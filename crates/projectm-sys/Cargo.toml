@@ -1,0 +1,15 @@
+[package]
+name = "projectm-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Raw FFI bindings to libprojectM"
+links = "projectM-4"
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"
+
+[features]
+default = []
+bundled = []  # Future: build libprojectM from source

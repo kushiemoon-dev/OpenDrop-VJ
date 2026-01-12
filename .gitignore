@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+build/
+.svelte-kit/
+dist/
+
+# Tauri
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.*
+
+# Cache
+.cache/
+
+# Rust build artifacts
+target/
+
+# Development notes (do not commit)
+notes*.md
+findings.md
+task_plan.md

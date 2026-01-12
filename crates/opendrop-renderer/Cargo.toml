@@ -1,0 +1,30 @@
+[package]
+name = "opendrop-renderer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "opendrop-renderer"
+path = "src/main.rs"
+
+[dependencies]
+# OpenGL
+glutin = "0.32"
+glutin-winit = "0.5"
+winit = "0.30"
+gl = "0.14"
+raw-window-handle = "0.6"
+
+# ProjectM
+projectm-rs = { path = "../projectm-rs" }
+
+# Core library for video output
+opendrop-core = { path = "../opendrop-core" }
+
+# Serialization for IPC
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

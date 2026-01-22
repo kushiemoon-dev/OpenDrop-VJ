@@ -42,7 +42,7 @@
 <header class="header glass">
   <div class="logo">
     <h1>OpenDrop</h1>
-    <span class="version">v0.1.0</span>
+    <span class="version">v0.2.1</span>
   </div>
 
   <div class="center">
@@ -51,58 +51,60 @@
     {/if}
   </div>
 
-  <div class="actions">
-    <button
-      class="theme-toggle btn-press"
-      onclick={toggleTheme}
-      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-    >
-      {#if isDark}
-        <Sun size={18} />
-      {:else}
-        <Moon size={18} />
-      {/if}
-    </button>
-
-    <div class="accent-picker-wrapper">
+  <div class="right-group">
+    <div class="actions">
       <button
-        class="accent-toggle btn-press"
-        onclick={(e) => { e.stopPropagation(); accentPickerOpen = !accentPickerOpen; }}
-        title="Change accent color"
-        aria-label="Change accent color"
-        aria-expanded={accentPickerOpen}
+        class="theme-toggle btn-press"
+        onclick={toggleTheme}
+        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       >
-        <Palette size={18} />
-        <span class="accent-dot" style="background: {ACCENT_PRESETS.find(p => p.value === accent.current)?.color}"></span>
+        {#if isDark}
+          <Sun size={18} />
+        {:else}
+          <Moon size={18} />
+        {/if}
       </button>
 
-      {#if accentPickerOpen}
-        <div class="accent-picker animate-scale-in" role="menu">
-          <div class="accent-picker-title">Accent Color</div>
-          <div class="accent-swatches">
-            {#each ACCENT_PRESETS as preset (preset.value)}
-              <button
-                class="accent-swatch"
-                class:selected={accent.current === preset.value}
-                style="--swatch-color: {preset.color}"
-                onclick={() => selectAccent(preset.value)}
-                title={preset.description}
-                role="menuitem"
-              >
-                <span class="swatch-color"></span>
-                <span class="swatch-name">{preset.name}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      {/if}
-    </div>
-  </div>
+      <div class="accent-picker-wrapper">
+        <button
+          class="accent-toggle btn-press"
+          onclick={(e) => { e.stopPropagation(); accentPickerOpen = !accentPickerOpen; }}
+          title="Change accent color"
+          aria-label="Change accent color"
+          aria-expanded={accentPickerOpen}
+        >
+          <Palette size={18} />
+          <span class="accent-dot" style="background: {ACCENT_PRESETS.find(p => p.value === accent.current)?.color}"></span>
+        </button>
 
-  <div class="status-group">
-    <StatusIndicator active={audioRunning} size="sm" label="Audio" />
-    <StatusIndicator active={visualizerRunning} size="sm" label="Visu" />
+        {#if accentPickerOpen}
+          <div class="accent-picker animate-scale-in" role="menu">
+            <div class="accent-picker-title">Accent Color</div>
+            <div class="accent-swatches">
+              {#each ACCENT_PRESETS as preset (preset.value)}
+                <button
+                  class="accent-swatch"
+                  class:selected={accent.current === preset.value}
+                  style="--swatch-color: {preset.color}"
+                  onclick={() => selectAccent(preset.value)}
+                  title={preset.description}
+                  role="menuitem"
+                >
+                  <span class="swatch-color"></span>
+                  <span class="swatch-name">{preset.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <div class="status-group">
+      <StatusIndicator active={audioRunning} size="sm" label="Audio" />
+      <StatusIndicator active={visualizerRunning} size="sm" label="Visu" />
+    </div>
   </div>
 </header>
 
@@ -180,6 +182,12 @@
     background: var(--bg-elevated);
     border-color: var(--border-medium);
     color: var(--accent-yellow);
+  }
+
+  .right-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
   }
 
   .status-group {

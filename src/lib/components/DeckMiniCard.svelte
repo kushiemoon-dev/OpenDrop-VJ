@@ -1,5 +1,6 @@
 <script>
   import StatusIndicator from './StatusIndicator.svelte';
+  import { Maximize, Play, Square, Volume2 } from 'lucide-svelte';
 
   /**
    * @type {{
@@ -66,9 +67,7 @@
     <div class="deck-actions">
       {#if running}
         <button class="action-btn" onclick={(e) => stopProp(e, onFullscreen)} title="Fullscreen">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-          </svg>
+          <Maximize size={14} />
         </button>
       {/if}
     </div>
@@ -82,9 +81,7 @@
       </div>
     {:else}
       <div class="idle-indicator">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
-          <polygon points="5,3 19,12 5,21" />
-        </svg>
+        <Play size={24} strokeWidth={1.5} class="idle-icon" />
       </div>
     {/if}
   </div>
@@ -95,9 +92,7 @@
 
   <div class="deck-controls">
     <div class="volume-control">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" opacity="0.5">
-        <path d="M11 5L6 9H2v6h4l5 4V5zM15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2" />
-      </svg>
+      <Volume2 size={12} class="volume-icon" />
       <input
         type="range"
         min="0"
@@ -113,15 +108,11 @@
     <div class="control-buttons">
       {#if !running}
         <button class="btn start" onclick={(e) => stopProp(e, onStart)} title="Start deck" aria-label="Start deck">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5,3 19,12 5,21" />
-          </svg>
+          <Play size={12} fill="currentColor" />
         </button>
       {:else}
         <button class="btn stop" onclick={(e) => stopProp(e, onStop)} title="Stop deck" aria-label="Stop deck">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" />
-          </svg>
+          <Square size={12} fill="currentColor" />
         </button>
       {/if}
     </div>
@@ -237,6 +228,14 @@
 
   .idle-indicator {
     color: var(--text-muted);
+  }
+
+  .idle-indicator :global(.idle-icon) {
+    opacity: 0.3;
+  }
+
+  .volume-control :global(.volume-icon) {
+    opacity: 0.5;
   }
 
   .live-indicator {

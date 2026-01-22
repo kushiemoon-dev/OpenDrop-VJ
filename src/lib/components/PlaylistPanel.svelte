@@ -1,5 +1,7 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
+  import { showToast } from "$lib/stores/toast";
+  import { SkipBack, SkipForward, Shuffle, RefreshCw, Trash2, Music, X } from 'lucide-svelte';
 
   /**
    * @typedef {{ name: string, path: string }} PlaylistItem
@@ -44,7 +46,7 @@
       await invoke("playlist_add", { deckId, name, path });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to add to playlist:", e);
+      showToast("Failed to add to playlist", "error");
     }
   }
 
@@ -54,7 +56,7 @@
       await invoke("playlist_remove", { deckId, index });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to remove from playlist:", e);
+      showToast("Failed to remove from playlist", "error");
     }
   }
 
@@ -63,7 +65,7 @@
       await invoke("playlist_clear", { deckId });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to clear playlist:", e);
+      showToast("Failed to clear playlist", "error");
     }
   }
 
@@ -72,7 +74,7 @@
       await invoke("playlist_next", { deckId });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to play next:", e);
+      showToast("Failed to play next", "error");
     }
   }
 
@@ -81,7 +83,7 @@
       await invoke("playlist_previous", { deckId });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to play previous:", e);
+      showToast("Failed to play previous", "error");
     }
   }
 
@@ -91,7 +93,7 @@
       await invoke("playlist_jump_to", { deckId, index });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to jump to:", e);
+      showToast("Failed to jump to preset", "error");
     }
   }
 
@@ -100,7 +102,7 @@
       await invoke("playlist_set_settings", { deckId, shuffle: !playlist.shuffle });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to toggle shuffle:", e);
+      showToast("Failed to toggle shuffle", "error");
     }
   }
 
@@ -109,7 +111,7 @@
       await invoke("playlist_set_settings", { deckId, autoCycle: !playlist.auto_cycle });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to toggle auto-cycle:", e);
+      showToast("Failed to toggle auto-cycle", "error");
     }
   }
 
@@ -118,7 +120,7 @@
       await invoke("playlist_set_settings", { deckId, cycleDurationSecs: cycleDuration });
       onUpdate?.();
     } catch (e) {
-      console.error("Failed to update cycle duration:", e);
+      showToast("Failed to update cycle duration", "error");
     }
   }
 
@@ -142,14 +144,10 @@
 
   <div class="playlist-controls">
     <button class="ctrl-btn" onclick={playPrevious} disabled={playlist.items.length === 0} title="Previous">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
-      </svg>
+      <SkipBack size={14} />
     </button>
     <button class="ctrl-btn" onclick={playNext} disabled={playlist.items.length === 0} title="Next">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M6 18l8.5-6L6 6v12zm10-12v12h2V6h-2z"/>
-      </svg>
+      <SkipForward size={14} />
     </button>
     <button
       class="ctrl-btn"
@@ -157,13 +155,7 @@
       onclick={toggleShuffle}
       title="Shuffle"
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="16 3 21 3 21 8"/>
-        <line x1="4" y1="20" x2="21" y2="3"/>
-        <polyline points="21 16 21 21 16 21"/>
-        <line x1="15" y1="15" x2="21" y2="21"/>
-        <line x1="4" y1="4" x2="9" y2="9"/>
-      </svg>
+      <Shuffle size={14} />
     </button>
     <button
       class="ctrl-btn"
@@ -171,16 +163,10 @@
       onclick={toggleAutoCycle}
       title="Auto-cycle"
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 12a9 9 0 11-6.219-8.56"/>
-        <polyline points="22 2 22 8 16 8"/>
-      </svg>
+      <RefreshCw size={14} />
     </button>
     <button class="ctrl-btn danger" onclick={clearPlaylist} disabled={playlist.items.length === 0} title="Clear all">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"/>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-      </svg>
+      <Trash2 size={14} />
     </button>
   </div>
 
@@ -203,11 +189,7 @@
   <div class="playlist-items">
     {#if playlist.items.length === 0}
       <div class="empty-state">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3">
-          <path d="M9 18V5l12-2v13"/>
-          <circle cx="6" cy="18" r="3"/>
-          <circle cx="18" cy="16" r="3"/>
-        </svg>
+        <Music size={24} strokeWidth={1.5} class="empty-icon" />
         <span>No presets in playlist</span>
         <span class="hint">Click + on presets to add</span>
       </div>
@@ -223,9 +205,7 @@
             {truncateName(item.name)}
           </button>
           <button class="item-remove" onclick={() => removeFromPlaylist(index)} title="Remove">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
+            <X size={12} />
           </button>
         </div>
       {/each}
@@ -351,6 +331,10 @@
   .empty-state .hint {
     font-size: 10px;
     opacity: 0.6;
+  }
+
+  .empty-state :global(.empty-icon) {
+    opacity: 0.3;
   }
 
   .playlist-item {

@@ -2,6 +2,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onMount, onDestroy } from 'svelte';
   import StatusIndicator from './StatusIndicator.svelte';
+  import { showToast } from "$lib/stores/toast";
+  import { Sliders, RefreshCw, Plug, X } from 'lucide-svelte';
 
   /**
    * @type {{
@@ -86,7 +88,7 @@
     try {
       builtinPresets = await invoke('midi_list_builtin_presets');
     } catch (e) {
-      console.error('Failed to load builtin presets:', e);
+      showToast("Failed to load MIDI presets", "error");
     }
   }
 
@@ -205,11 +207,7 @@
     <div class="section-header">Controller</div>
     {#if ports.length === 0 && !loading}
       <div class="no-devices">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="4" width="20" height="16" rx="2" />
-          <circle cx="8" cy="12" r="2" />
-          <circle cx="16" cy="12" r="2" />
-        </svg>
+        <Sliders size={20} strokeWidth={1.5} class="no-device-icon" />
         <span>No MIDI devices found</span>
         <small>Connect a MIDI controller</small>
       </div>
@@ -221,28 +219,19 @@
           {/each}
         </select>
         <button class="icon-btn" onclick={refreshPorts} disabled={loading} title="Refresh">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class:spinning={loading}>
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
+          <span class:spinning={loading}><RefreshCw size={14} /></span>
         </button>
       </div>
 
       <div class="controls">
         {#if !connected}
           <button class="btn primary" onclick={connect} disabled={loading || selectedPort < 0}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 3l-6 6 6 6" />
-              <path d="M3 9h16a4 4 0 0 1 4 4v2" />
-            </svg>
+            <Plug size={14} />
             Connect
           </button>
         {:else}
           <button class="btn danger" onclick={disconnect} disabled={loading}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <X size={14} />
             Disconnect
           </button>
         {/if}
@@ -319,10 +308,7 @@
                 <span class="mapping-action">{mapping.action}</span>
               </div>
               <button class="btn-remove" onclick={() => removeMapping(mapping.id)} title="Remove">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={12} />
               </button>
             </div>
           {/each}
@@ -404,7 +390,7 @@
     font-size: 11px;
   }
 
-  .no-devices svg {
+  .no-devices :global(.no-device-icon) {
     opacity: 0.5;
   }
 
@@ -446,6 +432,7 @@
   }
 
   .spinning {
+    display: inline-flex;
     animation: spin 1s linear infinite;
   }
 

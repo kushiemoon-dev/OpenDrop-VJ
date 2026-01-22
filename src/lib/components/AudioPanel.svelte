@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import VuMeter from './VuMeter.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
+  import { RefreshCw, Play, Square } from 'lucide-svelte';
 
   /**
    * @type {{
@@ -83,26 +84,19 @@
       {/each}
     </select>
     <button class="icon-btn" onclick={onRefresh} title="Refresh devices">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-        <path d="M21 3v5h-5" />
-      </svg>
+      <RefreshCw size={14} />
     </button>
   </div>
 
   <div class="controls">
     {#if !running}
       <button class="btn primary" onclick={onStart}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <polygon points="5,3 19,12 5,21" />
-        </svg>
+        <Play size={14} fill="currentColor" />
         Start
       </button>
     {:else}
       <button class="btn danger" onclick={onStop}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <rect x="6" y="6" width="12" height="12" />
-        </svg>
+        <Square size={14} fill="currentColor" />
         Stop
       </button>
     {/if}

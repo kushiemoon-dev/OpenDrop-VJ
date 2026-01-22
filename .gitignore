@@ -35,3 +35,4 @@ target/
 notes*.md
 findings.md
 task_plan.md
+coverage/

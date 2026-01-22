@@ -70,6 +70,8 @@ pub type ActionCallback = Box<dyn Fn(MidiAction, f32) + Send + 'static>;
 pub struct MidiController {
     /// Currently active connection
     connection: Option<MidiInputConnection<()>>,
+    /// Name of the connected port
+    connected_port_name: Option<String>,
     /// List of MIDI mappings
     mappings: Arc<Mutex<Vec<MidiMapping>>>,
     /// Callback for processed MIDI actions
@@ -92,6 +94,7 @@ impl MidiController {
     pub fn new() -> Self {
         Self {
             connection: None,
+            connected_port_name: None,
             mappings: Arc::new(Mutex::new(Vec::new())),
             action_callback: Arc::new(Mutex::new(None)),
             learn_mode: Arc::new(Mutex::new(None)),
@@ -177,6 +180,7 @@ impl MidiController {
             .map_err(|e| MidiError::ConnectionError(e.to_string()))?;
 
         tracing::info!("Connected to MIDI port: {}", port_name);
+        self.connected_port_name = Some(port_name);
         self.connection = Some(connection);
         Ok(())
     }
@@ -185,8 +189,14 @@ impl MidiController {
     pub fn disconnect(&mut self) {
         if let Some(conn) = self.connection.take() {
             conn.close();
+            self.connected_port_name = None;
             tracing::info!("Disconnected from MIDI port");
         }
+    }
+
+    /// Get the name of the connected port
+    pub fn connected_port_name(&self) -> Option<&str> {
+        self.connected_port_name.as_deref()
     }
 
     /// Check if connected to a MIDI port

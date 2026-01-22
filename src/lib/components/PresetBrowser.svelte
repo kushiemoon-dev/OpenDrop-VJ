@@ -1,5 +1,9 @@
 <script>
   import PresetCard from './PresetCard.svelte';
+  import { isFavorite, getFavoriteCount } from '$lib/stores/favorites';
+  import { extractCategory, buildCategoriesIndex, getCategoriesWithCounts } from '$lib/stores/categories';
+  import { getAllTags, hasTag, getTagCount } from '$lib/stores/tags';
+  import { ChevronDown, Star, Search, X } from 'lucide-svelte';
 
   /**
    * @typedef {{ name: string, path: string }} Preset
@@ -26,11 +30,50 @@
 
   let search = $state('');
   let expanded = $state(true);
+  let showFavoritesOnly = $state(false);
+  let selectedCategory = $state('all');
+  /** @type {string[]} */
+  let selectedTags = $state([]);
 
-  // Filter presets by search
+  // Get favorite count for display
+  let favoriteCount = $derived(getFavoriteCount());
+
+  // Build categories index when presets change
+  $effect(() => {
+    if (presets.length > 0) {
+      buildCategoriesIndex(presets);
+    }
+  });
+
+  // Get categories with counts
+  let categoriesWithCounts = $derived(getCategoriesWithCounts());
+
+  // Get all available tags
+  let availableTags = $derived(getAllTags());
+  let tagCount = $derived(getTagCount());
+
+  /**
+   * Toggle a tag in the selected tags filter
+   * @param {string} tag
+   */
+  function toggleTagFilter(tag) {
+    if (selectedTags.includes(tag)) {
+      selectedTags = selectedTags.filter((t) => t !== tag);
+    } else {
+      selectedTags = [...selectedTags, tag];
+    }
+  }
+
+  // Filter presets by search, favorites, category, and tags
   let filteredPresets = $derived(
     presets
-      .filter((/** @type {Preset} */ p) => p.name.toLowerCase().includes(search.toLowerCase()))
+      .filter((/** @type {Preset} */ p) => {
+        const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+        const matchesFavorites = !showFavoritesOnly || isFavorite(p.path);
+        const matchesCategory = selectedCategory === 'all' || extractCategory(p.path) === selectedCategory;
+        const matchesTags = selectedTags.length === 0 || selectedTags.every((tag) => hasTag(p.path, tag));
+        return matchesSearch && matchesFavorites && matchesCategory && matchesTags;
+      })
       .slice(0, 50)
   );
 
@@ -49,26 +92,60 @@
 <div class="preset-browser" class:collapsed={!expanded}>
   <div class="browser-header">
     <button class="toggle-btn" onclick={() => expanded = !expanded}>
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        class:rotated={!expanded}
-      >
-        <polyline points="6,9 12,15 18,9" />
-      </svg>
+      <span class="chevron" class:rotated={!expanded}>
+        <ChevronDown size={16} />
+      </span>
       <h3>Presets</h3>
       <span class="count">{presets.length}</span>
     </button>
 
+    <button
+      class="favorites-filter-btn"
+      class:active={showFavoritesOnly}
+      onclick={() => showFavoritesOnly = !showFavoritesOnly}
+      title={showFavoritesOnly ? 'Show all presets' : 'Show favorites only'}
+      disabled={!expanded}
+    >
+      <Star size={14} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
+      {#if favoriteCount > 0}
+        <span class="fav-count">{favoriteCount}</span>
+      {/if}
+    </button>
+
+    {#if categoriesWithCounts.length > 1}
+      <select
+        class="category-select"
+        bind:value={selectedCategory}
+        disabled={!expanded}
+        title="Filter by category"
+      >
+        <option value="all">All Categories</option>
+        {#each categoriesWithCounts as [category, count]}
+          <option value={category}>{category} ({count})</option>
+        {/each}
+      </select>
+    {/if}
+
+    {#if tagCount > 0}
+      <div class="tag-filters" class:disabled={!expanded}>
+        {#each availableTags.slice(0, 5) as tag}
+          <button
+            class="tag-chip"
+            class:active={selectedTags.includes(tag)}
+            onclick={() => toggleTagFilter(tag)}
+            disabled={!expanded}
+          >
+            {tag}
+          </button>
+        {/each}
+        {#if availableTags.length > 5}
+          <span class="tag-more">+{availableTags.length - 5}</span>
+        {/if}
+      </div>
+    {/if}
+
     <div class="search-bar">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8" />
-        <path d="m21 21-4.35-4.35" />
-      </svg>
+      <Search size={14} />
       <input
         type="text"
         bind:value={search}
@@ -77,9 +154,7 @@
       />
       {#if search}
         <button class="clear-btn" onclick={() => search = ''} title="Clear search" aria-label="Clear search">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
+          <X size={12} />
         </button>
       {/if}
     </div>
@@ -94,7 +169,17 @@
         </div>
       {:else if filteredPresets.length === 0}
         <div class="empty">
-          {#if search}
+          {#if showFavoritesOnly && favoriteCount === 0}
+            <Star size={24} strokeWidth={1.5} class="empty-star" />
+            <span>No favorites yet</span>
+            <span class="hint">Click the star on any preset to add it</span>
+          {:else if showFavoritesOnly && search}
+            <span>No favorites match "{search}"</span>
+          {:else if selectedCategory !== 'all' && search}
+            <span>No presets in "{selectedCategory}" match "{search}"</span>
+          {:else if selectedCategory !== 'all'}
+            <span>No presets in "{selectedCategory}"</span>
+          {:else if search}
             <span>No presets match "{search}"</span>
           {:else}
             <span>No presets loaded</span>
@@ -150,11 +235,12 @@
     flex-shrink: 0;
   }
 
-  .toggle-btn svg {
+  .toggle-btn .chevron {
+    display: flex;
     transition: var(--transition-fast);
   }
 
-  .toggle-btn svg.rotated {
+  .toggle-btn .chevron.rotated {
     transform: rotate(-90deg);
   }
 
@@ -174,6 +260,130 @@
     border-radius: 10px;
   }
 
+  .favorites-filter-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-size: 11px;
+    transition: all 0.15s ease;
+  }
+
+  .favorites-filter-btn:hover:not(:disabled) {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+    color: var(--accent-yellow, #fbbf24);
+  }
+
+  .favorites-filter-btn.active {
+    background: var(--accent-yellow, #fbbf24);
+    border-color: var(--accent-yellow, #fbbf24);
+    color: var(--bg-darkest);
+  }
+
+  .favorites-filter-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .fav-count {
+    background: var(--bg-panel);
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+
+  .favorites-filter-btn.active .fav-count {
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .category-select {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    max-width: 150px;
+    transition: all 0.15s ease;
+  }
+
+  .category-select:hover:not(:disabled) {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+    color: var(--text-primary);
+  }
+
+  .category-select:focus {
+    outline: none;
+    border-color: var(--accent-cyan);
+    box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.2);
+  }
+
+  .category-select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .category-select option {
+    background: var(--bg-panel);
+    color: var(--text-primary);
+    padding: var(--spacing-sm);
+  }
+
+  .tag-filters {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 200px;
+  }
+
+  .tag-filters.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .tag-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .tag-chip:hover:not(:disabled) {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+    color: var(--text-primary);
+  }
+
+  .tag-chip.active {
+    background: var(--accent-purple, #8b5cf6);
+    border-color: var(--accent-purple, #8b5cf6);
+    color: white;
+  }
+
+  .tag-chip:disabled {
+    cursor: not-allowed;
+  }
+
+  .tag-more {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
   .search-bar {
     flex: 1;
     display: flex;
@@ -186,7 +396,7 @@
     max-width: 300px;
   }
 
-  .search-bar svg {
+  .search-bar :global(svg) {
     color: var(--text-muted);
     flex-shrink: 0;
   }
@@ -254,10 +464,19 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: var(--spacing-md);
+    gap: var(--spacing-sm);
     padding: var(--spacing-xl);
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .empty .hint {
+    font-size: 11px;
+    opacity: 0.7;
+  }
+
+  .empty :global(.empty-star) {
+    opacity: 0.5;
   }
 
   .spinner {

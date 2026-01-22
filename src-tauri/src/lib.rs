@@ -3,9 +3,10 @@
 //! Multi-deck visualization controller supporting up to 4 simultaneous decks.
 
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -43,19 +44,75 @@ pub enum RendererHealth {
 pub struct RendererProcess {
     child: Child,
     running: bool,
-    health: RendererHealth,
+    health: Arc<Mutex<RendererHealth>>,
     started_at: std::time::Instant,
     crash_count: u32,
+    stdout_reader: Option<JoinHandle<()>>,
+}
+
+/// Events received from renderer process
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum RendererEvent {
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "closed")]
+    Closed,
+    #[serde(rename = "error")]
+    Error { message: String },
+    #[serde(rename = "preset_loaded")]
+    PresetLoaded { path: String },
 }
 
 impl RendererProcess {
-    fn new(child: Child) -> Self {
+    fn new(mut child: Child) -> Self {
+        let health = Arc::new(Mutex::new(RendererHealth::Starting));
+        let health_clone = Arc::clone(&health);
+
+        // Spawn thread to read stdout events from renderer
+        let stdout_reader = child.stdout.take().map(|stdout| {
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            if let Ok(event) = serde_json::from_str::<RendererEvent>(&line) {
+                                match event {
+                                    RendererEvent::Ready => {
+                                        if let Ok(mut h) = health_clone.lock() {
+                                            *h = RendererHealth::Ready;
+                                        }
+                                        info!("Renderer reported ready");
+                                    }
+                                    RendererEvent::Closed => {
+                                        if let Ok(mut h) = health_clone.lock() {
+                                            *h = RendererHealth::Stopped;
+                                        }
+                                        info!("Renderer closed");
+                                        break;
+                                    }
+                                    RendererEvent::Error { message } => {
+                                        warn!("Renderer error: {}", message);
+                                    }
+                                    RendererEvent::PresetLoaded { path } => {
+                                        info!("Renderer loaded preset: {}", path);
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+        });
+
         Self {
             child,
             running: true,
-            health: RendererHealth::Starting,
+            health,
             started_at: std::time::Instant::now(),
             crash_count: 0,
+            stdout_reader,
         }
     }
 
@@ -78,21 +135,26 @@ impl RendererProcess {
             Ok(Some(exit_status)) => {
                 self.running = false;
                 // Check if it was a crash or normal exit
-                if exit_status.success() {
-                    self.health = RendererHealth::Stopped;
-                } else {
-                    self.health = RendererHealth::Crashed;
-                    self.crash_count += 1;
-                    warn!("Renderer crashed with status: {:?}", exit_status);
+                if let Ok(mut h) = self.health.lock() {
+                    if exit_status.success() {
+                        *h = RendererHealth::Stopped;
+                    } else {
+                        *h = RendererHealth::Crashed;
+                        self.crash_count += 1;
+                        warn!("Renderer crashed with status: {:?}", exit_status);
+                    }
                 }
                 false
             }
             Ok(None) => {
                 // Process still running
-                if self.health == RendererHealth::Starting {
-                    // Check if it's been running long enough to consider healthy
-                    if self.started_at.elapsed() > std::time::Duration::from_secs(2) {
-                        self.health = RendererHealth::Running;
+                if let Ok(mut h) = self.health.lock() {
+                    if *h == RendererHealth::Starting {
+                        // Check if it's been running long enough to consider healthy
+                        // (fallback if Ready event not received)
+                        if self.started_at.elapsed() > std::time::Duration::from_secs(2) {
+                            *h = RendererHealth::Running;
+                        }
                     }
                 }
                 true
@@ -100,7 +162,9 @@ impl RendererProcess {
             Err(e) => {
                 warn!("Error checking renderer status: {}", e);
                 self.running = false;
-                self.health = RendererHealth::Crashed;
+                if let Ok(mut h) = self.health.lock() {
+                    *h = RendererHealth::Crashed;
+                }
                 self.crash_count += 1;
                 false
             }
@@ -115,12 +179,18 @@ impl RendererProcess {
             let _ = self.child.kill();
             let _ = self.child.wait();
             self.running = false;
-            self.health = RendererHealth::Stopped;
+            if let Ok(mut h) = self.health.lock() {
+                *h = RendererHealth::Stopped;
+            }
+        }
+        // Wait for stdout reader thread to finish
+        if let Some(handle) = self.stdout_reader.take() {
+            let _ = handle.join();
         }
     }
 
     fn get_health(&self) -> RendererHealth {
-        self.health
+        self.health.lock().map(|h| *h).unwrap_or(RendererHealth::Crashed)
     }
 
     fn uptime_secs(&self) -> u64 {
@@ -217,7 +287,12 @@ impl Playlist {
             use std::time::{SystemTime, UNIX_EPOCH};
 
             let mut hasher = DefaultHasher::new();
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos().hash(&mut hasher);
+            // Use unwrap_or with fallback to avoid panic on clock issues
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                .as_nanos();
+            nanos.hash(&mut hasher);
             self.current_index = (hasher.finish() as usize) % self.items.len();
         } else {
             self.current_index = (self.current_index + 1) % self.items.len();
@@ -714,6 +789,25 @@ fn load_preset(
         return Err(format!("Invalid deck ID: {}", deck_id));
     }
 
+    // Validate preset path
+    let preset_path = std::path::Path::new(&path);
+    if !preset_path.exists() {
+        return Err(format!("Preset file not found: {}", path));
+    }
+    if !preset_path.is_file() {
+        return Err(format!("Preset path is not a file: {}", path));
+    }
+    // Check extension
+    let valid_extensions = ["milk", "prjm"];
+    let has_valid_ext = preset_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| valid_extensions.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false);
+    if !has_valid_ext {
+        return Err(format!("Invalid preset extension (expected .milk or .prjm): {}", path));
+    }
+
     let mut decks_guard = state.decks.lock().map_err(|e| e.to_string())?;
     let deck = decks_guard.get_mut(&deck_id).ok_or("Deck not found")?;
 
@@ -956,6 +1050,164 @@ fn list_presets(dir: Option<String>) -> Result<Vec<PresetInfo>, String> {
     presets.truncate(500);
 
     Ok(presets)
+}
+
+/// Import presets from a source folder to the target directory
+#[tauri::command]
+fn import_presets_from_folder(
+    source_dir: String,
+    target_dir: Option<String>,
+) -> Result<ImportResult, String> {
+    // Use provided target or default preset location
+    let target = target_dir.unwrap_or_else(|| "/usr/share/projectM/presets".to_string());
+
+    let source_path = std::path::Path::new(&source_dir);
+    let target_path = std::path::Path::new(&target);
+
+    if !source_path.exists() {
+        return Err(format!("Source directory does not exist: {}", source_dir));
+    }
+
+    // Create target directory if it doesn't exist
+    std::fs::create_dir_all(&target_path).map_err(|e| e.to_string())?;
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+    let mut errors = Vec::new();
+
+    fn copy_presets(
+        source: &std::path::Path,
+        target: &std::path::Path,
+        imported: &mut usize,
+        skipped: &mut usize,
+        errors: &mut Vec<String>,
+        depth: usize,
+    ) {
+        if depth > 5 {
+            return;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(source) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                if path.is_dir() {
+                    let new_target = target.join(file_name);
+                    if std::fs::create_dir_all(&new_target).is_ok() {
+                        copy_presets(&path, &new_target, imported, skipped, errors, depth + 1);
+                    }
+                } else if path.extension().is_some_and(|ext| ext == "milk" || ext == "prjm") {
+                    let target_file = target.join(file_name);
+                    if target_file.exists() {
+                        *skipped += 1;
+                    } else {
+                        match std::fs::copy(&path, &target_file) {
+                            Ok(_) => *imported += 1,
+                            Err(e) => errors.push(format!("{}: {}", file_name, e)),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    copy_presets(
+        source_path,
+        target_path,
+        &mut imported,
+        &mut skipped,
+        &mut errors,
+        0,
+    );
+
+    Ok(ImportResult {
+        imported,
+        skipped,
+        errors,
+        target_dir: target,
+    })
+}
+
+/// Export a playlist to a JSON file
+#[tauri::command]
+fn export_playlist(
+    state: State<'_, AppState>,
+    deck_id: u8,
+    file_path: String,
+) -> Result<String, String> {
+    if deck_id >= MAX_DECKS {
+        return Err(format!("Invalid deck ID: {}", deck_id));
+    }
+
+    let decks_guard = state.decks.lock().map_err(|e| e.to_string())?;
+    let deck = decks_guard
+        .get(&deck_id)
+        .ok_or_else(|| format!("Deck {} not found", deck_id))?;
+
+    let playlist_info = PlaylistInfo::from(&deck.playlist);
+    let json = serde_json::to_string_pretty(&playlist_info).map_err(|e| e.to_string())?;
+
+    std::fs::write(&file_path, &json).map_err(|e| e.to_string())?;
+
+    Ok(format!("Playlist exported to {}", file_path))
+}
+
+/// Import a playlist from a JSON file
+#[tauri::command]
+fn import_playlist(
+    state: State<'_, AppState>,
+    deck_id: u8,
+    file_path: String,
+    replace: bool,
+) -> Result<String, String> {
+    if deck_id >= MAX_DECKS {
+        return Err(format!("Invalid deck ID: {}", deck_id));
+    }
+
+    let json = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    let imported: PlaylistInfo = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+
+    let mut decks_guard = state.decks.lock().map_err(|e| e.to_string())?;
+    let deck = decks_guard
+        .get_mut(&deck_id)
+        .ok_or_else(|| format!("Deck {} not found", deck_id))?;
+
+    if replace {
+        deck.playlist.items.clear();
+        deck.playlist.current_index = 0;
+    }
+
+    let initial_count = deck.playlist.items.len();
+    for item in imported.items {
+        // Check if file exists before adding
+        if std::path::Path::new(&item.path).exists() {
+            deck.playlist.items.push(PlaylistItem {
+                name: item.name,
+                path: item.path,
+            });
+        }
+    }
+
+    // Apply settings if replacing
+    if replace {
+        deck.playlist.name = imported.name;
+        deck.playlist.shuffle = imported.shuffle;
+        deck.playlist.auto_cycle = imported.auto_cycle;
+        deck.playlist.cycle_duration_secs = imported.cycle_duration_secs;
+    }
+
+    let added = deck.playlist.items.len() - initial_count;
+    Ok(format!("Imported {} presets to deck {}", added, deck_id))
+}
+
+/// Result of preset import operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResult {
+    pub imported: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
+    pub target_dir: String,
 }
 
 /// Pump audio from capture to all active decks + handle auto-cycle
@@ -1569,18 +1821,137 @@ fn list_monitors() -> Vec<MonitorInfo> {
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, use winapi to enumerate monitors
-        // For now, provide a simple fallback
-        monitors.push(MonitorInfo {
-            index: 0,
-            name: "Primary".to_string(),
-            width: 1920,
-            height: 1080,
-            is_primary: true,
-        });
+        use std::mem;
+        use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+        use windows::Win32::Graphics::Gdi::{
+            EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+        };
+
+        // Callback data structure
+        struct MonitorData {
+            monitors: Vec<MonitorInfo>,
+        }
+
+        unsafe extern "system" fn monitor_enum_proc(
+            hmonitor: HMONITOR,
+            _hdc: HDC,
+            _lprect: *mut RECT,
+            lparam: LPARAM,
+        ) -> BOOL {
+            let data = &mut *(lparam.0 as *mut MonitorData);
+
+            let mut info: MONITORINFOEXW = mem::zeroed();
+            info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+
+            if GetMonitorInfoW(hmonitor, &mut info.monitorInfo as *mut _).as_bool() {
+                let rect = info.monitorInfo.rcMonitor;
+                let width = (rect.right - rect.left) as u32;
+                let height = (rect.bottom - rect.top) as u32;
+
+                // Convert device name from wide string
+                let name_slice = &info.szDevice;
+                let name_len = name_slice.iter().position(|&c| c == 0).unwrap_or(name_slice.len());
+                let name = String::from_utf16_lossy(&name_slice[..name_len]);
+
+                let is_primary = (info.monitorInfo.dwFlags & 1) != 0; // MONITORINFOF_PRIMARY = 1
+
+                data.monitors.push(MonitorInfo {
+                    index: data.monitors.len(),
+                    name,
+                    width,
+                    height,
+                    is_primary,
+                });
+            }
+
+            BOOL::from(true) // Continue enumeration
+        }
+
+        let mut data = MonitorData {
+            monitors: Vec::new(),
+        };
+
+        unsafe {
+            let _ = EnumDisplayMonitors(
+                HDC::default(),
+                None,
+                Some(monitor_enum_proc),
+                LPARAM(&mut data as *mut _ as isize),
+            );
+        }
+
+        monitors = data.monitors;
+
+        // Fallback if enumeration failed
+        if monitors.is_empty() {
+            monitors.push(MonitorInfo {
+                index: 0,
+                name: "Primary".to_string(),
+                width: 1920,
+                height: 1080,
+                is_primary: true,
+            });
+        }
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(target_os = "macos")]
+    {
+        use core_graphics::display::{CGDisplay, CGMainDisplayID};
+
+        // Get all active displays
+        let max_displays = 16u32;
+        let mut display_ids: Vec<u32> = vec![0; max_displays as usize];
+        let mut display_count: u32 = 0;
+
+        unsafe {
+            let result = core_graphics::display::CGGetActiveDisplayList(
+                max_displays,
+                display_ids.as_mut_ptr(),
+                &mut display_count,
+            );
+
+            if result == 0 && display_count > 0 {
+                let main_display_id = CGMainDisplayID();
+
+                for i in 0..display_count as usize {
+                    let display_id = display_ids[i];
+                    let display = CGDisplay::new(display_id);
+
+                    let bounds = display.bounds();
+                    let width = bounds.size.width as u32;
+                    let height = bounds.size.height as u32;
+
+                    // Generate display name
+                    let name = if display_id == main_display_id {
+                        "Main Display".to_string()
+                    } else {
+                        format!("Display {}", i + 1)
+                    };
+
+                    monitors.push(MonitorInfo {
+                        index: i,
+                        name,
+                        width,
+                        height,
+                        is_primary: display_id == main_display_id,
+                    });
+                }
+            }
+        }
+
+        // Fallback if enumeration failed
+        if monitors.is_empty() {
+            monitors.push(MonitorInfo {
+                index: 0,
+                name: "Primary".to_string(),
+                width: 1920,
+                height: 1080,
+                is_primary: true,
+            });
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         monitors.push(MonitorInfo {
             index: 0,
@@ -1770,7 +2141,7 @@ fn midi_get_status(state: State<'_, AppState>) -> Result<MidiStatus, String> {
     Ok(MidiStatus {
         connected: midi_guard.is_connected(),
         learning: midi_guard.is_learning(),
-        port_name: None, // TODO: track connected port name
+        port_name: midi_guard.connected_port_name().map(String::from),
         mapping_count: midi_guard.get_mappings().len(),
     })
 }
@@ -2052,6 +2423,10 @@ pub fn run() {
             get_status,
             get_projectm_version,
             list_presets,
+            // Preset import/export commands
+            import_presets_from_folder,
+            export_playlist,
+            import_playlist,
             // Video output commands
             list_video_outputs,
             set_deck_video_output,

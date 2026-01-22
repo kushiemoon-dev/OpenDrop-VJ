@@ -1,5 +1,6 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
+  import { showToast } from "$lib/stores/toast";
 
   /**
    * @typedef {{
@@ -41,7 +42,7 @@
       await invoke("crossfader_set_position", { position: newPos });
       onUpdate?.();
     } catch (err) {
-      console.error("Failed to set crossfader position:", err);
+      showToast("Failed to set crossfader position", "error");
     }
   }
 
@@ -50,7 +51,7 @@
       await invoke("crossfader_set_enabled", { enabled: !crossfader.enabled });
       onUpdate?.();
     } catch (err) {
-      console.error("Failed to toggle crossfader:", err);
+      showToast("Failed to toggle crossfader", "error");
     }
   }
 
@@ -60,7 +61,7 @@
       await invoke("crossfader_set_curve", { curve });
       onUpdate?.();
     } catch (err) {
-      console.error("Failed to set curve:", err);
+      showToast("Failed to set curve", "error");
     }
   }
 

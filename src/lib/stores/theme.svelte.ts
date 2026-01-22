@@ -20,18 +20,13 @@ function getInitialTheme(): Theme {
     return 'dark';
   }
 
-  // Check localStorage first
+  // Check localStorage - only use stored preference if explicitly set
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark') {
     return stored;
   }
 
-  // Check system preference
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    return prefersDark ? 'dark' : 'light';
-  }
-
+  // Default to dark theme (ignore system preference for better visualizer experience)
   return 'dark';
 }
 

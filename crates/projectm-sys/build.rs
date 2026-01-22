@@ -15,7 +15,8 @@ fn main() {
     let pkg_config_result = if use_vcpkg {
         None
     } else {
-        let pkg_names = ["libprojectM", "projectM-4", "libprojectM-4", "projectm"];
+        // Try projectM-4 first (version 4.x), then fallback to older names
+        let pkg_names = ["projectM-4", "libprojectM-4", "libprojectM", "projectm"];
         pkg_names.iter().find_map(|name| {
             pkg_config::Config::new()
                 .atleast_version("4.0")
@@ -25,7 +26,11 @@ fn main() {
     };
 
     let include_paths = if let Some(lib) = &pkg_config_result {
-        // pkg-config found projectM, it will emit the link instructions
+        // pkg-config found projectM - but we need to emit link instructions explicitly
+        // because pkg-config returns "-l:projectM-4" which Cargo doesn't handle well
+        if target_os != "windows" {
+            println!("cargo:rustc-link-lib=dylib=projectM-4");
+        }
         lib.include_paths.clone()
     } else {
         // Fallback: manual configuration

@@ -1,7 +1,7 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
   import { onMount, onDestroy } from "svelte";
-  import { fly, fade } from "svelte/transition";
+  import { fly, fade, slide } from "svelte/transition";
   import '../app.css';
 
   // Components
@@ -13,6 +13,16 @@
   import CrossfaderPanel from '$lib/components/CrossfaderPanel.svelte';
   import VideoOutputPanel from '$lib/components/VideoOutputPanel.svelte';
   import MidiPanel from '$lib/components/MidiPanel.svelte';
+
+  // Lucide icons for sidebar toggle
+  import { PanelRightOpen, PanelRightClose, X } from 'lucide-svelte';
+
+  // Toast store - sync with global store for child components
+  import { toast as globalToast } from '$lib/stores/toast';
+
+  // Sidebar collapsed state
+  let sidebarCollapsed = $state(false);
+  let sidebarMobileOpen = $state(false);
 
   /**
    * @typedef {{ name: string, path: string }} Preset
@@ -65,8 +75,15 @@
   /** @type {number | null} */
   let audioPumpId = null;
 
-  // Toast notifications
+  // Toast notifications - local state synced with global store
   let toast = $state({ message: '', type: 'info', visible: false });
+
+  // Sync global toast to local state for child components
+  $effect(() => {
+    if (globalToast.visible && globalToast.message !== toast.message) {
+      toast = { ...globalToast };
+    }
+  });
 
   // Derived state
   let anyDeckRunning = $derived(multiDeckStatus.decks.some(d => d.running));
@@ -74,12 +91,19 @@
   let runningDecksCount = $derived(multiDeckStatus.decks.filter(d => d.running).length);
 
   // Audio pump loop - sends audio to all active decks
+  let audioPumpErrorCount = $state(0);
+  const AUDIO_PUMP_ERROR_THRESHOLD = 5;
+
   async function audioPumpLoop() {
     if (!audioPumpActive) return;
     try {
       await invoke("pump_audio");
+      audioPumpErrorCount = 0; // Reset on success
     } catch (e) {
-      // Ignore errors
+      audioPumpErrorCount++;
+      if (audioPumpErrorCount === AUDIO_PUMP_ERROR_THRESHOLD) {
+        showToast("Audio capture failing - check device connection", "error");
+      }
     }
     audioPumpId = requestAnimationFrame(audioPumpLoop);
   }
@@ -295,7 +319,29 @@
     audioRunning={multiDeckStatus.audio_running}
   />
 
-  <div class="main-layout">
+  <div class="main-layout" class:sidebar-collapsed={sidebarCollapsed}>
+    <!-- Mobile sidebar toggle button -->
+    <button
+      class="sidebar-mobile-toggle"
+      onclick={() => sidebarMobileOpen = true}
+      aria-label="Open sidebar"
+    >
+      <PanelRightOpen size={20} />
+    </button>
+
+    <!-- Desktop sidebar collapse toggle -->
+    <button
+      class="sidebar-collapse-toggle"
+      onclick={() => sidebarCollapsed = !sidebarCollapsed}
+      aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+      title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+    >
+      {#if sidebarCollapsed}
+        <PanelRightOpen size={18} />
+      {:else}
+        <PanelRightClose size={18} />
+      {/if}
+    </button>
     <main class="main-content">
       <!-- Multi-deck grid -->
       <div class="decks-section">
@@ -339,7 +385,29 @@
       </div>
     </main>
 
-    <aside class="sidebar">
+    <!-- Mobile sidebar overlay backdrop -->
+    {#if sidebarMobileOpen}
+      <div
+        class="sidebar-backdrop"
+        onclick={() => sidebarMobileOpen = false}
+        onkeydown={(e) => e.key === 'Escape' && (sidebarMobileOpen = false)}
+        role="button"
+        tabindex="-1"
+        aria-label="Close sidebar"
+        transition:fade={{ duration: 200 }}
+      ></div>
+    {/if}
+
+    <aside class="sidebar" class:collapsed={sidebarCollapsed} class:mobile-open={sidebarMobileOpen}>
+      <!-- Mobile close button -->
+      <button
+        class="sidebar-close-mobile"
+        onclick={() => sidebarMobileOpen = false}
+        aria-label="Close sidebar"
+      >
+        <X size={20} />
+      </button>
+
       <AudioPanel
         devices={audioDevices}
         bind:selectedDevice
@@ -434,6 +502,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
+    position: relative;
   }
 
   .main-content {
@@ -513,6 +582,12 @@
     .sidebar {
       width: 260px;
     }
+    .sidebar-collapse-toggle {
+      right: 260px;
+    }
+    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
+      right: 0;
+    }
   }
 
   @media (max-width: 1400px) {
@@ -521,11 +596,23 @@
       padding: var(--spacing-md);
       gap: var(--spacing-md);
     }
+    .sidebar-collapse-toggle {
+      right: 240px;
+    }
+    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
+      right: 0;
+    }
   }
 
   @media (max-width: 1200px) {
     .sidebar {
       width: 220px;
+    }
+    .sidebar-collapse-toggle {
+      right: 220px;
+    }
+    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
+      right: 0;
     }
   }
 
@@ -538,6 +625,176 @@
     .main-content {
       padding: var(--spacing-md);
       gap: var(--spacing-md);
+    }
+  }
+
+  /* Sidebar collapse toggle (desktop) */
+  .sidebar-collapse-toggle {
+    position: absolute;
+    right: var(--sidebar-width);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    width: 24px;
+    height: 48px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    border-right: none;
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .sidebar-collapse-toggle:hover {
+    background: var(--bg-elevated);
+    color: var(--accent-cyan);
+  }
+
+  .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
+    right: 0;
+    border-right: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
+
+  /* Collapsed sidebar state (desktop) */
+  .sidebar.collapsed {
+    width: 0;
+    padding: 0;
+    overflow: hidden;
+    border-left: none;
+  }
+
+  /* Mobile sidebar toggle button */
+  .sidebar-mobile-toggle {
+    display: none;
+    position: fixed;
+    bottom: var(--spacing-lg);
+    right: var(--spacing-lg);
+    z-index: 100;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent-cyan);
+    color: var(--bg-darkest);
+    border: none;
+    box-shadow: 0 4px 12px rgba(0, 240, 255, 0.3);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+
+  .sidebar-mobile-toggle:hover {
+    transform: scale(1.1);
+  }
+
+  /* Mobile sidebar close button */
+  .sidebar-close-mobile {
+    display: none;
+    position: absolute;
+    top: var(--spacing-md);
+    right: var(--spacing-md);
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    border: none;
+    cursor: pointer;
+    z-index: 10;
+  }
+
+  .sidebar-close-mobile:hover {
+    background: var(--status-error);
+    color: white;
+  }
+
+  /* Mobile sidebar backdrop */
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 150;
+  }
+
+  /* Mobile responsive (< 900px) */
+  @media (max-width: 900px) {
+    .sidebar-collapse-toggle {
+      display: none;
+    }
+
+    .sidebar-mobile-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .sidebar-backdrop {
+      display: block;
+    }
+
+    .sidebar {
+      position: fixed;
+      top: 52px;
+      right: 0;
+      bottom: 0;
+      width: 280px;
+      max-height: none;
+      z-index: 200;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .sidebar.mobile-open {
+      transform: translateX(0);
+    }
+
+    .sidebar-close-mobile {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .decks-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  /* Tablet/small desktop (< 768px) */
+  @media (max-width: 768px) {
+    .decks-grid {
+      grid-template-columns: 1fr 1fr;
+      gap: var(--spacing-sm);
+    }
+
+    .main-content {
+      padding: var(--spacing-sm);
+      gap: var(--spacing-sm);
+    }
+
+    .section-header h2 {
+      font-size: 12px;
+    }
+  }
+
+  /* Mobile (< 600px) */
+  @media (max-width: 600px) {
+    .decks-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      width: 100%;
+    }
+
+    .sidebar-mobile-toggle {
+      bottom: var(--spacing-md);
+      right: var(--spacing-md);
+      width: 44px;
+      height: 44px;
     }
   }
 

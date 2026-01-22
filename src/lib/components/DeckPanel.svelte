@@ -1,5 +1,6 @@
 <script>
   import StatusIndicator from './StatusIndicator.svelte';
+  import { Play, Square, Maximize } from 'lucide-svelte';
 
   let {
     running = false,
@@ -25,9 +26,7 @@
       </div>
     {:else}
       <div class="placeholder">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <polygon points="5,3 19,12 5,21" />
-        </svg>
+        <Play size={48} strokeWidth={1.5} />
         <span>Click Start to begin visualization</span>
       </div>
     {/if}
@@ -42,22 +41,16 @@
     <div class="buttons">
       {#if !running}
         <button class="btn primary" onclick={onStart}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5,3 19,12 5,21" />
-          </svg>
+          <Play size={16} fill="currentColor" />
           Start
         </button>
       {:else}
         <button class="btn danger" onclick={onStop}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" />
-          </svg>
+          <Square size={16} fill="currentColor" />
           Stop
         </button>
         <button class="btn secondary" onclick={onFullscreen} title="Fullscreen (F11)">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-          </svg>
+          <Maximize size={16} />
         </button>
       {/if}
     </div>
@@ -112,7 +105,7 @@
     color: var(--text-muted);
   }
 
-  .placeholder svg {
+  .placeholder :global(svg) {
     opacity: 0.3;
   }
 

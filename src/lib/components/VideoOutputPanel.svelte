@@ -2,6 +2,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from 'svelte';
   import StatusIndicator from './StatusIndicator.svelte';
+  import { showToast } from "$lib/stores/toast";
+  import { Monitor, RefreshCw, Video, Square, AlertCircle, Cast } from 'lucide-svelte';
 
   /**
    * @type {{
@@ -65,7 +67,7 @@
       /** @type {Array<{index: number, name: string, width: number, height: number, is_primary: boolean}>} */
       monitors = await invoke('list_monitors');
     } catch (e) {
-      console.error('Failed to list monitors:', e);
+      showToast("Failed to list monitors", "error");
       monitors = [];
     }
   }
@@ -92,7 +94,7 @@
     try {
       ndiAvailable = await invoke('is_ndi_available');
     } catch (e) {
-      console.error('Failed to check NDI availability:', e);
+      showToast("Failed to check NDI availability", "error");
       ndiAvailable = false;
     }
   }
@@ -132,11 +134,7 @@
 
   {#if devices.length === 0 && !loading}
     <div class="no-devices">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <rect x="2" y="3" width="20" height="14" rx="2" />
-        <line x1="8" y1="21" x2="16" y2="21" />
-        <line x1="12" y1="17" x2="12" y2="21" />
-      </svg>
+      <Monitor size={24} strokeWidth={1.5} class="no-device-icon" />
       <span>No v4l2 devices found</span>
       <small>Install v4l2loopback-dkms, then run:</small>
       <code>sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="OpenDrop"</code>
@@ -151,10 +149,7 @@
         {/each}
       </select>
       <button class="icon-btn" onclick={refreshDevices} disabled={loading} title="Refresh devices">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class:spinning={loading}>
-          <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-          <path d="M21 3v5h-5" />
-        </svg>
+        <span class:spinning={loading}><RefreshCw size={14} /></span>
       </button>
     </div>
 
@@ -174,17 +169,12 @@
     <div class="controls">
       {#if !enabled}
         <button class="btn primary" onclick={toggleVideoOutput} disabled={loading || !selectedDevice}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 7l-7 5 7 5V7z" />
-            <rect x="1" y="5" width="15" height="14" rx="2" />
-          </svg>
+          <Video size={14} />
           Enable Output
         </button>
       {:else}
         <button class="btn danger" onclick={toggleVideoOutput} disabled={loading}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" />
-          </svg>
+          <Square size={14} fill="currentColor" />
           Disable
         </button>
       {/if}
@@ -225,11 +215,7 @@
 
     {#if !ndiAvailable}
       <div class="ndi-unavailable">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 8v4" />
-          <path d="M12 16h.01" />
-        </svg>
+        <AlertCircle size={18} strokeWidth={1.5} class="ndi-alert-icon" />
         <span>NDI runtime not installed</span>
         <a href="https://ndi.video/tools/" target="_blank" rel="noopener">Get NDI Tools</a>
       </div>
@@ -246,18 +232,12 @@
       <div class="controls">
         {#if !ndiEnabled}
           <button class="btn ndi" onclick={toggleNdiOutput} disabled={loading}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M2 12l5-3v6l-5-3z" />
-              <path d="M22 12l-5-3v6l5-3z" />
-              <rect x="8" y="6" width="8" height="12" rx="1" />
-            </svg>
+            <Cast size={14} />
             Enable NDI
           </button>
         {:else}
           <button class="btn danger" onclick={toggleNdiOutput} disabled={loading}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" />
-            </svg>
+            <Square size={14} fill="currentColor" />
             Disable NDI
           </button>
         {/if}
@@ -327,7 +307,7 @@
     text-align: center;
   }
 
-  .no-devices svg {
+  .no-devices :global(.no-device-icon) {
     opacity: 0.5;
   }
 
@@ -397,6 +377,7 @@
   }
 
   .spinning {
+    display: inline-flex;
     animation: spin 1s linear infinite;
   }
 
@@ -534,7 +515,7 @@
     font-size: 11px;
   }
 
-  .ndi-unavailable svg {
+  .ndi-unavailable :global(.ndi-alert-icon) {
     opacity: 0.5;
   }
 

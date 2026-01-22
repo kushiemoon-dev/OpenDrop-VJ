@@ -1,6 +1,8 @@
 /* OpenDrop - Global CSS Variables & Base Styles */
 
-:root {
+/* Dark theme (default) */
+:root,
+[data-theme="dark"] {
   /* Background layers */
   --bg-darkest: #0a0a0f;
   --bg-dark: #12121a;
@@ -14,6 +16,7 @@
   --accent-purple: #8b5cf6;
   --accent-green: #00ff88;
   --accent-orange: #ff6b35;
+  --accent-yellow: #fbbf24;
 
   /* Status colors */
   --status-active: #00ff88;
@@ -57,6 +60,48 @@
   /* Font */
   --font-sans: 'Inter', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+  /* Color scheme for native elements */
+  color-scheme: dark;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  /* Background layers */
+  --bg-darkest: #f8f9fa;
+  --bg-dark: #f1f3f4;
+  --bg-panel: #ffffff;
+  --bg-elevated: #e8eaed;
+  --bg-hover: #dadce0;
+
+  /* Accent colors (more saturated for light mode) */
+  --accent-cyan: #0891b2;
+  --accent-magenta: #db2777;
+  --accent-purple: #7c3aed;
+  --accent-green: #059669;
+  --accent-orange: #ea580c;
+  --accent-yellow: #d97706;
+
+  /* Status colors */
+  --status-active: #059669;
+  --status-inactive: #9ca3af;
+  --status-error: #dc2626;
+  --status-warning: #d97706;
+
+  /* Text */
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+
+  /* Borders & effects */
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-medium: rgba(0, 0, 0, 0.12);
+  --glow-cyan: 0 0 20px rgba(8, 145, 178, 0.2);
+  --glow-green: 0 0 15px rgba(5, 150, 105, 0.2);
+  --glow-magenta: 0 0 20px rgba(219, 39, 119, 0.2);
+
+  /* Color scheme for native elements */
+  color-scheme: light;
 }
 
 /* Reset & Base */
@@ -188,6 +233,80 @@ body {
   }
 }
 
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Staggered list animation */
+@keyframes list-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Panel expand/collapse */
+@keyframes panel-expand {
+  from {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+    padding-top: var(--spacing-lg);
+    padding-bottom: var(--spacing-lg);
+  }
+}
+
+/* Button press effect */
+@keyframes button-press {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
 /* Button base */
 button {
   font-family: inherit;
@@ -224,4 +343,139 @@ input:focus, select:focus {
 
 input::placeholder {
   color: var(--text-muted);
+}
+
+/* Animation utility classes */
+.animate-fade-in {
+  animation: fade-in var(--transition-normal) ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up var(--transition-normal) ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right var(--transition-normal) ease-out;
+}
+
+.animate-slide-in-left {
+  animation: slide-in-left var(--transition-normal) ease-out;
+}
+
+.animate-scale-in {
+  animation: scale-in var(--transition-normal) ease-out;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Staggered list items - use with data-index attribute */
+.animate-list > * {
+  animation: list-item-in var(--transition-normal) ease-out both;
+}
+
+.animate-list > *:nth-child(1) { animation-delay: 0ms; }
+.animate-list > *:nth-child(2) { animation-delay: 30ms; }
+.animate-list > *:nth-child(3) { animation-delay: 60ms; }
+.animate-list > *:nth-child(4) { animation-delay: 90ms; }
+.animate-list > *:nth-child(5) { animation-delay: 120ms; }
+.animate-list > *:nth-child(6) { animation-delay: 150ms; }
+.animate-list > *:nth-child(7) { animation-delay: 180ms; }
+.animate-list > *:nth-child(8) { animation-delay: 210ms; }
+.animate-list > *:nth-child(9) { animation-delay: 240ms; }
+.animate-list > *:nth-child(10) { animation-delay: 270ms; }
+
+/* Button hover effects */
+.btn-hover-glow {
+  transition: all var(--transition-fast);
+}
+
+.btn-hover-glow:hover {
+  box-shadow: 0 0 12px var(--accent-primary, var(--accent-cyan));
+  transform: translateY(-1px);
+}
+
+.btn-hover-glow:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Button press animation */
+.btn-press:active {
+  animation: button-press 0.15s ease-out;
+}
+
+/* Panel collapsible */
+.panel-collapsible {
+  overflow: hidden;
+  transition: max-height var(--transition-normal),
+              padding var(--transition-normal),
+              opacity var(--transition-fast);
+}
+
+.panel-collapsible.collapsed {
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  opacity: 0;
+  border: none !important;
+}
+
+/* Loading shimmer effect */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.loading-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-panel) 0%,
+    var(--bg-elevated) 50%,
+    var(--bg-panel) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Accent color system - can be overridden by JS */
+:root {
+  --accent-primary: var(--accent-cyan);
+  --accent-secondary: var(--accent-magenta);
+}
+
+/* Accent color presets */
+[data-accent="cyan"] {
+  --accent-primary: var(--accent-cyan);
+  --glow-primary: var(--glow-cyan);
+}
+
+[data-accent="magenta"] {
+  --accent-primary: var(--accent-magenta);
+  --glow-primary: var(--glow-magenta);
+}
+
+[data-accent="purple"] {
+  --accent-primary: var(--accent-purple);
+  --glow-primary: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+[data-accent="green"] {
+  --accent-primary: var(--accent-green);
+  --glow-primary: var(--glow-green);
+}
+
+[data-accent="orange"] {
+  --accent-primary: var(--accent-orange);
+  --glow-primary: 0 0 20px rgba(255, 107, 53, 0.3);
+}
+
+[data-accent="yellow"] {
+  --accent-primary: var(--accent-yellow);
+  --glow-primary: 0 0 20px rgba(251, 191, 36, 0.3);
+}
+
+/* Apply accent to key elements globally */
+:root {
+  --section-title-color: var(--accent-primary, var(--accent-cyan));
 }

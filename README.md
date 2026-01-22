@@ -4,8 +4,8 @@
 
 ### Multi-Deck Audio Visualizer
 
-[![Pre-release](https://img.shields.io/badge/Status-Pre--release-orange?style=flat)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
-[![Version](https://img.shields.io/badge/Version-0.1.0--alpha-blue?style=flat)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
+[![Release](https://img.shields.io/badge/Status-Beta-green?style=flat)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
+[![Version](https://img.shields.io/badge/Version-0.2.0-blue?style=flat)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)](https://github.com/kushiemoon-dev/OpenDrop-VJ)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white)](https://github.com/kushiemoon-dev/OpenDrop-VJ)
 [![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -16,7 +16,7 @@
 
 Real-time audio visualization with MilkDrop presets, multi-deck mixing, and video output for OBS/VLC.
 
-> **Note:** This is an alpha pre-release. Features may be incomplete or unstable.
+> **Note:** This is a beta release. Some features may still be in development.
 
 </div>
 
@@ -34,15 +34,20 @@ Real-time audio visualization with MilkDrop presets, multi-deck mixing, and vide
 - **Compositor** — Blend modes (Normal, Add, Multiply, Screen, Overlay)
 - **Multi-Monitor** — Fullscreen on any connected display
 - **VU Meters** — Real-time audio level visualization
+- **Theme Support** — Dark/Light mode with customizable accent colors
+- **Preset Organization** — Favorites, categories, and tags for presets
+- **Toast Notifications** — Non-intrusive feedback for actions
 
 ---
 
 ## Download
 
-| Platform | Download |
-|----------|----------|
-| Linux (x64) | [opendrop-linux-x64.tar.gz](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases) |
-| Windows (x64) | [opendrop-windows-x64.msi](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases) |
+| Platform | Format | Download |
+|----------|--------|----------|
+| Linux (x64) | AppImage | [OpenDrop_0.2.0_amd64.AppImage](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
+| Linux (x64) | Debian | [OpenDrop_0.2.0_amd64.deb](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
+| Windows (x64) | MSI | [OpenDrop_0.2.0_x64-setup.msi](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
+| Windows (x64) | Installer | [OpenDrop_0.2.0_x64-setup.exe](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
 
 ---
 

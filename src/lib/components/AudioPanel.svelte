@@ -3,11 +3,21 @@
   import { invoke } from "@tauri-apps/api/core";
   import VuMeter from './VuMeter.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
-  import { RefreshCw, Play, Square } from 'lucide-svelte';
+  import { RefreshCw, Play, Square, Mic, Speaker, Monitor } from 'lucide-svelte';
+
+  /**
+   * @typedef {{
+   *   name: string,
+   *   description: string,
+   *   is_default: boolean,
+   *   is_monitor: boolean,
+   *   device_type: 'input' | 'output' | 'monitor'
+   * }} AudioDevice
+   */
 
   /**
    * @type {{
-   *   devices?: Array<{name: string, is_default: boolean}>,
+   *   devices?: AudioDevice[],
    *   selectedDevice?: string,
    *   running?: boolean,
    *   onStart?: () => void,
@@ -16,6 +26,29 @@
    * }}
    */
   let { devices = [], selectedDevice = $bindable(''), running = false, onStart, onStop, onRefresh } = $props();
+
+  /**
+   * Get icon component based on device type
+   * @param {string} deviceType
+   */
+  function getDeviceIcon(deviceType) {
+    switch (deviceType) {
+      case 'output': return Speaker;
+      case 'monitor': return Monitor;
+      default: return Mic;
+    }
+  }
+
+  /**
+   * Format device display name
+   * @param {AudioDevice} device
+   */
+  function formatDeviceName(device) {
+    // Use description if available, otherwise fall back to name
+    const displayName = device.description || device.name;
+    const maxLen = 35;
+    return displayName.length > maxLen ? displayName.slice(0, maxLen) + '...' : displayName;
+  }
 
   // Real audio levels from backend
   let levelL = $state(0);
@@ -76,17 +109,35 @@
 
   <div class="device-select">
     <select bind:value={selectedDevice} disabled={running}>
-      {#each devices as device}
-        <option value={device.name}>
-          {device.name.length > 30 ? device.name.slice(0, 30) + '...' : device.name}
-          {device.is_default ? ' (Default)' : ''}
-        </option>
-      {/each}
+      {#if devices.length === 0}
+        <option value="">No devices found</option>
+      {:else}
+        {#each devices as device}
+          <option value={device.name}>
+            {device.device_type === 'output' ? '🔊 ' : device.device_type === 'monitor' ? '📺 ' : '🎤 '}
+            {formatDeviceName(device)}
+            {device.is_default ? ' ★' : ''}
+          </option>
+        {/each}
+      {/if}
     </select>
     <button class="icon-btn" onclick={onRefresh} title="Refresh devices">
       <RefreshCw size={14} />
     </button>
   </div>
+
+  {#if devices.length > 0}
+    {@const selected = devices.find(d => d.name === selectedDevice)}
+    {#if selected?.device_type === 'output'}
+      <div class="device-hint loopback">
+        Loopback mode - captures system audio output
+      </div>
+    {:else if selected?.device_type === 'monitor'}
+      <div class="device-hint monitor">
+        Monitor device - captures what you hear
+      </div>
+    {/if}
+  {/if}
 
   <div class="controls">
     {#if !running}
@@ -165,6 +216,25 @@
     background: var(--bg-elevated);
     color: var(--text-primary);
     border-color: var(--border-medium);
+  }
+
+  .device-hint {
+    font-size: 0.75em;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    background: var(--bg-dark);
+    border-left: 2px solid var(--border-subtle);
+  }
+
+  .device-hint.loopback {
+    border-left-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  .device-hint.monitor {
+    border-left-color: var(--accent-green);
+    color: var(--accent-green);
   }
 
   .controls {

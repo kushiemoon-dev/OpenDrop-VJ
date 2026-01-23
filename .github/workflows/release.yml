@@ -74,6 +74,16 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Build renderer sidecar
+        run: |
+          echo "=== Building opendrop-renderer ==="
+          cargo build --release -p opendrop-renderer
+          mkdir -p src-tauri/binaries
+          cp target/release/opendrop-renderer src-tauri/binaries/opendrop-renderer-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/opendrop-renderer-x86_64-unknown-linux-gnu
+          echo "=== Renderer sidecar ready ==="
+          ls -la src-tauri/binaries/
+
       - name: Build Tauri app
         run: |
           echo "=== Starting Tauri build ==="
@@ -139,6 +149,16 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
+
+      - name: Build renderer sidecar
+        shell: pwsh
+        run: |
+          echo "=== Building opendrop-renderer ==="
+          cargo build --release -p opendrop-renderer
+          New-Item -ItemType Directory -Force -Path "src-tauri/binaries"
+          Copy-Item "target/release/opendrop-renderer.exe" "src-tauri/binaries/opendrop-renderer-x86_64-pc-windows-msvc.exe"
+          echo "=== Renderer sidecar ready ==="
+          Get-ChildItem "src-tauri/binaries"
 
       - name: Build Tauri app
         run: pnpm tauri build --verbose

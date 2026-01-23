@@ -13,6 +13,7 @@
   import CrossfaderPanel from '$lib/components/CrossfaderPanel.svelte';
   import VideoOutputPanel from '$lib/components/VideoOutputPanel.svelte';
   import MidiPanel from '$lib/components/MidiPanel.svelte';
+  import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 
   // Lucide icons for sidebar toggle
   import { PanelRightOpen, PanelRightClose, X } from 'lucide-svelte';
@@ -24,13 +25,16 @@
   let sidebarCollapsed = $state(false);
   let sidebarMobileOpen = $state(false);
 
+  // Settings panel state
+  let settingsOpen = $state(false);
+
   /**
    * @typedef {{ name: string, path: string }} Preset
    * @typedef {{ name: string, path: string }} PlaylistItem
    * @typedef {{ name: string, items: PlaylistItem[], current_index: number, shuffle: boolean, auto_cycle: boolean, cycle_duration_secs: number }} Playlist
    * @typedef {{ id: number, running: boolean, preset: string | null, volume: number, beat_sensitivity: number, playlist: Playlist }} DeckInfo
    * @typedef {{ position: number, side_a: number[], side_b: number[], curve: string, enabled: boolean }} CrossfaderInfo
-   * @typedef {{ name: string, is_default: boolean }} AudioDevice
+   * @typedef {{ name: string, description: string, is_default: boolean, is_monitor: boolean, device_type: 'input' | 'output' | 'monitor' }} AudioDevice
    */
 
   // Multi-deck state
@@ -317,6 +321,7 @@
     version={projectmVersion}
     visualizerRunning={anyDeckRunning}
     audioRunning={multiDeckStatus.audio_running}
+    onSettingsClick={() => settingsOpen = true}
   />
 
   <div class="main-layout" class:sidebar-collapsed={sidebarCollapsed}>
@@ -481,6 +486,14 @@
       </div>
     </aside>
   </div>
+
+  <!-- Settings panel -->
+  {#if settingsOpen}
+    <SettingsPanel
+      onClose={() => settingsOpen = false}
+      onPresetsRefresh={loadPresets}
+    />
+  {/if}
 
   <!-- Toast notification -->
   {#if toast.visible}

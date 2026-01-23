@@ -1,6 +1,6 @@
 <script>
   import StatusIndicator from './StatusIndicator.svelte';
-  import { Sun, Moon, Palette } from 'lucide-svelte';
+  import { Sun, Moon, Palette, Settings } from 'lucide-svelte';
   import { theme, toggleTheme } from '$lib/stores/theme';
   import { accent, setAccent, ACCENT_PRESETS } from '$lib/stores/accent';
 
@@ -8,10 +8,11 @@
    * @type {{
    *   version?: string,
    *   visualizerRunning?: boolean,
-   *   audioRunning?: boolean
+   *   audioRunning?: boolean,
+   *   onSettingsClick?: () => void
    * }}
    */
-  let { version = '', visualizerRunning = false, audioRunning = false } = $props();
+  let { version = '', visualizerRunning = false, audioRunning = false, onSettingsClick } = $props();
 
   // Reactive theme state
   let isDark = $derived(theme.current === 'dark');
@@ -42,7 +43,7 @@
 <header class="header glass">
   <div class="logo">
     <h1>OpenDrop</h1>
-    <span class="version">v0.2.1</span>
+    <span class="version">v0.3.0</span>
   </div>
 
   <div class="center">
@@ -99,6 +100,15 @@
           </div>
         {/if}
       </div>
+
+      <button
+        class="settings-toggle btn-press"
+        onclick={onSettingsClick}
+        title="Settings"
+        aria-label="Open settings"
+      >
+        <Settings size={18} />
+      </button>
     </div>
 
     <div class="status-group">
@@ -184,6 +194,26 @@
     color: var(--accent-yellow);
   }
 
+  .settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: var(--transition-fast);
+  }
+
+  .settings-toggle:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+    color: var(--accent-primary, var(--accent-cyan));
+  }
+
   .right-group {
     display: flex;
     align-items: center;
@@ -238,7 +268,7 @@
     border-radius: var(--radius-lg);
     padding: var(--spacing-md);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    z-index: 100;
+    z-index: 300;
   }
 
   .accent-picker-title {

@@ -61,6 +61,17 @@ impl Default for AudioConfig {
     }
 }
 
+/// Device direction/type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceType {
+    /// Input device (microphone)
+    Input,
+    /// Output device (speakers) - can be used for loopback capture
+    Output,
+    /// Monitor device (Linux PulseAudio/PipeWire monitor)
+    Monitor,
+}
+
 /// Information about an audio device
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
@@ -72,6 +83,8 @@ pub struct DeviceInfo {
     pub is_default: bool,
     /// Whether this is a monitor (captures output audio)
     pub is_monitor: bool,
+    /// Device type (input, output, monitor)
+    pub device_type: DeviceType,
     /// Capture backend to use
     pub backend: AudioBackend,
 }
@@ -134,6 +147,7 @@ impl AudioEngine {
                 description: "System Audio (Auto-detect)".to_string(),
                 is_default: true,
                 is_monitor: true,
+                device_type: DeviceType::Monitor,
                 backend: AudioBackend::PulseAudio,
             });
 
@@ -163,6 +177,7 @@ impl AudioEngine {
                                     description: format!("{} (Monitor)", description),
                                     is_default: false,
                                     is_monitor: true,
+                                    device_type: DeviceType::Monitor,
                                     backend: AudioBackend::PulseAudio,
                                 });
                             }
@@ -174,29 +189,84 @@ impl AudioEngine {
             info!("Found {} audio devices on Linux", devices.len());
         }
 
-        // On Windows/macOS, use CPAL normally
+        // On Windows/macOS, use CPAL - list both input and output devices
         #[cfg(not(target_os = "linux"))]
         {
             let host = cpal::default_host();
-            let default_name = host
+
+            // Get default device names for marking
+            let default_input_name = host
                 .default_input_device()
                 .and_then(|d| d.name().ok());
+            let default_output_name = host
+                .default_output_device()
+                .and_then(|d| d.name().ok());
 
-            devices = host.input_devices()
-                .map(|devices| {
-                    devices
-                        .filter_map(|d| {
-                            d.name().ok().map(|name| DeviceInfo {
-                                description: name.clone(),
-                                is_default: Some(&name) == default_name.as_ref(),
-                                is_monitor: false,
+            // List input devices (microphones)
+            if let Ok(input_devices) = host.input_devices() {
+                for device in input_devices {
+                    if let Ok(name) = device.name() {
+                        devices.push(DeviceInfo {
+                            description: format!("{} (Input)", name),
+                            is_default: Some(&name) == default_input_name.as_ref(),
+                            is_monitor: false,
+                            device_type: DeviceType::Input,
+                            backend: AudioBackend::Cpal,
+                            name,
+                        });
+                    }
+                }
+            }
+
+            // List output devices (speakers/headphones) for loopback capture
+            // On Windows, WASAPI allows capturing from output devices (loopback)
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(output_devices) = host.output_devices() {
+                    for device in output_devices {
+                        if let Ok(name) = device.name() {
+                            // Mark as loopback device
+                            devices.push(DeviceInfo {
+                                description: format!("{} (Loopback)", name),
+                                is_default: false, // Output device can be default for playback
+                                is_monitor: true,  // Loopback acts like a monitor
+                                device_type: DeviceType::Output,
                                 backend: AudioBackend::Cpal,
-                                name,
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                                name: format!("loopback:{}", name), // Prefix to identify loopback
+                            });
+                        }
+                    }
+                }
+            }
+
+            // On macOS, loopback requires virtual audio devices (BlackHole, Loopback app)
+            // We still list output devices but they won't work without virtual device software
+            #[cfg(target_os = "macos")]
+            {
+                if let Ok(output_devices) = host.output_devices() {
+                    for device in output_devices {
+                        if let Ok(name) = device.name() {
+                            // Check if this looks like a virtual loopback device
+                            let is_virtual = name.to_lowercase().contains("blackhole")
+                                || name.to_lowercase().contains("loopback")
+                                || name.to_lowercase().contains("soundflower");
+
+                            if is_virtual {
+                                devices.push(DeviceInfo {
+                                    description: format!("{} (Virtual)", name),
+                                    is_default: false,
+                                    is_monitor: true,
+                                    device_type: DeviceType::Output,
+                                    backend: AudioBackend::Cpal,
+                                    name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            info!("Found {} audio devices", devices.len());
         }
 
         devices
@@ -318,24 +388,53 @@ fn run_audio_thread(
     {
         let host = cpal::default_host();
 
-        // Get the device
-        let device = if let Some(ref name) = config.device_name {
-            host.input_devices()
-                .map_err(|e| AudioError::StreamError(e.to_string()))?
-                .find(|d| d.name().ok().as_ref() == Some(name))
-                .ok_or_else(|| AudioError::DeviceNotFound(name.clone()))?
+        // Check if this is a loopback device (Windows only)
+        let (device, is_loopback) = if let Some(ref name) = config.device_name {
+            if name.starts_with("loopback:") {
+                // Extract the actual device name after "loopback:" prefix
+                let actual_name = name.strip_prefix("loopback:").unwrap_or(name);
+                info!("Looking for loopback device: {}", actual_name);
+
+                // Find the output device for loopback capture
+                let output_device = host.output_devices()
+                    .map_err(|e| AudioError::StreamError(e.to_string()))?
+                    .find(|d| d.name().ok().as_deref() == Some(actual_name))
+                    .ok_or_else(|| AudioError::DeviceNotFound(actual_name.to_string()))?;
+
+                (output_device, true)
+            } else {
+                // Regular input device
+                let input_device = host.input_devices()
+                    .map_err(|e| AudioError::StreamError(e.to_string()))?
+                    .find(|d| d.name().ok().as_ref() == Some(name))
+                    .ok_or_else(|| AudioError::DeviceNotFound(name.clone()))?;
+
+                (input_device, false)
+            }
         } else {
-            host.default_input_device()
-                .ok_or(AudioError::NoInputDevice)?
+            // Default input device
+            let default_device = host.default_input_device()
+                .ok_or(AudioError::NoInputDevice)?;
+            (default_device, false)
         };
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-        info!("Using audio input device: {}", device_name);
+        info!(
+            "Using audio device: {} (loopback: {})",
+            device_name, is_loopback
+        );
 
         // Get supported config
-        let supported_config = device
-            .default_input_config()
-            .map_err(|e| AudioError::ConfigError(e.to_string()))?;
+        // For loopback, we use the output device's default output config
+        let supported_config = if is_loopback {
+            device
+                .default_output_config()
+                .map_err(|e| AudioError::ConfigError(format!("Loopback config error: {}", e)))?
+        } else {
+            device
+                .default_input_config()
+                .map_err(|e| AudioError::ConfigError(e.to_string()))?
+        };
 
         info!(
             "Device config: {} Hz, {} channels, {:?}",
@@ -348,6 +447,8 @@ fn run_audio_thread(
         let stream_config: StreamConfig = supported_config.into();
 
         // Build the stream based on sample format
+        // Note: For loopback on Windows, we still use build_input_stream
+        // WASAPI handles the loopback internally when called on an output device
         let stream = match sample_format {
             SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, sample_tx)?,
             SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, sample_tx)?,
@@ -356,7 +457,7 @@ fn run_audio_thread(
         };
 
         stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
-        info!("Audio stream started");
+        info!("Audio stream started (loopback: {})", is_loopback);
 
         // Wait for stop command (blocks until Stop received or channel closed)
         let _ = command_rx.recv();

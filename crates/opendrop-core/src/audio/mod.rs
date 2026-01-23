@@ -6,7 +6,7 @@ pub mod ring_buffer;
 #[cfg(target_os = "linux")]
 pub mod pipewire;
 
-pub use capture::{AudioBackend, AudioCapture, AudioConfig, AudioEngine, AudioError, DeviceInfo};
+pub use capture::{AudioBackend, AudioCapture, AudioConfig, AudioEngine, AudioError, DeviceInfo, DeviceType};
 
 #[cfg(target_os = "linux")]
 pub use pipewire::{PipeWireCapture, PipeWireConfig, PipeWireSource};

@@ -660,14 +660,25 @@ pub struct DeckInfo {
 #[derive(Serialize, Deserialize)]
 pub struct AudioDeviceInfo {
     pub name: String,
+    pub description: String,
     pub is_default: bool,
+    pub is_monitor: bool,
+    pub device_type: String, // "input", "output", or "monitor"
 }
 
 impl From<DeviceInfo> for AudioDeviceInfo {
     fn from(d: DeviceInfo) -> Self {
+        let device_type = match d.device_type {
+            opendrop_core::audio::DeviceType::Input => "input",
+            opendrop_core::audio::DeviceType::Output => "output",
+            opendrop_core::audio::DeviceType::Monitor => "monitor",
+        };
         Self {
             name: d.name,
+            description: d.description,
             is_default: d.is_default,
+            is_monitor: d.is_monitor,
+            device_type: device_type.to_string(),
         }
     }
 }
@@ -708,22 +719,39 @@ fn start_deck(
     let renderer_path = find_renderer_executable()?;
     info!("Using renderer at: {}", renderer_path);
 
-    // Use a default preset if none specified
+    // Use a default preset if none specified - search all preset directories
     let preset = preset_path.or_else(|| {
-        std::fs::read_dir("/usr/share/projectM/presets/presets_milkdrop_104")
-            .ok()
-            .and_then(|mut dir| {
-                dir.find_map(|entry| {
-                    entry.ok().and_then(|e| {
-                        let path = e.path();
-                        if path.extension().is_some_and(|ext| ext == "milk") {
-                            Some(path.to_string_lossy().to_string())
-                        } else {
-                            None
+        // Try to find any .milk preset in any of the default directories
+        for dir in get_default_preset_dirs() {
+            if !dir.exists() || !dir.is_dir() {
+                continue;
+            }
+
+            // Recursively search for a preset
+            fn find_first_preset(dir: &std::path::Path, depth: usize) -> Option<String> {
+                if depth > 3 {
+                    return None;
+                }
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            if let Some(preset) = find_first_preset(&path, depth + 1) {
+                                return Some(preset);
+                            }
+                        } else if path.extension().is_some_and(|ext| ext == "milk" || ext == "prjm") {
+                            return Some(path.to_string_lossy().to_string());
                         }
-                    })
-                })
-            })
+                    }
+                }
+                None
+            }
+
+            if let Some(preset) = find_first_preset(&dir, 0) {
+                return Some(preset);
+            }
+        }
+        None
     });
 
     // Build config
@@ -888,26 +916,271 @@ fn toggle_fullscreen(state: State<'_, AppState>, deck_id: Option<u8>) -> Result<
     Err(format!("Deck {} not running", deck_id))
 }
 
+/// Get the renderer executable name for the current platform
+fn renderer_executable_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "opendrop-renderer.exe"
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "opendrop-renderer"
+    }
+}
+
+/// Get the target triple for the current platform (used by Tauri sidecars)
+fn target_triple() -> &'static str {
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        "x86_64-pc-windows-msvc"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        "x86_64-unknown-linux-gnu"
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        "x86_64-apple-darwin"
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        "aarch64-apple-darwin"
+    }
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64")
+    )))]
+    {
+        "unknown"
+    }
+}
+
 /// Find the renderer executable
 fn find_renderer_executable() -> Result<String, String> {
-    let candidates = [
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.join("opendrop-renderer")))
-            .map(|p| p.to_string_lossy().to_string()),
-        Some("/srv/http/opendrop/target/debug/opendrop-renderer".to_string()),
-        Some("/srv/http/opendrop/target/release/opendrop-renderer".to_string()),
-        Some("/usr/bin/opendrop-renderer".to_string()),
-        Some("/usr/local/bin/opendrop-renderer".to_string()),
-    ];
+    let exe_name = renderer_executable_name();
+    let triple = target_triple();
 
-    for candidate in candidates.into_iter().flatten() {
-        if std::path::Path::new(&candidate).exists() {
-            return Ok(candidate);
+    // Tauri sidecar name with target triple (e.g., opendrop-renderer-x86_64-pc-windows-msvc.exe)
+    #[cfg(target_os = "windows")]
+    let sidecar_name = format!("opendrop-renderer-{}.exe", triple);
+    #[cfg(not(target_os = "windows"))]
+    let sidecar_name = format!("opendrop-renderer-{}", triple);
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    // 1. Check next to current exe (Tauri sidecar location - with target triple)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Tauri bundled sidecar (with target triple suffix)
+            candidates.push(exe_dir.join(&sidecar_name));
+            // Plain name (development builds)
+            candidates.push(exe_dir.join(exe_name));
         }
     }
 
-    Err("Could not find opendrop-renderer executable".to_string())
+    // 2. Check relative to working directory (development)
+    if let Ok(cwd) = std::env::current_dir() {
+        // Cargo workspace target directories
+        candidates.push(cwd.join("target/release").join(exe_name));
+        candidates.push(cwd.join("target/debug").join(exe_name));
+        // From src-tauri directory
+        candidates.push(cwd.join("../target/release").join(exe_name));
+        candidates.push(cwd.join("../target/debug").join(exe_name));
+    }
+
+    // 3. Platform-specific system paths
+    #[cfg(target_os = "linux")]
+    {
+        candidates.push(std::path::PathBuf::from("/usr/bin/opendrop-renderer"));
+        candidates.push(std::path::PathBuf::from("/usr/local/bin/opendrop-renderer"));
+        // Check user's home directory
+        if let Some(home) = std::env::var_os("HOME") {
+            candidates.push(std::path::PathBuf::from(home).join(".local/bin/opendrop-renderer"));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Check Program Files
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            candidates.push(std::path::PathBuf::from(pf).join("OpenDrop").join("opendrop-renderer.exe"));
+        }
+        // Check AppData/Local
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            candidates.push(std::path::PathBuf::from(local_app_data).join("OpenDrop").join("opendrop-renderer.exe"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push(std::path::PathBuf::from("/usr/local/bin/opendrop-renderer"));
+        candidates.push(std::path::PathBuf::from("/opt/homebrew/bin/opendrop-renderer"));
+        // Check within app bundle
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(bundle_path) = exe_path.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+                candidates.push(bundle_path.join("Resources/opendrop-renderer"));
+            }
+        }
+    }
+
+    // Search all candidates
+    for candidate in &candidates {
+        if candidate.exists() && candidate.is_file() {
+            info!("Found renderer at: {}", candidate.display());
+            return Ok(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    // Build helpful error message
+    let searched_paths: Vec<String> = candidates
+        .iter()
+        .take(5) // Show first 5 paths in error
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    Err(format!(
+        "Could not find opendrop-renderer executable. Searched:\n  - {}",
+        searched_paths.join("\n  - ")
+    ))
+}
+
+/// Get default preset directories for the current platform
+fn get_default_preset_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        // System-wide projectM presets
+        dirs.push(std::path::PathBuf::from("/usr/share/projectM/presets"));
+        dirs.push(std::path::PathBuf::from("/usr/local/share/projectM/presets"));
+
+        // User-specific locations
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = std::path::PathBuf::from(home);
+            dirs.push(home_path.join(".local/share/opendrop/presets"));
+            dirs.push(home_path.join(".local/share/projectM/presets"));
+            dirs.push(home_path.join("OpenDrop/presets"));
+        }
+
+        // XDG data directories
+        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+            let data_path = std::path::PathBuf::from(data_home);
+            dirs.push(data_path.join("opendrop/presets"));
+            dirs.push(data_path.join("projectM/presets"));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // AppData locations
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            let app_path = std::path::PathBuf::from(app_data);
+            dirs.push(app_path.join("OpenDrop/presets"));
+            dirs.push(app_path.join("projectM/presets"));
+        }
+
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            let local_path = std::path::PathBuf::from(local_app_data);
+            dirs.push(local_path.join("OpenDrop/presets"));
+            dirs.push(local_path.join("projectM/presets"));
+        }
+
+        // Program Files locations
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            let pf_path = std::path::PathBuf::from(pf);
+            dirs.push(pf_path.join("OpenDrop/presets"));
+            dirs.push(pf_path.join("projectM/presets"));
+        }
+
+        // User's Documents folder
+        if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+            let user_path = std::path::PathBuf::from(user_profile);
+            dirs.push(user_path.join("Documents/OpenDrop/presets"));
+            dirs.push(user_path.join("OpenDrop/presets"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Application Support
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = std::path::PathBuf::from(home);
+            dirs.push(home_path.join("Library/Application Support/OpenDrop/presets"));
+            dirs.push(home_path.join("Library/Application Support/projectM/presets"));
+            dirs.push(home_path.join("OpenDrop/presets"));
+        }
+
+        // System locations
+        dirs.push(std::path::PathBuf::from("/usr/local/share/projectM/presets"));
+        dirs.push(std::path::PathBuf::from("/opt/homebrew/share/projectM/presets"));
+    }
+
+    // Check next to executable (for portable installs)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            dirs.push(exe_dir.join("presets"));
+            // Also check parent for app bundles
+            if let Some(parent) = exe_dir.parent() {
+                dirs.push(parent.join("presets"));
+                dirs.push(parent.join("Resources/presets"));
+            }
+        }
+    }
+
+    dirs
+}
+
+/// Get the first existing preset directory, or create the user's default
+fn get_preset_dir() -> String {
+    let default_dirs = get_default_preset_dirs();
+
+    // Return the first directory that exists and has presets
+    for dir in &default_dirs {
+        if dir.exists() && dir.is_dir() {
+            // Check if it has any .milk files
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                let has_presets = entries.filter_map(|e| e.ok()).any(|entry| {
+                    let path = entry.path();
+                    path.extension().is_some_and(|ext| ext == "milk")
+                        || (path.is_dir() && path.read_dir().ok().is_some_and(|mut d| d.next().is_some()))
+                });
+                if has_presets {
+                    return dir.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+
+    // Return the first candidate (user's data directory) even if it doesn't exist yet
+    default_dirs
+        .first()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| {
+            #[cfg(target_os = "windows")]
+            {
+                std::env::var("APPDATA")
+                    .map(|p| format!("{}\\OpenDrop\\presets", p))
+                    .unwrap_or_else(|_| "C:\\OpenDrop\\presets".to_string())
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                std::env::var("HOME")
+                    .map(|p| format!("{}/.local/share/opendrop/presets", p))
+                    .unwrap_or_else(|_| "/tmp/opendrop/presets".to_string())
+            }
+        })
+}
+
+/// Get all preset directories that exist
+#[tauri::command]
+fn get_preset_directories() -> Vec<String> {
+    get_default_preset_dirs()
+        .into_iter()
+        .filter(|p| p.exists() && p.is_dir())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
 }
 
 /// List available audio input devices
@@ -988,7 +1261,7 @@ fn get_multi_deck_status(state: State<'_, AppState>) -> Result<MultiDeckStatus, 
     Ok(MultiDeckStatus {
         decks: deck_infos,
         audio_running: audio_guard.is_running(),
-        preset_dir: "/usr/share/projectM/presets".to_string(),
+        preset_dir: get_preset_dir(),
         crossfader: CrossfaderInfo::from(&*crossfader_guard),
         compositor: CompositorInfo::from(&*compositor_guard),
     })
@@ -1006,7 +1279,7 @@ fn get_status(state: State<'_, AppState>) -> Result<VisualizerStatus, String> {
         running: deck.is_running(),
         audio_running: audio_guard.is_running(),
         current_preset: deck.preset_path.clone(),
-        preset_dir: "/usr/share/projectM/presets".to_string(),
+        preset_dir: get_preset_dir(),
     })
 }
 
@@ -1016,15 +1289,19 @@ fn get_projectm_version() -> String {
     projectm_rs::ProjectM::version()
 }
 
-/// List presets in a directory
+/// List presets in a directory (or all default directories if none specified)
 #[tauri::command]
 fn list_presets(dir: Option<String>) -> Result<Vec<PresetInfo>, String> {
-    let dir = dir.unwrap_or_else(|| "/usr/share/projectM/presets".to_string());
-
     let mut presets = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
 
-    fn scan_dir(path: &std::path::Path, presets: &mut Vec<PresetInfo>, depth: usize) {
-        if depth > 3 {
+    fn scan_dir(
+        path: &std::path::Path,
+        presets: &mut Vec<PresetInfo>,
+        seen_paths: &mut std::collections::HashSet<String>,
+        depth: usize,
+    ) {
+        if depth > 4 {
             return;
         }
 
@@ -1032,22 +1309,45 @@ fn list_presets(dir: Option<String>) -> Result<Vec<PresetInfo>, String> {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() {
-                    scan_dir(&path, presets, depth + 1);
-                } else if path.extension().is_some_and(|ext| ext == "milk") {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        presets.push(PresetInfo {
-                            name: name.to_string(),
-                            path: path.to_string_lossy().to_string(),
-                        });
+                    scan_dir(&path, presets, seen_paths, depth + 1);
+                } else if path.extension().is_some_and(|ext| ext == "milk" || ext == "prjm") {
+                    let path_str = path.to_string_lossy().to_string();
+                    // Avoid duplicates if same preset exists in multiple locations
+                    if !seen_paths.contains(&path_str) {
+                        seen_paths.insert(path_str.clone());
+                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                            presets.push(PresetInfo {
+                                name: name.to_string(),
+                                path: path_str,
+                            });
+                        }
                     }
                 }
             }
         }
     }
 
-    scan_dir(std::path::Path::new(&dir), &mut presets, 0);
+    // If a specific directory is provided, only search that one
+    if let Some(specific_dir) = dir {
+        let dir_path = std::path::Path::new(&specific_dir);
+        if dir_path.exists() && dir_path.is_dir() {
+            scan_dir(dir_path, &mut presets, &mut seen_paths, 0);
+        }
+    } else {
+        // Search all default directories
+        for dir_path in get_default_preset_dirs() {
+            if dir_path.exists() && dir_path.is_dir() {
+                scan_dir(&dir_path, &mut presets, &mut seen_paths, 0);
+            }
+        }
+    }
+
     presets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    presets.truncate(500);
+
+    // Limit to reasonable number (increased from 500)
+    if presets.len() > 2000 {
+        presets.truncate(2000);
+    }
 
     Ok(presets)
 }
@@ -2423,6 +2723,7 @@ pub fn run() {
             get_status,
             get_projectm_version,
             list_presets,
+            get_preset_directories,
             // Preset import/export commands
             import_presets_from_folder,
             export_playlist,

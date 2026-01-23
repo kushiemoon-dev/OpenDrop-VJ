@@ -39,16 +39,22 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
           ~/vcpkg/bootstrap-vcpkg.sh
+          # x64-linux is the standard dynamic triplet for Linux
           ~/vcpkg/vcpkg install projectm:x64-linux
           VCPKG_INSTALLED=~/vcpkg/installed/x64-linux
           echo "=== vcpkg lib contents ==="
           ls -la "$VCPKG_INSTALLED/lib/" || true
+          echo "=== vcpkg include contents ==="
+          ls -la "$VCPKG_INSTALLED/include/" || true
+          find "$VCPKG_INSTALLED/include" -name "*.h" | head -20 || true
           echo "=== Setting environment ==="
           echo "PKG_CONFIG_PATH=$VCPKG_INSTALLED/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=$VCPKG_INSTALLED/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
           echo "LIBRARY_PATH=$VCPKG_INSTALLED/lib:$LIBRARY_PATH" >> $GITHUB_ENV
           echo "PROJECTM_4_DIR=$VCPKG_INSTALLED" >> $GITHUB_ENV
           echo "PROJECTM_4_LIB_DIR=$VCPKG_INSTALLED/lib" >> $GITHUB_ENV
+          echo "PROJECTM_4_INCLUDE_DIR=$VCPKG_INSTALLED/include" >> $GITHUB_ENV
+          echo "CPATH=$VCPKG_INSTALLED/include:$CPATH" >> $GITHUB_ENV
 
       - uses: pnpm/action-setup@v2
         with:
@@ -103,10 +109,14 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
           C:\vcpkg\bootstrap-vcpkg.bat
-          C:\vcpkg\vcpkg install projectm:x64-windows
-          $vcpkgInstalled = "C:\vcpkg\installed\x64-windows"
+          C:\vcpkg\vcpkg install projectm:x64-windows-static
+          $vcpkgInstalled = "C:\vcpkg\installed\x64-windows-static"
+          echo "=== vcpkg lib directory contents ==="
+          Get-ChildItem -Path "$vcpkgInstalled\lib" -Recurse | ForEach-Object { $_.FullName }
+          echo "=== vcpkg include directory contents ==="
+          Get-ChildItem -Path "$vcpkgInstalled\include" -Recurse -Directory | ForEach-Object { $_.FullName }
+          echo "=== Setting environment variables ==="
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-          echo "$vcpkgInstalled\bin" >> $env:GITHUB_PATH
           echo "PKG_CONFIG_PATH=$vcpkgInstalled\lib\pkgconfig" >> $env:GITHUB_ENV
           echo "PROJECTM_4_DIR=$vcpkgInstalled" >> $env:GITHUB_ENV
           echo "PROJECTM_4_LIB_DIR=$vcpkgInstalled\lib" >> $env:GITHUB_ENV

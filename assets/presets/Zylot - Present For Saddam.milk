@@ -1,5 +1,5 @@
 [preset00]
-fRating=5.000000
+fRating=3.000000
 fGammaAdj=1.700000
 fDecay=0.980000
 fVideoEchoZoom=2.000000
@@ -82,20 +82,20 @@ per_frame_18=q4 = expt2;
 per_frame_19=monitor = timer;
 per_frame_20=timer = if(above(timer,.01),timer-.01,6);
 per_frame_21=yspeed = if(below(timer,.012),.02,yspeed);
-per_frame_22=xspeed = if(below(timer,.012),rand(200)*.0001,xspeed);
+per_frame_22=xspeed = if(below(timer,.012),int(rand(200))*.0001,xspeed);
 per_frame_23=locy = if(below(timer,.012),1,locy);
-per_frame_24=locx = if(below(timer,.012),(rand(80)+20)*.01,locx);
+per_frame_24=locx = if(below(timer,.012),(int(rand(80))+20)*.01,locx);
 per_frame_25=expt = if(below(timer,.012),.5,expt);
 per_frame_26=expt2 = if(below(timer,.012),1,expt2);
-per_pixel_1=randomn = rand(100)*.006;
+per_pixel_1=randomn = int(rand(100))*.006;
 per_pixel_2=xcenter = q1;
 per_pixel_3=ycenter = abs(q2-1);
 per_pixel_4=dx = if(below(q2,.011),if(equal(q3,0),if(equal(q4,0),dx + (x - xcenter)*.03,dx + (x - xcenter)*.1),dx + (x - xcenter)*randomn),0);
 per_pixel_5=dy = if(below(q2,.011),if(equal(q3,0),if(equal(q4,0),dy + (y - ycenter)*.06*bass,dy + (y - ycenter)*.1),dy + (y - ycenter)*randomn),0);
 per_frame_init_1=yspeed = .02;
-per_frame_init_2=xspeed = rand(200)*.0001;
+per_frame_init_2=xspeed = int(rand(200))*.0001;
 per_frame_init_3=locy = 1;
-per_frame_init_4=locx = (rand(80)+20)*.01;
+per_frame_init_4=locx = (int(rand(80))+20)*.01;
 per_frame_init_5=expt = .5;
 per_frame_init_6=expt2 = 1;
 per_frame_init_7=timer = 6;

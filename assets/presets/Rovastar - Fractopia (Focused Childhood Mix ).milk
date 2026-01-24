@@ -237,9 +237,9 @@ per_frame_29=movement =movement + 0.4*(((bass+bass_att + 0.1*pow((bass+0.6*bass_
 per_frame_30=movement = if(above(movement,10000), 0, movement);
 per_frame_31=q8 = movement;
 per_frame_32=ib_size = ib_size + (beat);
-per_frame_33=ib_r = beat*rand(100)*0.01;
-per_frame_34=ib_g = beat*rand(100)*0.01;
-per_frame_35=ib_b = beat*rand(100)*0.01;
+per_frame_33=ib_r = beat*int(rand(100))*0.01;
+per_frame_34=ib_g = beat*int(rand(100))*0.01;
+per_frame_35=ib_b = beat*int(rand(100))*0.01;
 per_frame_36=zoom =1.3 + 0.5*sin(movement*0.821);
 per_frame_37=wrap = 1-beat;
 per_pixel_1=myx = x-(q1);

@@ -129,7 +129,7 @@
     top: 0;
     width: 2px;
     height: 100%;
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     opacity: 0.8;
     transition: left 0.05s linear, opacity 0.3s;
   }

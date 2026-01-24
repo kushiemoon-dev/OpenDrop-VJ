@@ -249,7 +249,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .count {
@@ -321,7 +321,7 @@
 
   .category-select:focus {
     outline: none;
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.2);
   }
 
@@ -456,7 +456,7 @@
   }
 
   .preset-grid::-webkit-scrollbar-thumb:hover {
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
   }
 
   .loading, .empty {
@@ -483,7 +483,7 @@
     width: 24px;
     height: 24px;
     border: 2px solid var(--border-subtle);
-    border-top-color: var(--accent-cyan);
+    border-top-color: var(--accent-primary);
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }

@@ -13,6 +13,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 #[cfg(target_os = "linux")]
 use cpal::SampleFormat;
+
+// WASAPI host ID for explicit Windows audio handling
+#[cfg(target_os = "windows")]
+use cpal::HostId;
 use thiserror::Error;
 use tracing::{debug, error, info, warn};
 
@@ -198,7 +202,7 @@ impl AudioEngine {
             let default_input_name = host
                 .default_input_device()
                 .and_then(|d| d.name().ok());
-            let default_output_name = host
+            let _default_output_name = host
                 .default_output_device()
                 .and_then(|d| d.name().ok());
 
@@ -383,10 +387,18 @@ fn run_audio_thread(
         return run_parec_capture(actual_device, command_rx, sample_tx);
     }
 
-    // On Windows/macOS, use CPAL normally
+    // On Windows/macOS, use CPAL
     #[cfg(not(target_os = "linux"))]
     {
+        // On Windows, explicitly use WASAPI host for proper loopback support
+        #[cfg(target_os = "windows")]
+        let host = cpal::host_from_id(HostId::Wasapi)
+            .map_err(|e| AudioError::StreamError(format!("Failed to get WASAPI host: {}", e)))?;
+
+        #[cfg(not(target_os = "windows"))]
         let host = cpal::default_host();
+
+        info!("Using audio host: {:?}", host.id());
 
         // Check if this is a loopback device (Windows only)
         let (device, is_loopback) = if let Some(ref name) = config.device_name {
@@ -438,7 +450,7 @@ fn run_audio_thread(
 
         info!(
             "Device config: {} Hz, {} channels, {:?}",
-            supported_config.sample_rate().0,
+            supported_config.sample_rate(),
             supported_config.channels(),
             supported_config.sample_format()
         );
@@ -447,17 +459,30 @@ fn run_audio_thread(
         let stream_config: StreamConfig = supported_config.into();
 
         // Build the stream based on sample format
-        // Note: For loopback on Windows, we still use build_input_stream
-        // WASAPI handles the loopback internally when called on an output device
+        // Note: For loopback on Windows WASAPI, we use build_input_stream on an output device.
+        // WASAPI handles loopback capture internally. Important: loopback only produces audio
+        // when something is actually playing through that device.
+        info!(
+            "Building audio stream: format={:?}, rate={}, channels={}, loopback={}",
+            sample_format,
+            stream_config.sample_rate,
+            stream_config.channels,
+            is_loopback
+        );
+
         let stream = match sample_format {
-            SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, sample_tx)?,
-            SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, sample_tx)?,
-            SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, sample_tx)?,
+            SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, sample_tx, is_loopback)?,
+            SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, sample_tx, is_loopback)?,
+            SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, sample_tx, is_loopback)?,
             format => return Err(AudioError::UnsupportedFormat(format)),
         };
 
         stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
-        info!("Audio stream started (loopback: {})", is_loopback);
+        info!("Audio stream started successfully (loopback: {})", is_loopback);
+
+        if is_loopback {
+            info!("Note: WASAPI loopback only captures audio when something is playing through the device");
+        }
 
         // Wait for stop command (blocks until Stop received or channel closed)
         let _ = command_rx.recv();
@@ -597,15 +622,41 @@ fn build_stream<T>(
     device: &Device,
     config: &StreamConfig,
     tx: Sender<Vec<f32>>,
+    is_loopback: bool,
 ) -> Result<Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
     f32: cpal::FromSample<T>,
 {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    // Track callback activity for debugging
+    let callback_count = Arc::new(AtomicU64::new(0));
+    let callback_count_clone = callback_count.clone();
+    let has_logged_first_callback = Arc::new(AtomicBool::new(false));
+    let has_logged_first_clone = has_logged_first_callback.clone();
+
     let stream = device
         .build_input_stream(
             config,
             move |data: &[T], _: &cpal::InputCallbackInfo| {
+                let count = callback_count_clone.fetch_add(1, Ordering::Relaxed);
+
+                // Log first callback to confirm stream is working
+                if !has_logged_first_clone.swap(true, Ordering::Relaxed) {
+                    info!(
+                        "Audio callback received first data: {} samples (loopback: {})",
+                        data.len(),
+                        is_loopback
+                    );
+                }
+
+                // Log periodically in debug mode
+                if count % 1000 == 0 && count > 0 {
+                    debug!("Audio callback count: {}", count);
+                }
+
                 // Convert samples to f32
                 let samples: Vec<f32> = data
                     .iter()

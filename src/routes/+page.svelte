@@ -553,7 +553,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
     margin: 0;
   }
 
@@ -664,7 +664,7 @@
 
   .sidebar-collapse-toggle:hover {
     background: var(--bg-elevated);
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
@@ -691,7 +691,7 @@
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     color: var(--bg-darkest);
     border: none;
     box-shadow: 0 4px 12px rgba(0, 240, 255, 0.3);
@@ -823,7 +823,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
     margin-bottom: var(--spacing-md);
   }
 
@@ -877,7 +877,7 @@
 
   .deck-status-row.selected {
     background: var(--bg-elevated);
-    border-left: 2px solid var(--accent-cyan);
+    border-left: 2px solid var(--accent-primary);
   }
 
   .deck-label {

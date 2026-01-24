@@ -132,6 +132,9 @@
       <div class="device-hint loopback">
         Loopback mode - captures system audio output
       </div>
+      <div class="device-hint warning">
+        ⚠️ Audio must be playing for loopback to work
+      </div>
     {:else if selected?.device_type === 'monitor'}
       <div class="device-hint monitor">
         Monitor device - captures what you hear
@@ -176,7 +179,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .meters {
@@ -192,12 +195,18 @@
   .device-select {
     display: flex;
     gap: var(--spacing-sm);
+    min-width: 0;
+    overflow: hidden;
   }
 
   .device-select select {
     flex: 1;
+    min-width: 0;
     font-size: 12px;
     padding: var(--spacing-sm) var(--spacing-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .icon-btn {
@@ -228,13 +237,19 @@
   }
 
   .device-hint.loopback {
-    border-left-color: var(--accent-cyan);
-    color: var(--accent-cyan);
+    border-left-color: var(--accent-primary);
+    color: var(--accent-primary);
   }
 
   .device-hint.monitor {
     border-left-color: var(--accent-green);
     color: var(--accent-green);
+  }
+
+  .device-hint.warning {
+    border-left-color: var(--accent-yellow, #ffd93d);
+    color: var(--accent-yellow, #ffd93d);
+    font-size: 0.7em;
   }
 
   .controls {
@@ -256,7 +271,7 @@
   }
 
   .btn.primary {
-    background: linear-gradient(135deg, var(--accent-cyan), #0096c7);
+    background: linear-gradient(135deg, var(--accent-primary), #0096c7);
     color: white;
   }
 

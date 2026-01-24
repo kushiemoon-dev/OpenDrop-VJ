@@ -4,9 +4,9 @@ import AudioPanel from '$lib/components/AudioPanel.svelte';
 
 describe('AudioPanel', () => {
 	const mockDevices = [
-		{ name: 'Built-in Microphone', is_default: true },
-		{ name: 'USB Audio Device', is_default: false },
-		{ name: 'External Interface Long Name That Should Be Truncated', is_default: false }
+		{ name: 'Built-in Microphone', description: 'Built-in Microphone (Input)', is_default: true, is_monitor: false, device_type: 'input' as const },
+		{ name: 'USB Audio Device', description: 'USB Audio Device (Input)', is_default: false, is_monitor: false, device_type: 'input' as const },
+		{ name: 'External Interface Long Name That Should Be Truncated', description: 'External Interface Long Name That Should Be Truncated (Input)', is_default: false, is_monitor: false, device_type: 'input' as const }
 	];
 
 	beforeEach(() => {
@@ -29,10 +29,11 @@ describe('AudioPanel', () => {
 			expect(options).toHaveLength(3);
 		});
 
-		it('shows (Default) label for default device', () => {
+		it('shows star icon for default device', () => {
 			render(AudioPanel, { props: { devices: mockDevices } });
 
-			expect(screen.getByText(/Built-in Microphone.*\(Default\)/)).toBeInTheDocument();
+			// Default device is marked with ★ in the option text
+			expect(screen.getByText(/Built-in Microphone.*★/)).toBeInTheDocument();
 		});
 
 		it('truncates long device names', () => {

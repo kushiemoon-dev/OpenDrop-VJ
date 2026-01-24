@@ -139,7 +139,7 @@
   }
 
   .deck-card.selected {
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
   }
 
@@ -148,7 +148,7 @@
   }
 
   .deck-card.running.selected {
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow: 0 0 20px rgba(0, 240, 255, 0.3), 0 0 10px rgba(0, 255, 136, 0.2);
   }
 
@@ -303,7 +303,7 @@
     -webkit-appearance: none;
     width: 12px;
     height: 12px;
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     border-radius: 50%;
     cursor: pointer;
     transition: transform 0.15s;
@@ -329,7 +329,7 @@
   }
 
   .btn.start {
-    background: linear-gradient(135deg, var(--accent-cyan), #0096c7);
+    background: linear-gradient(135deg, var(--accent-primary), #0096c7);
     color: white;
   }
 

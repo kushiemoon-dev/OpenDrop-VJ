@@ -104,7 +104,7 @@
   }
 
   .preset-card:focus-visible {
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow: 0 0 0 2px rgba(0, 240, 255, 0.3);
   }
 
@@ -120,7 +120,7 @@
   }
 
   .preset-card.selected {
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow: 0 0 15px rgba(0, 240, 255, 0.25), inset 0 0 20px rgba(0, 240, 255, 0.05);
   }
 
@@ -170,7 +170,7 @@
   }
 
   .preset-card.selected .name {
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .tags {
@@ -256,7 +256,7 @@
     width: 22px;
     height: 22px;
     border-radius: var(--radius-sm);
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     color: var(--bg-darkest);
     display: flex;
     align-items: center;

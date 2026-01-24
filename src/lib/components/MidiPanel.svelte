@@ -359,7 +359,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .section {
@@ -460,7 +460,7 @@
   }
 
   .btn.primary {
-    background: linear-gradient(135deg, var(--accent-cyan), #0077b6);
+    background: linear-gradient(135deg, var(--accent-primary), #0077b6);
     color: white;
   }
 
@@ -500,8 +500,8 @@
 
   .preset-btn:hover {
     background: var(--bg-elevated);
-    border-color: var(--accent-cyan);
-    color: var(--accent-cyan);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
   }
 
   .learn-active {
@@ -510,16 +510,16 @@
     gap: var(--spacing-sm);
     padding: var(--spacing-md);
     background: rgba(0, 209, 255, 0.1);
-    border: 1px solid var(--accent-cyan);
+    border: 1px solid var(--accent-primary);
     border-radius: var(--radius-md);
     font-size: 11px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .learn-pulse {
     width: 8px;
     height: 8px;
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     border-radius: 50%;
     animation: pulse 1s ease-in-out infinite;
   }
@@ -562,15 +562,15 @@
   }
 
   .btn-small.primary {
-    background: var(--accent-cyan);
-    border-color: var(--accent-cyan);
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
     color: white;
   }
 
   .btn-small:hover:not(:disabled) {
     background: var(--bg-elevated);
-    border-color: var(--accent-cyan);
-    color: var(--accent-cyan);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
   }
 
   .btn-small.primary:hover:not(:disabled) {

@@ -3291,7 +3291,7 @@ dependencies = [
 
 [[package]]
 name = "opendrop"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "core-graphics 0.24.0",
  "opendrop-core",

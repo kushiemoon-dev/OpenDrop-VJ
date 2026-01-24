@@ -62,6 +62,8 @@ enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    #[serde(rename = "set_texture_paths")]
+    SetTexturePaths { paths: Vec<String> },
     #[serde(rename = "stop")]
     Stop,
 }
@@ -92,6 +94,9 @@ struct Config {
     /// Monitor index for fullscreen (0 = primary)
     #[serde(default)]
     monitor_index: Option<usize>,
+    /// Texture search paths for presets that reference external textures
+    #[serde(default)]
+    texture_paths: Vec<String>,
 }
 
 fn send_event(event: Event) {
@@ -431,6 +436,13 @@ impl RenderApp {
                     Command::SetNdiOutput { enabled, name } => {
                         self.set_ndi_output(enabled, name);
                     }
+                    Command::SetTexturePaths { paths } => {
+                        if let Some(ref mut pm) = self.projectm {
+                            let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+                            pm.set_texture_search_paths(&path_refs);
+                            info!("Set {} texture search paths", paths.len());
+                        }
+                    }
                     Command::Stop => {
                         self.should_exit = true;
                         event_loop.exit();
@@ -466,20 +478,25 @@ impl RenderApp {
     }
 
     fn handle_resize(&mut self, size: PhysicalSize<u32>) {
-        if size.width > 0 && size.height > 0 {
-            if let Some(ref surface) = self.gl_surface {
-                surface.resize(
-                    self.gl_context.as_ref().unwrap(),
-                    NonZeroU32::new(size.width).unwrap(),
-                    NonZeroU32::new(size.height).unwrap(),
-                );
-            }
-            if let Some(ref mut pm) = self.projectm {
-                pm.resize(size.width, size.height);
-            }
-            unsafe {
-                gl::Viewport(0, 0, size.width as i32, size.height as i32);
-            }
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+
+        // Check both surface AND context are initialized - prevents crash on Windows
+        let (Some(ref surface), Some(ref context)) = (&self.gl_surface, &self.gl_context) else {
+            return; // Not ready yet, skip resize
+        };
+
+        if let (Some(w), Some(h)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) {
+            surface.resize(context, w, h);
+        }
+
+        if let Some(ref mut pm) = self.projectm {
+            pm.resize(size.width, size.height);
+        }
+
+        unsafe {
+            gl::Viewport(0, 0, size.width as i32, size.height as i32);
         }
     }
 }
@@ -566,10 +583,17 @@ impl ApplicationHandler for RenderApp {
         let _ = surface.set_swap_interval(&context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
 
         unsafe {
-            let version = std::ffi::CStr::from_ptr(gl::GetString(gl::VERSION) as *const _);
-            let renderer = std::ffi::CStr::from_ptr(gl::GetString(gl::RENDERER) as *const _);
-            info!("OpenGL version: {:?}", version);
-            info!("OpenGL renderer: {:?}", renderer);
+            let version_ptr = gl::GetString(gl::VERSION);
+            let renderer_ptr = gl::GetString(gl::RENDERER);
+
+            if !version_ptr.is_null() && !renderer_ptr.is_null() {
+                let version = std::ffi::CStr::from_ptr(version_ptr as *const _);
+                let renderer = std::ffi::CStr::from_ptr(renderer_ptr as *const _);
+                info!("OpenGL version: {:?}", version);
+                info!("OpenGL renderer: {:?}", renderer);
+            } else {
+                warn!("Failed to get OpenGL version/renderer strings (null pointer)");
+            }
         }
 
         // Create projectM
@@ -577,6 +601,14 @@ impl ApplicationHandler for RenderApp {
         match ProjectM::new(size.width, size.height) {
             Ok(mut pm) => {
                 info!("ProjectM {} initialized", ProjectM::version());
+
+                // Set texture search paths before loading preset
+                if !self.config.texture_paths.is_empty() {
+                    let path_refs: Vec<&str> =
+                        self.config.texture_paths.iter().map(|s| s.as_str()).collect();
+                    pm.set_texture_search_paths(&path_refs);
+                    info!("Set {} texture search paths from config", self.config.texture_paths.len());
+                }
 
                 if let Some(ref preset_path) = self.config.preset_path {
                     if let Err(e) = pm.load_preset(preset_path, false) {
@@ -726,6 +758,7 @@ fn main() {
                 fullscreen: false,
                 deck_id: 0,
                 monitor_index: None,
+                texture_paths: Vec::new(),
             }
         })
     } else {
@@ -736,6 +769,7 @@ fn main() {
             fullscreen: false,
             deck_id: 0,
             monitor_index: None,
+            texture_paths: Vec::new(),
         }
     };
 

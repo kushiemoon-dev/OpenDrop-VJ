@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import { X, FolderPlus, Trash2, RefreshCw, FolderOpen, Sun, Moon } from 'lucide-svelte';
-  import { settings, addPresetPath, removePresetPath } from '$lib/stores/settings.svelte';
+  import { settings, addPresetPath, removePresetPath, addTexturePath, removeTexturePath } from '$lib/stores/settings.svelte';
   import { theme, toggleTheme } from '$lib/stores/theme';
   import { accent, setAccent, ACCENT_PRESETS } from '$lib/stores/accent';
 
@@ -19,6 +19,11 @@
   let loadingPaths = $state(false);
   let newPathInput = $state('');
 
+  /** @type {string[]} */
+  let detectedTexturePaths = $state([]);
+  let loadingTexturePaths = $state(false);
+  let newTexturePathInput = $state('');
+
   async function loadDetectedPaths() {
     loadingPaths = true;
     try {
@@ -28,6 +33,17 @@
       detectedPaths = [];
     }
     loadingPaths = false;
+  }
+
+  async function loadDetectedTexturePaths() {
+    loadingTexturePaths = true;
+    try {
+      detectedTexturePaths = await invoke('get_texture_directories');
+    } catch (e) {
+      console.error('Failed to get texture directories:', e);
+      detectedTexturePaths = [];
+    }
+    loadingTexturePaths = false;
   }
 
   async function browseForFolder() {
@@ -40,6 +56,21 @@
       if (selected && typeof selected === 'string') {
         addPresetPath(selected);
         onPresetsRefresh?.();
+      }
+    } catch (e) {
+      console.error('Failed to open folder dialog:', e);
+    }
+  }
+
+  async function browseForTextureFolder() {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Texture Folder'
+      });
+      if (selected && typeof selected === 'string') {
+        addTexturePath(selected);
       }
     } catch (e) {
       console.error('Failed to open folder dialog:', e);
@@ -60,9 +91,22 @@
     onPresetsRefresh?.();
   }
 
+  function handleAddTexturePath() {
+    if (newTexturePathInput.trim()) {
+      addTexturePath(newTexturePathInput.trim());
+      newTexturePathInput = '';
+    }
+  }
+
+  /** @param {string} path */
+  function handleRemoveTexturePath(path) {
+    removeTexturePath(path);
+  }
+
   // Load detected paths on mount
   $effect(() => {
     loadDetectedPaths();
+    loadDetectedTexturePaths();
   });
 
   // Reactive theme state
@@ -197,12 +241,79 @@
         </div>
       </section>
 
+      <!-- Texture Paths Section -->
+      <section class="settings-section">
+        <h3>Texture Directories</h3>
+        <p class="section-desc">Configure where OpenDrop looks for texture files (.tga, .png, .jpg) used by presets</p>
+
+        <!-- Detected Texture Paths -->
+        <div class="subsection">
+          <div class="subsection-header">
+            <span>Auto-detected Paths</span>
+            <button class="icon-btn" onclick={loadDetectedTexturePaths} disabled={loadingTexturePaths} title="Refresh">
+              <RefreshCw size={14} class={loadingTexturePaths ? 'spinning' : ''} />
+            </button>
+          </div>
+          <div class="path-list">
+            {#if detectedTexturePaths.length === 0}
+              <div class="empty-state">No texture directories found</div>
+            {:else}
+              {#each detectedTexturePaths as path}
+                <div class="path-item detected">
+                  <FolderOpen size={14} />
+                  <span class="path-text" title={path}>{path}</span>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </div>
+
+        <!-- Custom Texture Paths -->
+        <div class="subsection">
+          <div class="subsection-header">
+            <span>Custom Paths</span>
+            <button class="icon-btn primary" onclick={browseForTextureFolder} title="Browse for folder">
+              <FolderPlus size={14} />
+            </button>
+          </div>
+          <div class="path-list">
+            {#if settings.customTexturePaths.length === 0}
+              <div class="empty-state">No custom texture paths added</div>
+            {:else}
+              {#each settings.customTexturePaths as path}
+                <div class="path-item custom">
+                  <FolderOpen size={14} />
+                  <span class="path-text" title={path}>{path}</span>
+                  <button class="remove-btn" onclick={() => handleRemoveTexturePath(path)} title="Remove">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          <!-- Manual texture path input -->
+          <div class="add-path-row">
+            <input
+              type="text"
+              placeholder="Enter texture path manually..."
+              bind:value={newTexturePathInput}
+              onkeydown={(e) => e.key === 'Enter' && handleAddTexturePath()}
+            />
+            <button class="add-btn" onclick={handleAddTexturePath} disabled={!newTexturePathInput.trim()}>
+              Add
+            </button>
+          </div>
+        </div>
+      </section>
+
       <!-- Info Section -->
       <section class="settings-section info">
         <h3>Preset Format</h3>
         <p class="section-desc">
           OpenDrop supports MilkDrop presets (.milk) and projectM presets (.prjm).
           Place your presets in any of the directories above, and they will appear in the preset browser.
+          Textures referenced by presets are automatically searched in texture directories.
         </p>
       </section>
     </div>

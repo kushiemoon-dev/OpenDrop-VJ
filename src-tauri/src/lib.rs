@@ -226,6 +226,8 @@ enum RendererCommand {
         enabled: bool,
         name: Option<String>,
     },
+    #[serde(rename = "set_texture_paths")]
+    SetTexturePaths { paths: Vec<String> },
     #[serde(rename = "stop")]
     Stop,
 }
@@ -241,6 +243,9 @@ struct RendererConfig {
     /// Monitor index for fullscreen (0 = primary)
     #[serde(default)]
     monitor_index: Option<usize>,
+    /// Texture search paths for presets that reference external textures
+    #[serde(default)]
+    texture_paths: Vec<String>,
 }
 
 /// A preset item in a playlist
@@ -754,6 +759,13 @@ fn start_deck(
         None
     });
 
+    // Collect texture paths from default locations
+    let texture_paths: Vec<String> = get_default_texture_dirs()
+        .into_iter()
+        .filter(|p| p.exists() && p.is_dir())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
     // Build config
     let config = RendererConfig {
         width: width.unwrap_or(1280),
@@ -762,6 +774,7 @@ fn start_deck(
         fullscreen: fullscreen.unwrap_or(false),
         deck_id,
         monitor_index,
+        texture_paths,
     };
 
     let config_json = serde_json::to_string(&config).map_err(|e| e.to_string())?;
@@ -1190,6 +1203,118 @@ fn get_preset_dir() -> String {
 #[tauri::command]
 fn get_preset_directories() -> Vec<String> {
     get_default_preset_dirs()
+        .into_iter()
+        .filter(|p| p.exists() && p.is_dir())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect()
+}
+
+/// Get default texture directories for the current platform
+fn get_default_texture_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+
+    #[cfg(target_os = "linux")]
+    {
+        // System-wide projectM textures
+        dirs.push(std::path::PathBuf::from("/usr/share/projectM/textures"));
+        dirs.push(std::path::PathBuf::from("/usr/local/share/projectM/textures"));
+
+        // User-specific locations
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = std::path::PathBuf::from(home);
+            dirs.push(home_path.join(".local/share/opendrop/textures"));
+            dirs.push(home_path.join(".local/share/projectM/textures"));
+            dirs.push(home_path.join("OpenDrop/textures"));
+        }
+
+        // XDG data directories
+        if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+            let data_path = std::path::PathBuf::from(data_home);
+            dirs.push(data_path.join("opendrop/textures"));
+            dirs.push(data_path.join("projectM/textures"));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // AppData locations
+        if let Some(app_data) = std::env::var_os("APPDATA") {
+            let app_path = std::path::PathBuf::from(app_data);
+            dirs.push(app_path.join("OpenDrop/textures"));
+            dirs.push(app_path.join("projectM/textures"));
+        }
+
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            let local_path = std::path::PathBuf::from(local_app_data);
+            dirs.push(local_path.join("OpenDrop/textures"));
+            dirs.push(local_path.join("projectM/textures"));
+        }
+
+        // Program Files locations
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            let pf_path = std::path::PathBuf::from(pf);
+            dirs.push(pf_path.join("OpenDrop/textures"));
+            dirs.push(pf_path.join("projectM/textures"));
+        }
+
+        // User's Documents folder
+        if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+            let user_path = std::path::PathBuf::from(user_profile);
+            dirs.push(user_path.join("Documents/OpenDrop/textures"));
+            dirs.push(user_path.join("OpenDrop/textures"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Application Support
+        if let Some(home) = std::env::var_os("HOME") {
+            let home_path = std::path::PathBuf::from(home);
+            dirs.push(home_path.join("Library/Application Support/OpenDrop/textures"));
+            dirs.push(home_path.join("Library/Application Support/projectM/textures"));
+            dirs.push(home_path.join("OpenDrop/textures"));
+        }
+
+        // System locations
+        dirs.push(std::path::PathBuf::from("/usr/local/share/projectM/textures"));
+        dirs.push(std::path::PathBuf::from("/opt/homebrew/share/projectM/textures"));
+    }
+
+    // Check next to executable (for portable installs and bundled resources)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Direct next to executable
+            dirs.push(exe_dir.join("textures"));
+            // Tauri bundles resources to 'resources/' subdirectory
+            dirs.push(exe_dir.join("resources/textures"));
+
+            // Also check parent for app bundles
+            if let Some(parent) = exe_dir.parent() {
+                dirs.push(parent.join("textures"));
+                dirs.push(parent.join("resources/textures"));
+                // macOS app bundle
+                dirs.push(parent.join("Resources/textures"));
+            }
+
+            // AppImage: check $APPDIR environment variable
+            if let Some(appdir) = std::env::var_os("APPDIR") {
+                let appdir_path = std::path::PathBuf::from(appdir);
+                dirs.push(appdir_path.join("textures"));
+                dirs.push(appdir_path.join("resources/textures"));
+            }
+        }
+    }
+
+    // Also include preset directories since textures are often co-located with presets
+    dirs.extend(get_default_preset_dirs());
+
+    dirs
+}
+
+/// Get all texture directories that exist
+#[tauri::command]
+fn get_texture_directories() -> Vec<String> {
+    get_default_texture_dirs()
         .into_iter()
         .filter(|p| p.exists() && p.is_dir())
         .map(|p| p.to_string_lossy().to_string())
@@ -2383,6 +2508,58 @@ fn set_deck_ndi_output(
     Err(format!("Deck {} not running", deck_id))
 }
 
+/// Set texture search paths for a deck
+#[tauri::command]
+fn set_deck_texture_paths(
+    state: State<'_, AppState>,
+    deck_id: u8,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    if deck_id >= MAX_DECKS {
+        return Err(format!("Invalid deck ID: {}", deck_id));
+    }
+
+    let mut decks_guard = state.decks.lock().map_err(|e| e.to_string())?;
+    let deck = decks_guard.get_mut(&deck_id).ok_or("Deck not found")?;
+
+    if let Some(ref mut renderer) = deck.renderer {
+        if renderer.is_running() {
+            renderer.send_command(&RendererCommand::SetTexturePaths {
+                paths: paths.clone(),
+            })?;
+            return Ok(format!("Set {} texture paths on deck {}", paths.len(), deck_id));
+        }
+    }
+
+    Err(format!("Deck {} not running", deck_id))
+}
+
+/// Set texture paths for all running decks
+#[tauri::command]
+fn set_all_decks_texture_paths(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    let mut decks_guard = state.decks.lock().map_err(|e| e.to_string())?;
+    let mut count = 0;
+
+    for deck_id in 0..MAX_DECKS {
+        if let Some(deck) = decks_guard.get_mut(&deck_id) {
+            if let Some(ref mut renderer) = deck.renderer {
+                if renderer.is_running() {
+                    if renderer.send_command(&RendererCommand::SetTexturePaths {
+                        paths: paths.clone(),
+                    }).is_ok() {
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(format!("Updated texture paths on {} running decks", count))
+}
+
 // ============ MIDI Commands ============
 
 /// MIDI status info for frontend
@@ -2768,6 +2945,7 @@ pub fn run() {
             get_projectm_version,
             list_presets,
             get_preset_directories,
+            get_texture_directories,
             // Preset import/export commands
             import_presets_from_folder,
             export_playlist,
@@ -2778,6 +2956,9 @@ pub fn run() {
             // NDI output commands
             is_ndi_available,
             set_deck_ndi_output,
+            // Texture path commands
+            set_deck_texture_paths,
+            set_all_decks_texture_paths,
             // Monitor commands
             list_monitors,
             // MIDI commands

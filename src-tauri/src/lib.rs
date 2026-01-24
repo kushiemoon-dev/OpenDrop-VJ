@@ -1117,14 +1117,27 @@ fn get_default_preset_dirs() -> Vec<std::path::PathBuf> {
         dirs.push(std::path::PathBuf::from("/opt/homebrew/share/projectM/presets"));
     }
 
-    // Check next to executable (for portable installs)
+    // Check next to executable (for portable installs and bundled resources)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
+            // Direct next to executable
             dirs.push(exe_dir.join("presets"));
+            // Tauri bundles resources to 'resources/' subdirectory
+            dirs.push(exe_dir.join("resources/presets"));
+
             // Also check parent for app bundles
             if let Some(parent) = exe_dir.parent() {
                 dirs.push(parent.join("presets"));
+                dirs.push(parent.join("resources/presets"));
+                // macOS app bundle
                 dirs.push(parent.join("Resources/presets"));
+            }
+
+            // AppImage: check $APPDIR environment variable
+            if let Some(appdir) = std::env::var_os("APPDIR") {
+                let appdir_path = std::path::PathBuf::from(appdir);
+                dirs.push(appdir_path.join("presets"));
+                dirs.push(appdir_path.join("resources/presets"));
             }
         }
     }
@@ -2665,8 +2678,38 @@ fn greet(name: &str) -> String {
 
 // ============ App Entry Point ============
 
+/// Configure WebKitGTK workarounds for Linux graphics compatibility.
+///
+/// Addresses EGL/DMA-BUF issues causing white screens on:
+/// - AppImage builds with bundled WebKitGTK on Wayland
+/// - Intel i915 graphics with newer Mesa versions
+///
+/// References:
+/// - https://github.com/tauri-apps/tauri/issues/9394
+/// - https://bugs.webkit.org/show_bug.cgi?id=202362
+#[cfg(target_os = "linux")]
+fn configure_linux_webkit_workarounds() {
+    use std::env;
+
+    // Check if running as AppImage
+    let is_appimage = env::var("APPIMAGE").is_ok() || env::var("APPDIR").is_ok();
+
+    if is_appimage {
+        // Disable DMA-BUF renderer to prevent EGL_BAD_PARAMETER errors
+        // when bundled WebKitGTK conflicts with host EGL/Mesa stack
+        if env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
+            env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            eprintln!("[OpenDrop] AppImage detected: Setting WEBKIT_DISABLE_DMABUF_RENDERER=1");
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Fix WebKitGTK EGL issues on Linux AppImage
+    #[cfg(target_os = "linux")]
+    configure_linux_webkit_workarounds();
+
     tracing_subscriber::fmt()
         .with_env_filter("opendrop=debug,opendrop_core=debug,projectm_rs=debug")
         .init();
@@ -2676,6 +2719,7 @@ pub fn run() {
     info!("Multi-deck mode: {} decks available", MAX_DECKS);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![

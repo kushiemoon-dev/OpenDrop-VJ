@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["full"] }
 crossbeam-channel = "0.5"
 
 # Audio
-cpal = "0.15"
+cpal = "0.17"
 ringbuf = "0.4"
 midir = "0.10"
 

@@ -176,7 +176,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
     margin: 0;
   }
 
@@ -192,9 +192,9 @@
   }
 
   .toggle-btn.active {
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     color: var(--bg-darkest);
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
   }
 
   .fader-section {
@@ -225,7 +225,7 @@
   }
 
   .side-label:last-child .side-name {
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
   }
 
   .side-decks {
@@ -252,7 +252,7 @@
     background: linear-gradient(90deg,
       var(--accent-magenta) 0%,
       var(--bg-dark) 50%,
-      var(--accent-cyan) 100%
+      var(--accent-primary) 100%
     );
     border-radius: 4px;
     outline: none;
@@ -272,7 +272,7 @@
 
   .fader-slider::-webkit-slider-thumb:hover {
     transform: scaleY(1.1);
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
   }
 
   .fader-slider::-webkit-slider-thumb:active {

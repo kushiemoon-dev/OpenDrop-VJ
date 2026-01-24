@@ -91,7 +91,7 @@
   }
 
   .preview-area.active {
-    border-color: var(--accent-cyan);
+    border-color: var(--accent-primary);
     box-shadow:
       inset 0 0 30px rgba(0, 240, 255, 0.1),
       0 0 20px rgba(0, 240, 255, 0.2);
@@ -124,7 +124,7 @@
     position: absolute;
     width: 80px;
     height: 80px;
-    border: 2px solid var(--accent-cyan);
+    border: 2px solid var(--accent-primary);
     border-radius: 50%;
     animation: pulse-expand 2s ease-out infinite;
     opacity: 0;
@@ -149,8 +149,8 @@
     font-size: 14px;
     font-weight: 700;
     letter-spacing: 2px;
-    color: var(--accent-cyan);
-    text-shadow: 0 0 10px var(--accent-cyan);
+    color: var(--accent-primary);
+    text-shadow: 0 0 10px var(--accent-primary);
     z-index: 1;
   }
 
@@ -200,7 +200,7 @@
   }
 
   .btn.primary {
-    background: linear-gradient(135deg, var(--accent-cyan), #0096c7);
+    background: linear-gradient(135deg, var(--accent-primary), #0096c7);
     color: white;
   }
 

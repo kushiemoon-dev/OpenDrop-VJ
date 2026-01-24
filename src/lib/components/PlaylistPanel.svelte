@@ -236,7 +236,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
     margin: 0;
   }
 
@@ -278,7 +278,7 @@
   }
 
   .ctrl-btn.active {
-    background: var(--accent-cyan);
+    background: var(--accent-primary);
     color: var(--bg-darkest);
   }
 
@@ -352,7 +352,7 @@
 
   .playlist-item.current {
     background: rgba(0, 240, 255, 0.1);
-    border-left: 2px solid var(--accent-cyan);
+    border-left: 2px solid var(--accent-primary);
   }
 
   .playlist-item.playing .item-index {
@@ -360,7 +360,7 @@
   }
 
   @keyframes pulse-glow {
-    0%, 100% { color: var(--accent-cyan); }
+    0%, 100% { color: var(--accent-primary); }
     50% { color: var(--status-active); }
   }
 
@@ -390,7 +390,7 @@
   }
 
   .playlist-item.current .item-name {
-    color: var(--accent-cyan);
+    color: var(--accent-primary);
     font-weight: 500;
   }
 

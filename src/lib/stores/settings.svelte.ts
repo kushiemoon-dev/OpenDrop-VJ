@@ -63,6 +63,34 @@ function saveSettings(settings: AppSettings): void {
 let settingsState = $state<AppSettings>(loadSettings());
 
 /**
+ * Reactive settings object - use settings.current to access values
+ * Cannot export $state directly if reassigned, so we wrap in an object
+ */
+export const settings = {
+  get current() {
+    return settingsState;
+  },
+  get customPresetPaths() {
+    return settingsState.customPresetPaths;
+  },
+  get useOnlyCustomPaths() {
+    return settingsState.useOnlyCustomPaths;
+  },
+  get defaultDeckWidth() {
+    return settingsState.defaultDeckWidth;
+  },
+  get defaultDeckHeight() {
+    return settingsState.defaultDeckHeight;
+  },
+  get autoStartAudio() {
+    return settingsState.autoStartAudio;
+  },
+  get preferredAudioDevice() {
+    return settingsState.preferredAudioDevice;
+  },
+};
+
+/**
  * Update one or more settings
  * @param updates - Partial settings object with values to update
  */
@@ -113,12 +141,4 @@ export function removePresetPath(path: string): void {
   saveSettings(settingsState);
 }
 
-/**
- * Get the current settings state (reactive)
- */
-export function getSettingsState(): AppSettings {
-  return settingsState;
-}
-
-export { settingsState as settings };
 export type { AppSettings };

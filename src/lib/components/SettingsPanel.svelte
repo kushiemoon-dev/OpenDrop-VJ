@@ -1,8 +1,10 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
-  import { X, FolderPlus, Trash2, RefreshCw, FolderOpen } from 'lucide-svelte';
+  import { X, FolderPlus, Trash2, RefreshCw, FolderOpen, Sun, Moon } from 'lucide-svelte';
   import { settings, addPresetPath, removePresetPath } from '$lib/stores/settings.svelte';
+  import { theme, toggleTheme } from '$lib/stores/theme';
+  import { accent, setAccent, ACCENT_PRESETS } from '$lib/stores/accent';
 
   /**
    * @type {{
@@ -52,6 +54,7 @@
     }
   }
 
+  /** @param {string} path */
   function handleRemovePath(path) {
     removePresetPath(path);
     onPresetsRefresh?.();
@@ -61,6 +64,9 @@
   $effect(() => {
     loadDetectedPaths();
   });
+
+  // Reactive theme state
+  let isDark = $derived(theme.current === 'dark');
 </script>
 
 <div class="settings-overlay" onclick={onClose} role="presentation">
@@ -73,6 +79,58 @@
     </header>
 
     <div class="settings-content">
+      <!-- Appearance Section -->
+      <section class="settings-section">
+        <h3>Appearance</h3>
+        <p class="section-desc">Customize the look and feel of OpenDrop</p>
+
+        <!-- Theme Toggle -->
+        <div class="subsection">
+          <div class="subsection-header">
+            <span>Theme</span>
+          </div>
+          <div class="theme-toggle-row">
+            <button
+              class="theme-option"
+              class:active={!isDark}
+              onclick={() => !isDark || toggleTheme()}
+            >
+              <Sun size={16} />
+              <span>Light</span>
+            </button>
+            <button
+              class="theme-option"
+              class:active={isDark}
+              onclick={() => isDark || toggleTheme()}
+            >
+              <Moon size={16} />
+              <span>Dark</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Accent Color -->
+        <div class="subsection">
+          <div class="subsection-header">
+            <span>Accent Color</span>
+          </div>
+          <div class="accent-grid">
+            {#each ACCENT_PRESETS as preset (preset.value)}
+              <button
+                class="accent-option"
+                class:selected={accent.current === preset.value}
+                style="--swatch-color: {preset.color}"
+                onclick={() => setAccent(preset.value)}
+                title={preset.description}
+              >
+                <span class="accent-swatch"></span>
+                <span class="accent-name">{preset.name}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      </section>
+
       <!-- Preset Paths Section -->
       <section class="settings-section">
         <h3>Preset Directories</h3>
@@ -277,7 +335,7 @@
   }
 
   .icon-btn.primary:hover:not(:disabled) {
-    color: var(--accent-primary, var(--accent-cyan));
+    color: var(--accent-primary);
   }
 
   .path-list {
@@ -369,14 +427,14 @@
 
   .add-path-row input:focus {
     outline: none;
-    border-color: var(--accent-primary, var(--accent-cyan));
+    border-color: var(--accent-primary);
   }
 
   .add-btn {
     padding: var(--spacing-sm) var(--spacing-md);
     font-size: 0.85em;
     font-weight: 500;
-    background: var(--accent-primary, var(--accent-cyan));
+    background: var(--accent-primary);
     border: none;
     border-radius: var(--radius-md);
     color: var(--bg-dark);
@@ -416,5 +474,86 @@
   @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* Theme toggle styles */
+  .theme-toggle-row {
+    display: flex;
+    gap: var(--spacing-sm);
+  }
+
+  .theme-option {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    font-size: 0.85em;
+  }
+
+  .theme-option:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+  }
+
+  .theme-option.active {
+    background: var(--bg-elevated);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+  }
+
+  /* Accent color styles */
+  .accent-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--spacing-sm);
+  }
+
+  .accent-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition-fast);
+  }
+
+  .accent-option:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-medium);
+  }
+
+  .accent-option.selected {
+    background: var(--bg-elevated);
+    border-color: var(--swatch-color);
+  }
+
+  .accent-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--swatch-color);
+    box-shadow: 0 0 8px var(--swatch-color);
+  }
+
+  .accent-name {
+    font-size: 0.7em;
+    color: var(--text-muted);
+    text-transform: capitalize;
+  }
+
+  .accent-option.selected .accent-name {
+    color: var(--text-primary);
   }
 </style>

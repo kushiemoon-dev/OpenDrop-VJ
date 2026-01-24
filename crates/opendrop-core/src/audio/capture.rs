@@ -202,7 +202,7 @@ impl AudioEngine {
             let default_input_name = host
                 .default_input_device()
                 .and_then(|d| d.name().ok());
-            let _default_output_name = host
+            let default_output_name = host
                 .default_output_device()
                 .and_then(|d| d.name().ok());
 
@@ -232,7 +232,7 @@ impl AudioEngine {
                             // Mark as loopback device
                             devices.push(DeviceInfo {
                                 description: format!("{} (Loopback)", name),
-                                is_default: false, // Output device can be default for playback
+                                is_default: Some(&name) == default_output_name.as_ref(),
                                 is_monitor: true,  // Loopback acts like a monitor
                                 device_type: DeviceType::Output,
                                 backend: AudioBackend::Cpal,
@@ -424,10 +424,28 @@ fn run_audio_thread(
                 (input_device, false)
             }
         } else {
-            // Default input device
-            let default_device = host.default_input_device()
-                .ok_or(AudioError::NoInputDevice)?;
-            (default_device, false)
+            // Windows: Try loopback on default output first, fallback to input
+            // Most users want to visualize what they're listening to, not microphone input
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(output_device) = host.default_output_device() {
+                    info!("Windows: Using default output device for loopback capture");
+                    (output_device, true)
+                } else if let Some(input_device) = host.default_input_device() {
+                    info!("Windows: Falling back to default input device");
+                    (input_device, false)
+                } else {
+                    return Err(AudioError::NoInputDevice);
+                }
+            }
+
+            // macOS: Default to input device (loopback requires virtual audio software)
+            #[cfg(not(target_os = "windows"))]
+            {
+                let default_device = host.default_input_device()
+                    .ok_or(AudioError::NoInputDevice)?;
+                (default_device, false)
+            }
         };
 
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());

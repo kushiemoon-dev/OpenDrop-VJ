@@ -261,6 +261,48 @@ impl ProjectM {
             version
         }
     }
+
+    /// Set the texture search paths
+    ///
+    /// Textures referenced in presets will be searched in these paths.
+    /// This allows textures to be stored separately from presets.
+    ///
+    /// # Arguments
+    /// * `paths` - Slice of directory paths to search for textures
+    ///
+    /// # Note
+    /// If the libprojectM API for texture paths is not available, this is a no-op.
+    pub fn set_texture_search_paths(&mut self, paths: &[&str]) {
+        if paths.is_empty() {
+            return;
+        }
+
+        let c_strings: Vec<CString> = paths
+            .iter()
+            .filter_map(|p| CString::new(*p).ok())
+            .collect();
+
+        if c_strings.is_empty() {
+            return;
+        }
+
+        let mut ptrs: Vec<*const std::os::raw::c_char> =
+            c_strings.iter().map(|s| s.as_ptr()).collect();
+
+        debug!(
+            "Setting {} texture search paths: {:?}",
+            ptrs.len(),
+            paths
+        );
+
+        unsafe {
+            projectm_sys::projectm_set_texture_search_paths(
+                self.handle.as_ptr(),
+                ptrs.as_mut_ptr(),
+                ptrs.len(),
+            );
+        }
+    }
 }
 
 impl Drop for ProjectM {

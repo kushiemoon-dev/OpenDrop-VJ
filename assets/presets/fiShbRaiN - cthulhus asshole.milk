@@ -18,7 +18,7 @@ bBrighten=0
 bDarken=0
 bSolarize=0
 bInvert=0
-fWaveAlpha=0.001000
+fWaveAlpha=0.000000
 fWaveScale=1.285751
 fWaveSmoothing=0.630000
 fWaveParam=0.000000
@@ -74,7 +74,7 @@ wavecode_0_r=1.000000
 wavecode_0_g=1.000000
 wavecode_0_b=1.000000
 wavecode_0_a=1.000000
-wave_0_per_point1=branch=rand(2);
+wave_0_per_point1=branch=int(rand(2));
 wave_0_per_point2=
 wave_0_per_point3=//base
 wave_0_per_point4=wx=if(equal(sc,0),.5,wx);
@@ -119,7 +119,7 @@ wavecode_1_r=1.000000
 wavecode_1_g=1.000000
 wavecode_1_b=1.000000
 wavecode_1_a=1.000000
-wave_1_per_point1=branch=rand(2);
+wave_1_per_point1=branch=int(rand(2));
 wave_1_per_point2=
 wave_1_per_point3=//base
 wave_1_per_point4=wx=if(equal(sc,0),.5,wx);

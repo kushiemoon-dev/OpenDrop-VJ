@@ -77,5 +77,5 @@ per_frame_16=wave_mystery = (frame%2)*(2*(1-equal(mode%3,0))-1);
 per_frame_17=wave_r=if(below(frame%6,3),bass*0.5,0);
 per_frame_18=wave_b=0.9+sin(time)*0.1;
 per_frame_19=wave_g=if(above(frame%6,2),bass*0.5,0);
-per_pixel_1=dx = dx*pow(-1,0&(13+q1 - 5*(q2*y)))*min(bass,1.2);
-per_pixel_2=dy = dy*pow(-1,0&(13+q1 - 5*(q3*x)))*min(bass,1.2);
+per_pixel_1=dx = dx*pow(-1,-1&(13+q1 - 5*(q2*y))+.5)*min(bass,1.2);
+per_pixel_2=dy = dy*pow(-1,-1&(13+q1 - 5*(q3*x))+.5)*min(bass,1.2);

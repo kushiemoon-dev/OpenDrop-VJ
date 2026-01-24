@@ -226,12 +226,12 @@ per_frame_18=beatrate = max(if(beat,if(below(time-lastbeat,2*beatrate),0.1*(beat
 per_frame_19=peakbass_att = beat*bass_att + (1-beat)*peakbass_att*(above(time - lastbeat, 2*beatrate)*0.95 + (1-above(time - lastbeat, 2*beatrate))*0.995);
 per_frame_20=lastbeat = beat*time + (1-beat)*lastbeat;
 per_frame_21=peakbass_att = max(peakbass_att,1.1*meanbass_att);
-per_frame_22=//counter = if(beat,counter+rand(10),counter);
+per_frame_22=//counter = if(beat,counter+int(rand(10)),counter);
 per_frame_23=//counter = if(above(counter,10000),0,counter);
-per_frame_24=test1 = if(beat,0.001*(rand(20)-10),test1);
-per_frame_25=test2 = if(beat,rand(79),test2);
-per_frame_26=test3 = if(beat,0.001*(rand(20)-10),test3);
-per_frame_27=test4 = if(beat,rand(79),test4);
+per_frame_24=test1 = if(beat,0.001*(int(rand(20))-10),test1);
+per_frame_25=test2 = if(beat,int(rand(79)),test2);
+per_frame_26=test3 = if(beat,0.001*(int(rand(20))-10),test3);
+per_frame_27=test4 = if(beat,int(rand(79)),test4);
 per_frame_28=
 per_frame_29=q1 =test1;
 per_frame_30=q2 =test2;
@@ -240,7 +240,7 @@ per_frame_32=q4 =test4;
 per_frame_33=
 per_frame_34=//q1 = 0.001*((counter%20)-10); //multiply amount for dx
 per_frame_35=//q2 = (counter%79); //angle amount for dy
-per_frame_36=//counter2 = if(beat,counter2+rand(10),counter2);
+per_frame_36=//counter2 = if(beat,counter2+int(rand(10)),counter2);
 per_frame_37=//counter2 = if(above(counter2,10000),0,counter2);
 per_frame_38=//q3 = 0.001*((counter2%20)-10); //multiply amount for dy
 per_frame_39=//q4 = (counter2%79); //angle amount for dy

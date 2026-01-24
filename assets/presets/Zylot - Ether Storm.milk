@@ -54,11 +54,9 @@ ib_r=0.250000
 ib_g=0.250000 
 ib_b=0.250000 
 ib_a=0.000000 
-per_frame_1=dx = dx - .001; 
-per_frame_2=dy = dy - .001; 
-per_frame_3=wave_r = wave_r + .5*sin(time*.666); 
-per_frame_4=wave_g = wave_g + .5*sin(time*.777); 
-per_frame_5=wave_b = wave_b + .5*sin(time*.888); 
+per_frame_1=wave_r = wave_r + .5*sin(time*.666); 
+per_frame_2=wave_g = wave_g + .5*sin(time*.777); 
+per_frame_3=wave_b = wave_b + .5*sin(time*.888); 
 per_pixel_1=dx = if(above(y,.7),001.*asin((x-.5)*(y-.7)),dx); 
 per_pixel_2=dx = if(below(y,.3),001.*-asin((x-.5)*(y-.3)),dx); 
 per_pixel_3=dy = (y-.5)*.05; 

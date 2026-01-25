@@ -138,7 +138,7 @@ shapecode_0_border_b=0.000000
 shapecode_0_border_a=0.000000
 shape_0_init1=bob = 1.5;
 shape_0_init2=ro = 0;
-shape_0_init3=red = rand(20);
+shape_0_init3=red = int(rand(20));
 shape_0_per_frame1=vol = 1 + 0.2*((bass_att+treb_att+mid_att)/3);
 shape_0_per_frame2=bob = bob*above(bob,0.01) - 0.01 + 1*(1 - above(bob,0.01));
 shape_0_per_frame3=bob = 0.4 + 0.4*sin(time*0.8);
@@ -252,7 +252,7 @@ shape_3_per_frame6=r = 0.5 + 0.5*sin(frame*0.5);
 shape_3_per_frame7=b = 0.5 + 0.5*sin(frame*0.5 + 2.094);
 shape_3_per_frame8=g = 0.5 + 0.5*sin(frame*0.5 + 4.188);
 shape_3_per_frame9=
-per_frame_init_1=red = rand(20);
+per_frame_init_1=red = int(rand(20));
 per_frame_1=dx = 0;
 per_frame_2=dy = 0;
 per_frame_3=wave_x = 0.5;

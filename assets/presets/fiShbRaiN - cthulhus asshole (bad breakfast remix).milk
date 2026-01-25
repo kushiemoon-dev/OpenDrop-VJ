@@ -18,7 +18,7 @@ bBrighten=0
 bDarken=0
 bSolarize=0
 bInvert=0
-fWaveAlpha=0.001000
+fWaveAlpha=0.000000
 fWaveScale=1.285751
 fWaveSmoothing=0.630000
 fWaveParam=0.000000
@@ -175,8 +175,8 @@ shape_1_per_frame3=
 shape_1_per_frame4=b2=abs(sin(time*.3));
 shape_1_per_frame5=
 shape_1_per_frame6=ang=time;
-shape_1_per_frame7=x=rand(100)*.01;
-shape_1_per_frame8=y=rand(100)*.01;
+shape_1_per_frame7=x=int(rand(100))*.01;
+shape_1_per_frame8=y=int(rand(100))*.01;
 shapecode_2_enabled=0
 shapecode_2_sides=4
 shapecode_2_additive=0

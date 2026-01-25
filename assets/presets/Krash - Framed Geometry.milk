@@ -353,7 +353,7 @@ per_frame_10=lastbeat = beat*time + (1-beat)*lastbeat;
 per_frame_11=peakbass_att = max(peakbass_att,1.1*meanbass_att);
 per_frame_12=dir = if(equal(abs(dir),1),dir,1);
 per_frame_13=dir = if(equal(beatcount,beat),0-dir,dir);
-per_frame_14=beatcount = if(above(beatcount,rand(10)+2),1,beatcount+beat);
+per_frame_14=beatcount = if(above(beatcount,int(rand(10))+2),1,beatcount+beat);
 per_frame_15=movement = movement+(dir/fps)*0.5*3.1415/beatrate;
 per_frame_16=q1 = movement;
 per_frame_17=monitor = beat;

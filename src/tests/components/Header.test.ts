@@ -17,7 +17,7 @@ describe('Header', () => {
 
 		it('renders the version', () => {
 			render(Header);
-			expect(screen.getByText('v0.3.0')).toBeInTheDocument();
+			expect(screen.getByText('v0.3.3')).toBeInTheDocument();
 		});
 
 		it('renders projectm version when provided', () => {

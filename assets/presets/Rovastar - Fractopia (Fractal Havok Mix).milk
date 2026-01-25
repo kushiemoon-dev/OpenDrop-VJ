@@ -208,9 +208,9 @@ shapecode_3_border_r=1.000000
 shapecode_3_border_g=1.000000
 shapecode_3_border_b=1.000000
 shapecode_3_border_a=0.100000
-per_frame_init_1=q4 = 0.249+0.5*(rand(100)*0.01);
-per_frame_init_2=q5 = 0.249+0.5*(rand(100)*0.01);
-per_frame_init_3=q6 = 0.249+0.5*(rand(100)*0.01);
+per_frame_init_1=q4 = 0.249+0.5*(int(rand(100))*0.01);
+per_frame_init_2=q5 = 0.249+0.5*(int(rand(100))*0.01);
+per_frame_init_3=q6 = 0.249+0.5*(int(rand(100))*0.01);
 per_frame_1=mv_r = 0.5 + 0.499*(0.60*sin(3.980*time) + 0.40*sin(1.047*time) );
 per_frame_2=mv_g = 0.5+ 0.499*(0.60*sin(0.835*time) + 0.40*sin(1.081*time) );
 per_frame_3=mv_b = 0.5 + 0.499*(0.60*sin(0.814*time) + 0.40*sin(1.011*time) );

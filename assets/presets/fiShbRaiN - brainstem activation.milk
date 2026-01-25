@@ -18,7 +18,7 @@ bBrighten=0
 bDarken=1
 bSolarize=0
 bInvert=0
-fWaveAlpha=0.001000
+fWaveAlpha=0.000000
 fWaveScale=1.285751
 fWaveSmoothing=0.630000
 fWaveParam=0.000000
@@ -79,7 +79,7 @@ wave_0_per_point2=la=.25+(treb_att*.09)+(.2*sin(time));
 wave_0_per_point3=ra=-.25-(treb*.09)+(.2*cos(time));
 wave_0_per_point4=
 wave_0_per_point5=//left or right?
-wave_0_per_point6=branch=rand(2);
+wave_0_per_point6=branch=int(rand(2));
 wave_0_per_point7=
 wave_0_per_point8=//base
 wave_0_per_point9=wx=if(equal(sc,0),.5,wx);
@@ -129,7 +129,7 @@ wave_1_per_point2=la=.15+(treb_att*.09)+(.2*sin(time));
 wave_1_per_point3=ra=-.15-(treb*.09)+(.2*cos(time));
 wave_1_per_point4=
 wave_1_per_point5=//left or right?
-wave_1_per_point6=branch=rand(2);
+wave_1_per_point6=branch=int(rand(2));
 wave_1_per_point7=
 wave_1_per_point8=//base
 wave_1_per_point9=wx=if(equal(sc,0),.5,wx);
@@ -179,7 +179,7 @@ wave_2_per_point2=la=.2+(treb_att*.09)+(.2*sin(time));
 wave_2_per_point3=ra=-.2-(treb*.09)+(.2*cos(time));
 wave_2_per_point4=
 wave_2_per_point5=//left or right?
-wave_2_per_point6=branch=rand(2);
+wave_2_per_point6=branch=int(rand(2));
 wave_2_per_point7=
 wave_2_per_point8=//base
 wave_2_per_point9=wx=if(equal(sc,0),.5,wx);
@@ -225,7 +225,7 @@ wave_3_per_point2=la=.5+(treb_att*.09)+(.2*sin(time));
 wave_3_per_point3=ra=-.5-(treb*.09)+(.2*cos(time));
 wave_3_per_point4=
 wave_3_per_point5=//left or right?
-wave_3_per_point6=branch=rand(2);
+wave_3_per_point6=branch=int(rand(2));
 wave_3_per_point7=
 wave_3_per_point8=//base
 wave_3_per_point9=wx=if(equal(sc,0),.5,wx);

@@ -1427,9 +1427,9 @@ fn get_projectm_version() -> String {
     projectm_rs::ProjectM::version()
 }
 
-/// List presets in a directory (or all default directories if none specified)
+/// List presets in directories (defaults + custom paths, or specific directories if provided)
 #[tauri::command]
-fn list_presets(dir: Option<String>) -> Result<Vec<PresetInfo>, String> {
+fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
     let mut presets = Vec::new();
     let mut seen_paths = std::collections::HashSet::new();
 
@@ -1465,17 +1465,19 @@ fn list_presets(dir: Option<String>) -> Result<Vec<PresetInfo>, String> {
         }
     }
 
-    // If a specific directory is provided, only search that one
-    if let Some(specific_dir) = dir {
-        let dir_path = std::path::Path::new(&specific_dir);
+    // Always search default directories first
+    for dir_path in get_default_preset_dirs() {
         if dir_path.exists() && dir_path.is_dir() {
-            scan_dir(dir_path, &mut presets, &mut seen_paths, 0);
+            scan_dir(&dir_path, &mut presets, &mut seen_paths, 0);
         }
-    } else {
-        // Search all default directories
-        for dir_path in get_default_preset_dirs() {
+    }
+
+    // If additional custom directories are provided, search those too
+    if let Some(custom_dirs) = dirs {
+        for dir_str in custom_dirs {
+            let dir_path = std::path::Path::new(&dir_str);
             if dir_path.exists() && dir_path.is_dir() {
-                scan_dir(&dir_path, &mut presets, &mut seen_paths, 0);
+                scan_dir(dir_path, &mut presets, &mut seen_paths, 0);
             }
         }
     }

@@ -18,7 +18,7 @@ bBrighten=0
 bDarken=0
 bSolarize=0
 bInvert=0
-fWaveAlpha=0.001000
+fWaveAlpha=0.000000
 fWaveScale=0.010000
 fWaveSmoothing=0.900000
 fWaveParam=0.000000
@@ -74,8 +74,8 @@ wavecode_0_r=1.000000
 wavecode_0_g=1.000000
 wavecode_0_b=1.000000
 wavecode_0_a=1.000000
-wave_0_per_point1=x=rand(1);
-wave_0_per_point2=y=rand(1);
+wave_0_per_point1=x=int(rand(1));
+wave_0_per_point2=y=int(rand(1));
 wavecode_1_enabled=0
 wavecode_1_samples=512
 wavecode_1_sep=0

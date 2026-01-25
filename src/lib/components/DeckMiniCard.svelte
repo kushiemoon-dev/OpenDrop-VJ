@@ -130,6 +130,8 @@
     gap: var(--spacing-sm);
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 0;
+    overflow: hidden;
   }
 
   .deck-card:hover {
@@ -263,6 +265,8 @@
 
   .deck-info {
     min-height: 18px;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .preset-name {

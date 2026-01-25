@@ -34,6 +34,8 @@
   let selectedCategory = $state('all');
   /** @type {string[]} */
   let selectedTags = $state([]);
+  let displayLimit = $state(200);
+  let showAll = $state(false);
 
   // Get favorite count for display
   let favoriteCount = $derived(getFavoriteCount());
@@ -64,8 +66,8 @@
     }
   }
 
-  // Filter presets by search, favorites, category, and tags
-  let filteredPresets = $derived(
+  // Filter presets by search, favorites, category, and tags (without limit)
+  let allFilteredPresets = $derived(
     presets
       .filter((/** @type {Preset} */ p) => {
         const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
@@ -74,8 +76,16 @@
         const matchesTags = selectedTags.length === 0 || selectedTags.every((tag) => hasTag(p.path, tag));
         return matchesSearch && matchesFavorites && matchesCategory && matchesTags;
       })
-      .slice(0, 50)
   );
+
+  // Apply display limit for performance
+  let filteredPresets = $derived(
+    showAll ? allFilteredPresets : allFilteredPresets.slice(0, displayLimit)
+  );
+
+  // Check if there are more presets to show
+  let hasMorePresets = $derived(allFilteredPresets.length > displayLimit && !showAll);
+  let remainingCount = $derived(allFilteredPresets.length - displayLimit);
 
   /** @param {Preset} preset */
   function handleSelect(preset) {
@@ -198,6 +208,11 @@
             />
           {/each}
         </div>
+        {#if hasMorePresets}
+          <button class="show-all-btn" onclick={() => showAll = true}>
+            Show all {allFilteredPresets.length} presets ({remainingCount} more)
+          </button>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -495,5 +510,25 @@
   @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+
+  .show-all-btn {
+    display: block;
+    width: 100%;
+    margin-top: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .show-all-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
   }
 </style>

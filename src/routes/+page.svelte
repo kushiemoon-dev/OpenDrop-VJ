@@ -21,6 +21,9 @@
   // Toast store - sync with global store for child components
   import { toast as globalToast } from '$lib/stores/toast';
 
+  // Settings store for custom preset paths
+  import { settings } from '$lib/stores/settings.svelte';
+
   // Sidebar collapsed state
   let sidebarCollapsed = $state(false);
   let sidebarMobileOpen = $state(false);
@@ -171,7 +174,15 @@
   async function loadPresets() {
     loadingPresets = true;
     try {
-      presets = await invoke("list_presets", { dir: null });
+      // Pass custom preset paths to backend if configured
+      const customPaths = settings.customPresetPaths;
+      if (customPaths.length > 0) {
+        // Backend will scan both defaults + custom paths when dirs is provided
+        presets = await invoke("list_presets", { dirs: customPaths });
+      } else {
+        // Use defaults only
+        presets = await invoke("list_presets", { dirs: null });
+      }
     } catch (e) {
       showToast("Error loading presets: " + e, "error");
     }
@@ -567,13 +578,13 @@
 
   .decks-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--spacing-md);
   }
 
   @media (max-width: 1200px) {
     .decks-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
@@ -772,14 +783,14 @@
     }
 
     .decks-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   /* Tablet/small desktop (< 768px) */
   @media (max-width: 768px) {
     .decks-grid {
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       gap: var(--spacing-sm);
     }
 
@@ -796,7 +807,7 @@
   /* Mobile (< 600px) */
   @media (max-width: 600px) {
     .decks-grid {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .sidebar {

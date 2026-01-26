@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import { X, FolderPlus, Trash2, RefreshCw, FolderOpen, Sun, Moon } from 'lucide-svelte';
-  import { settings, addPresetPath, removePresetPath, addTexturePath, removeTexturePath } from '$lib/stores/settings.svelte';
+  import { settings, addPresetPath, removePresetPath, addTexturePath, removeTexturePath, normalizePath } from '$lib/stores/settings.svelte';
   import { theme, toggleTheme } from '$lib/stores/theme';
   import { accent, setAccent, ACCENT_PRESETS } from '$lib/stores/accent';
 
@@ -27,7 +27,16 @@
   async function loadDetectedPaths() {
     loadingPaths = true;
     try {
-      detectedPaths = await invoke('get_preset_directories');
+      /** @type {string[]} */
+      const paths = await invoke('get_preset_directories');
+      // Deduplicate paths that differ only in separator style (Windows issue)
+      const seen = new Set();
+      detectedPaths = paths.filter((p) => {
+        const normalized = normalizePath(p);
+        if (seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      });
     } catch (e) {
       console.error('Failed to get preset directories:', e);
       detectedPaths = [];
@@ -38,7 +47,16 @@
   async function loadDetectedTexturePaths() {
     loadingTexturePaths = true;
     try {
-      detectedTexturePaths = await invoke('get_texture_directories');
+      /** @type {string[]} */
+      const paths = await invoke('get_texture_directories');
+      // Deduplicate paths that differ only in separator style (Windows issue)
+      const seen = new Set();
+      detectedTexturePaths = paths.filter((p) => {
+        const normalized = normalizePath(p);
+        if (seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      });
     } catch (e) {
       console.error('Failed to get texture directories:', e);
       detectedTexturePaths = [];

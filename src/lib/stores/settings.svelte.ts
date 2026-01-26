@@ -7,6 +7,14 @@
 
 const STORAGE_KEY = 'opendrop-settings';
 
+/**
+ * Normalize path separators to forward slashes for consistent comparison.
+ * This prevents duplicate paths on Windows where both / and \ are valid.
+ */
+export function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
 interface AppSettings {
   /** Custom preset directories to search (in addition to defaults) */
   customPresetPaths: string[];
@@ -126,7 +134,11 @@ export function getCustomPresetPaths(): string[] {
  * @param path - Directory path to add
  */
 export function addPresetPath(path: string): void {
-  if (!settingsState.customPresetPaths.includes(path)) {
+  const normalizedNew = normalizePath(path);
+  const isDuplicate = settingsState.customPresetPaths.some(
+    (existing) => normalizePath(existing) === normalizedNew
+  );
+  if (!isDuplicate) {
     settingsState = {
       ...settingsState,
       customPresetPaths: [...settingsState.customPresetPaths, path],
@@ -160,7 +172,11 @@ export function getCustomTexturePaths(): string[] {
  * @param path - Directory path to add
  */
 export function addTexturePath(path: string): void {
-  if (!settingsState.customTexturePaths.includes(path)) {
+  const normalizedNew = normalizePath(path);
+  const isDuplicate = settingsState.customTexturePaths.some(
+    (existing) => normalizePath(existing) === normalizedNew
+  );
+  if (!isDuplicate) {
     settingsState = {
       ...settingsState,
       customTexturePaths: [...settingsState.customTexturePaths, path],

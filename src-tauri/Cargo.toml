@@ -1,6 +1,6 @@
 [package]
 name = "opendrop"
-version = "0.3.1"
+version = "0.3.4"
 description = "Modern open-source VJ visualizer - NestDrop alternative"
 authors = ["OpenDrop Contributors"]
 edition = "2021"

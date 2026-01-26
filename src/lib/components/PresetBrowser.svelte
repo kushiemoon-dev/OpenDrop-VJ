@@ -225,6 +225,8 @@
     border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0; /* Allow flex shrinking */
     overflow: hidden;
     transition: var(--transition-normal);
   }
@@ -442,16 +444,20 @@
 
   .browser-content {
     flex: 1;
+    min-height: 0; /* Allow flex shrinking */
     overflow: hidden;
     padding: var(--spacing-md);
     animation: fade-in 0.2s ease;
+    display: flex;
+    flex-direction: column;
   }
 
   .preset-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: var(--spacing-sm);
-    max-height: 200px;
+    flex: 1;
+    min-height: 100px; /* Minimum usable height */
     overflow-y: auto;
     padding-right: var(--spacing-xs);
   }

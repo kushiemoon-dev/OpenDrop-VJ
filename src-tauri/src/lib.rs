@@ -1431,12 +1431,12 @@ fn get_projectm_version() -> String {
 #[tauri::command]
 fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
     let mut presets = Vec::new();
-    let mut seen_paths = std::collections::HashSet::new();
+    let mut seen_names = std::collections::HashSet::new();
 
     fn scan_dir(
         path: &std::path::Path,
         presets: &mut Vec<PresetInfo>,
-        seen_paths: &mut std::collections::HashSet<String>,
+        seen_names: &mut std::collections::HashSet<String>,
         depth: usize,
     ) {
         if depth > 4 {
@@ -1447,15 +1447,17 @@ fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() {
-                    scan_dir(&path, presets, seen_paths, depth + 1);
+                    scan_dir(&path, presets, seen_names, depth + 1);
                 } else if path.extension().is_some_and(|ext| ext == "milk" || ext == "prjm") {
                     let path_str = path.to_string_lossy().to_string();
-                    // Avoid duplicates if same preset exists in multiple locations
-                    if !seen_paths.contains(&path_str) {
-                        seen_paths.insert(path_str.clone());
-                        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                    // Avoid duplicates by preset name (not full path)
+                    // This prevents bundled presets from appearing twice with different paths
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        let name_str = name.to_string();
+                        if !seen_names.contains(&name_str) {
+                            seen_names.insert(name_str.clone());
                             presets.push(PresetInfo {
-                                name: name.to_string(),
+                                name: name_str,
                                 path: path_str,
                             });
                         }
@@ -1468,7 +1470,7 @@ fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
     // Always search default directories first
     for dir_path in get_default_preset_dirs() {
         if dir_path.exists() && dir_path.is_dir() {
-            scan_dir(&dir_path, &mut presets, &mut seen_paths, 0);
+            scan_dir(&dir_path, &mut presets, &mut seen_names, 0);
         }
     }
 
@@ -1477,17 +1479,12 @@ fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
         for dir_str in custom_dirs {
             let dir_path = std::path::Path::new(&dir_str);
             if dir_path.exists() && dir_path.is_dir() {
-                scan_dir(dir_path, &mut presets, &mut seen_paths, 0);
+                scan_dir(dir_path, &mut presets, &mut seen_names, 0);
             }
         }
     }
 
     presets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    // Limit to reasonable number (increased from 500)
-    if presets.len() > 2000 {
-        presets.truncate(2000);
-    }
 
     Ok(presets)
 }

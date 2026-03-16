@@ -454,6 +454,28 @@ fn run_audio_thread(
             device_name, is_loopback
         );
 
+        // Log detailed device config for debugging (especially important for WASAPI loopback)
+        #[cfg(target_os = "windows")]
+        {
+            if is_loopback {
+                info!("WASAPI loopback: attempting to capture from output device '{}'", device_name);
+                info!("WASAPI loopback: ensure audio is playing through this device for visualization");
+            }
+            // Log all supported configs for debugging
+            if let Ok(configs) = device.supported_output_configs() {
+                for (i, cfg) in configs.enumerate() {
+                    debug!(
+                        "  Output config {}: channels={}, rate={:?}-{:?}, format={:?}",
+                        i,
+                        cfg.channels(),
+                        cfg.min_sample_rate(),
+                        cfg.max_sample_rate(),
+                        cfg.sample_format()
+                    );
+                }
+            }
+        }
+
         // Get supported config
         // For loopback, we use the output device's default output config
         let supported_config = if is_loopback {
@@ -472,6 +494,16 @@ fn run_audio_thread(
             supported_config.channels(),
             supported_config.sample_format()
         );
+
+        #[cfg(target_os = "windows")]
+        if is_loopback {
+            info!(
+                "WASAPI loopback negotiated: {:?} Hz, {} ch, {:?}",
+                supported_config.sample_rate(),
+                supported_config.channels(),
+                supported_config.sample_format()
+            );
+        }
 
         let sample_format = supported_config.sample_format();
         let stream_config: StreamConfig = supported_config.into();

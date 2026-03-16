@@ -35,7 +35,15 @@ impl ProjectM {
     pub fn new(width: u32, height: u32) -> Result<Self, Error> {
         debug!("Creating ProjectM instance {}x{}", width, height);
 
-        let handle = unsafe { projectm_sys::projectm_create() };
+        let handle = match std::panic::catch_unwind(|| unsafe { projectm_sys::projectm_create() }) {
+            Ok(h) => h,
+            Err(_) => {
+                error!("ProjectM initialization panicked (likely driver or OpenGL issue)");
+                return Err(Error::InitFailed(
+                    "projectm_create panicked - check GPU drivers and OpenGL support".to_string(),
+                ));
+            }
+        };
 
         let handle = NonNull::new(handle).ok_or_else(|| {
             error!("Failed to create projectM instance");

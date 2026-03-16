@@ -34,7 +34,7 @@
   let selectedCategory = $state('all');
   /** @type {string[]} */
   let selectedTags = $state([]);
-  let displayLimit = $state(200);
+  let displayLimit = $state(500);
   let showAll = $state(false);
 
   // Get favorite count for display
@@ -209,9 +209,20 @@
           {/each}
         </div>
         {#if hasMorePresets}
-          <button class="show-all-btn" onclick={() => showAll = true}>
-            Show all {allFilteredPresets.length} presets ({remainingCount} more)
-          </button>
+          <div class="load-more-actions">
+            <button class="show-more-btn" onclick={() => displayLimit += 500}>
+              Show More (+500)
+            </button>
+            {#if allFilteredPresets.length > 5000}
+              <button class="show-all-btn warn" onclick={() => showAll = true}>
+                Show All {allFilteredPresets.length} (may be slow)
+              </button>
+            {:else}
+              <button class="show-all-btn" onclick={() => showAll = true}>
+                Show All ({allFilteredPresets.length})
+              </button>
+            {/if}
+          </div>
         {/if}
       {/if}
     </div>
@@ -536,5 +547,39 @@
     background: var(--bg-elevated);
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+  }
+
+  .show-all-btn.warn {
+    border-color: var(--accent-yellow, #fbbf24);
+    color: var(--accent-yellow, #fbbf24);
+  }
+
+  .show-all-btn.warn:hover {
+    background: rgba(251, 191, 36, 0.1);
+    border-color: var(--accent-yellow, #fbbf24);
+    color: var(--accent-yellow, #fbbf24);
+  }
+
+  .load-more-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+  }
+
+  .show-more-btn {
+    flex: 1;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--accent-primary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .show-more-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--accent-primary);
   }
 </style>

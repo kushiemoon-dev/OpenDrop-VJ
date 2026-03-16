@@ -97,6 +97,8 @@ struct Config {
     /// Texture search paths for presets that reference external textures
     #[serde(default)]
     texture_paths: Vec<String>,
+    #[serde(default)]
+    test_mode: bool,
 }
 
 fn send_event(event: Event) {
@@ -579,6 +581,27 @@ impl ApplicationHandler for RenderApp {
             gl_display.get_proc_address(&c_str) as *const _
         });
 
+        // Validate critical GL functions are loaded (ProjectM v4 requires these)
+        {
+            let required_fns: &[(&str, bool)] = &[
+                ("glCreateShader", gl::CreateShader::is_loaded()),
+                ("glCreateProgram", gl::CreateProgram::is_loaded()),
+                ("glGenFramebuffers", gl::GenFramebuffers::is_loaded()),
+                ("glGenTextures", gl::GenTextures::is_loaded()),
+                ("glCompileShader", gl::CompileShader::is_loaded()),
+            ];
+            for (name, loaded) in required_fns {
+                if !loaded {
+                    let msg = format!("Required OpenGL function not available: {}. Update your GPU drivers.", name);
+                    error!("{}", msg);
+                    send_event(Event::Error { message: msg });
+                    event_loop.exit();
+                    return;
+                }
+            }
+            info!("All required OpenGL functions loaded successfully");
+        }
+
         // Vsync
         let _ = surface.set_swap_interval(&context, SwapInterval::Wait(NonZeroU32::new(1).unwrap()));
 
@@ -598,8 +621,13 @@ impl ApplicationHandler for RenderApp {
 
         // Create projectM
         let size = window.inner_size();
-        match ProjectM::new(size.width, size.height) {
+        // Create at safe small size first, then resize - some drivers crash on large initial framebuffers
+        match ProjectM::new(640, 480) {
             Ok(mut pm) => {
+                // Resize to actual window size after safe initialization
+                if size.width != 640 || size.height != 480 {
+                    pm.resize(size.width, size.height);
+                }
                 info!("ProjectM {} initialized", ProjectM::version());
 
                 // Set texture search paths before loading preset
@@ -645,6 +673,13 @@ impl ApplicationHandler for RenderApp {
         self.window = Some(window);
 
         send_event(Event::Ready);
+
+        // In test mode, exit immediately after successful init
+        if self.config.test_mode {
+            info!("Test mode: GL+ProjectM initialized successfully, exiting");
+            event_loop.exit();
+            return;
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -759,6 +794,7 @@ fn main() {
                 deck_id: 0,
                 monitor_index: None,
                 texture_paths: Vec::new(),
+                test_mode: false,
             }
         })
     } else {
@@ -770,8 +806,16 @@ fn main() {
             deck_id: 0,
             monitor_index: None,
             texture_paths: Vec::new(),
+            test_mode: false,
         }
     };
+
+    let mut config = config; // Make mutable
+    // Check for --test flag (health check mode)
+    if args.iter().any(|a| a == "--test") {
+        config.test_mode = true;
+        info!("Running in test mode - will exit after GL+ProjectM validation");
+    }
 
     info!("Starting renderer with config: {:?}", config);
 

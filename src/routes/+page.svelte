@@ -215,7 +215,7 @@
       showToast(/** @type {string} */ (result), "success");
       await refreshMultiDeckStatus();
     } catch (e) {
-      showToast("Error: " + e, "error");
+      showToast("Deck start failed: " + e + ". If visualization crashes, try updating your GPU drivers.", "error");
     }
   }
 

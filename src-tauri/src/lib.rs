@@ -782,12 +782,20 @@ fn start_deck(
     info!("Starting deck {} with config: {:?}", deck_id, config);
 
     // Spawn renderer process
-    let child = Command::new(&renderer_path)
-        .arg(&config_json)
+    let mut cmd = Command::new(&renderer_path);
+    cmd.arg(&config_json)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
+        .stderr(Stdio::inherit());
+
+    // On Windows, suppress the console window for the renderer process
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let child = cmd.spawn()
         .map_err(|e| format!("Failed to start renderer for deck {}: {}", deck_id, e))?;
 
     // Update deck state
@@ -1199,13 +1207,29 @@ fn get_preset_dir() -> String {
         })
 }
 
+/// Normalize a path string for consistent comparison across platforms.
+/// Converts backslashes to forward slashes and lowercases on Windows.
+fn normalize_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    #[cfg(target_os = "windows")]
+    {
+        normalized.to_lowercase()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        normalized
+    }
+}
+
 /// Get all preset directories that exist
 #[tauri::command]
 fn get_preset_directories() -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
     get_default_preset_dirs()
         .into_iter()
         .filter(|p| p.exists() && p.is_dir())
         .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| seen.insert(normalize_path(p)))
         .collect()
 }
 
@@ -1305,8 +1329,7 @@ fn get_default_texture_dirs() -> Vec<std::path::PathBuf> {
         }
     }
 
-    // Also include preset directories since textures are often co-located with presets
-    dirs.extend(get_default_preset_dirs());
+    // Note: preset dirs intentionally NOT included - textures and presets are separate concerns
 
     dirs
 }
@@ -1314,10 +1337,12 @@ fn get_default_texture_dirs() -> Vec<std::path::PathBuf> {
 /// Get all texture directories that exist
 #[tauri::command]
 fn get_texture_directories() -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
     get_default_texture_dirs()
         .into_iter()
         .filter(|p| p.exists() && p.is_dir())
         .map(|p| p.to_string_lossy().to_string())
+        .filter(|p| seen.insert(normalize_path(p)))
         .collect()
 }
 
@@ -1427,6 +1452,37 @@ fn get_projectm_version() -> String {
     projectm_rs::ProjectM::version()
 }
 
+/// Check renderer health by spawning a test instance
+#[tauri::command]
+fn check_renderer_health() -> Result<String, String> {
+    let renderer_path = find_renderer_executable()?;
+
+    let child = Command::new(&renderer_path)
+        .arg("--test")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start renderer health check: {}", e))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Renderer health check failed: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    if output.status.success() && stdout.contains("\"type\":\"ready\"") {
+        Ok("Renderer health check passed: GL+ProjectM working".to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!(
+            "Renderer health check failed. Exit code: {:?}. Error: {}",
+            output.status.code(),
+            if stderr.is_empty() { stdout.to_string() } else { stderr.to_string() }
+        ))
+    }
+}
+
 /// List presets in directories (defaults + custom paths, or specific directories if provided)
 #[tauri::command]
 fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
@@ -1450,12 +1506,14 @@ fn list_presets(dirs: Option<Vec<String>>) -> Result<Vec<PresetInfo>, String> {
                     scan_dir(&path, presets, seen_names, depth + 1);
                 } else if path.extension().is_some_and(|ext| ext == "milk" || ext == "prjm") {
                     let path_str = path.to_string_lossy().to_string();
-                    // Avoid duplicates by preset name (not full path)
-                    // This prevents bundled presets from appearing twice with different paths
+                    // Deduplicate by normalized name (handles Windows path separator differences)
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                         let name_str = name.to_string();
-                        if !seen_names.contains(&name_str) {
-                            seen_names.insert(name_str.clone());
+                        let normalized = name_str.replace('\\', "/");
+                        #[cfg(target_os = "windows")]
+                        let normalized = normalized.to_lowercase();
+                        if !seen_names.contains(&normalized) {
+                            seen_names.insert(normalized);
                             presets.push(PresetInfo {
                                 name: name_str,
                                 path: path_str,
@@ -2942,6 +3000,7 @@ pub fn run() {
             // Utility commands
             get_status,
             get_projectm_version,
+            check_renderer_health,
             list_presets,
             get_preset_directories,
             get_texture_directories,

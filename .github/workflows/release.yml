@@ -117,6 +117,7 @@ jobs:
       - name: Install libprojectM via vcpkg
         shell: pwsh
         run: |
+          if (Test-Path "C:\vcpkg") { Remove-Item -Recurse -Force "C:\vcpkg" }
           git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
           C:\vcpkg\bootstrap-vcpkg.bat
           C:\vcpkg\vcpkg install projectm:x64-windows-static
@@ -149,6 +150,22 @@ jobs:
 
       - name: Install frontend dependencies
         run: pnpm install
+
+      - name: Download SpoutLibrary.dll
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "libs/win64"
+          $url = "https://github.com/leadedge/Spout2/releases/download/2.007.017/Spout-SDK-binaries_2-007-017_1.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\spout-sdk.zip"
+          Expand-Archive -Path "$env:TEMP\spout-sdk.zip" -DestinationPath "$env:TEMP\spout-sdk" -Force
+          $dll = Get-ChildItem -Path "$env:TEMP\spout-sdk" -Recurse -Filter "SpoutLibrary.dll" | Where-Object { $_.DirectoryName -match "x64" } | Select-Object -First 1
+          if ($dll) {
+            Copy-Item $dll.FullName "libs/win64/SpoutLibrary.dll"
+            echo "=== SpoutLibrary.dll extracted ==="
+            Get-ChildItem "libs/win64"
+          } else {
+            echo "WARNING: SpoutLibrary.dll not found in SDK zip, build will continue without Spout"
+          }
 
       - name: Build renderer sidecar
         shell: pwsh

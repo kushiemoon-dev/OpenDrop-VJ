@@ -16,7 +16,7 @@
 <header class="header glass">
   <div class="logo">
     <h1>OpenDrop</h1>
-    <span class="version">v0.3.5</span>
+    <span class="version">v0.3.6</span>
   </div>
 
   <div class="center">

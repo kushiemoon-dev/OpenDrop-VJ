@@ -55,6 +55,9 @@
   let levelR = $state(0);
   /** @type {number | null} */
   let animationId = null;
+  let zeroLevelCount = $state(0);
+  let showNoAudioHint = $state(false);
+  const ZERO_LEVEL_THRESHOLD = 300; // ~5s at 60fps
 
   // Fetch real audio levels when running
   $effect(() => {
@@ -76,6 +79,15 @@
         // Apply some smoothing and scaling for better visualization
         levelL = Math.min(1, left * 3); // Scale up for visibility
         levelR = Math.min(1, right * 3);
+        if (left === 0 && right === 0) {
+          zeroLevelCount++;
+          if (zeroLevelCount >= ZERO_LEVEL_THRESHOLD) {
+            showNoAudioHint = true;
+          }
+        } else {
+          zeroLevelCount = 0;
+          showNoAudioHint = false;
+        }
       } catch (e) {
         // Ignore errors, levels stay at previous value
       }
@@ -89,6 +101,8 @@
       cancelAnimationFrame(animationId);
       animationId = null;
     }
+    zeroLevelCount = 0;
+    showNoAudioHint = false;
   }
 
   onDestroy(() => {
@@ -106,6 +120,12 @@
     <VuMeter level={levelL} label="L" />
     <VuMeter level={levelR} label="R" />
   </div>
+
+  {#if showNoAudioHint && running}
+    <div class="no-audio-hint">
+      No audio detected — play audio through the selected output device
+    </div>
+  {/if}
 
   <div class="device-select">
     <select bind:value={selectedDevice} disabled={running}>
@@ -190,6 +210,14 @@
     background: var(--bg-dark);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-subtle);
+  }
+
+  .no-audio-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted, #888);
+    text-align: center;
+    padding: 4px 8px;
+    opacity: 0.8;
   }
 
   .device-select {

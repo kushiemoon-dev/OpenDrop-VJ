@@ -4,6 +4,7 @@
 //! On Linux, can use native PipeWire for monitor devices instead of parec subprocess.
 
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 // CPAL is used on Windows/macOS, but not on Linux (we use parec)
@@ -124,6 +125,8 @@ pub struct AudioEngine {
     thread_handle: Option<JoinHandle<()>>,
     /// Whether the engine is running
     running: bool,
+    /// Last CPAL stream error, if any
+    last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AudioEngine {
@@ -134,7 +137,13 @@ impl AudioEngine {
             sample_rx: None,
             thread_handle: None,
             running: false,
+            last_error: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Get and clear the last CPAL stream error, if any
+    pub fn last_error(&self) -> Option<String> {
+        self.last_error.lock().ok().and_then(|mut e| e.take())
     }
 
     /// List available audio input devices
@@ -309,9 +318,11 @@ impl AudioEngine {
         let (command_tx, command_rx) = mpsc::channel();
         let (sample_tx, sample_rx) = mpsc::channel();
 
+        let last_error_clone = self.last_error.clone();
+
         // Spawn the audio thread
         let thread_handle = thread::spawn(move || {
-            if let Err(e) = run_audio_thread(config, command_rx, sample_tx) {
+            if let Err(e) = run_audio_thread(config, command_rx, sample_tx, last_error_clone) {
                 error!("Audio thread error: {}", e);
             }
         });
@@ -380,10 +391,12 @@ fn run_audio_thread(
     config: AudioConfig,
     command_rx: Receiver<AudioCommand>,
     sample_tx: Sender<Vec<f32>>,
+    last_error: Arc<Mutex<Option<String>>>,
 ) -> Result<(), AudioError> {
     // On Linux, ALWAYS use parec to avoid CPAL/ALSA panics and system audio blocking
     #[cfg(target_os = "linux")]
     {
+        let _ = last_error; // not used on Linux (no CPAL stream)
         let device_name = config.device_name.clone().unwrap_or_else(|| "auto".to_string());
 
         // If "auto" or empty, find the default monitor
@@ -532,9 +545,9 @@ fn run_audio_thread(
         );
 
         let stream = match sample_format {
-            SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, sample_tx, is_loopback)?,
-            SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, sample_tx, is_loopback)?,
-            SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, sample_tx, is_loopback)?,
+            SampleFormat::F32 => build_stream::<f32>(&device, &stream_config, sample_tx, is_loopback, last_error)?,
+            SampleFormat::I16 => build_stream::<i16>(&device, &stream_config, sample_tx, is_loopback, last_error)?,
+            SampleFormat::U16 => build_stream::<u16>(&device, &stream_config, sample_tx, is_loopback, last_error)?,
             format => return Err(AudioError::UnsupportedFormat(format)),
         };
 
@@ -684,13 +697,13 @@ fn build_stream<T>(
     config: &StreamConfig,
     tx: Sender<Vec<f32>>,
     is_loopback: bool,
+    last_error: Arc<Mutex<Option<String>>>,
 ) -> Result<Stream, AudioError>
 where
     T: cpal::Sample + cpal::SizedSample,
     f32: cpal::FromSample<T>,
 {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::Arc;
 
     // Track callback activity for debugging
     let callback_count = Arc::new(AtomicU64::new(0));
@@ -729,6 +742,9 @@ where
             },
             move |err| {
                 error!("Audio stream error: {}", err);
+                if let Ok(mut last) = last_error.lock() {
+                    *last = Some(format!("Audio stream error: {}", err));
+                }
             },
             None,
         )

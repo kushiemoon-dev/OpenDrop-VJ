@@ -157,6 +157,17 @@
     } catch (e) {
       showToast("Error: " + e, "error");
     }
+    // Check for renderer errors on running decks
+    for (const deck of multiDeckStatus.decks) {
+      if (deck.running) {
+        try {
+          const errors = await invoke('get_renderer_errors', { deckId: deck.id });
+          for (const err of errors) {
+            showToast(`Deck ${deck.id + 1}: ${err}`, 'error');
+          }
+        } catch (_) {}
+      }
+    }
   }
 
   async function loadAudioDevices() {

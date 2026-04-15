@@ -5,6 +5,7 @@
   import { settings, addPresetPath, removePresetPath, addTexturePath, removeTexturePath, normalizePath } from '$lib/stores/settings.svelte';
   import { theme, toggleTheme } from '$lib/stores/theme';
   import { accent, setAccent, ACCENT_PRESETS } from '$lib/stores/accent';
+  import { showToast } from '$lib/stores/toast';
 
   /**
    * @type {{
@@ -140,8 +141,7 @@
     loadingErrorLog = true;
     try {
       errorLogEntries = await invoke('get_error_log');
-    } catch (e) {
-      console.error('Failed to load error log:', e);
+    } catch (_) {
       errorLogEntries = [];
     }
     loadingErrorLog = false;
@@ -151,8 +151,8 @@
     try {
       await invoke('clear_error_log');
       errorLogEntries = [];
-    } catch (e) {
-      console.error('Failed to clear error log:', e);
+    } catch (_) {
+      // ignore
     }
   }
 
@@ -162,7 +162,10 @@
       .join('\n');
     try {
       await navigator.clipboard.writeText(text || 'No errors logged');
-    } catch (_) {}
+    } catch (_) {
+      // Clipboard API may not be available in all Tauri contexts
+      showToast('Copy failed — clipboard not available', 'error');
+    }
   }
 </script>
 
@@ -372,7 +375,7 @@
 
       <!-- Error Log -->
       <section class="settings-section">
-        <button class="section-toggle" onclick={() => { showErrorLog = !showErrorLog; if (showErrorLog) loadErrorLog(); }}>
+        <button class="section-toggle" onclick={() => { showErrorLog = !showErrorLog; if (showErrorLog) loadErrorLog(); }} aria-expanded={showErrorLog}>
           <span class="section-title">Error Log</span>
           <span class="toggle-icon">{showErrorLog ? '▾' : '▸'}</span>
         </button>

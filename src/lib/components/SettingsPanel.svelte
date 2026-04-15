@@ -129,6 +129,41 @@
 
   // Reactive theme state
   let isDark = $derived(theme.current === 'dark');
+
+  // Error log
+  let showErrorLog = $state(false);
+  /** @type {Array<{timestamp: string, source: string, message: string}>} */
+  let errorLogEntries = $state([]);
+  let loadingErrorLog = $state(false);
+
+  async function loadErrorLog() {
+    loadingErrorLog = true;
+    try {
+      errorLogEntries = await invoke('get_error_log');
+    } catch (e) {
+      console.error('Failed to load error log:', e);
+      errorLogEntries = [];
+    }
+    loadingErrorLog = false;
+  }
+
+  async function clearErrorLog() {
+    try {
+      await invoke('clear_error_log');
+      errorLogEntries = [];
+    } catch (e) {
+      console.error('Failed to clear error log:', e);
+    }
+  }
+
+  async function copyErrorLog() {
+    const text = errorLogEntries
+      .map(e => `[${new Date(Number(e.timestamp)).toISOString()}] [${e.source}] ${e.message}`)
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text || 'No errors logged');
+    } catch (_) {}
+  }
 </script>
 
 <div class="settings-overlay" onclick={onClose} role="presentation">
@@ -333,6 +368,43 @@
           Place your presets in any of the directories above, and they will appear in the preset browser.
           Textures referenced by presets are automatically searched in texture directories.
         </p>
+      </section>
+
+      <!-- Error Log -->
+      <section class="settings-section">
+        <button class="section-toggle" onclick={() => { showErrorLog = !showErrorLog; if (showErrorLog) loadErrorLog(); }}>
+          <span class="section-title">Error Log</span>
+          <span class="toggle-icon">{showErrorLog ? '▾' : '▸'}</span>
+        </button>
+
+        {#if showErrorLog}
+          <div class="error-log-container">
+            <div class="error-log-actions">
+              <button class="small-btn" onclick={loadErrorLog} disabled={loadingErrorLog}>
+                <RefreshCw size={12} />
+                Refresh
+              </button>
+              <button class="small-btn" onclick={copyErrorLog}>Copy</button>
+              <button class="small-btn" onclick={clearErrorLog}>Clear</button>
+            </div>
+
+            {#if loadingErrorLog}
+              <div class="error-log-empty">Loading...</div>
+            {:else if errorLogEntries.length === 0}
+              <div class="error-log-empty">No errors logged</div>
+            {:else}
+              <div class="error-log-list">
+                {#each errorLogEntries as entry}
+                  <div class="error-log-entry">
+                    <span class="error-timestamp">{new Date(Number(entry.timestamp)).toLocaleTimeString()}</span>
+                    <span class="error-source">[{entry.source}]</span>
+                    <span class="error-message">{entry.message}</span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </section>
     </div>
   </div>
@@ -684,5 +756,92 @@
 
   .accent-option.selected .accent-name {
     color: var(--text-primary);
+  }
+
+  .section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--text-primary, #fff);
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 8px 0;
+    cursor: pointer;
+  }
+
+  .error-log-container {
+    padding: 4px 0 8px;
+  }
+
+  .error-log-actions {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .small-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 0.7rem;
+    border-radius: 4px;
+    border: 1px solid var(--border-color, #333);
+    background: var(--bg-secondary, #1a1a1a);
+    color: var(--text-secondary, #aaa);
+    cursor: pointer;
+  }
+
+  .small-btn:hover:not(:disabled) {
+    background: var(--bg-hover, #252525);
+  }
+
+  .small-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .error-log-list {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.65rem;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 4px;
+    padding: 4px;
+  }
+
+  .error-log-entry {
+    padding: 2px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    line-height: 1.5;
+  }
+
+  .error-log-entry:last-child {
+    border-bottom: none;
+  }
+
+  .error-timestamp {
+    color: var(--text-secondary, #666);
+    margin-right: 4px;
+  }
+
+  .error-source {
+    color: var(--accent, #f59e0b);
+    margin-right: 4px;
+  }
+
+  .error-message {
+    color: var(--text-primary, #ccc);
+  }
+
+  .error-log-empty {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #666);
+    text-align: center;
+    padding: 12px;
   }
 </style>

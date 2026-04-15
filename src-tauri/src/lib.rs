@@ -1408,7 +1408,8 @@ fn start_audio(
 /// Stop audio capture
 #[tauri::command]
 fn stop_audio(state: State<'_, AppState>) -> Result<String, String> {
-    let mut audio_guard = state.audio_engine.lock().map_err(|e| e.to_string())?;
+    let mut audio_guard = state.audio_engine.try_lock()
+        .map_err(|_| "Audio engine is busy, please try again".to_string())?;
     audio_guard.stop();
     Ok("Audio capture stopped".to_string())
 }

@@ -3323,7 +3323,7 @@ dependencies = [
 
 [[package]]
 name = "opendrop"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "core-graphics 0.24.0",
  "opendrop-core",

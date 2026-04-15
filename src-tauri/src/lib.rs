@@ -56,6 +56,7 @@ pub struct RendererProcess {
     started_at: std::time::Instant,
     crash_count: u32,
     stdout_reader: Option<JoinHandle<()>>,
+    errors: Arc<Mutex<Vec<String>>>,
 }
 
 /// Events received from renderer process
@@ -76,6 +77,8 @@ impl RendererProcess {
     fn new(mut child: Child) -> Self {
         let health = Arc::new(Mutex::new(RendererHealth::Starting));
         let health_clone = Arc::clone(&health);
+        let errors = Arc::new(Mutex::new(Vec::<String>::new()));
+        let errors_clone = errors.clone();
 
         // Spawn thread to read stdout events from renderer
         let stdout_reader = child.stdout.take().map(|stdout| {
@@ -101,6 +104,9 @@ impl RendererProcess {
                                     }
                                     RendererEvent::Error { message } => {
                                         warn!("Renderer error: {}", message);
+                                        if let Ok(mut errs) = errors_clone.lock() {
+                                            errs.push(message);
+                                        }
                                     }
                                     RendererEvent::PresetLoaded { path } => {
                                         info!("Renderer loaded preset: {}", path);
@@ -121,7 +127,12 @@ impl RendererProcess {
             started_at: std::time::Instant::now(),
             crash_count: 0,
             stdout_reader,
+            errors,
         }
+    }
+
+    fn drain_errors(&self) -> Vec<String> {
+        self.errors.lock().map(|mut e| e.drain(..).collect()).unwrap_or_default()
     }
 
     fn send_command(&mut self, cmd: &RendererCommand) -> Result<(), String> {
@@ -1831,6 +1842,13 @@ fn pump_audio(state: State<'_, AppState>) -> Result<u32, String> {
     Ok(total_samples_sent)
 }
 
+/// Get the last audio stream error, if any
+#[tauri::command]
+fn get_audio_error(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let audio = state.audio_engine.lock().map_err(|e| e.to_string())?;
+    Ok(audio.last_error())
+}
+
 /// Get current audio levels for VU meters
 #[tauri::command]
 fn get_audio_levels(state: State<'_, AppState>) -> Result<(f32, f32), String> {
@@ -2982,6 +3000,22 @@ fn clear_error_log(state: State<'_, AppState>) -> Result<String, String> {
     Ok("Error log cleared".to_string())
 }
 
+/// Get and clear renderer errors for a deck (also logs them to error log)
+#[tauri::command]
+fn get_renderer_errors(state: State<'_, AppState>, deck_id: DeckId) -> Result<Vec<String>, String> {
+    let decks = state.decks.lock().map_err(|e| e.to_string())?;
+    if let Some(deck) = decks.get(&deck_id) {
+        if let Some(ref renderer) = deck.renderer {
+            let errors = renderer.drain_errors();
+            for err in &errors {
+                state.log_error("renderer", err);
+            }
+            return Ok(errors);
+        }
+    }
+    Ok(vec![])
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix WebKitGTK EGL issues on Linux AppImage
@@ -3041,6 +3075,7 @@ pub fn run() {
             stop_audio,
             pump_audio,
             get_audio_levels,
+            get_audio_error,
             // Utility commands
             get_status,
             get_projectm_version,
@@ -3084,6 +3119,7 @@ pub fn run() {
             // Error log commands
             get_error_log,
             clear_error_log,
+            get_renderer_errors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -548,7 +548,17 @@ impl ApplicationHandler for RenderApp {
             }
         };
 
-        let window = window.expect("Window should be created");
+        let window = match window {
+            Some(w) => w,
+            None => {
+                error!("Window was not created by display builder");
+                send_event(Event::Error {
+                    message: "Window creation failed. Try updating GPU drivers.".to_string(),
+                });
+                event_loop.exit();
+                return;
+            }
+        };
         let raw_window_handle = window.window_handle().ok().map(|h| h.as_raw());
 
         let gl_display = gl_config.display();
@@ -556,25 +566,53 @@ impl ApplicationHandler for RenderApp {
             .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
             .build(raw_window_handle);
 
-        let not_current_context = unsafe {
-            gl_display
-                .create_context(&gl_config, &context_attrs)
-                .expect("Failed to create OpenGL context")
+        let not_current_context = match unsafe { gl_display.create_context(&gl_config, &context_attrs) } {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                error!("Failed to create OpenGL 3.3 context: {}", e);
+                send_event(Event::Error {
+                    message: format!("Failed to create OpenGL 3.3 context: {}. Try updating GPU drivers.", e),
+                });
+                event_loop.exit();
+                return;
+            }
         };
 
-        let attrs = window
-            .build_surface_attributes(SurfaceAttributesBuilder::new())
-            .expect("Failed to build surface attributes");
-
-        let surface = unsafe {
-            gl_display
-                .create_window_surface(&gl_config, &attrs)
-                .expect("Failed to create window surface")
+        let attrs = match window.build_surface_attributes(SurfaceAttributesBuilder::new()) {
+            Ok(a) => a,
+            Err(e) => {
+                error!("Failed to build surface attributes: {}", e);
+                send_event(Event::Error {
+                    message: format!("Failed to build surface attributes: {}. Try updating GPU drivers.", e),
+                });
+                event_loop.exit();
+                return;
+            }
         };
 
-        let context = not_current_context
-            .make_current(&surface)
-            .expect("Failed to make context current");
+        let surface = match unsafe { gl_display.create_window_surface(&gl_config, &attrs) } {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to create window surface: {}", e);
+                send_event(Event::Error {
+                    message: format!("Failed to create window surface: {}. Try updating GPU drivers.", e),
+                });
+                event_loop.exit();
+                return;
+            }
+        };
+
+        let context = match not_current_context.make_current(&surface) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Failed to make GL context current: {}", e);
+                send_event(Event::Error {
+                    message: format!("Failed to make GL context current: {}. Try updating GPU drivers.", e),
+                });
+                event_loop.exit();
+                return;
+            }
+        };
 
         gl::load_with(|s| {
             let c_str = CString::new(s).unwrap();

@@ -40,6 +40,14 @@ pub enum RendererHealth {
     Stopped,
 }
 
+/// Entry in the application error log
+#[derive(Clone, serde::Serialize)]
+pub struct ErrorEntry {
+    pub timestamp: String,
+    pub source: String,
+    pub message: String,
+}
+
 /// Renderer process handle
 pub struct RendererProcess {
     child: Child,
@@ -499,6 +507,8 @@ pub struct AppState {
     midi_controller: Mutex<MidiController>,
     /// Current audio levels (left, right) for VU meters - updated by pump_audio
     audio_levels: Mutex<(f32, f32)>,
+    /// Application error log ring buffer for user-visible diagnostics
+    error_log: Mutex<std::collections::VecDeque<ErrorEntry>>,
 }
 
 impl Default for AppState {
@@ -508,6 +518,23 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub fn log_error(&self, source: &str, message: &str) {
+        if let Ok(mut log) = self.error_log.lock() {
+            if log.len() >= 100 {
+                log.pop_front();
+            }
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| format!("{}", d.as_secs()))
+                .unwrap_or_default();
+            log.push_back(ErrorEntry {
+                timestamp,
+                source: source.to_string(),
+                message: message.to_string(),
+            });
+        }
+    }
+
     pub fn new() -> Self {
         let mut decks = HashMap::new();
         // Initialize all 4 decks
@@ -522,6 +549,7 @@ impl AppState {
             compositor: Mutex::new(CompositorConfig::default()),
             midi_controller: Mutex::new(MidiController::new()),
             audio_levels: Mutex::new((0.0, 0.0)),
+            error_log: Mutex::new(std::collections::VecDeque::new()),
         }
     }
 }
@@ -2938,6 +2966,21 @@ fn configure_linux_webkit_workarounds() {
     }
 }
 
+/// Get the application error log
+#[tauri::command]
+fn get_error_log(state: State<'_, AppState>) -> Result<Vec<ErrorEntry>, String> {
+    let log = state.error_log.lock().map_err(|e| e.to_string())?;
+    Ok(log.iter().cloned().collect())
+}
+
+/// Clear the application error log
+#[tauri::command]
+fn clear_error_log(state: State<'_, AppState>) -> Result<String, String> {
+    let mut log = state.error_log.lock().map_err(|e| e.to_string())?;
+    log.clear();
+    Ok("Error log cleared".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Fix WebKitGTK EGL issues on Linux AppImage
@@ -3037,6 +3080,9 @@ pub fn run() {
             // Backward compatibility
             start_visualizer,
             stop_visualizer,
+            // Error log commands
+            get_error_log,
+            clear_error_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

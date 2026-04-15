@@ -525,7 +525,7 @@ impl AppState {
             }
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| format!("{}", d.as_secs()))
+                .map(|d| format!("{}", d.as_millis()))
                 .unwrap_or_default();
             log.push_back(ErrorEntry {
                 timestamp,

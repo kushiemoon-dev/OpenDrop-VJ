@@ -332,7 +332,18 @@ impl AudioEngine {
         }
 
         if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !handle.is_finished() {
+                if std::time::Instant::now() > deadline {
+                    warn!("Audio thread did not stop within 2s timeout, detaching");
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+            // If not finished: intentionally detach to avoid blocking UI
         }
 
         self.sample_rx = None;

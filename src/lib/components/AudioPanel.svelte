@@ -56,6 +56,7 @@
   let levelR = $state(0);
   /** @type {number | null} */
   let animationId = null;
+  let audioErrorPollCount = 0;
   let zeroLevelCount = $state(0);
   let showNoAudioHint = $state(false);
   const ZERO_LEVEL_THRESHOLD = 300; // ~5s at 60fps
@@ -89,10 +90,13 @@
           zeroLevelCount = 0;
           showNoAudioHint = false;
         }
-        // Check for audio stream errors
-        const audioErr = await invoke('get_audio_error');
-        if (audioErr) {
-          showToast(audioErr, 'error');
+        // Check for audio stream errors (~once per second at 60fps)
+        audioErrorPollCount++;
+        if (audioErrorPollCount % 60 === 0) {
+          const audioErr = await invoke('get_audio_error');
+          if (audioErr) {
+            showToast(audioErr, 'error');
+          }
         }
       } catch (e) {
         // Ignore errors, levels stay at previous value

@@ -3003,17 +3003,17 @@ fn clear_error_log(state: State<'_, AppState>) -> Result<String, String> {
 /// Get and clear renderer errors for a deck (also logs them to error log)
 #[tauri::command]
 fn get_renderer_errors(state: State<'_, AppState>, deck_id: DeckId) -> Result<Vec<String>, String> {
-    let decks = state.decks.lock().map_err(|e| e.to_string())?;
-    if let Some(deck) = decks.get(&deck_id) {
-        if let Some(ref renderer) = deck.renderer {
-            let errors = renderer.drain_errors();
-            for err in &errors {
-                state.log_error("renderer", err);
-            }
-            return Ok(errors);
-        }
+    let errors = {
+        let decks = state.decks.lock().map_err(|e| e.to_string())?;
+        decks.get(&deck_id)
+            .and_then(|deck| deck.renderer.as_ref())
+            .map(|r| r.drain_errors())
+            .unwrap_or_default()
+    }; // decks guard dropped here
+    for err in &errors {
+        state.log_error("renderer", err);
     }
-    Ok(vec![])
+    Ok(errors)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

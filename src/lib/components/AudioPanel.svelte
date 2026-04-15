@@ -4,6 +4,7 @@
   import VuMeter from './VuMeter.svelte';
   import StatusIndicator from './StatusIndicator.svelte';
   import { RefreshCw, Play, Square, Mic, Speaker, Monitor } from 'lucide-svelte';
+  import { showToast } from '$lib/stores/toast';
 
   /**
    * @typedef {{
@@ -87,6 +88,11 @@
         } else {
           zeroLevelCount = 0;
           showNoAudioHint = false;
+        }
+        // Check for audio stream errors
+        const audioErr = await invoke('get_audio_error');
+        if (audioErr) {
+          showToast(audioErr, 'error');
         }
       } catch (e) {
         // Ignore errors, levels stay at previous value

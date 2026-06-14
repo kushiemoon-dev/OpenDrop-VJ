@@ -5,6 +5,17 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-14
+
+### Fixed
+- CI: pnpm-workspace.yaml missing `packages` field; `allowBuilds` had placeholder values
+- CI: update `pnpm/action-setup` to v4 and `softprops/action-gh-release` to v2 (Node.js 20 deprecated June 16)
+- CI: bump Node.js to 22 on runners
+- Security: bump concurrently to v10 (fixes shell-quote critical CVE)
+- Security: bump electron-builder to v26 (fixes tar high CVEs)
+- Security: add pnpm overrides for shell-quote, tar, esbuild, cookie transitive deps
+- pnpm: move build allowlist from `onlyBuiltDependencies` (deprecated) to `pnpm-workspace.yaml` `allowBuilds` (pnpm v11)
+
 ## [0.4.0] - 2026-06-14
 
 > **Complete rewrite**: web-first stack (SvelteKit + Butterchurn + Electron)

@@ -1,38 +1,52 @@
 {
-  "name": "opendrop",
-  "version": "0.3.6",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
-  },
-  "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.55.0",
-    "@sveltejs/vite-plugin-svelte": "^5.1.1",
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/cli": "^2.10.1",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
-    "@tauri-apps/plugin-opener": "^2.5.3",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/svelte": "^5.3.1",
-    "@vitest/coverage-v8": "^4.1.0",
-    "jsdom": "^29.0.0",
-    "svelte": "^5.53.12",
-    "svelte-check": "^4.4.5",
-    "typescript": "^5.9.3",
-    "vite": "^6.4.2",
-    "vitest": "^4.1.0"
-  },
-  "dependencies": {
-    "lucide-svelte": "^0.577.0"
-  }
+	"name": "opendrop",
+	"private": true,
+	"version": "0.4.0",
+	"type": "module",
+	"main": "electron/main.cjs",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"test": "vitest",
+		"test:coverage": "vitest --coverage",
+		"test:e2e": "playwright test",
+		"electron:dev": "concurrently \"vite dev\" \"wait-on http://localhost:1420 && electron .\"",
+		"electron:build": "vite build && electron-builder"
+	},
+	"dependencies": {
+		"@lucide/svelte": "^0.577.0",
+		"butterchurn": "^2.6.7",
+		"butterchurn-presets": "^2.4.7"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild",
+			"core-js",
+			"electron"
+		]
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.60.0",
+		"@sveltejs/adapter-static": "^3.0.10",
+		"@sveltejs/kit": "^2.63.0",
+		"@sveltejs/vite-plugin-svelte": "^7.1.2",
+		"@testing-library/jest-dom": "^6.6.3",
+		"@testing-library/svelte": "^5.3.1",
+		"@types/node": "^25.9.3",
+		"@vitest/coverage-v8": "^3.0.0",
+		"concurrently": "^9.2.1",
+		"electron": "^42.4.0",
+		"electron-builder": "^25.1.8",
+		"jsdom": "^29.0.0",
+		"svelte": "^5.56.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.16",
+		"vitest": "^3.0.0",
+		"wait-on": "^8.0.5"
+	}
 }

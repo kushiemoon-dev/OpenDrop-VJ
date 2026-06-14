@@ -1,971 +1,1282 @@
-<script>
-  import { invoke } from "@tauri-apps/api/core";
-  import { onMount, onDestroy } from "svelte";
-  import { fly, fade, slide } from "svelte/transition";
-  import '../app.css';
+<script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import { Deck } from '$lib/engine/deck.js';
+	import { AudioEngine } from '$lib/engine/audio.js';
+	import { MainSync } from '$lib/engine/sync.js';
+	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
+	import { loadPresets, buildPresetList, searchPresets, getCategories, type PresetMeta } from '$lib/presets/index.js';
+	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
+	import { BeatDetector } from '$lib/engine/bpm.js';
 
-  // Components
-  import Header from '$lib/components/Header.svelte';
-  import DeckMiniCard from '$lib/components/DeckMiniCard.svelte';
-  import AudioPanel from '$lib/components/AudioPanel.svelte';
-  import PresetBrowser from '$lib/components/PresetBrowser.svelte';
-  import PlaylistPanel from '$lib/components/PlaylistPanel.svelte';
-  import CrossfaderPanel from '$lib/components/CrossfaderPanel.svelte';
-  import VideoOutputPanel from '$lib/components/VideoOutputPanel.svelte';
-  import MidiPanel from '$lib/components/MidiPanel.svelte';
-  import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+	// — State —————————————————————————————————————————————
+	let canvasA: HTMLCanvasElement | undefined = $state();
+	let canvasB: HTMLCanvasElement | undefined = $state();
+	let deckA: Deck | null = null;
+	let deckB: Deck | null = null;
+	let audio: AudioEngine | null = null;
 
-  // Lucide icons for sidebar toggle
-  import { PanelRightOpen, PanelRightClose, X } from 'lucide-svelte';
+	let presets: Record<string, object> = $state({});
+	let presetList: PresetMeta[] = $state([]);
+	let searchQuery = $state('');
 
-  // Toast store - sync with global store for child components
-  import { toast as globalToast } from '$lib/stores/toast';
+	let activeDeck = $state<'A' | 'B'>('A');
+	let presetA = $state('');
+	let presetB = $state('');
+	let crossfader = $state(0); // 0 = 100% A, 1 = 100% B
 
-  // Settings store for custom preset paths
-  import { settings } from '$lib/stores/settings.svelte';
+	let sourceLabel = $state('none');
+	let currentDeviceId = $state('');
+	let status = $state<'idle' | 'running' | 'error'>('idle');
+	let errorMsg = $state('');
+	let sourceError = $state('');
+	let audioEl: HTMLAudioElement | undefined = $state();
+	let audioDevices = $state<MediaDeviceInfo[]>([]);
+	let showDevicePicker = $state(false);
+	let vuLevel = $state(0);
+	let outputOpen = $state(false);
+	let sync: MainSync | null = null;
 
-  // Sidebar collapsed state
-  let sidebarCollapsed = $state(false);
-  let sidebarMobileOpen = $state(false);
+	// — Playlist state ————————————————————————————————————
+	let playlistIntervalSec = $state(10);
+	let playlistMode = $state<PlaylistMode>('sequential');
+	let playlistAPlaying = $state(false);
+	let playlistBPlaying = $state(false);
+	let playlistA: PlaylistEngine | null = null;
+	let playlistB: PlaylistEngine | null = null;
+	let playlistAItems = $state<string[]>([]);
+	let playlistBItems = $state<string[]>([]);
 
-  // Settings panel state
-  let settingsOpen = $state(false);
+	// — MIDI ——————————————————————————————————————————————
+	type MidiAction =
+		| 'crossfader'
+		| 'preset-prev-a' | 'preset-next-a'
+		| 'preset-prev-b' | 'preset-next-b'
+		| 'playlist-toggle-a' | 'playlist-toggle-b'
+		| 'playlist-prev-a' | 'playlist-next-a'
+		| 'playlist-prev-b' | 'playlist-next-b';
 
-  /**
-   * @typedef {{ name: string, path: string }} Preset
-   * @typedef {{ name: string, path: string }} PlaylistItem
-   * @typedef {{ name: string, items: PlaylistItem[], current_index: number, shuffle: boolean, auto_cycle: boolean, cycle_duration_secs: number }} Playlist
-   * @typedef {{ id: number, running: boolean, preset: string | null, volume: number, beat_sensitivity: number, playlist: Playlist }} DeckInfo
-   * @typedef {{ position: number, side_a: number[], side_b: number[], curve: string, enabled: boolean }} CrossfaderInfo
-   * @typedef {{ name: string, description: string, is_default: boolean, is_monitor: boolean, device_type: 'input' | 'output' | 'monitor' }} AudioDevice
-   */
+	const MIDI_ACTIONS: MidiAction[] = [
+		'crossfader',
+		'preset-prev-a', 'preset-next-a',
+		'preset-prev-b', 'preset-next-b',
+		'playlist-toggle-a', 'playlist-toggle-b',
+		'playlist-prev-a', 'playlist-next-a',
+		'playlist-prev-b', 'playlist-next-b',
+	];
 
-  // Multi-deck state
-  /** @type {{ decks: DeckInfo[], audio_running: boolean, preset_dir: string, crossfader: CrossfaderInfo, compositor: any }} */
-  let multiDeckStatus = $state({
-    decks: [
-      { id: 0, running: false, preset: null, volume: 1.0, beat_sensitivity: 1.0, playlist: { name: '', items: [], current_index: 0, shuffle: false, auto_cycle: false, cycle_duration_secs: 30 } },
-      { id: 1, running: false, preset: null, volume: 1.0, beat_sensitivity: 1.0, playlist: { name: '', items: [], current_index: 0, shuffle: false, auto_cycle: false, cycle_duration_secs: 30 } },
-      { id: 2, running: false, preset: null, volume: 1.0, beat_sensitivity: 1.0, playlist: { name: '', items: [], current_index: 0, shuffle: false, auto_cycle: false, cycle_duration_secs: 30 } },
-      { id: 3, running: false, preset: null, volume: 1.0, beat_sensitivity: 1.0, playlist: { name: '', items: [], current_index: 0, shuffle: false, auto_cycle: false, cycle_duration_secs: 30 } },
-    ],
-    audio_running: false,
-    preset_dir: "",
-    crossfader: {
-      position: 0.5,
-      side_a: [0, 1],
-      side_b: [2, 3],
-      curve: 'equal_power',
-      enabled: false
-    },
-    compositor: {
-      enabled: false,
-      output_width: 1920,
-      output_height: 1080,
-      link_to_crossfader: true,
-      deck_settings: {}
-    }
-  });
+	const MIDI_LABELS: Record<MidiAction, string> = {
+		'crossfader': 'Crossfader',
+		'preset-prev-a': '◀ Preset A', 'preset-next-a': '▶ Preset A',
+		'preset-prev-b': '◀ Preset B', 'preset-next-b': '▶ Preset B',
+		'playlist-toggle-a': '⏯ Playlist A', 'playlist-toggle-b': '⏯ Playlist B',
+		'playlist-prev-a': '⏮ Playlist A', 'playlist-next-a': '⏭ Playlist A',
+		'playlist-prev-b': '⏮ Playlist B', 'playlist-next-b': '⏭ Playlist B',
+	};
 
-  // Selected deck for preset browser
-  let selectedDeckId = $state(0);
+	const midiSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
+	let midi: MidiEngine | null = null;
+	let midiConnected = $state(false);
+	let midiDeviceNames = $state<string[]>([]);
+	let midiMappings = $state<Partial<Record<MidiAction, MidiTriggerKey>>>({});
+	let learningAction = $state<MidiAction | null>(null);
 
-  // Audio & UI state
-  /** @type {AudioDevice[]} */
-  let audioDevices = $state([]);
-  let selectedDevice = $state("");
-  let projectmVersion = $state("");
-  /** @type {Preset[]} */
-  let presets = $state([]);
-  let loadingPresets = $state(false);
-  let audioPumpActive = $state(false);
-  /** @type {number | null} */
-  let audioPumpId = null;
+	// — Electron ——————————————————————————————————————————
+	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
+	let loopbackSources = $state<{ id: string; name: string }[]>([]);
+	let showLoopbackPicker = $state(false);
 
-  // Toast notifications - local state synced with global store
-  let toast = $state({ message: '', type: 'info', visible: false });
+	// — Beat detection ————————————————————————————————————
+	let beatDetector: BeatDetector | null = null;
+	let detectedBpm = $state(0);
+	let beatSyncA = $state(false);
+	let beatSyncB = $state(false);
+	let beatsPerChange = $state(8);
+	let beatCountA = 0;
+	let beatCountB = 0;
 
-  // Sync global toast to local state for child components
-  $effect(() => {
-    if (globalToast.visible && globalToast.message !== toast.message) {
-      toast = { ...globalToast };
-    }
-  });
+	// — Favoris + tags ————————————————————————————————————
+	let favorites = $state<string[]>([]);
+	let activeTag = $state<string>(''); // '' = tous, '★' = favoris, 'Auteur' = tag
 
-  // Derived state
-  let anyDeckRunning = $derived(multiDeckStatus.decks.some(d => d.running));
-  let selectedDeck = $derived(multiDeckStatus.decks.find(d => d.id === selectedDeckId));
-  let runningDecksCount = $derived(multiDeckStatus.decks.filter(d => d.running).length);
+	// — Derived ———————————————————————————————————————————
+	let allTags = $derived(getCategories(presetList));
+	let filteredPresets = $derived.by(() => {
+		let list = searchPresets(presetList, searchQuery);
+		if (activeTag === '★') return list.filter((p) => favorites.includes(p.name));
+		if (activeTag) return list.filter((p) => p.category === activeTag);
+		return list;
+	});
+	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
+	let opacityA = $derived(1 - crossfader);
+	let opacityB = $derived(crossfader);
+	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
+	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
 
-  // Audio pump loop - sends audio to all active decks
-  let audioPumpErrorCount = $state(0);
-  const AUDIO_PUMP_ERROR_THRESHOLD = 5;
+	// — Sync crossfader to output window ——————————————————
+	$effect(() => {
+		sync?.sendCrossfader(crossfader);
+	});
 
-  async function audioPumpLoop() {
-    if (!audioPumpActive) return;
-    try {
-      await invoke("pump_audio");
-      audioPumpErrorCount = 0; // Reset on success
-    } catch (e) {
-      audioPumpErrorCount++;
-      if (audioPumpErrorCount === AUDIO_PUMP_ERROR_THRESHOLD) {
-        showToast("Audio capture failing - check device connection", "error");
-      }
-    }
-    audioPumpId = requestAnimationFrame(audioPumpLoop);
-  }
+	// — VU meter polling ——————————————————————————————————
+	$effect(() => {
+		if (status !== 'running' || !audio) return;
+		let rafId: number;
+		const tick = () => {
+			vuLevel = audio!.getLevels().rms;
+			rafId = requestAnimationFrame(tick);
+		};
+		rafId = requestAnimationFrame(tick);
+		return () => cancelAnimationFrame(rafId);
+	});
 
-  function startAudioPump() {
-    if (!audioPumpActive) {
-      audioPumpActive = true;
-      audioPumpLoop();
-    }
-  }
+	// — Persistance localStorage ——————————————————————————
+	// _ready évite que les $effect écrasent le localStorage avant qu'onMount l'ait lu
+	let _ready = $state(false);
+	$effect(() => {
+		if (!_ready) return;
+		localStorage.setItem('od-pl-a', JSON.stringify(playlistAItems));
+		localStorage.setItem('od-pl-b', JSON.stringify(playlistBItems));
+		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
+		localStorage.setItem('od-pl-mode', playlistMode);
+		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
+		localStorage.setItem('od-favorites', JSON.stringify(favorites));
+	});
 
-  function stopAudioPump() {
-    audioPumpActive = false;
-    if (audioPumpId) {
-      cancelAnimationFrame(audioPumpId);
-      audioPumpId = null;
-    }
-  }
+	// — Lifecycle ——————————————————————————————————————————
+	onMount(async () => {
+		// Restaurer les playlists sauvegardées
+		try {
+			const savedA = localStorage.getItem('od-pl-a');
+			if (savedA) playlistAItems = JSON.parse(savedA);
+			const savedB = localStorage.getItem('od-pl-b');
+			if (savedB) playlistBItems = JSON.parse(savedB);
+			const savedInterval = localStorage.getItem('od-pl-interval');
+			if (savedInterval) playlistIntervalSec = Number(savedInterval);
+			const savedMode = localStorage.getItem('od-pl-mode');
+			if (savedMode) playlistMode = savedMode as PlaylistMode;
+			const savedMidi = localStorage.getItem('od-midi-mappings');
+			if (savedMidi) midiMappings = JSON.parse(savedMidi);
+			const savedFavs = localStorage.getItem('od-favorites');
+			if (savedFavs) favorites = JSON.parse(savedFavs);
+		} catch {}
+		_ready = true; // autorise les $effect de sauvegarde
 
-  // Start/stop audio pump based on any deck running
-  $effect(() => {
-    if (anyDeckRunning && multiDeckStatus.audio_running) {
-      startAudioPump();
-    } else {
-      stopAudioPump();
-    }
-  });
+		presets = await loadPresets();
+		presetList = buildPresetList(presets);
+		if (presetList.length > 0) presetA = presetList[0].name;
+		if (presetList.length > 1) presetB = presetList[1].name;
+	});
 
-  onMount(async () => {
-    await refreshMultiDeckStatus();
-    await loadAudioDevices();
-    await loadPresets();
-    projectmVersion = await invoke("get_projectm_version");
-  });
+	onDestroy(() => {
+		playlistA?.destroy();
+		playlistB?.destroy();
+		deckA?.destroy();
+		deckB?.destroy();
+		audio?.destroy();
+		sync?.destroy();
+		midi?.destroy();
+		beatDetector?.destroy();
+	});
 
-  onDestroy(() => {
-    stopAudioPump();
-  });
+	// — Actions ————————————————————————————————————————————
+	async function startVisualizer() {
+		if (!canvasA || !canvasB) return;
+		try {
+			const testCtx = canvasA.getContext('webgl2');
+			if (!testCtx) {
+				throw new Error(
+					'WebGL2 unavailable. In LibreWolf/Firefox: go to about:config → set webgl.disabled = false.'
+				);
+			}
 
-  // API calls
-  async function refreshMultiDeckStatus() {
-    try {
-      multiDeckStatus = await invoke("get_multi_deck_status");
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-    // Check for renderer errors on running decks
-    for (const deck of multiDeckStatus.decks) {
-      if (deck.running) {
-        try {
-          const errors = await invoke('get_renderer_errors', { deckId: deck.id });
-          for (const err of errors) {
-            showToast(`Deck ${deck.id + 1}: ${err}`, 'error');
-          }
-        } catch (_) {}
-      }
-    }
-  }
+			audio = new AudioEngine();
+			await audio.resume();
 
-  async function loadAudioDevices() {
-    try {
-      audioDevices = await invoke("list_audio_devices");
-      const defaultDevice = audioDevices.find(d => d.is_default);
-      if (defaultDevice) {
-        selectedDevice = defaultDevice.name;
-      }
-    } catch (e) {
-      showToast("Error loading devices: " + e, "error");
-    }
-  }
+			const w = canvasA.clientWidth || 1280;
+			const h = canvasA.clientHeight || 720;
 
-  async function loadPresets() {
-    loadingPresets = true;
-    try {
-      // Pass custom preset paths to backend if configured
-      const customPaths = settings.customPresetPaths;
-      if (customPaths.length > 0) {
-        // Backend will scan both defaults + custom paths when dirs is provided
-        presets = await invoke("list_presets", { dirs: customPaths });
-      } else {
-        // Use defaults only
-        presets = await invoke("list_presets", { dirs: null });
-      }
-    } catch (e) {
-      showToast("Error loading presets: " + e, "error");
-    }
-    loadingPresets = false;
-  }
+			deckA = new Deck(canvasA, 'deck-a');
+			deckB = new Deck(canvasB, 'deck-b');
 
-  /**
-   * @param {string} message
-   * @param {string} [type="info"]
-   */
-  function showToast(message, type = "info") {
-    toast = { message, type, visible: true };
-    setTimeout(() => {
-      toast.visible = false;
-    }, 3000);
-  }
+			await deckA.init(audio.ctx, { width: w, height: h });
+			await deckB.init(audio.ctx, { width: w, height: h });
 
-  // Deck actions
-  /** @param {number} deckId */
-  async function startDeck(deckId) {
-    try {
-      const deck = multiDeckStatus.decks.find(d => d.id === deckId);
-      const result = await invoke("start_deck", {
-        deckId,
-        width: 1280,
-        height: 720,
-        fullscreen: false,
-        presetPath: deck?.preset || null
-      });
-      showToast(/** @type {string} */ (result), "success");
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Deck start failed: " + e + ". If visualization crashes, try updating your GPU drivers.", "error");
-    }
-  }
+			if (presetA && presets[presetA]) deckA.loadPreset(presets[presetA], 0.0);
+			if (presetB && presets[presetB]) deckB.loadPreset(presets[presetB], 0.0);
 
-  /** @param {number} deckId */
-  async function stopDeck(deckId) {
-    try {
-      const result = await invoke("stop_deck", { deckId });
-      showToast(/** @type {string} */ (result), "success");
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			deckA.connectAudio(audio.gainNode);
+			deckB.connectAudio(audio.gainNode);
 
-  /** @param {number} deckId */
-  async function toggleFullscreen(deckId) {
-    try {
-      await invoke("toggle_fullscreen", { deckId });
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			deckA.startRenderLoop();
+			deckB.startRenderLoop();
 
-  /**
-   * @param {number} deckId
-   * @param {number} volume
-   */
-  async function setDeckVolume(deckId, volume) {
-    try {
-      await invoke("set_deck_volume", { deckId, volume });
-      // Update local state immediately for responsiveness
-      const deck = multiDeckStatus.decks.find(d => d.id === deckId);
-      if (deck) deck.volume = volume;
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, (name) => {
+				presetA = name;
+				deckA?.loadPreset(presets[name], 2.0);
+				sync?.sendPreset('A', name);
+				playlistAPlaying = playlistA?.playing ?? false;
+			});
+			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, (name) => {
+				presetB = name;
+				deckB?.loadPreset(presets[name], 2.0);
+				sync?.sendPreset('B', name);
+				playlistBPlaying = playlistB?.playing ?? false;
+			});
 
-  // Audio actions
-  async function startAudio() {
-    try {
-      const result = await invoke("start_audio", {
-        deviceName: selectedDevice || null
-      });
-      showToast(result, "success");
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			sync = new MainSync();
+			sync.onOutputReady(() => {
+				sync?.sendPreset('A', presetA);
+				sync?.sendPreset('B', presetB);
+				sync?.sendCrossfader(crossfader);
+				if (currentDeviceId) sync?.sendSource(currentDeviceId);
+			});
 
-  async function stopAudio() {
-    try {
-      const result = await invoke("stop_audio");
-      showToast(result, "success");
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			beatDetector = new BeatDetector(audio.analyser);
+			beatDetector.start(() => {
+				detectedBpm = beatDetector?.bpm ?? 0;
+				if (beatSyncA) {
+					beatCountA = (beatCountA + 1) % beatsPerChange;
+					if (beatCountA === 0) {
+						if (playlistAItems.length > 0) playlistA?.next();
+						else applyMidiAction('preset-next-a', 127);
+					}
+				}
+				if (beatSyncB) {
+					beatCountB = (beatCountB + 1) % beatsPerChange;
+					if (beatCountB === 0) {
+						if (playlistBItems.length > 0) playlistB?.next();
+						else applyMidiAction('preset-next-b', 127);
+					}
+				}
+			});
 
-  // Preset actions
-  /**
-   * @param {string} path
-   * @param {number} [deckId]
-   */
-  async function loadPresetOnDeck(path, deckId = selectedDeckId) {
-    if (!path) return;
-    try {
-      const result = await invoke("load_preset", { path, deckId });
-      showToast("Loaded: " + path.split('/').pop(), "success");
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Error: " + e, "error");
-    }
-  }
+			status = 'running';
+		} catch (e) {
+			status = 'error';
+			errorMsg = e instanceof Error ? e.message : String(e);
+		}
+	}
 
-  /** @param {Preset} preset */
-  function selectPreset(preset) {
-    // Update local state for selected deck
-    const deck = multiDeckStatus.decks.find(d => d.id === selectedDeckId);
-    if (deck) {
-      deck.preset = preset.path;
-    }
-    // If deck is running, load the preset immediately
-    if (deck?.running) {
-      loadPresetOnDeck(preset.path, selectedDeckId);
-    }
-  }
+	async function openLoopbackPicker() {
+		sourceError = '';
+		try {
+			loopbackSources = await window.electronAPI!.getLoopbackSources();
+			if (loopbackSources.length === 1) {
+				await connectLoopback(loopbackSources[0]);
+			} else {
+				showLoopbackPicker = true;
+			}
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
 
-  /** @param {number} deckId */
-  function selectDeck(deckId) {
-    selectedDeckId = deckId;
-  }
+	async function connectLoopback(source: { id: string; name: string }) {
+		if (!audio) return;
+		sourceError = '';
+		showLoopbackPicker = false;
+		try {
+			await audio.connectLoopback(source.id);
+			sourceLabel = `loopback: ${source.name}`;
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
 
-  // Playlist actions
-  /** @param {Preset} preset */
-  async function addToPlaylist(preset) {
-    try {
-      await invoke("playlist_add", {
-        deckId: selectedDeckId,
-        name: preset.name,
-        path: preset.path
-      });
-      await refreshMultiDeckStatus();
-    } catch (e) {
-      showToast("Error adding to playlist: " + e, "error");
-    }
-  }
+	async function connectMic() {
+		if (!audio) return;
+		sourceError = '';
+		try {
+			await audio.connectMic();
+			sourceLabel = 'microphone';
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function openDevicePicker() {
+		sourceError = '';
+		try {
+			audioDevices = await AudioEngine.listAudioDevices();
+			showDevicePicker = true;
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function connectDevice(device: MediaDeviceInfo) {
+		if (!audio) return;
+		sourceError = '';
+		showDevicePicker = false;
+		try {
+			await audio.resume();
+			await audio.connectDevice(device.deviceId);
+			currentDeviceId = device.deviceId;
+			sourceLabel = device.label || device.deviceId;
+			sync?.sendSource(device.deviceId);
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function connectFile() {
+		if (!audio || !audioEl) return;
+		sourceError = '';
+		try {
+			audio.connectMediaElement(audioEl);
+			audioEl.play();
+			sourceLabel = 'file';
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function onFileChange(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file || !audioEl) return;
+		audioEl.src = URL.createObjectURL(file);
+		if (status === 'running') connectFile();
+	}
+
+	function selectPreset(name: string) {
+		if (activeDeck === 'A') {
+			presetA = name;
+			deckA?.loadPreset(presets[name], 2.0);
+			sync?.sendPreset('A', name);
+		} else {
+			presetB = name;
+			deckB?.loadPreset(presets[name], 2.0);
+			sync?.sendPreset('B', name);
+		}
+	}
+
+	function addToPlaylist(deck: 'A' | 'B', name: string) {
+		if (deck === 'A') {
+			if (playlistAItems.includes(name)) return;
+			playlistAItems = [...playlistAItems, name];
+			playlistA?.setItems(playlistAItems);
+		} else {
+			if (playlistBItems.includes(name)) return;
+			playlistBItems = [...playlistBItems, name];
+			playlistB?.setItems(playlistBItems);
+		}
+	}
+
+	function removeFromPlaylist(deck: 'A' | 'B', name: string) {
+		if (deck === 'A') {
+			playlistAItems = playlistAItems.filter((n) => n !== name);
+			playlistA?.setItems(playlistAItems);
+		} else {
+			playlistBItems = playlistBItems.filter((n) => n !== name);
+			playlistB?.setItems(playlistBItems);
+		}
+	}
+
+	function togglePlaylist(deck: 'A' | 'B') {
+		const pl = deck === 'A' ? playlistA : playlistB;
+		if (!pl) return;
+		pl.setInterval(playlistIntervalSec * 1000);
+		pl.setMode(playlistMode);
+		if (pl.playing) {
+			pl.stop();
+		} else {
+			pl.start();
+		}
+		if (deck === 'A') playlistAPlaying = pl.playing;
+		else playlistBPlaying = pl.playing;
+	}
+
+	function playlistNext(deck: 'A' | 'B') {
+		(deck === 'A' ? playlistA : playlistB)?.next();
+	}
+
+	function playlistPrev(deck: 'A' | 'B') {
+		(deck === 'A' ? playlistA : playlistB)?.prev();
+	}
+
+	function toggleBeatSync(deck: 'A' | 'B') {
+		if (deck === 'A') {
+			beatSyncA = !beatSyncA;
+			beatCountA = 0;
+			playlistA?.setInterval(beatSyncA ? Infinity : playlistIntervalSec * 1000);
+		} else {
+			beatSyncB = !beatSyncB;
+			beatCountB = 0;
+			playlistB?.setInterval(beatSyncB ? Infinity : playlistIntervalSec * 1000);
+		}
+	}
+
+	async function toggleMidi() {
+		if (midiConnected) {
+			midi?.destroy();
+			midi = null;
+			midiConnected = false;
+			midiDeviceNames = [];
+			learningAction = null;
+			return;
+		}
+		try {
+			midi = new MidiEngine();
+			await midi.connect();
+			midiConnected = true;
+			midiDeviceNames = midi.deviceNames;
+			midi.onMessage((msg) => {
+				const key = triggerKey(msg);
+				if (learningAction !== null) {
+					// Mode apprentissage : enregistre le trigger
+					if (msg.type === 'note_off') return; // ignore note-off pendant learn
+					midiMappings = { ...midiMappings, [learningAction]: key };
+					learningAction = null;
+					return;
+				}
+				// Dispatcher
+				for (const [action, mapped] of Object.entries(midiMappings) as [MidiAction, MidiTriggerKey][]) {
+					if (mapped !== key) continue;
+					if (msg.type === 'note_off') break; // actions déclenchées sur note_on ou cc
+					applyMidiAction(action as MidiAction, msg.value);
+					break;
+				}
+			});
+		} catch (e) {
+			midiConnected = false;
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	function startLearn(action: MidiAction) {
+		learningAction = learningAction === action ? null : action;
+	}
+
+	function clearMapping(action: MidiAction) {
+		const { [action]: _, ...rest } = midiMappings;
+		midiMappings = rest as Partial<Record<MidiAction, MidiTriggerKey>>;
+	}
+
+	function applyMidiAction(action: MidiAction, value: number) {
+		if (status !== 'running') return;
+		switch (action) {
+			case 'crossfader':
+				crossfader = value / 127;
+				break;
+			case 'preset-prev-a': {
+				if (presetList.length === 0) break;
+				const idx = ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
+				selectPresetForDeck('A', presetList[idx].name);
+				break;
+			}
+			case 'preset-next-a': {
+				if (presetList.length === 0) break;
+				const idx = (presetIdxA + 1) % presetList.length;
+				selectPresetForDeck('A', presetList[idx].name);
+				break;
+			}
+			case 'preset-prev-b': {
+				if (presetList.length === 0) break;
+				const idx = ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
+				selectPresetForDeck('B', presetList[idx].name);
+				break;
+			}
+			case 'preset-next-b': {
+				if (presetList.length === 0) break;
+				const idx = (presetIdxB + 1) % presetList.length;
+				selectPresetForDeck('B', presetList[idx].name);
+				break;
+			}
+			case 'playlist-toggle-a': togglePlaylist('A'); break;
+			case 'playlist-toggle-b': togglePlaylist('B'); break;
+			case 'playlist-prev-a': playlistPrev('A'); break;
+			case 'playlist-next-a': playlistNext('A'); break;
+			case 'playlist-prev-b': playlistPrev('B'); break;
+			case 'playlist-next-b': playlistNext('B'); break;
+		}
+	}
+
+	function selectPresetForDeck(deck: 'A' | 'B', name: string) {
+		if (deck === 'A') {
+			presetA = name;
+			deckA?.loadPreset(presets[name], 2.0);
+			sync?.sendPreset('A', name);
+		} else {
+			presetB = name;
+			deckB?.loadPreset(presets[name], 2.0);
+			sync?.sendPreset('B', name);
+		}
+	}
+
+	function toggleFavorite(name: string) {
+		if (favorites.includes(name)) {
+			favorites = favorites.filter((n) => n !== name);
+		} else {
+			favorites = [...favorites, name];
+		}
+	}
+
+	function exportPlaylists() {
+		const data = JSON.stringify({
+			version: 1,
+			playlistA: playlistAItems,
+			playlistB: playlistBItems,
+			intervalSec: playlistIntervalSec,
+			mode: playlistMode,
+		}, null, 2);
+		const blob = new Blob([data], { type: 'application/json' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'opendrop-playlists.json';
+		a.click();
+		URL.revokeObjectURL(url);
+	}
+
+	function importPlaylists(e: Event) {
+		const file = (e.target as HTMLInputElement).files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			try {
+				const data = JSON.parse(reader.result as string);
+				if (Array.isArray(data.playlistA)) playlistAItems = data.playlistA;
+				if (Array.isArray(data.playlistB)) playlistBItems = data.playlistB;
+				if (typeof data.intervalSec === 'number') playlistIntervalSec = data.intervalSec;
+				if (data.mode === 'sequential' || data.mode === 'shuffle') playlistMode = data.mode;
+				playlistA?.setItems(playlistAItems);
+				playlistB?.setItems(playlistBItems);
+			} catch {}
+		};
+		reader.readAsText(file);
+		(e.target as HTMLInputElement).value = '';
+	}
+
+	function openOutput() {
+		window.open('/output', 'opendrop-output', 'width=1280,height=720');
+		outputOpen = true;
+		// Give the window ~800ms to init, then push current state
+		setTimeout(() => {
+			sync?.sendPreset('A', presetA);
+			sync?.sendPreset('B', presetB);
+			sync?.sendCrossfader(crossfader);
+			if (currentDeviceId) sync?.sendSource(currentDeviceId);
+		}, 800);
+	}
+
+	function onResize() {
+		if (status !== 'running') return;
+		if (canvasA) deckA?.resize(canvasA.clientWidth, canvasA.clientHeight);
+		if (canvasB) deckB?.resize(canvasB.clientWidth, canvasB.clientHeight);
+	}
+
+	function onKeydown(e: KeyboardEvent) {
+		// Ignorer si on tape dans un champ texte
+		const tag = (e.target as HTMLElement).tagName;
+		if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+		switch (e.key) {
+			case 'ArrowLeft':
+				e.preventDefault();
+				crossfader = Math.max(0, parseFloat((crossfader - 0.05).toFixed(2)));
+				break;
+			case 'ArrowRight':
+				e.preventDefault();
+				crossfader = Math.min(1, parseFloat((crossfader + 0.05).toFixed(2)));
+				break;
+			case 'Tab':
+				e.preventDefault();
+				activeDeck = activeDeck === 'A' ? 'B' : 'A';
+				break;
+			case '[':
+				e.preventDefault();
+				applyMidiAction(activeDeck === 'A' ? 'preset-prev-a' : 'preset-prev-b', 127);
+				break;
+			case ']':
+				e.preventDefault();
+				applyMidiAction(activeDeck === 'A' ? 'preset-next-a' : 'preset-next-b', 127);
+				break;
+			case ' ':
+				e.preventDefault();
+				togglePlaylist(activeDeck);
+				break;
+			case 'n':
+			case 'N':
+				e.preventDefault();
+				playlistNext(activeDeck);
+				break;
+			case 'p':
+			case 'P':
+				e.preventDefault();
+				playlistPrev(activeDeck);
+				break;
+		}
+	}
 </script>
 
-<div class="app">
-  <Header
-    version={projectmVersion}
-    visualizerRunning={anyDeckRunning}
-    audioRunning={multiDeckStatus.audio_running}
-    onSettingsClick={() => settingsOpen = true}
-  />
+<svelte:window onresize={onResize} onkeydown={onKeydown} />
+<audio bind:this={audioEl} style="display:none" crossorigin="anonymous"></audio>
 
-  <div class="main-layout" class:sidebar-collapsed={sidebarCollapsed}>
-    <!-- Mobile sidebar toggle button -->
-    <button
-      class="sidebar-mobile-toggle"
-      onclick={() => sidebarMobileOpen = true}
-      aria-label="Open sidebar"
-    >
-      <PanelRightOpen size={20} />
-    </button>
+<main>
+	<div class="visualizer-wrap">
+		<!-- Deck A — base layer -->
+		<canvas
+			bind:this={canvasA}
+			class="deck-canvas"
+			style="opacity:{opacityA}"
+		></canvas>
+		<!-- Deck B — top layer -->
+		<canvas
+			bind:this={canvasB}
+			class="deck-canvas"
+			style="opacity:{opacityB}"
+		></canvas>
 
-    <!-- Desktop sidebar collapse toggle -->
-    <button
-      class="sidebar-collapse-toggle"
-      onclick={() => sidebarCollapsed = !sidebarCollapsed}
-      aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-    >
-      {#if sidebarCollapsed}
-        <PanelRightOpen size={18} />
-      {:else}
-        <PanelRightClose size={18} />
-      {/if}
-    </button>
-    <main class="main-content">
-      <!-- Multi-deck grid -->
-      <div class="decks-section">
-        <div class="section-header">
-          <h2>Decks</h2>
-          <span class="running-count">
-            {runningDecksCount} / 4 running
-          </span>
-        </div>
-        <div class="decks-grid">
-          {#each multiDeckStatus.decks as deck (deck.id)}
-            <DeckMiniCard
-              deckId={deck.id}
-              running={deck.running}
-              preset={deck.preset}
-              volume={deck.volume}
-              selected={selectedDeckId === deck.id}
-              onStart={() => startDeck(deck.id)}
-              onStop={() => stopDeck(deck.id)}
-              onFullscreen={() => toggleFullscreen(deck.id)}
-              onVolumeChange={(/** @type {number} */ v) => setDeckVolume(deck.id, v)}
-              onSelect={selectDeck}
-            />
-          {/each}
-        </div>
-      </div>
+		{#if status === 'idle'}
+			<div class="overlay">
+				<h1 class="logo">OpenDrop</h1>
+				<p class="tagline">Milkdrop visualizer — web-first</p>
+				<button class="btn-primary" onclick={startVisualizer}>▶ Start</button>
+			</div>
+		{/if}
 
-      <!-- Preset browser for selected deck -->
-      <div class="preset-section">
-        <div class="section-header">
-          <h2>Presets for Deck {selectedDeckId + 1}</h2>
-        </div>
-        <PresetBrowser
-          {presets}
-          currentPreset={selectedDeck?.preset || ''}
-          loading={loadingPresets}
-          onSelect={selectPreset}
-          onLoad={(/** @type {string} */ path) => loadPresetOnDeck(path)}
-          onAddToPlaylist={addToPlaylist}
-        />
-      </div>
-    </main>
+		{#if status === 'error'}
+			<div class="overlay error">
+				<p>⚠ {errorMsg}</p>
+				<button class="btn-secondary" onclick={() => { status = 'idle'; errorMsg = ''; }}>Retry</button>
+			</div>
+		{/if}
+	</div>
 
-    <!-- Mobile sidebar overlay backdrop -->
-    {#if sidebarMobileOpen}
-      <div
-        class="sidebar-backdrop"
-        onclick={() => sidebarMobileOpen = false}
-        onkeydown={(e) => e.key === 'Escape' && (sidebarMobileOpen = false)}
-        role="button"
-        tabindex="-1"
-        aria-label="Close sidebar"
-        transition:fade={{ duration: 200 }}
-      ></div>
-    {/if}
+	<aside class="controls">
+		<!-- Audio source -->
+		<div class="controls-section">
+			<span class="label">Audio source</span>
+			<div class="btn-row">
+				<button class="btn-sm" class:active={sourceLabel === 'microphone'} onclick={connectMic} disabled={status !== 'running'}>Mic</button>
+				<button class="btn-sm" onclick={openDevicePicker} disabled={status !== 'running'}>Pick device</button>
+				{#if isElectron}
+					<button class="btn-sm electron-loopback" class:active={sourceLabel.startsWith('loopback')} onclick={openLoopbackPicker} disabled={status !== 'running'} title="Capture system audio (Electron)">⟲ Loopback</button>
+				{/if}
+			</div>
+			{#if showLoopbackPicker}
+				<div class="device-picker">
+					<span class="label">Select loopback source</span>
+					{#each loopbackSources as src}
+						<button class="device-item" onclick={() => connectLoopback(src)}>{src.name}</button>
+					{/each}
+					<button class="btn-sm" onclick={() => showLoopbackPicker = false}>Cancel</button>
+				</div>
+			{/if}
+			<div class="file-row">
+				<label class="btn-sm file-label">
+					File
+					<input type="file" accept="audio/*" onchange={onFileChange} style="display:none" />
+				</label>
+				{#if audioEl?.src && status === 'running'}
+					<button class="btn-sm" class:active={sourceLabel === 'file'} onclick={connectFile}>▶ Play</button>
+				{/if}
+			</div>
+			{#if sourceLabel !== 'none'}
+				<span class="source-badge">▶ {sourceLabel}</span>
+			{/if}
+			{#if status === 'running'}
+				<div class="vu-meter">
+					<div class="vu-bar" style="width:{Math.round(vuLevel * 100)}%"></div>
+				</div>
+			{/if}
+			{#if sourceError}
+				<span class="source-error">⚠ {sourceError}</span>
+			{/if}
+			{#if showDevicePicker}
+				<div class="device-picker">
+					<span class="label">Select input device</span>
+					{#each audioDevices as device}
+						<button class="device-item" onclick={() => connectDevice(device)}>
+							{device.label || `Device ${device.deviceId.slice(0, 8)}`}
+						</button>
+					{/each}
+					<button class="btn-sm" onclick={() => showDevicePicker = false}>Cancel</button>
+				</div>
+			{/if}
+		</div>
 
-    <aside class="sidebar" class:collapsed={sidebarCollapsed} class:mobile-open={sidebarMobileOpen}>
-      <!-- Mobile close button -->
-      <button
-        class="sidebar-close-mobile"
-        onclick={() => sidebarMobileOpen = false}
-        aria-label="Close sidebar"
-      >
-        <X size={20} />
-      </button>
+		<!-- Mixer -->
+		<div class="controls-section">
+			<span class="label">Mixer</span>
+			<div class="deck-tabs">
+				<button
+					class="deck-tab"
+					class:active={activeDeck === 'A'}
+					onclick={() => activeDeck = 'A'}
+				>
+					<span class="deck-letter">A</span>
+					<span class="deck-preset-name">{presetA.split(' - ')[0] || '—'}</span>
+				</button>
+				<button
+					class="deck-tab"
+					class:active={activeDeck === 'B'}
+					onclick={() => activeDeck = 'B'}
+				>
+					<span class="deck-letter">B</span>
+					<span class="deck-preset-name">{presetB.split(' - ')[0] || '—'}</span>
+				</button>
+			</div>
+			<div class="crossfader-row">
+				<span class="cf-label" class:bright={crossfader < 0.2}>A</span>
+				<input
+					class="crossfader"
+					type="range"
+					min="0"
+					max="1"
+					step="0.01"
+					bind:value={crossfader}
+				/>
+				<span class="cf-label" class:bright={crossfader > 0.8}>B</span>
+			</div>
+		</div>
 
-      <AudioPanel
-        devices={audioDevices}
-        bind:selectedDevice
-        running={multiDeckStatus.audio_running}
-        onStart={startAudio}
-        onStop={stopAudio}
-        onRefresh={loadAudioDevices}
-      />
+		<!-- Playlist -->
+		<div class="controls-section pl-section">
+			<div class="pl-header">
+				<span class="label">Playlist</span>
+				<div class="btn-row">
+					<button class="btn-sm" class:active={playlistMode === 'sequential'} onclick={() => playlistMode = 'sequential'}>Seq</button>
+					<button class="btn-sm" class:active={playlistMode === 'shuffle'} onclick={() => playlistMode = 'shuffle'}>Shuffle</button>
+					<button class="btn-sm" onclick={exportPlaylists} title="Exporter les playlists">⬇</button>
+					<label class="btn-sm file-label" title="Importer des playlists">⬆<input type="file" accept=".json" onchange={importPlaylists} style="display:none" /></label>
+				</div>
+			</div>
+			<div class="crossfader-row">
+				<span class="cf-label">⏱</span>
+				<input class="crossfader" type="range" min="2" max="120" step="1" bind:value={playlistIntervalSec} />
+				<span class="cf-label bright">{playlistIntervalSec}s</span>
+			</div>
 
-      <!-- Playlist for selected deck -->
-      <PlaylistPanel
-        deckId={selectedDeckId}
-        playlist={selectedDeck?.playlist || { name: '', items: [], current_index: 0, shuffle: false, auto_cycle: false, cycle_duration_secs: 30 }}
-        running={selectedDeck?.running || false}
-        onUpdate={refreshMultiDeckStatus}
-      />
+			<!-- Beat sync -->
+			{#if status === 'running'}
+				<div class="beat-sync-row">
+					<span class="bpm-display">♩ {detectedBpm > 0 ? detectedBpm : '—'}</span>
+					<select class="beats-select" bind:value={beatsPerChange}>
+						<option value={4}>4 beats</option>
+						<option value={8}>8 beats</option>
+						<option value={16}>16 beats</option>
+						<option value={32}>32 beats</option>
+					</select>
+					<button class="btn-sm pl-btn" class:active={beatSyncA} onclick={() => toggleBeatSync('A')} title="Beat-sync Deck A">A</button>
+					<button class="btn-sm pl-btn" class:active={beatSyncB} onclick={() => toggleBeatSync('B')} title="Beat-sync Deck B">B</button>
+				</div>
+			{/if}
 
-      <!-- Crossfader A/B -->
-      <CrossfaderPanel
-        crossfader={multiDeckStatus.crossfader}
-        onUpdate={refreshMultiDeckStatus}
-      />
+			<!-- Deck A playlist -->
+			<div class="pl-deck">
+				<div class="pl-deck-header">
+					<span class="pl-deck-label">A</span>
+					<span class="label">{playlistAItems.length} preset{playlistAItems.length !== 1 ? 's' : ''}</span>
+					<div class="pl-transport">
+						<button class="btn-sm pl-btn" onclick={() => playlistPrev('A')} disabled={status !== 'running' || playlistAItems.length === 0}>⏮</button>
+						<button class="btn-sm pl-btn" class:active={playlistAPlaying} onclick={() => togglePlaylist('A')} disabled={status !== 'running' || playlistAItems.length === 0}>
+							{playlistAPlaying ? '⏹' : '▶'}
+						</button>
+						<button class="btn-sm pl-btn" onclick={() => playlistNext('A')} disabled={status !== 'running' || playlistAItems.length === 0}>⏭</button>
+					</div>
+				</div>
+				{#if playlistAItems.length > 0}
+					<ul class="pl-items">
+						{#each playlistAItems as name (name)}
+							<li class="pl-item">
+								<span class="pl-item-name" class:pl-active={name === presetA}>{name}</span>
+								<button class="pl-remove" onclick={() => removeFromPlaylist('A', name)}>×</button>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="pl-empty">Use +A in the preset list below</p>
+				{/if}
+			</div>
 
-      <!-- Video Output -->
-      <VideoOutputPanel
-        deckId={selectedDeckId}
-        onStatusChange={refreshMultiDeckStatus}
-      />
+			<!-- Deck B playlist -->
+			<div class="pl-deck">
+				<div class="pl-deck-header">
+					<span class="pl-deck-label">B</span>
+					<span class="label">{playlistBItems.length} preset{playlistBItems.length !== 1 ? 's' : ''}</span>
+					<div class="pl-transport">
+						<button class="btn-sm pl-btn" onclick={() => playlistPrev('B')} disabled={status !== 'running' || playlistBItems.length === 0}>⏮</button>
+						<button class="btn-sm pl-btn" class:active={playlistBPlaying} onclick={() => togglePlaylist('B')} disabled={status !== 'running' || playlistBItems.length === 0}>
+							{playlistBPlaying ? '⏹' : '▶'}
+						</button>
+						<button class="btn-sm pl-btn" onclick={() => playlistNext('B')} disabled={status !== 'running' || playlistBItems.length === 0}>⏭</button>
+					</div>
+				</div>
+				{#if playlistBItems.length > 0}
+					<ul class="pl-items">
+						{#each playlistBItems as name (name)}
+							<li class="pl-item">
+								<span class="pl-item-name" class:pl-active={name === presetB}>{name}</span>
+								<button class="pl-remove" onclick={() => removeFromPlaylist('B', name)}>×</button>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="pl-empty">Use +B in the preset list below</p>
+				{/if}
+			</div>
+		</div>
 
-      <!-- MIDI Control -->
-      <MidiPanel />
+		<!-- Output -->
+		<div class="controls-section">
+			<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
+				⎋ Open output window
+			</button>
+			{#if outputOpen}
+				<span class="label" style="color:#7af">Output window open — use as OBS Browser Source</span>
+			{/if}
+		</div>
 
-      <!-- Selected deck info -->
-      <div class="sidebar-section">
-        <h3>Selected: Deck {selectedDeckId + 1}</h3>
-        <div class="info-row">
-          <span class="label">Status</span>
-          <span class="value" class:active={selectedDeck?.running}>
-            {selectedDeck?.running ? 'Running' : 'Stopped'}
-          </span>
-        </div>
-        <div class="info-row">
-          <span class="label">Preset</span>
-          <span class="value preset" title={selectedDeck?.preset}>
-            {selectedDeck?.preset?.split('/').pop()?.replace('.milk', '') || 'None'}
-          </span>
-        </div>
-        <div class="info-row">
-          <span class="label">Volume</span>
-          <span class="value">
-            {Math.round((selectedDeck?.volume || 1) * 100)}%
-          </span>
-        </div>
-      </div>
+		<!-- MIDI -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">MIDI</span>
+				{#if midiSupported}
+					<button class="btn-sm" class:active={midiConnected} onclick={toggleMidi}>
+						{midiConnected ? 'Déconnecter' : 'Connecter'}
+					</button>
+				{:else}
+					<span style="font-size:10px;color:#f87">Chromium only</span>
+				{/if}
+			</div>
+			{#if midiConnected}
+				<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
+				{#if learningAction !== null}
+					<span style="font-size:11px;color:#fa7">Bouge un knob/bouton sur ton contrôleur…</span>
+				{/if}
+				<div class="midi-list">
+					{#each MIDI_ACTIONS as action}
+						{@const mapped = midiMappings[action]}
+						<div class="midi-row">
+							<span class="midi-label">{MIDI_LABELS[action]}</span>
+							<span class="midi-binding" class:midi-learning={learningAction === action}>
+								{mapped ? formatTrigger(mapped) : '—'}
+							</span>
+							<button class="btn-sm pl-btn" class:active={learningAction === action}
+								onclick={() => startLearn(action)}>
+								{learningAction === action ? '…' : 'Learn'}
+							</button>
+							{#if mapped}
+								<button class="pl-remove" onclick={() => clearMapping(action)}>×</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 
-      <!-- Decks overview -->
-      <div class="sidebar-section">
-        <h3>All Decks</h3>
-        {#each multiDeckStatus.decks as deck (deck.id)}
-          <div class="deck-status-row" class:active={deck.running} class:selected={deck.id === selectedDeckId}>
-            <span class="deck-label">Deck {deck.id + 1}</span>
-            <span class="deck-state">{deck.running ? 'Live' : 'Off'}</span>
-          </div>
-        {/each}
-      </div>
-
-      <div class="sidebar-section tips">
-        <h3>Shortcuts</h3>
-        <div class="tip"><kbd>F</kbd> / <kbd>F11</kbd> Fullscreen</div>
-        <div class="tip"><kbd>ESC</kbd> Close window</div>
-      </div>
-    </aside>
-  </div>
-
-  <!-- Settings panel -->
-  {#if settingsOpen}
-    <SettingsPanel
-      onClose={() => settingsOpen = false}
-      onPresetsRefresh={loadPresets}
-    />
-  {/if}
-
-  <!-- Toast notification -->
-  {#if toast.visible}
-    <div class="toast {toast.type}" transition:fly={{ y: 20, duration: 200 }}>
-      {toast.message}
-    </div>
-  {/if}
-</div>
+		<!-- Preset browser -->
+		<div class="controls-section preset-browser">
+			<span class="label">Presets → Deck {activeDeck} ({filteredPresets.length})</span>
+			<input
+				class="search-input"
+				type="search"
+				placeholder="Search presets…"
+				bind:value={searchQuery}
+			/>
+			<!-- Chips favoris + tags -->
+			<div class="tag-chips">
+				<button class="tag-chip" class:tag-active={activeTag === '★'} onclick={() => activeTag = activeTag === '★' ? '' : '★'}>★</button>
+				{#each allTags as tag}
+					<button class="tag-chip" class:tag-active={activeTag === tag} onclick={() => activeTag = activeTag === tag ? '' : tag}>{tag}</button>
+				{/each}
+			</div>
+			<ul class="preset-list">
+				{#each filteredPresets as p (p.name)}
+					{@const isFav = favorites.includes(p.name)}
+					<li class="preset-row">
+						<button
+							class="fav-btn"
+							class:fav-on={isFav}
+							onclick={() => toggleFavorite(p.name)}
+							title={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+						>★</button>
+						<button
+							class="preset-item"
+							class:active={p.name === activePreset}
+							onclick={() => selectPreset(p.name)}
+						>
+							{p.name}
+						</button>
+						<button class="pl-add" class:in-list={playlistAItems.includes(p.name)} onclick={() => addToPlaylist('A', p.name)} title="Add to playlist A">A</button>
+						<button class="pl-add" class:in-list={playlistBItems.includes(p.name)} onclick={() => addToPlaylist('B', p.name)} title="Add to playlist B">B</button>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	</aside>
+</main>
 
 <style>
-  .app {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background: var(--bg-darkest);
-  }
+	:global(*, *::before, *::after) {
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0;
+	}
 
-  .main-layout {
-    display: flex;
-    flex: 1;
-    overflow: hidden;
-    position: relative;
-  }
+	/* ── City Pop Tokyo Night ── */
+	:global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
 
-  .main-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-lg);
-    padding: var(--spacing-lg);
-    overflow: hidden;
-  }
+	:global(html, body) {
+		width: 100%; height: 100%;
+		background: #07071a;
+		color: #ddddf5;
+		font-family: 'Inter', system-ui, sans-serif;
+		font-size: 13px;
+		overflow: hidden;
+	}
 
-  .decks-section {
-    flex-shrink: 0;
-    min-height: 0;
-    overflow: hidden;
-  }
+	/* Scrollbars */
+	:global(::-webkit-scrollbar) { width: 4px; }
+	:global(::-webkit-scrollbar-track) { background: transparent; }
+	:global(::-webkit-scrollbar-thumb) { background: #2a2a5a; border-radius: 2px; }
+	:global(::-webkit-scrollbar-thumb:hover) { background: #ff2d78; }
 
-  .preset-section {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto; /* Fix: enable scroll when content overflows */
-  }
+	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: var(--spacing-md);
-  }
+	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; }
 
-  .section-header h2 {
-    font-size: 14px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--accent-primary);
-    margin: 0;
-  }
+	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
-  .running-count {
-    font-size: 12px;
-    color: var(--text-muted);
-    background: var(--bg-panel);
-    padding: 4px 10px;
-    border-radius: var(--radius-md);
-  }
+	/* Overlay start screen */
+	.overlay {
+		position: absolute; inset: 0;
+		display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2rem;
+		background: rgba(7, 7, 26, 0.82);
+		backdrop-filter: blur(2px);
+		z-index: 10;
+	}
 
-  .decks-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--spacing-md);
-  }
+	.overlay.error { background: rgba(20, 0, 10, 0.9); color: #ff6090; }
 
-  @media (max-width: 1200px) {
-    .decks-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
+	.logo {
+		font-size: 3rem; font-weight: 800; letter-spacing: 0.15em;
+		background: linear-gradient(135deg, #ff2d78 0%, #00e5ff 100%);
+		-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+		filter: drop-shadow(0 0 24px rgba(255, 45, 120, 0.6));
+	}
 
-  .sidebar {
-    width: var(--sidebar-width);
-    background: var(--bg-dark);
-    border-left: 1px solid var(--border-subtle);
-    padding: var(--spacing-lg);
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-lg);
-    overflow-y: auto;
-    flex-shrink: 0;
-    max-height: calc(100vh - 52px); /* Fix: limit height to viewport minus header */
-  }
+	.tagline { color: #6666aa; font-size: 12px; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
 
-  /* Responsive breakpoints for desktop */
-  @media (max-width: 1600px) {
-    .sidebar {
-      width: 260px;
-    }
-    .sidebar-collapse-toggle {
-      right: 260px;
-    }
-    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
-      right: 0;
-    }
-  }
+	/* ── Sidebar ── */
+	.controls {
+		width: 268px; flex-shrink: 0;
+		background: #0b0b20;
+		border-left: 1px solid #1a1a42;
+		display: flex; flex-direction: column; overflow: hidden;
+		/* subtle scanline texture */
+		background-image: repeating-linear-gradient(
+			0deg, transparent, transparent 2px,
+			rgba(255,255,255,0.012) 2px, rgba(255,255,255,0.012) 4px
+		);
+	}
 
-  @media (max-width: 1400px) {
-    .sidebar {
-      width: 240px;
-      padding: var(--spacing-md);
-      gap: var(--spacing-md);
-    }
-    .sidebar-collapse-toggle {
-      right: 240px;
-    }
-    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
-      right: 0;
-    }
-  }
+	.controls-section {
+		padding: 0.7rem 0.75rem;
+		border-bottom: 1px solid #131330;
+		display: flex; flex-direction: column; gap: 0.4rem;
+	}
 
-  @media (max-width: 1200px) {
-    .sidebar {
-      width: 220px;
-    }
-    .sidebar-collapse-toggle {
-      right: 220px;
-    }
-    .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
-      right: 0;
-    }
-  }
+	.preset-browser { flex: 1; overflow: hidden; }
 
-  @media (max-width: 1024px) {
-    .sidebar {
-      width: 200px;
-      padding: var(--spacing-sm);
-      gap: var(--spacing-sm);
-    }
-    .main-content {
-      padding: var(--spacing-md);
-      gap: var(--spacing-md);
-    }
-  }
+	.label {
+		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+		color: #444470; font-weight: 600;
+	}
 
-  /* Sidebar collapse toggle (desktop) */
-  .sidebar-collapse-toggle {
-    position: absolute;
-    right: var(--sidebar-width);
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 50;
-    width: 24px;
-    height: 48px;
-    background: var(--bg-panel);
-    border: 1px solid var(--border-subtle);
-    border-right: none;
-    border-radius: var(--radius-md) 0 0 var(--radius-md);
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
+	.btn-row, .file-row { display: flex; gap: 0.4rem; }
 
-  .sidebar-collapse-toggle:hover {
-    background: var(--bg-elevated);
-    color: var(--accent-primary);
-  }
+	.source-badge { font-size: 11px; color: #00e5ff; }
+	.source-error { font-size: 11px; color: #ff6090; word-break: break-word; }
 
-  .main-layout.sidebar-collapsed .sidebar-collapse-toggle {
-    right: 0;
-    border-right: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md) 0 0 var(--radius-md);
-  }
+	/* VU meter — pink→cyan gradient */
+	.vu-meter {
+		height: 5px; background: #111130; border-radius: 3px; overflow: hidden;
+		border: 1px solid #1a1a40;
+	}
 
-  /* Collapsed sidebar state (desktop) */
-  .sidebar.collapsed {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-    border-left: none;
-  }
+	.vu-bar {
+		height: 100%;
+		background: linear-gradient(90deg, #ff2d78, #b44fff 50%, #00e5ff);
+		border-radius: 3px;
+		transition: width 50ms linear;
+		box-shadow: 0 0 8px rgba(255, 45, 120, 0.5);
+	}
 
-  /* Mobile sidebar toggle button */
-  .sidebar-mobile-toggle {
-    display: none;
-    position: fixed;
-    bottom: var(--spacing-lg);
-    right: var(--spacing-lg);
-    z-index: 100;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: var(--accent-primary);
-    color: var(--bg-darkest);
-    border: none;
-    box-shadow: 0 4px 12px rgba(0, 240, 255, 0.3);
-    cursor: pointer;
-    transition: transform 0.2s ease;
-  }
+	.device-picker {
+		display: flex; flex-direction: column; gap: 0.2rem;
+		margin-top: 0.2rem; padding: 0.4rem;
+		background: #0e0e28; border: 1px solid #232350; border-radius: 6px;
+	}
 
-  .sidebar-mobile-toggle:hover {
-    transform: scale(1.1);
-  }
+	.device-item {
+		display: block; width: 100%; text-align: left;
+		background: none; border: none; color: #aaaacc;
+		padding: 0.3rem 0.4rem; cursor: pointer; font-size: 11px;
+		border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		transition: all 0.1s;
+	}
 
-  /* Mobile sidebar close button */
-  .sidebar-close-mobile {
-    display: none;
-    position: absolute;
-    top: var(--spacing-md);
-    right: var(--spacing-md);
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-md);
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-    border: none;
-    cursor: pointer;
-    z-index: 10;
-  }
+	.device-item:hover { background: #191940; color: #fff; }
 
-  .sidebar-close-mobile:hover {
-    background: var(--status-error);
-    color: white;
-  }
+	/* ── Mixer ── */
+	.deck-tabs { display: flex; gap: 0.4rem; }
 
-  /* Mobile sidebar backdrop */
-  .sidebar-backdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    z-index: 150;
-  }
+	.deck-tab {
+		flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+		padding: 0.45rem 0.4rem;
+		background: #0e0e26; border: 1px solid #1e1e48;
+		border-radius: 6px; cursor: pointer; color: #44447a;
+		transition: all 0.15s;
+	}
 
-  /* Mobile responsive (< 900px) */
-  @media (max-width: 900px) {
-    .sidebar-collapse-toggle {
-      display: none;
-    }
+	.deck-tab:hover { border-color: #ff2d78; color: #cc88aa; }
 
-    .sidebar-mobile-toggle {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+	.deck-tab.active {
+		background: #1a0a22;
+		border-color: #ff2d78;
+		color: #ff2d78;
+		box-shadow: 0 0 12px rgba(255, 45, 120, 0.3), inset 0 0 8px rgba(255, 45, 120, 0.06);
+	}
 
-    .sidebar-backdrop {
-      display: block;
-    }
+	.deck-letter { font-size: 16px; font-weight: 800; }
 
-    .sidebar {
-      position: fixed;
-      top: 52px;
-      right: 0;
-      bottom: 0;
-      width: 280px;
-      max-height: none;
-      z-index: 200;
-      transform: translateX(100%);
-      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
+	.deck-preset-name {
+		font-size: 10px; white-space: nowrap; overflow: hidden;
+		text-overflow: ellipsis; max-width: 90px; color: inherit;
+	}
 
-    .sidebar.mobile-open {
-      transform: translateX(0);
-    }
+	.crossfader-row { display: flex; align-items: center; gap: 0.4rem; }
 
-    .sidebar-close-mobile {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+	.cf-label {
+		font-size: 11px; font-weight: 700; color: #33335a;
+		width: 12px; text-align: center; transition: color 0.15s;
+	}
 
-    .decks-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
+	.cf-label.bright { color: #ff2d78; text-shadow: 0 0 8px rgba(255,45,120,0.8); }
 
-  /* Tablet/small desktop (< 768px) */
-  @media (max-width: 768px) {
-    .decks-grid {
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: var(--spacing-sm);
-    }
+	.crossfader { flex: 1; accent-color: #ff2d78; cursor: pointer; }
 
-    .main-content {
-      padding: var(--spacing-sm);
-      gap: var(--spacing-sm);
-    }
+	/* ── Preset browser ── */
+	.search-input {
+		width: 100%;
+		background: #0e0e26; border: 1px solid #1e1e48;
+		border-radius: 6px; color: #ddddf5;
+		padding: 0.35rem 0.5rem; font-size: 12px; outline: none;
+		transition: border-color 0.15s;
+	}
 
-    .section-header h2 {
-      font-size: 12px;
-    }
-  }
+	.search-input:focus { border-color: #00e5ff; box-shadow: 0 0 0 2px rgba(0,229,255,0.1); }
+	.search-input::placeholder { color: #33335a; }
 
-  /* Mobile (< 600px) */
-  @media (max-width: 600px) {
-    .decks-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
+	.preset-list { flex: 1; overflow-y: auto; list-style: none; }
 
-    .sidebar {
-      width: 100%;
-    }
+	.preset-item {
+		display: block; width: 100%; text-align: left;
+		background: none; border: none; color: #8888bb;
+		padding: 0.3rem 0.5rem; cursor: pointer; font-size: 12px;
+		border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		transition: all 0.1s;
+	}
 
-    .sidebar-mobile-toggle {
-      bottom: var(--spacing-md);
-      right: var(--spacing-md);
-      width: 44px;
-      height: 44px;
-    }
-  }
+	.preset-item:hover { background: #111130; color: #eeeeff; }
 
-  .sidebar-section {
-    background: var(--bg-panel);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    padding: var(--spacing-lg);
-  }
+	.preset-item.active {
+		background: #0c0c2a;
+		color: #00e5ff;
+		text-shadow: 0 0 8px rgba(0,229,255,0.5);
+	}
 
-  .sidebar-section h3 {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--accent-primary);
-    margin-bottom: var(--spacing-md);
-  }
+	/* ── Buttons ── */
+	.btn-primary {
+		background: linear-gradient(135deg, #ff2d78, #b44fff);
+		color: #fff; border: none; border-radius: 8px;
+		padding: 0.65rem 2.2rem; font-size: 1rem; font-weight: 700;
+		cursor: pointer; letter-spacing: 0.05em;
+		box-shadow: 0 0 24px rgba(255,45,120,0.5), 0 0 48px rgba(180,79,255,0.2);
+		transition: all 0.2s;
+	}
 
-  .info-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-sm) 0;
-    border-bottom: 1px solid var(--border-subtle);
-  }
+	.btn-primary:hover {
+		box-shadow: 0 0 32px rgba(255,45,120,0.7), 0 0 64px rgba(180,79,255,0.3);
+		transform: translateY(-1px);
+	}
 
-  .info-row:last-child {
-    border-bottom: none;
-  }
+	.btn-secondary {
+		background: #1a1a3a; color: #aaaacc; border: 1px solid #2a2a5a;
+		border-radius: 6px; padding: 0.4rem 1rem; cursor: pointer;
+		transition: all 0.1s;
+	}
 
-  .info-row .label {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
+	.btn-secondary:hover { border-color: #ff2d78; color: #fff; }
 
-  .info-row .value {
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
+	.btn-sm {
+		background: #0e0e26; color: #7777aa;
+		border: 1px solid #1e1e48; border-radius: 5px;
+		padding: 0.25rem 0.6rem; font-size: 12px; cursor: pointer;
+		transition: all 0.12s;
+	}
 
-  .info-row .value.active {
-    color: var(--status-active);
-  }
+	.btn-sm:hover:not(:disabled) { background: #141436; color: #ddddf5; border-color: #3a3a6a; }
 
-  .info-row .value.preset {
-    max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+	.btn-sm.active {
+		background: #1a0822; border-color: #ff2d78; color: #ff2d78;
+		box-shadow: 0 0 8px rgba(255,45,120,0.25);
+	}
 
-  .deck-status-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--spacing-xs) var(--spacing-sm);
-    margin: 2px 0;
-    border-radius: var(--radius-sm);
-    font-size: 11px;
-    transition: all 0.15s;
-  }
+	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
 
-  .deck-status-row:hover {
-    background: var(--bg-elevated);
-  }
+	.file-label { display: inline-block; cursor: pointer; }
 
-  .deck-status-row.selected {
-    background: var(--bg-elevated);
-    border-left: 2px solid var(--accent-primary);
-  }
+	.pl-btn { padding: 0.22rem 0.4rem; font-size: 11px; }
 
-  .deck-label {
-    color: var(--text-secondary);
-  }
+	.pl-section { gap: 0.5rem; }
 
-  .deck-state {
-    color: var(--text-muted);
-  }
+	.pl-header { display: flex; align-items: center; justify-content: space-between; }
 
-  .deck-status-row.active .deck-state {
-    color: var(--status-active);
-    font-weight: 600;
-  }
+	.pl-deck {
+		background: #0a0a1e; border: 1px solid #161640;
+		border-radius: 6px; padding: 0.4rem;
+		display: flex; flex-direction: column; gap: 0.3rem;
+	}
 
-  .tips {
-    margin-top: auto;
-  }
+	.pl-deck-header { display: flex; align-items: center; gap: 0.4rem; }
 
-  .tip {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-bottom: var(--spacing-sm);
-  }
+	.pl-deck-label {
+		font-size: 13px; font-weight: 800; width: 14px;
+		color: #ff2d78; text-shadow: 0 0 8px rgba(255,45,120,0.7);
+	}
 
-  .tip kbd {
-    display: inline-block;
-    padding: 2px 6px;
-    background: var(--bg-dark);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    margin-right: 4px;
-  }
+	.pl-transport { display: flex; gap: 0.25rem; margin-left: auto; }
 
-  /* Toast notification */
-  .toast {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: var(--spacing-md) var(--spacing-xl);
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 500;
-    z-index: 1000;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-  }
+	.pl-items {
+		list-style: none; max-height: 80px; overflow-y: auto;
+		display: flex; flex-direction: column; gap: 1px;
+	}
 
-  .toast.info {
-    background: rgba(0, 150, 255, 0.85);
-    color: white;
-    border: 1px solid rgba(0, 150, 255, 0.5);
-  }
+	.pl-item { display: flex; align-items: center; gap: 0.25rem; }
 
-  .toast.success {
-    background: rgba(0, 200, 100, 0.85);
-    color: white;
-    border: 1px solid rgba(0, 200, 100, 0.5);
-  }
+	.pl-item-name {
+		flex: 1; font-size: 11px; color: #666690;
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
 
-  .toast.error {
-    background: rgba(255, 71, 87, 0.85);
-    color: white;
-    border: 1px solid rgba(255, 71, 87, 0.5);
-  }
+	.pl-item-name.pl-active { color: #00e5ff; text-shadow: 0 0 6px rgba(0,229,255,0.5); }
+
+	.pl-remove {
+		background: none; border: none; color: #33335a;
+		cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; flex-shrink: 0;
+		transition: color 0.1s;
+	}
+
+	.pl-remove:hover { color: #ff2d78; }
+
+	.pl-empty { font-size: 10px; color: #2a2a50; font-style: italic; }
+
+	/* Tag chips */
+	.tag-chips {
+		display: flex; flex-wrap: wrap; gap: 3px;
+	}
+
+	.tag-chip {
+		background: #0e0e26; border: 1px solid #1e1e48;
+		border-radius: 10px; color: #44447a;
+		font-size: 10px; padding: 2px 7px; cursor: pointer;
+		white-space: nowrap; transition: all 0.12s;
+	}
+
+	.tag-chip:hover { border-color: #b44fff; color: #b44fff; }
+
+	.tag-chip.tag-active {
+		background: #1a0830; border-color: #b44fff; color: #b44fff;
+		box-shadow: 0 0 8px rgba(180,79,255,0.35);
+	}
+
+	/* Bouton favori ★ */
+	.fav-btn {
+		background: none; border: none; color: #22224a;
+		font-size: 11px; cursor: pointer; padding: 0 2px;
+		flex-shrink: 0; transition: all 0.1s; line-height: 1;
+	}
+
+	.fav-btn:hover { color: #ffcc00; }
+	.fav-btn.fav-on { color: #ffcc00; text-shadow: 0 0 8px rgba(255,204,0,0.7); }
+
+	/* Preset rows +A +B */
+	.preset-row { display: flex; align-items: center; gap: 2px; }
+	.preset-row .preset-item { flex: 1; min-width: 0; }
+
+	.pl-add {
+		flex-shrink: 0; background: #0e0e26;
+		border: 1px solid #1e1e48; border-radius: 3px;
+		color: #2a2a52; font-size: 10px; font-weight: 800;
+		padding: 2px 5px; cursor: pointer; line-height: 1; transition: all 0.1s;
+	}
+
+	.pl-add:hover { border-color: #ff2d78; color: #ff2d78; background: #150a1a; }
+	.pl-add.in-list { color: #00e5ff; border-color: #005566; background: #04101a; }
+
+	/* MIDI */
+	.midi-list {
+		display: flex; flex-direction: column; gap: 2px;
+		max-height: 160px; overflow-y: auto;
+	}
+
+	.midi-row { display: flex; align-items: center; gap: 3px; }
+
+	.midi-label { font-size: 10px; color: #44447a; width: 80px; flex-shrink: 0; white-space: nowrap; }
+
+	.midi-binding {
+		flex: 1; font-size: 10px; color: #33335a; font-family: 'Courier New', monospace;
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+
+	.midi-binding.midi-learning { color: #ff8c00; animation: blink 0.6s step-end infinite; }
+
+	@keyframes blink { 50% { opacity: 0; } }
+
+	/* Beat sync */
+	.beat-sync-row {
+		display: flex; align-items: center; gap: 0.4rem;
+		padding: 0.3rem 0.5rem;
+		background: #08081e; border: 1px solid #141440;
+		border-radius: 6px;
+	}
+
+	.bpm-display {
+		font-size: 12px; font-weight: 700; color: #b44fff;
+		text-shadow: 0 0 10px rgba(180,79,255,0.6);
+		min-width: 48px; font-family: 'Courier New', monospace;
+		flex-shrink: 0;
+	}
+
+	.beats-select {
+		background: #0e0e26; color: #7777aa;
+		border: 1px solid #1e1e48; border-radius: 5px;
+		padding: 0.2rem 0.3rem; font-size: 10px; cursor: pointer;
+		-webkit-appearance: none; appearance: none;
+		flex: 1; min-width: 0;
+	}
+
+	.beats-select:focus { outline: none; border-color: #b44fff; }
+
+	/* Output button */
+	.btn-output {
+		width: 100%;
+		background: linear-gradient(135deg, rgba(0,229,255,0.08), rgba(180,79,255,0.08));
+		color: #00e5ff; border: 1px solid #004455;
+		border-radius: 6px; padding: 0.45rem; font-size: 12px; font-weight: 600;
+		cursor: pointer; letter-spacing: 0.03em;
+		transition: all 0.15s;
+		box-shadow: 0 0 12px rgba(0,229,255,0.1);
+	}
+
+	.btn-output:hover:not(:disabled) {
+		background: linear-gradient(135deg, rgba(0,229,255,0.14), rgba(180,79,255,0.14));
+		box-shadow: 0 0 20px rgba(0,229,255,0.25);
+		border-color: #00e5ff;
+	}
+
+	.btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
 </style>

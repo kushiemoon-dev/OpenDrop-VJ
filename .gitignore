@@ -1,40 +1,34 @@
-# Dependencies
-node_modules/
+node_modules
 
-# Build outputs
-build/
-.svelte-kit/
-dist/
-
-# Tauri
-src-tauri/target/
-src-tauri/binaries/
-
-# IDE
-.vscode/
-.idea/
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-npm-debug.log*
-
-# Environment
+# Env
 .env
 .env.*
+!.env.example
+!.env.test
 
-# Cache
-.cache/
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
 
-# Rust build artifacts
-target/
+# Electron build output
+dist-electron
 
-# Development notes (do not commit)
-notes*.md
-findings.md
-task_plan.md
-progress.md
-coverage/
+# Test artifacts
+test-results
+playwright-report
+.playwright-mcp
+
+# Screenshots (debug)
+*.png

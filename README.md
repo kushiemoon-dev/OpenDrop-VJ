@@ -1,246 +1,156 @@
-<div align="center">
-
 # OpenDrop VJ
 
-### Multi-Deck Audio Visualizer
+### Multi-Deck Milkdrop Visualizer — web-first, cross-platform
 
-[![Release](https://img.shields.io/github/v/release/kushiemoon-dev/OpenDrop-VJ?style=flat&color=00f0ff)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
-[![Downloads](https://img.shields.io/github/downloads/kushiemoon-dev/OpenDrop-VJ/total?style=flat&color=8b5cf6)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
-[![Linux](https://img.shields.io/badge/Linux-FCC624?style=flat&logo=linux&logoColor=black)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
-[![Windows](https://img.shields.io/badge/Windows-0078D6?style=flat&logo=windows&logoColor=white)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
-[![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Tauri](https://img.shields.io/badge/Tauri_2-24C8DB?style=flat&logo=tauri&logoColor=white)](https://tauri.app/)
-[![ProjectM](https://img.shields.io/badge/ProjectM-4.x-purple)](https://github.com/projectM-visualizer/projectm)
-[![License](https://img.shields.io/github/license/kushiemoon-dev/OpenDrop-VJ?style=flat)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
+[![License](https://img.shields.io/github/license/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](LICENSE)
 
-**Open-source NestDrop alternative for Linux and Windows**
+**Open-source NestDrop alternative.** Real-time Milkdrop audio visualization with
+2-deck mixing, MIDI control, and OBS Browser Source output — powered by
+[Butterchurn](https://github.com/jberg/butterchurn) (WebGL, no C++ required).
 
-Real-time audio visualization with MilkDrop presets, multi-deck mixing, MIDI control, and video output for OBS/VLC.
-
-[Download Latest Release](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) · [Report Bug](https://github.com/kushiemoon-dev/OpenDrop-VJ/issues) · [Request Feature](https://github.com/kushiemoon-dev/OpenDrop-VJ/issues)
-
-</div>
+> **v0.4.0** is a complete rewrite of the original Tauri/Rust/projectM v1
+> (which never ran reliably on Windows or Linux). The new stack is web-first:
+> **zero native toolchain** needed, runs identically on Windows, Linux, and Mac.
 
 ---
 
 ## Features
 
-- **Multi-Deck Visualization** — Up to 4 independent decks with crossfader mixing
-- **MilkDrop Presets** — Full support for .milk and .prjm preset files via ProjectM 4.x
-- **Audio Capture** — Native PipeWire/PulseAudio (Linux), WASAPI loopback (Windows)
-- **Video Output** — v4l2loopback (Linux), Spout (Windows) for OBS/VLC integration
-- **NDI Streaming** — Network video output (optional, requires NDI SDK)
-- **MIDI Control** — Full MIDI mapping with learn mode and controller presets
-- **Playlist Management** — Per-deck playlists with shuffle and auto-cycle
-- **Compositor** — Blend modes (Normal, Add, Multiply, Screen, Overlay)
-- **Multi-Monitor** — Fullscreen on any connected display
-- **Preset Browser** — Favorites, categories, tags, progressive loading for large collections
-- **Theme Support** — Dark/Light mode with 6 customizable accent colors
-- **VU Meters** — Real-time audio level visualization
+- **2 decks A/B** — independent Butterchurn (Milkdrop WebGL) instances
+- **Crossfader** — opacity blend A↔B, arrow-key shortcuts (±0.05)
+- **Playlists** — per-deck auto-cycle (sequential / shuffle), 2–120 s interval, prev / next
+- **Beat-sync / BPM** — bass-energy beat detector drives preset changes on the beat
+- **MIDI mapping** — CC/note → crossfader, playlist controls *(Chromium / Electron only)*
+- **Preset browser** — search, author tag filters, favorites ★, 100 presets bundled
+- **Output window** — detached `/output` route for second monitor or OBS Browser Source
+- **Audio sources** — mic, device picker, audio file, display capture, loopback *(Electron only)*
+- **Export / import** playlists as JSON
+- **Keyboard shortcuts** — ← → nudge crossfader, Tab switches active deck
 
 ---
 
-## Download
+## Stack
 
-| Platform | Format | Download |
-|----------|--------|----------|
-| Linux (x64) | AppImage | [OpenDrop_0.3.5_amd64.AppImage](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
-| Linux (x64) | Debian | [OpenDrop_0.3.5_amd64.deb](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
-| Windows (x64) | Installer | [OpenDrop_0.3.5_x64-setup.exe](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
-| Windows (x64) | MSI | [OpenDrop_0.3.5_x64_en-US.msi](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) |
+| Layer | Tech |
+|-------|------|
+| UI | SvelteKit + Svelte 5 runes, TypeScript |
+| Visualizer | [Butterchurn](https://github.com/jberg/butterchurn) (Milkdrop WebGL) + [butterchurn-presets](https://github.com/jberg/butterchurn-presets) |
+| Audio | Web Audio API (`AudioContext`, `AnalyserNode`) |
+| MIDI | Web MIDI API |
+| Build | Vite + `@sveltejs/adapter-static` (SPA, `ssr: false`) |
+| Desktop | Electron 42 (optional — adds loopback audio + native window) |
 
 ---
 
-## Requirements
-
-### Linux
+## Quick Start (browser)
 
 ```bash
-# Arch Linux
-sudo pacman -S projectm pipewire
-
-# Ubuntu/Debian
-sudo apt install libprojectm4 pipewire
-
-# Video output (optional)
-sudo pacman -S v4l2loopback-dkms   # Arch
-sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="OpenDrop"
-```
-
-### Windows
-
-- Windows 10/11 (x64)
-- GPU with OpenGL 3.3+ support
-- [Spout](https://spout.zeal.co/) for video output to OBS (SpoutLibrary.dll bundled in installer)
-
----
-
-## Build from Source
-
-```bash
-# Prerequisites
-# - Rust 1.75+
-# - Node.js 18+
-# - pnpm
-# - libprojectM-4 development files
-
-# Clone
-git clone https://github.com/kushiemoon-dev/OpenDrop-VJ.git
-cd OpenDrop-VJ
-
-# Install dependencies
 pnpm install
-
-# Build renderer sidecar
-cargo build --release -p opendrop-renderer
-mkdir -p src-tauri/binaries
-cp target/release/opendrop-renderer src-tauri/binaries/opendrop-renderer-$(rustc -vV | grep host | cut -d' ' -f2)
-
-# Development mode
-pnpm tauri dev
-
-# Release build
-pnpm tauri build
+pnpm dev          # → http://localhost:1420
 ```
 
----
+Click **▶ Start** to initialize the audio context, then pick a preset in the browser panel.
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│         Frontend (Svelte 5 / SvelteKit)                 │
-│  PresetBrowser, Playlist, Crossfader, MIDI, VU Meters  │
-└────────────────┬────────────────────────────────────────┘
-                 │ Tauri IPC Commands
-                 ▼
-┌─────────────────────────────────────────────────────────┐
-│         Tauri Backend (Rust)                            │
-│  AppState, AudioEngine, MIDI, Crossfader, Compositor   │
-└──┬──────────────────────────────────────────────┬───────┘
-   │ Spawn (JSON IPC)                             │ Audio
-   ▼                                              ▼
-┌──────────────────┐  ┌──────────────────┐   ┌──────────┐
-│ Renderer Deck 0  │  │ Renderer Deck 1-3│   │ PipeWire │
-│ ProjectM+OpenGL  │  │ ProjectM+OpenGL  │   │ /WASAPI  │
-│ + Video Output   │  │ + Video Output   │   └──────────┘
-└────────┬─────────┘  └──────────────────┘
-         │ glReadPixels
-         ▼
-┌──────────────────┐
-│ v4l2 / Spout     │ → OBS / VLC
-│ / NDI            │
-└──────────────────┘
-```
-
----
-
-## Video Output Setup
-
-### Linux (v4l2loopback)
+## Desktop (Electron)
 
 ```bash
-# Load kernel module
-sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="OpenDrop"
-
-# Verify device
-ls -la /dev/video10
-
-# In OBS: Sources → Video Capture Device → OpenDrop
+pnpm electron:dev     # Vite dev + Electron in parallel
+pnpm electron:build   # Build SPA then package with electron-builder
 ```
 
-### Windows (Spout)
+**Linux / Hyprland (Wayland)** — pass flags when launching the packaged app:
 
-SpoutLibrary.dll is bundled with the installer. In OBS:
-1. Install the [Spout2 plugin for OBS](https://github.com/Off-World-Live/obs-spout2-plugin)
-2. Sources → Spout2 Capture → Select "OpenDrop Deck 1"
+```bash
+./OpenDrop-VJ.AppImage --ozone-platform=wayland --no-sandbox
+```
 
----
+## System Audio Capture (Linux — PipeWire)
 
-## MIDI Controller Support
+```bash
+bash scripts/setup-audio.sh   # Creates a PipeWire monitor source
+```
 
-Built-in presets for popular controllers:
-- **Generic DJ** — Universal 2-deck mapping
-- **Akai APC Mini** — Grid-based control
-- **Novation Launchpad** — Pad-based preset switching
-- **Korg nanoKONTROL2** — Fader-based mixing
+Then pick **Pick device** in the app and select the monitor source. On Windows/Mac,
+use the **Loopback** button in the Electron app (powered by `desktopCapturer`).
 
-Custom mappings can be created via the MIDI Learn mode.
+## OBS Browser Source
 
----
+1. Add a **Browser Source** in OBS
+2. URL: `http://localhost:1420/output` (dev) or the packaged app URL
+3. Width / Height: match your stream resolution
 
-## Configuration
-
-Settings are stored in:
-- **Linux:** `~/.config/opendrop/`
-- **Windows:** `%APPDATA%\OpenDrop\`
-
-Preset and texture directories are configurable in Settings (gear icon).
+The `/output` route is a fullscreen crossfaded canvas — no UI chrome.
 
 ---
 
-## Tech Stack
+## Development
 
-| Component | Technology |
-|-----------|------------|
-| Backend | Rust, Tauri 2.x |
-| Frontend | Svelte 5, SvelteKit, TypeScript |
-| Visualization | ProjectM 4.x, OpenGL 3.3 |
-| Audio | PipeWire/PulseAudio (Linux), WASAPI (Windows) |
-| MIDI | midir |
-| Video Out | v4l2 (Linux), Spout (Windows), NDI (cross-platform) |
-| Icons | Lucide |
+```bash
+pnpm check          # svelte-check (TypeScript + Svelte)
+pnpm test           # Vitest unit tests (midi engine, playlist engine)
+pnpm test:coverage  # Coverage report
+pnpm test:e2e       # Playwright E2E — 15 tests (requires pnpm dev running)
+pnpm build          # Production SPA → build/
+```
 
 ---
 
 ## Project Structure
 
 ```
-OpenDrop-VJ/
-├── src/                    # Svelte frontend
-│   ├── lib/components/     # UI components (12)
-│   ├── lib/stores/         # State management (Svelte 5 runes)
-│   └── routes/             # SvelteKit pages
-├── src-tauri/              # Tauri backend
-│   └── src/lib.rs          # Main Rust logic
-├── crates/
-│   ├── opendrop-core/      # Core library (audio, video, MIDI)
-│   ├── opendrop-renderer/  # OpenGL renderer process (sidecar)
-│   ├── projectm-rs/        # Safe ProjectM wrapper
-│   └── projectm-sys/       # ProjectM FFI bindings
-└── assets/                 # Bundled presets & textures
+src/
+├── lib/
+│   ├── engine/
+│   │   ├── audio.ts      AudioEngine — AudioContext, source switching, AnalyserNode
+│   │   ├── bpm.ts        BeatDetector — bass-energy beat detection
+│   │   ├── deck.ts       Deck — Butterchurn instance wrapper
+│   │   ├── midi.ts       MidiEngine — Web MIDI, CC/note mapping
+│   │   ├── playlist.ts   PlaylistEngine — auto-cycle, shuffle, prev/next
+│   │   └── sync.ts       Cross-window state sync (BroadcastChannel / Electron IPC)
+│   └── presets/
+│       └── index.ts      Preset registry (butterchurn-presets, search, categories)
+└── routes/
+    ├── +page.svelte      Main VJ controller UI
+    └── output/
+        └── +page.svelte  Fullscreen output canvas (OBS / second monitor)
+
+electron/
+├── main.cjs              Electron main process (IPC relay, loopback, app:// protocol)
+└── preload.cjs           contextBridge → window.electronAPI
+
+e2e/
+└── app.spec.ts           Playwright E2E tests
 ```
+
+---
+
+## Known Limitations & Roadmap
+
+| Item | Status |
+|------|--------|
+| Blend modes (Normal / Add / Screen…) | Not yet — opacity crossfade only |
+| Full preset library (1754 presets) | 100 loaded — full load deferred |
+| Web MIDI | Chromium / Electron only (not Firefox / Safari) |
+| System audio loopback | Electron only (browser cannot capture system audio) |
+| Signed installers | Planned |
+| 4-deck compositor | Planned |
+| NDI / Spout / v4l2 output | Planned |
 
 ---
 
 ## Credits
 
-- [ProjectM](https://github.com/projectM-visualizer/projectm) — MilkDrop visualization engine
-- [Tauri](https://tauri.app/) — Desktop application framework
-- [Svelte](https://svelte.dev/) — Frontend framework
-- [Spout2](https://github.com/leadedge/Spout2) — Video frame sharing (Windows)
-- [midir](https://github.com/Boddlnagg/midir) — MIDI library for Rust
-- [Lucide](https://lucide.dev/) — Icon library
-
----
-
-## Disclaimer
-
-- This software is for **personal and educational use only**
-- Respect the licenses of preset files you use
-- Support the original preset creators
-- No warranty is provided; use at your own risk
-
----
+- [Butterchurn](https://github.com/jberg/butterchurn) — WebGL Milkdrop renderer by Jordan Berg
+- [butterchurn-presets](https://github.com/jberg/butterchurn-presets) — bundled preset collection
+- [SvelteKit](https://kit.svelte.dev) / [Svelte 5](https://svelte.dev)
+- [Electron](https://www.electronjs.org)
+- Preset authors — listed in each `.milk` file; used under their respective licenses
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).
 
 ---
 
-<div align="center">
-
-Made with ❤️ by [kushiemoon-dev](https://github.com/kushiemoon-dev)
-
-</div>
+*Made with ❤️ by [kushiemoon-dev](https://github.com/kushiemoon-dev)*

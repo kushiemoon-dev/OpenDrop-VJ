@@ -1,0 +1,29 @@
+appId: dev.kushiemoon.opendrop
+productName: OpenDrop VJ
+copyright: Copyright © 2026 kushiemoon-dev
+
+directories:
+  output: dist-electron
+  buildResources: assets
+
+files:
+  - build/**
+  - electron/**
+  - package.json
+
+mac:
+  category: public.app-category.music
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: AudioVideo

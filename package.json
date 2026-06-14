@@ -22,14 +22,6 @@
 		"butterchurn": "^2.6.7",
 		"butterchurn-presets": "^2.4.7"
 	},
-	"pnpm": {
-		"overrides": {
-			"shell-quote": ">=1.8.4",
-			"tar": ">=7.5.7",
-			"esbuild": ">=0.28.1",
-			"cookie": ">=0.7.0"
-		}
-	},
 	"devDependencies": {
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-static": "^3.0.10",

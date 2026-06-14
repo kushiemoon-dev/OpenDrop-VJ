@@ -23,24 +23,25 @@
 		"butterchurn-presets": "^2.4.7"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": [
-			"esbuild",
-			"core-js",
-			"electron"
-		]
+		"overrides": {
+			"shell-quote": ">=1.8.4",
+			"tar": ">=7.5.7",
+			"esbuild": ">=0.28.1",
+			"cookie": ">=0.7.0"
+		}
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-static": "^3.0.10",
-		"@sveltejs/kit": "^2.63.0",
+		"@sveltejs/kit": "^2.65.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@testing-library/jest-dom": "^6.6.3",
 		"@testing-library/svelte": "^5.3.1",
 		"@types/node": "^25.9.3",
 		"@vitest/coverage-v8": "^3.0.0",
-		"concurrently": "^9.2.1",
+		"concurrently": "^10.0.3",
 		"electron": "^42.4.0",
-		"electron-builder": "^25.1.8",
+		"electron-builder": "^26.0.0",
 		"jsdom": "^29.0.0",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",

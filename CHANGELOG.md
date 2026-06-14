@@ -5,6 +5,41 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-14
+
+> **Complete rewrite**: web-first stack (SvelteKit + Butterchurn + Electron)
+> replacing Tauri / Rust / projectM C++ entirely. Zero native toolchain —
+> runs on Windows, Linux, and Mac out of the box.
+
+### Added
+- **Butterchurn** visualizer engine (Milkdrop WebGL, 100 presets via `butterchurn-presets`)
+- **2 independent decks A/B** — separate Butterchurn instances on their own canvases
+- **Crossfader** A↔B via opacity (0–1 slider, arrow-key shortcuts ±0.05)
+- **Per-deck playlists**: sequential / shuffle auto-cycle, 2–120 s interval, add/remove/prev/next
+- **Beat-sync / BPM**: `BeatDetector` — bass-energy detection, 43-frame history, 300 ms cooldown
+- **MIDI mapping** (Web MIDI API, Chromium/Electron only): CC/notes → crossfader, playlists
+- **Favorites** ★ persisted in localStorage
+- **Author-derived tag filters** with chip UI
+- Live **preset search**
+- Detached **output window** at `/output` — designed for OBS Browser Source
+- Audio sources: mic, device picker, audio file, `getDisplayMedia` (display capture)
+- **System audio loopback** via Electron `desktopCapturer` (Linux/Windows)
+- **Export / import** playlists as JSON (`opendrop-playlists.json`)
+- **Electron shell**: `electron/main.cjs` + `electron/preload.cjs` (contextIsolation, BroadcastChannel IPC relay, `app://` protocol for packaged builds)
+- PipeWire monitor setup script: `scripts/setup-audio.sh` (Linux)
+- Vitest unit tests for midi + playlist engines; 15 Playwright E2E tests
+
+### Changed
+- Dropped Tauri / Rust / projectM C++ / OpenGL renderer sidecar / v4l2loopback / Spout / NDI
+- App is a SvelteKit SPA (`adapter-static`, `ssr: false`) — Electron wraps it as a native desktop app
+
+### Known Limitations
+- Blend modes not implemented — opacity crossfade only
+- 100 / 1754 presets loaded (full library load deferred)
+- Web MIDI: Chromium / Electron only (Firefox / Safari unsupported)
+- System audio loopback: Electron only (unavailable in plain browser)
+- Installers unsigned (code signing deferred)
+
 ## [0.2.0] - 2026-01-22
 
 ### Added

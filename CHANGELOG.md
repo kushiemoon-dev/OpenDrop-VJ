@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security: bump electron-builder to v26 (fixes tar high CVEs)
 - Security: add pnpm overrides for shell-quote, tar, esbuild, cookie transitive deps
 - pnpm: move build allowlist from `onlyBuiltDependencies` (deprecated) to `pnpm-workspace.yaml` `allowBuilds` (pnpm v11)
+- pnpm: migrate `pnpm.overrides` from package.json to `pnpm-workspace.yaml` `overrides` (pnpm v11 drops package.json overrides)
+- CI: add `electron-winstaller` to `allowBuilds` (required by electron-builder v26 on Windows runners)
 
 ## [0.4.0] - 2026-06-14
 

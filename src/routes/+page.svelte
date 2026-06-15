@@ -81,10 +81,20 @@
 
 	// — Electron ——————————————————————————————————————————
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
-	let loopbackSources = $state<{ id: string; name: string }[]>([]);
-	let showLoopbackPicker = $state(false);
 	let platform = $state('');
-	let showLoopbackHelp = $state(false);
+	let showSystemAudioHelp = $state(false);
+
+	/** Detect OS in web builds (navigator.userAgent) — used for help text only. */
+	function detectWebOS(): string {
+		if (typeof navigator === 'undefined') return '';
+		const ua = navigator.userAgent;
+		if (ua.includes('Windows')) return 'windows';
+		if (ua.includes('Macintosh') || ua.includes('Mac OS')) return 'darwin';
+		if (ua.includes('Linux')) return 'linux';
+		return '';
+	}
+	/** Effective OS: Electron gives us the real value; web falls back to UA detection. */
+	const effectiveOS = $derived(platform || detectWebOS());
 
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
@@ -94,6 +104,17 @@
 	let beatsPerChange = $state(8);
 	let beatCountA = 0;
 	let beatCountB = 0;
+	let autoXfade = $state(false);
+	let autoXfadeCount = 0;
+
+	// — Tap tempo ——————————————————————————————————————————
+	let tapTimes: number[] = [];
+	let manualBpm = $state(0);
+	let metronomeId: ReturnType<typeof setInterval> | null = null;
+
+	// — Lock deck ——————————————————————————————————————————
+	let lockA = $state(false);
+	let lockB = $state(false);
 
 	// — Favoris + tags ————————————————————————————————————
 	let favorites = $state<string[]>([]);
@@ -178,6 +199,7 @@
 		sync?.destroy();
 		midi?.destroy();
 		beatDetector?.destroy();
+		if (metronomeId !== null) clearInterval(metronomeId);
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -236,20 +258,7 @@
 			beatDetector = new BeatDetector(audio.analyser);
 			beatDetector.start(() => {
 				detectedBpm = beatDetector?.bpm ?? 0;
-				if (beatSyncA) {
-					beatCountA = (beatCountA + 1) % beatsPerChange;
-					if (beatCountA === 0) {
-						if (playlistAItems.length > 0) playlistA?.next();
-						else applyMidiAction('preset-next-a', 127);
-					}
-				}
-				if (beatSyncB) {
-					beatCountB = (beatCountB + 1) % beatsPerChange;
-					if (beatCountB === 0) {
-						if (playlistBItems.length > 0) playlistB?.next();
-						else applyMidiAction('preset-next-b', 127);
-					}
-				}
+				if (!manualBpm) onBeat();
 			});
 
 			status = 'running';
@@ -259,31 +268,37 @@
 		}
 	}
 
-	async function openLoopbackPicker() {
-		sourceError = '';
-		if (platform === 'linux') {
-			showLoopbackHelp = true;
-			return;
-		}
-		try {
-			loopbackSources = await window.electronAPI!.getLoopbackSources();
-			if (loopbackSources.length === 1) {
-				await connectLoopback(loopbackSources[0]);
-			} else {
-				showLoopbackPicker = true;
-			}
-		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
-		}
-	}
-
-	async function connectLoopback(source: { id: string; name: string }) {
+	async function captureSystemAudio() {
 		if (!audio) return;
 		sourceError = '';
-		showLoopbackPicker = false;
 		try {
-			await audio.connectLoopback(source.id);
-			sourceLabel = `loopback: ${source.name}`;
+			await audio.resume();
+			if (isElectron && platform === 'win32') {
+				// Electron Windows: setDisplayMediaRequestHandler → loopback natif, pas de picker
+				await audio.connectDisplay();
+				sourceLabel = 'system audio';
+			} else if (effectiveOS === 'linux' || effectiveOS === 'darwin') {
+				// Linux (Electron ou web) / macOS (Electron) : chercher .monitor ou BlackHole
+				const devices = await AudioEngine.listAudioDevices();
+				const monitors = devices.filter((d) =>
+					/monitor|blackhole|loopback|cable|opendrop/i.test(d.label)
+				);
+				if (monitors.length === 1) {
+					await audio.connectDevice(monitors[0].deviceId);
+					currentDeviceId = monitors[0].deviceId;
+					sourceLabel = monitors[0].label || 'system audio';
+					sync?.sendSource(monitors[0].deviceId);
+				} else if (monitors.length > 1) {
+					audioDevices = monitors;
+					showDevicePicker = true;
+				} else {
+					showSystemAudioHelp = true;
+				}
+			} else {
+				// Web Windows / navigateur inconnu : getDisplayMedia avec guidance honnête
+				await audio.connectDisplay();
+				sourceLabel = 'system audio';
+			}
 		} catch (e) {
 			sourceError = e instanceof Error ? e.message : String(e);
 		}
@@ -293,6 +308,7 @@
 		if (!audio) return;
 		sourceError = '';
 		try {
+			await audio.resume();
 			await audio.connectMic();
 			sourceLabel = 'microphone';
 		} catch (e) {
@@ -325,10 +341,11 @@
 		}
 	}
 
-	function connectFile() {
+	async function connectFile() {
 		if (!audio || !audioEl) return;
 		sourceError = '';
 		try {
+			await audio.resume();
 			audio.connectMediaElement(audioEl);
 			audioEl.play();
 			sourceLabel = 'file';
@@ -402,6 +419,30 @@
 		(deck === 'A' ? playlistA : playlistB)?.prev();
 	}
 
+	function onBeat() {
+		if (autoXfade) {
+			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
+			if (autoXfadeCount === 0) {
+				crossfader = crossfader < 0.5 ? 1 : 0;
+				sync?.sendCrossfader(crossfader);
+			}
+		}
+		if (beatSyncA && !lockA) {
+			beatCountA = (beatCountA + 1) % beatsPerChange;
+			if (beatCountA === 0) {
+				if (playlistAItems.length > 0) playlistA?.next();
+				else applyMidiAction('preset-next-a', 127);
+			}
+		}
+		if (beatSyncB && !lockB) {
+			beatCountB = (beatCountB + 1) % beatsPerChange;
+			if (beatCountB === 0) {
+				if (playlistBItems.length > 0) playlistB?.next();
+				else applyMidiAction('preset-next-b', 127);
+			}
+		}
+	}
+
 	function toggleBeatSync(deck: 'A' | 'B') {
 		if (deck === 'A') {
 			beatSyncA = !beatSyncA;
@@ -412,6 +453,26 @@
 			beatCountB = 0;
 			playlistB?.setInterval(beatSyncB ? Infinity : playlistIntervalSec * 1000);
 		}
+	}
+
+	function tapTempo() {
+		const now = performance.now();
+		tapTimes.push(now);
+		if (tapTimes.length > 4) tapTimes = tapTimes.slice(-4);
+		if (tapTimes.length < 2) return;
+		const intervals = tapTimes.slice(1).map((t, i) => t - tapTimes[i]);
+		const avg = intervals.reduce((s, v) => s + v, 0) / intervals.length;
+		const bpm = Math.round(60000 / avg);
+		if (bpm < 40 || bpm > 300) return;
+		manualBpm = bpm;
+		if (metronomeId !== null) clearInterval(metronomeId);
+		metronomeId = setInterval(onBeat, avg);
+	}
+
+	function clearManualBpm() {
+		manualBpm = 0;
+		tapTimes = [];
+		if (metronomeId !== null) { clearInterval(metronomeId); metronomeId = null; }
 	}
 
 	async function toggleMidi() {
@@ -660,24 +721,21 @@
 			<div class="btn-row">
 				<button class="btn-sm" class:active={sourceLabel === 'microphone'} onclick={connectMic} disabled={status !== 'running'}>Mic</button>
 				<button class="btn-sm" onclick={openDevicePicker} disabled={status !== 'running'}>Pick device</button>
-				{#if isElectron}
-					<button class="btn-sm electron-loopback" class:active={sourceLabel.startsWith('loopback')} onclick={openLoopbackPicker} disabled={status !== 'running'} title="Capture system audio (Electron)">⟲ Loopback</button>
-				{/if}
+				<button class="btn-sm" class:active={sourceLabel === 'system audio'} onclick={captureSystemAudio} disabled={status !== 'running'} title="Capturer le son système">🔊 Audio système</button>
 			</div>
-			{#if showLoopbackPicker}
+			{#if showSystemAudioHelp}
 				<div class="device-picker">
-					<span class="label">Select loopback source</span>
-					{#each loopbackSources as src}
-						<button class="device-item" onclick={() => connectLoopback(src)}>{src.name}</button>
-					{/each}
-					<button class="btn-sm" onclick={() => showLoopbackPicker = false}>Cancel</button>
-				</div>
-			{/if}
-			{#if showLoopbackHelp}
-				<div class="device-picker">
-					<span class="label">System audio on Linux</span>
-					<p class="hint">Run once in a terminal:<br><code>bash scripts/setup-audio.sh</code><br>Then use <strong>Pick device</strong> → "OpenDrop - Son du PC"</p>
-					<button class="btn-sm" onclick={() => showLoopbackHelp = false}>OK</button>
+					{#if effectiveOS === 'darwin'}
+						<span class="label">Audio système sur macOS</span>
+						<p class="hint">Installer <strong>BlackHole</strong> (gratuit) :<br><code>brew install blackhole-2ch</code><br>Créer un Multi-Output Device dans Audio MIDI Setup,<br>puis <strong>Pick device</strong> → BlackHole.</p>
+					{:else if effectiveOS === 'linux'}
+						<span class="label">Audio système sur Linux</span>
+						<p class="hint">Aucun périphérique monitor trouvé.<br>Utilisez <strong>Pick device</strong> → entrée se terminant par <code>.monitor</code> (sortie système).<br>Optionnel : <code>bash scripts/setup-audio.sh</code> pour un device nommé.</p>
+					{:else}
+						<span class="label">Audio système</span>
+						<p class="hint">Dans Chrome/Edge : cliquer <strong>Audio système</strong> → choisir <strong>Écran entier</strong> → cocher <strong>"Partager l'audio système"</strong>.</p>
+					{/if}
+					<button class="btn-sm" onclick={() => showSystemAudioHelp = false}>OK</button>
 				</div>
 			{/if}
 			<div class="file-row">
@@ -768,15 +826,20 @@
 			<!-- Beat sync -->
 			{#if status === 'running'}
 				<div class="beat-sync-row">
-					<span class="bpm-display">♩ {detectedBpm > 0 ? detectedBpm : '—'}</span>
+					<span class="bpm-display" class:manual={manualBpm > 0}>♩ {manualBpm > 0 ? manualBpm : detectedBpm > 0 ? detectedBpm : '—'}</span>
+					<button class="btn-sm tap-btn" onclick={tapTempo} title="Tap tempo">TAP</button>
+					{#if manualBpm > 0}
+						<button class="btn-sm" onclick={clearManualBpm} title="Clear manual BPM">✕</button>
+					{/if}
 					<select class="beats-select" bind:value={beatsPerChange}>
-						<option value={4}>4 beats</option>
-						<option value={8}>8 beats</option>
-						<option value={16}>16 beats</option>
-						<option value={32}>32 beats</option>
+						<option value={4}>4</option>
+						<option value={8}>8</option>
+						<option value={16}>16</option>
+						<option value={32}>32</option>
 					</select>
 					<button class="btn-sm pl-btn" class:active={beatSyncA} onclick={() => toggleBeatSync('A')} title="Beat-sync Deck A">A</button>
 					<button class="btn-sm pl-btn" class:active={beatSyncB} onclick={() => toggleBeatSync('B')} title="Beat-sync Deck B">B</button>
+					<button class="btn-sm pl-btn" class:active={autoXfade} onclick={() => { autoXfade = !autoXfade; autoXfadeCount = 0; }} title="Auto-cut crossfader on beat">⇄</button>
 				</div>
 			{/if}
 
@@ -791,6 +854,7 @@
 							{playlistAPlaying ? '⏹' : '▶'}
 						</button>
 						<button class="btn-sm pl-btn" onclick={() => playlistNext('A')} disabled={status !== 'running' || playlistAItems.length === 0}>⏭</button>
+						<button class="btn-sm pl-btn lock-btn" class:locked={lockA} onclick={() => lockA = !lockA} title={lockA ? 'Unlock deck A' : 'Lock deck A'}>🔒</button>
 					</div>
 				</div>
 				{#if playlistAItems.length > 0}
@@ -818,6 +882,7 @@
 							{playlistBPlaying ? '⏹' : '▶'}
 						</button>
 						<button class="btn-sm pl-btn" onclick={() => playlistNext('B')} disabled={status !== 'running' || playlistBItems.length === 0}>⏭</button>
+						<button class="btn-sm pl-btn lock-btn" class:locked={lockB} onclick={() => lockB = !lockB} title={lockB ? 'Unlock deck B' : 'Lock deck B'}>🔒</button>
 					</div>
 				</div>
 				{#if playlistBItems.length > 0}
@@ -978,7 +1043,7 @@
 		width: 268px; flex-shrink: 0;
 		background: #0b0b20;
 		border-left: 1px solid #1a1a42;
-		display: flex; flex-direction: column; overflow: hidden;
+		display: flex; flex-direction: column; overflow-y: auto;
 		/* subtle scanline texture */
 		background-image: repeating-linear-gradient(
 			0deg, transparent, transparent 2px,
@@ -992,7 +1057,7 @@
 		display: flex; flex-direction: column; gap: 0.4rem;
 	}
 
-	.preset-browser { flex: 1; overflow: hidden; }
+	.preset-browser { flex: 1 0 180px; overflow: hidden; }
 
 	.label {
 		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
@@ -1037,6 +1102,11 @@
 	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
 	.hint code { background: #191940; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 10px; }
 	.hint strong { color: #e0e0ff; }
+
+	.tap-btn { font-weight: 700; letter-spacing: 0.05em; }
+	.bpm-display.manual { color: #b44fff; text-shadow: 0 0 8px rgba(180,79,255,0.5); }
+	.lock-btn { opacity: 0.35; }
+	.lock-btn.locked { opacity: 1; color: #ff2d78; }
 
 	/* ── Mixer ── */
 	.deck-tabs { display: flex; gap: 0.4rem; }

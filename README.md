@@ -2,6 +2,7 @@
 
 ### Multi-Deck Milkdrop Visualizer — web-first, cross-platform
 
+[![Live Demo](https://img.shields.io/badge/demo-opendrop.kushie.dev-ff2d78?style=flat-square)](https://opendrop.kushie.dev)
 [![Release](https://img.shields.io/github/v/release/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
 [![License](https://img.shields.io/github/license/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](LICENSE)
 
@@ -22,9 +23,9 @@
 - **Playlists** — per-deck auto-cycle (sequential / shuffle), 2–120 s interval, prev / next
 - **Beat-sync / BPM** — bass-energy beat detector drives preset changes on the beat
 - **MIDI mapping** — CC/note → crossfader, playlist controls *(Chromium / Electron only)*
-- **Preset browser** — search, author tag filters, favorites ★, 100 presets bundled
+- **Preset browser** — search, favorites ★, 1754 presets (lazy-loaded)
 - **Output window** — detached `/output` route for second monitor or OBS Browser Source
-- **Audio sources** — mic, device picker, audio file, display capture, loopback *(Electron only)*
+- **Audio sources** — mic, device picker, audio file, system audio (all platforms)
 - **Export / import** playlists as JSON
 - **Keyboard shortcuts** — ← → nudge crossfader, Tab switches active deck
 
@@ -43,7 +44,11 @@
 
 ---
 
-## Quick Start (browser)
+## Try it
+
+**→ [opendrop.kushie.dev](https://opendrop.kushie.dev)** — no install required (Chrome/Edge recommended).
+
+## Quick Start (self-hosted)
 
 ```bash
 pnpm install
@@ -65,14 +70,17 @@ pnpm electron:build   # Build SPA then package with electron-builder
 ./OpenDrop-VJ.AppImage --ozone-platform=wayland --no-sandbox
 ```
 
-## System Audio Capture (Linux — PipeWire)
+## System Audio Capture
 
-```bash
-bash scripts/setup-audio.sh   # Creates a PipeWire monitor source
-```
+Click **🔊 Audio système** in the app — behaviour adapts per platform:
 
-Then pick **Pick device** in the app and select the monitor source. On Windows/Mac,
-use the **Loopback** button in the Electron app (powered by `desktopCapturer`).
+| Platform | Web | Electron |
+|----------|-----|----------|
+| **Windows** | Screen picker → "Share system audio" (Chrome) | Native loopback — no picker |
+| **Linux** | Device picker → `.monitor` source (PipeWire/Pulse) | Same |
+| **macOS** | Tab audio only | Install [BlackHole](https://github.com/ExistentialAudio/BlackHole) → device picker |
+
+**Linux optional:** `bash scripts/setup-audio.sh` creates a named PipeWire virtual source ("OpenDrop - Son du PC") instead of using a raw `.monitor` device.
 
 ## OBS Browser Source
 
@@ -130,9 +138,8 @@ e2e/
 | Item | Status |
 |------|--------|
 | Blend modes (Normal / Add / Screen…) | Not yet — opacity crossfade only |
-| Full preset library (1754 presets) | 100 loaded — full load deferred |
 | Web MIDI | Chromium / Electron only (not Firefox / Safari) |
-| System audio loopback | Electron only (browser cannot capture system audio) |
+| System audio on macOS browser | Tab audio only — install BlackHole for full capture |
 | Signed installers | Planned |
 | 4-deck compositor | Planned |
 | NDI / Spout / v4l2 output | Planned |

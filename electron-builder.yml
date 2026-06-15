@@ -10,6 +10,10 @@ files:
   - build/**
   - electron/**
   - package.json
+  - node_modules/grandiose/**
+
+asarUnpack:
+  - node_modules/grandiose/**
 
 mac:
   category: public.app-category.music

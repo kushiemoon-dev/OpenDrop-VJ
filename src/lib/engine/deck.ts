@@ -26,6 +26,9 @@ export interface DeckOptions {
 	height?: number;
 	meshWidth?: number;
 	meshHeight?: number;
+	pixelRatio?: number;
+	textureRatio?: number;
+	outputFXAA?: boolean;
 }
 
 export class Deck {
@@ -60,7 +63,10 @@ export class Deck {
 			width: w,
 			height: h,
 			meshWidth: opts.meshWidth ?? 32,
-			meshHeight: opts.meshHeight ?? 24
+			meshHeight: opts.meshHeight ?? 24,
+			pixelRatio: opts.pixelRatio ?? 1,
+			textureRatio: opts.textureRatio ?? 1,
+			outputFXAA: opts.outputFXAA ?? false
 		});
 
 		this._state = 'running';
@@ -120,6 +126,23 @@ export class Deck {
 		this.canvas.width = width;
 		this.canvas.height = height;
 		this.viz?.setRendererSize(width, height);
+	}
+
+	/**
+	 * Apply new quality settings without recreating the visualizer.
+	 * Calls setRendererSize (updates mesh + pixel/textureRatio) + setOutputAA.
+	 */
+	applyQuality(opts: { meshWidth: number; meshHeight: number; pixelRatio: number; textureRatio: number; outputFXAA: boolean }): void {
+		if (!this.viz) return;
+		const w = this.canvas.clientWidth || this.canvas.width;
+		const h = this.canvas.clientHeight || this.canvas.height;
+		this.viz.setRendererSize(w, h, {
+			meshWidth: opts.meshWidth,
+			meshHeight: opts.meshHeight,
+			pixelRatio: opts.pixelRatio,
+			textureRatio: opts.textureRatio
+		});
+		this.viz.setOutputAA(opts.outputFXAA);
 	}
 
 	/**

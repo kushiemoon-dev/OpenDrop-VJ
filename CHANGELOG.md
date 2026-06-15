@@ -5,6 +5,16 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-15
+
+### Added
+- All 1754 Milkdrop presets now available (up from 100) via lazy-loading — names appear instantly, data loads on first use
+
+### Fixed
+- Linux loopback button no longer opens the Wayland screen-share portal; shows PipeWire setup instructions instead
+- Preset browser: removed author tag chips (unworkable at 1754 presets), kept ★ favorites filter and search
+- Preset list items more compact to show more presets at once
+
 ## [0.4.0] - 2026-06-14
 
 > **Complete rewrite**: web-first stack (SvelteKit + Butterchurn + Electron)

@@ -6,7 +6,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
 
   getPlatform: () => ipcRenderer.invoke('get-platform'),
-  getLoopbackSources: () => ipcRenderer.invoke('get-loopback-sources'),
 
   // BroadcastChannel relay through main process (cross-window IPC)
   sendBroadcast: (data) => ipcRenderer.send('bc-post', data),

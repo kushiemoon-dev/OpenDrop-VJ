@@ -4,6 +4,12 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, net } = require(
 const path = require('path');
 const fs = require('fs');
 
+// ── NDI (optional — requires NDI SDK + grandiose) ──────────────────────────
+let grandiose = null;
+let ndiSender = null;
+let ndiTimer = null;
+let outputWin = null;     // tracked below in did-create-window
+
 const isDev = !app.isPackaged;
 const DEV_URL = 'http://localhost:1420';
 const BUILD_DIR = path.join(__dirname, '../build');
@@ -19,6 +25,52 @@ ipcMain.on('bc-post', (event, data) => {
 
 // ── Platform info ───────────────────────────────────────────────────────────
 ipcMain.handle('get-platform', () => process.platform);
+
+// ── NDI handlers ─────────────────────────────────────────────────────────────
+ipcMain.handle('ndi:start', async (_, { name, width, height }) => {
+  try {
+    if (!grandiose) grandiose = require('grandiose');
+    if (ndiSender) { ndiSender.destroy?.(); ndiSender = null; }
+    if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
+
+    ndiSender = await grandiose.send({ name, clockVideo: false, clockAudio: false });
+
+    ndiTimer = setInterval(async () => {
+      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+      if (!win || !ndiSender) return;
+      try {
+        const img = await win.webContents.capturePage();
+        const buf = img.toBitmap();
+        const w = img.getSize().width;
+        const h = img.getSize().height;
+        if (!w || !h) return;
+        ndiSender.video({
+          xres: w,
+          yres: h,
+          frameRateN: 30000,
+          frameRateD: 1001,
+          pictureAspectRatio: w / h,
+          type: grandiose.FRAME_TYPE_VIDEO,
+          lineStrideBytes: w * 4,
+          fourCC: grandiose.FOURCC_BGRA,
+          data: buf,
+          timestamp: BigInt(0),
+        }).catch(() => {});
+      } catch { /* skip frame on error */ }
+    }, 1000 / 30);
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ndi:stop', async () => {
+  if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
+  ndiSender?.destroy?.();
+  ndiSender = null;
+  return { ok: true };
+});
 
 // ── Custom app:// protocol for production SPA routing ─────────────────────
 function registerProtocol() {
@@ -73,6 +125,12 @@ function createWindow() {
   } else {
     win.loadURL('app://localhost/');
   }
+
+  // Track the output window for NDI capture
+  win.webContents.on('did-create-window', (child) => {
+    outputWin = child;
+    child.on('closed', () => { if (outputWin === child) outputWin = null; });
+  });
 
   // Allow output window opened via window.open('/output', ...)
   win.webContents.setWindowOpenHandler(() => ({

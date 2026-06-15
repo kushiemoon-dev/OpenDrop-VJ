@@ -3,13 +3,21 @@
 	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { OutputSync } from '$lib/engine/sync.js';
-	import { buildPresetList, loadPresetData } from '$lib/presets/index.js';
+	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
+	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
+	import { type Overlay } from '$lib/engine/overlay.js';
+	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 
 	let canvasA: HTMLCanvasElement | undefined = $state();
 	let canvasB: HTMLCanvasElement | undefined = $state();
 	let crossfader = $state(0);
+	let overlays = $state<Overlay[]>([]);
+	let beat = $state(false);
+	let beatTimer: ReturnType<typeof setTimeout> | null = null;
 	let status = $state<'initializing' | 'ready' | 'error'>('initializing');
 	let errorMsg = $state('');
+	let ndiActive = $state(false);
+	let ndiError = $state('');
 
 	let deckA: Deck | null = null;
 	let deckB: Deck | null = null;
@@ -30,14 +38,16 @@
 
 			deckA = new Deck(canvasA!, 'out-a');
 			deckB = new Deck(canvasB!, 'out-b');
-			await deckA.init(audio.ctx, { width: w, height: h });
-			await deckB.init(audio.ctx, { width: w, height: h });
+			const q = getQualitySettings(DEFAULT_TIER);
+			await deckA.init(audio.ctx, { width: w, height: h, ...q });
+			await deckB.init(audio.ctx, { width: w, height: h, ...q });
 
 			deckA.startRenderLoop();
 			deckB.startRenderLoop();
 
 			// Charger les presets par défaut (mêmes indices 0/1 que le main) pour ne jamais
 			// être noir si le handshake de sync tarde ou est absent.
+			await initPresets();
 			const list = buildPresetList();
 			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) deckA.loadPreset(d, 0.0); }
 			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) deckB.loadPreset(d, 0.0); }
@@ -54,6 +64,16 @@
 				} else if (msg.type === 'crossfader') {
 					gotState = true;
 					crossfader = msg.value;
+				} else if (msg.type === 'quality') {
+					const settings = getQualitySettings(msg.tier as QualityTier);
+					deckA?.applyQuality(settings);
+					deckB?.applyQuality(settings);
+				} else if (msg.type === 'overlays') {
+					overlays = msg.list;
+				} else if (msg.type === 'beat') {
+					beat = true;
+					if (beatTimer !== null) clearTimeout(beatTimer);
+					beatTimer = setTimeout(() => { beat = false; beatTimer = null; }, 80);
 				} else if (msg.type === 'source') {
 					try {
 						await audio!.resume();
@@ -83,6 +103,7 @@
 	});
 
 	onDestroy(() => {
+		if (beatTimer !== null) clearTimeout(beatTimer);
 		if (helloTimer !== null) clearInterval(helloTimer);
 		deckA?.destroy();
 		deckB?.destroy();
@@ -95,13 +116,42 @@
 		deckA?.resize(canvasA.clientWidth, canvasA.clientHeight);
 		deckB?.resize(canvasB.clientWidth, canvasB.clientHeight);
 	}
+
+	const eAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
+
+	async function toggleNdi() {
+		ndiError = '';
+		if (ndiActive) {
+			await eAPI?.ndiStop();
+			ndiActive = false;
+		} else {
+			const w = window.innerWidth;
+			const h = window.innerHeight;
+			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
+			if (res?.ok) {
+				ndiActive = true;
+			} else {
+				ndiError = res?.error ?? 'NDI SDK non trouvé — installez le NDI SDK depuis ndi.video puis relancez.';
+			}
+		}
+	}
 </script>
 
 <svelte:window onresize={onResize} />
 
 <div class="output">
 	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}"></canvas>
-	<canvas bind:this={canvasB} class="layer" style="opacity:{opacityB}"></canvas>
+	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
+	<OverlayLayer {overlays} {beat} />
+
+	{#if eAPI}
+		<button class="ndi-btn" class:ndi-on={ndiActive} onclick={toggleNdi} title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
+			NDI {ndiActive ? '●' : '○'}
+		</button>
+	{/if}
+	{#if ndiError}
+		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{ndiError}</div>
+	{/if}
 
 	{#if status === 'initializing'}
 		<div class="notice">Initializing…</div>
@@ -120,6 +170,7 @@
 		height: 100vh;
 		position: relative;
 		background: #000;
+		isolation: isolate;
 	}
 
 	.layer {
@@ -129,6 +180,7 @@
 		height: 100%;
 		display: block;
 	}
+	.layer-b { mix-blend-mode: screen; }
 
 	.notice {
 		position: absolute;
@@ -143,4 +195,25 @@
 	}
 
 	.notice.error { color: #f87; }
+
+	.ndi-btn {
+		position: absolute;
+		bottom: 12px;
+		right: 12px;
+		z-index: 30;
+		background: rgba(0,0,0,0.6);
+		border: 1px solid #333;
+		border-radius: 6px;
+		color: #555;
+		font-size: 11px;
+		font-family: 'Courier New', monospace;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		padding: 4px 10px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+
+	.ndi-btn:hover { border-color: #ff6600; color: #ff6600; }
+	.ndi-btn.ndi-on { border-color: #ff6600; color: #ff6600; background: rgba(255,102,0,0.12); }
 </style>

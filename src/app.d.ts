@@ -15,6 +15,8 @@ declare global {
 			getPlatform: () => Promise<string>;
 			sendBroadcast: (data: unknown) => void;
 			onBroadcast: (cb: (data: unknown) => void) => () => void;
+			ndiStart: (name: string, width: number, height: number) => Promise<{ ok: boolean; error?: string }>;
+			ndiStop: () => Promise<{ ok: boolean }>;
 		};
 	}
 }

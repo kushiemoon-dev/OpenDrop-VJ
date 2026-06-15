@@ -17,8 +17,14 @@ ipcMain.on('bc-post', (event, data) => {
   });
 });
 
+// ── Platform info ───────────────────────────────────────────────────────────
+ipcMain.handle('get-platform', () => process.platform);
+
 // ── Loopback audio: expose desktopCapturer sources to renderer ─────────────
+// Linux/Wayland: desktopCapturer triggers the screen-share portal, not audio.
+// Use PipeWire virtual source (scripts/setup-audio.sh) + Pick device instead.
 ipcMain.handle('get-loopback-sources', async () => {
+  if (process.platform === 'linux') return [];
   try {
     const sources = await desktopCapturer.getSources({ types: ['screen'] });
     return sources.map((s) => ({ id: s.id, name: s.name }));

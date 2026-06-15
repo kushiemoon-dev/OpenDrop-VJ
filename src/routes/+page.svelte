@@ -4,7 +4,7 @@
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
-	import { loadPresets, buildPresetList, searchPresets, getCategories, type PresetMeta } from '$lib/presets/index.js';
+	import { buildPresetList, loadPresetData, searchPresets, type PresetMeta } from '$lib/presets/index.js';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 
@@ -15,7 +15,6 @@
 	let deckB: Deck | null = null;
 	let audio: AudioEngine | null = null;
 
-	let presets: Record<string, object> = $state({});
 	let presetList: PresetMeta[] = $state([]);
 	let searchQuery = $state('');
 
@@ -84,6 +83,8 @@
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
 	let loopbackSources = $state<{ id: string; name: string }[]>([]);
 	let showLoopbackPicker = $state(false);
+	let platform = $state('');
+	let showLoopbackHelp = $state(false);
 
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
@@ -99,7 +100,6 @@
 	let activeTag = $state<string>(''); // '' = tous, '★' = favoris, 'Auteur' = tag
 
 	// — Derived ———————————————————————————————————————————
-	let allTags = $derived(getCategories(presetList));
 	let filteredPresets = $derived.by(() => {
 		let list = searchPresets(presetList, searchQuery);
 		if (activeTag === '★') return list.filter((p) => favorites.includes(p.name));
@@ -144,6 +144,9 @@
 
 	// — Lifecycle ——————————————————————————————————————————
 	onMount(async () => {
+		if (isElectron) {
+			platform = await window.electronAPI!.getPlatform();
+		}
 		// Restaurer les playlists sauvegardées
 		try {
 			const savedA = localStorage.getItem('od-pl-a');
@@ -161,8 +164,7 @@
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
-		presets = await loadPresets();
-		presetList = buildPresetList(presets);
+		presetList = buildPresetList();
 		if (presetList.length > 0) presetA = presetList[0].name;
 		if (presetList.length > 1) presetB = presetList[1].name;
 	});
@@ -201,8 +203,8 @@
 			await deckA.init(audio.ctx, { width: w, height: h });
 			await deckB.init(audio.ctx, { width: w, height: h });
 
-			if (presetA && presets[presetA]) deckA.loadPreset(presets[presetA], 0.0);
-			if (presetB && presets[presetB]) deckB.loadPreset(presets[presetB], 0.0);
+			if (presetA) { const d = await loadPresetData(presetA); if (d) deckA.loadPreset(d, 0.0); }
+			if (presetB) { const d = await loadPresetData(presetB); if (d) deckB.loadPreset(d, 0.0); }
 
 			deckA.connectAudio(audio.gainNode);
 			deckB.connectAudio(audio.gainNode);
@@ -210,15 +212,15 @@
 			deckA.startRenderLoop();
 			deckB.startRenderLoop();
 
-			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, (name) => {
+			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetA = name;
-				deckA?.loadPreset(presets[name], 2.0);
+				const d = await loadPresetData(name); if (d) deckA?.loadPreset(d, 2.0);
 				sync?.sendPreset('A', name);
 				playlistAPlaying = playlistA?.playing ?? false;
 			});
-			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, (name) => {
+			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetB = name;
-				deckB?.loadPreset(presets[name], 2.0);
+				const d = await loadPresetData(name); if (d) deckB?.loadPreset(d, 2.0);
 				sync?.sendPreset('B', name);
 				playlistBPlaying = playlistB?.playing ?? false;
 			});
@@ -259,6 +261,10 @@
 
 	async function openLoopbackPicker() {
 		sourceError = '';
+		if (platform === 'linux') {
+			showLoopbackHelp = true;
+			return;
+		}
 		try {
 			loopbackSources = await window.electronAPI!.getLoopbackSources();
 			if (loopbackSources.length === 1) {
@@ -338,14 +344,16 @@
 		if (status === 'running') connectFile();
 	}
 
-	function selectPreset(name: string) {
+	async function selectPreset(name: string) {
+		const d = await loadPresetData(name);
+		if (!d) return;
 		if (activeDeck === 'A') {
 			presetA = name;
-			deckA?.loadPreset(presets[name], 2.0);
+			deckA?.loadPreset(d, 2.0);
 			sync?.sendPreset('A', name);
 		} else {
 			presetB = name;
-			deckB?.loadPreset(presets[name], 2.0);
+			deckB?.loadPreset(d, 2.0);
 			sync?.sendPreset('B', name);
 		}
 	}
@@ -491,14 +499,16 @@
 		}
 	}
 
-	function selectPresetForDeck(deck: 'A' | 'B', name: string) {
+	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
+		const d = await loadPresetData(name);
+		if (!d) return;
 		if (deck === 'A') {
 			presetA = name;
-			deckA?.loadPreset(presets[name], 2.0);
+			deckA?.loadPreset(d, 2.0);
 			sync?.sendPreset('A', name);
 		} else {
 			presetB = name;
-			deckB?.loadPreset(presets[name], 2.0);
+			deckB?.loadPreset(d, 2.0);
 			sync?.sendPreset('B', name);
 		}
 	}
@@ -661,6 +671,13 @@
 						<button class="device-item" onclick={() => connectLoopback(src)}>{src.name}</button>
 					{/each}
 					<button class="btn-sm" onclick={() => showLoopbackPicker = false}>Cancel</button>
+				</div>
+			{/if}
+			{#if showLoopbackHelp}
+				<div class="device-picker">
+					<span class="label">System audio on Linux</span>
+					<p class="hint">Run once in a terminal:<br><code>bash scripts/setup-audio.sh</code><br>Then use <strong>Pick device</strong> → "OpenDrop - Son du PC"</p>
+					<button class="btn-sm" onclick={() => showLoopbackHelp = false}>OK</button>
 				</div>
 			{/if}
 			<div class="file-row">
@@ -875,12 +892,9 @@
 				placeholder="Search presets…"
 				bind:value={searchQuery}
 			/>
-			<!-- Chips favoris + tags -->
+			<!-- Filtre favoris -->
 			<div class="tag-chips">
-				<button class="tag-chip" class:tag-active={activeTag === '★'} onclick={() => activeTag = activeTag === '★' ? '' : '★'}>★</button>
-				{#each allTags as tag}
-					<button class="tag-chip" class:tag-active={activeTag === tag} onclick={() => activeTag = activeTag === tag ? '' : tag}>{tag}</button>
-				{/each}
+				<button class="tag-chip" class:tag-active={activeTag === '★'} onclick={() => activeTag = activeTag === '★' ? '' : '★'}>★ Favorites</button>
 			</div>
 			<ul class="preset-list">
 				{#each filteredPresets as p (p.name)}
@@ -1020,6 +1034,10 @@
 
 	.device-item:hover { background: #191940; color: #fff; }
 
+	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
+	.hint code { background: #191940; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 10px; }
+	.hint strong { color: #e0e0ff; }
+
 	/* ── Mixer ── */
 	.deck-tabs { display: flex; gap: 0.4rem; }
 
@@ -1075,8 +1093,8 @@
 	.preset-item {
 		display: block; width: 100%; text-align: left;
 		background: none; border: none; color: #8888bb;
-		padding: 0.3rem 0.5rem; cursor: pointer; font-size: 12px;
-		border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		padding: 0.15rem 0.4rem; cursor: pointer; font-size: 11px;
+		border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 		transition: all 0.1s;
 	}
 
@@ -1177,6 +1195,8 @@
 	/* Tag chips */
 	.tag-chips {
 		display: flex; flex-wrap: wrap; gap: 3px;
+		max-height: 52px; overflow-y: auto;
+		scrollbar-width: thin; scrollbar-color: #2a2a5a transparent;
 	}
 
 	.tag-chip {

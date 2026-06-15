@@ -5,7 +5,7 @@
  * to all active decks via Deck.connectAudio(analyser).
  */
 
-export type AudioSourceType = 'none' | 'mic' | 'file' | 'display' | 'loopback';
+export type AudioSourceType = 'none' | 'mic' | 'file' | 'display';
 
 export interface AudioLevels {
 	rms: number; // 0–1 overall RMS
@@ -109,24 +109,6 @@ export class AudioEngine {
 		// Build an audio-only stream from the captured tracks
 		const audioOnlyStream = new MediaStream(audioTracks);
 		this._connectStream(audioOnlyStream, 'display');
-	}
-
-	/**
-	 * Electron only — capture system audio via a desktopCapturer source ID.
-	 * Get source IDs with window.electronAPI.getLoopbackSources().
-	 */
-	async connectLoopback(sourceId: string): Promise<void> {
-		const stream = await navigator.mediaDevices.getUserMedia({
-			audio: {
-				// Electron/Chromium-specific constraint — chromeMediaSource not in standard types
-				mandatory: {
-					chromeMediaSource: 'desktop',
-					chromeMediaSourceId: sourceId,
-				},
-			} as MediaTrackConstraints,
-			video: false,
-		});
-		this._connectStream(stream, 'loopback');
 	}
 
 	/** Connect an audio file element as the source. */

@@ -1,5 +1,8 @@
 node_modules
 
+# Presets générés (lancé par pnpm presets:build ou pnpm build)
+/static/presets
+
 # Output
 .output
 .vercel

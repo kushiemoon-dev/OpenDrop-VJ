@@ -1,61 +1,67 @@
 /**
- * Preset registry — all 1754 Milkdrop presets from butterchurn-presets.
+ * Preset registry — 16 375 presets servis comme fichiers statiques.
  *
- * Names are available immediately (derived from file paths via import.meta.glob).
- * Preset data is loaded lazily on first use and cached.
+ * Appeler `await initPresets()` une fois avant tout usage.
+ * Après ça, toutes les fonctions ci-dessous sont synchrones, sauf loadPresetData.
  */
+
+import { base } from '$app/paths';
 
 export interface PresetMeta {
 	name: string;
 	category: string;
 }
 
-// Vite resolves all 1754 JSON paths at build time; actual data loads lazily per preset.
-const _modules = import.meta.glob(
-	'/node_modules/butterchurn-presets/presets/converted/*.json'
-);
+interface ManifestEntry { slug: string; name: string; }
 
-// name → module loader
-const _loaders = new Map<string, () => Promise<unknown>>();
-// name → cached preset data
+let _nameToSlug = new Map<string, string>();
 const _cache = new Map<string, object>();
+let _initialized = false;
 
-function pathToName(path: string): string {
-	return path.replace(/^.*\/converted\//, '').replace(/\.json$/, '');
+/** Noms de tous les presets, disponibles après initPresets(). */
+export let allPresetNames: string[] = [];
+
+/** Charger le manifest. À appeler une fois dans onMount avant tout usage. */
+export async function initPresets(): Promise<void> {
+	if (_initialized) return;
+	const res = await fetch(`${base}/presets/manifest.json`);
+	if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status}`);
+	const manifest: { entries: ManifestEntry[] } = await res.json();
+	for (const { slug, name } of manifest.entries) {
+		_nameToSlug.set(name, slug);
+	}
+	allPresetNames = manifest.entries.map(e => e.name);
+	_initialized = true;
 }
 
-for (const [path, loader] of Object.entries(_modules)) {
-	_loaders.set(pathToName(path), loader as () => Promise<unknown>);
-}
-
-/** All preset names, sorted alphabetically. Available synchronously. */
-export const allPresetNames: string[] = [..._loaders.keys()].sort(
-	(a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })
-);
-
-/** Load a single preset's data (cached). */
+/** Charger les données d'un preset (mis en cache). */
 export async function loadPresetData(name: string): Promise<object | null> {
 	if (_cache.has(name)) return _cache.get(name)!;
-	const loader = _loaders.get(name);
-	if (!loader) return null;
-	const mod = await loader() as { default: object };
-	const data = mod.default ?? mod;
-	_cache.set(name, data);
-	return data;
+	const slug = _nameToSlug.get(name);
+	if (!slug) return null;
+	try {
+		const res = await fetch(`${base}/presets/${encodeURIComponent(slug)}.json`);
+		if (!res.ok) return null;
+		const data = await res.json() as object;
+		_cache.set(name, data);
+		return data;
+	} catch {
+		return null;
+	}
 }
 
-/** Build preset metadata list (synchronous — no data loading needed). */
+/** Construire la liste complète des presets avec catégorie. */
 export function buildPresetList(): PresetMeta[] {
 	return allPresetNames.map((name) => ({ name, category: getCategory(name) }));
 }
 
-/** Extract author/category from preset name (part before " - "). */
+/** Extraire la catégorie/auteur depuis le nom (partie avant " - "). */
 export function getCategory(name: string): string {
 	const dash = name.indexOf(' - ');
 	return dash > 0 ? name.slice(0, dash).trim() : 'Other';
 }
 
-/** Filter presets by search query. */
+/** Filtrer les presets par recherche. */
 export function searchPresets(list: PresetMeta[], query: string): PresetMeta[] {
 	if (!query) return list;
 	const q = query.toLowerCase();

@@ -14,4 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('bc-msg', handler);
     return () => ipcRenderer.off('bc-msg', handler);
   },
+
+  // NDI output (requires NDI SDK + grandiose)
+  ndiStart: (name, width, height) => ipcRenderer.invoke('ndi:start', { name, width, height }),
+  ndiStop: () => ipcRenderer.invoke('ndi:stop'),
 });

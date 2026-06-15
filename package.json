@@ -7,7 +7,8 @@
 	"main": "electron/main.cjs",
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"presets:build": "node scripts/build-presets.mjs",
+		"build": "node scripts/build-presets.mjs && vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -16,7 +17,8 @@
 		"test:coverage": "vitest --coverage",
 		"test:e2e": "playwright test",
 		"electron:dev": "concurrently \"vite dev\" \"wait-on http://localhost:1420 && electron .\"",
-		"electron:build": "vite build && electron-builder"
+		"electron:build": "vite build && electron-builder",
+		"electron:rebuild": "electron-rebuild -f -w grandiose"
 	},
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",

@@ -20,19 +20,6 @@ ipcMain.on('bc-post', (event, data) => {
 // ── Platform info ───────────────────────────────────────────────────────────
 ipcMain.handle('get-platform', () => process.platform);
 
-// ── Loopback audio: expose desktopCapturer sources to renderer ─────────────
-// Linux/Wayland: desktopCapturer triggers the screen-share portal, not audio.
-// Use PipeWire virtual source (scripts/setup-audio.sh) + Pick device instead.
-ipcMain.handle('get-loopback-sources', async () => {
-  if (process.platform === 'linux') return [];
-  try {
-    const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    return sources.map((s) => ({ id: s.id, name: s.name }));
-  } catch {
-    return [];
-  }
-});
-
 // ── Custom app:// protocol for production SPA routing ─────────────────────
 function registerProtocol() {
   protocol.handle('app', async (request) => {
@@ -65,6 +52,21 @@ function createWindow() {
   });
 
   win.once('ready-to-show', () => win.show());
+
+  // ── System audio loopback via getDisplayMedia ──────────────────────────────
+  // Intercepts renderer getDisplayMedia() calls. On Windows, fulfils with
+  // native loopback (no screen-share dialog, no extra software). On macOS/Linux
+  // the UI routes to Path B (device picker / BlackHole / .monitor) before
+  // calling connectDisplay(), so this handler is a graceful fallback only.
+  win.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
+    if (process.platform === 'win32') {
+      callback({ audio: 'loopback' });
+      return;
+    }
+    desktopCapturer.getSources({ types: ['screen'] })
+      .then((sources) => callback(sources.length ? { video: sources[0] } : {}))
+      .catch(() => callback({}));
+  }, { useSystemPicker: false });
 
   if (isDev) {
     win.loadURL(DEV_URL);

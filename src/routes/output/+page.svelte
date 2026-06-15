@@ -3,7 +3,7 @@
 	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { OutputSync } from '$lib/engine/sync.js';
-	import { loadPresets } from '$lib/presets/index.js';
+	import { loadPresetData } from '$lib/presets/index.js';
 
 	let canvasA: HTMLCanvasElement | undefined = $state();
 	let canvasB: HTMLCanvasElement | undefined = $state();
@@ -15,15 +15,12 @@
 	let deckB: Deck | null = null;
 	let audio: AudioEngine | null = null;
 	let sync: OutputSync | null = null;
-	let presets: Record<string, object> = {};
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
 
 	onMount(async () => {
 		try {
-			presets = await loadPresets();
-
 			// Minimal AudioContext — no source, just needed by Butterchurn
 			audio = new AudioEngine();
 
@@ -41,7 +38,7 @@
 			sync = new OutputSync();
 			sync.listen(async (msg) => {
 				if (msg.type === 'preset') {
-					const preset = presets[msg.name];
+					const preset = await loadPresetData(msg.name);
 					if (!preset) return;
 					if (msg.deck === 'A') deckA?.loadPreset(preset, 2.0);
 					else deckB?.loadPreset(preset, 2.0);

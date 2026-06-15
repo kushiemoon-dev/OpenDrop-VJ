@@ -5,7 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
 
-  // Loopback audio via desktopCapturer
+  getPlatform: () => ipcRenderer.invoke('get-platform'),
   getLoopbackSources: () => ipcRenderer.invoke('get-loopback-sources'),
 
   // BroadcastChannel relay through main process (cross-window IPC)

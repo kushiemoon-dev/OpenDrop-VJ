@@ -12,6 +12,7 @@ declare global {
 	interface Window {
 		electronAPI?: {
 			isElectron: true;
+			getPlatform: () => Promise<string>;
 			getLoopbackSources: () => Promise<{ id: string; name: string }[]>;
 			sendBroadcast: (data: unknown) => void;
 			onBroadcast: (cb: (data: unknown) => void) => () => void;

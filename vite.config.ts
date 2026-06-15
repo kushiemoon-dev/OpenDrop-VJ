@@ -18,12 +18,11 @@ export default defineConfig({
 		port: 1420
 	},
 	optimizeDeps: {
-		// Force Vite to pre-bundle these CJS/UMD packages into ESM.
-		// butterchurn is a UMD bundle that needs conversion to work with import().
-		include: ['butterchurn', 'butterchurn-presets']
+		// Force Vite to pre-bundle this CJS/UMD package into ESM.
+		include: ['butterchurn']
 	},
 	ssr: {
-		// Never try to SSR these browser-only packages.
-		noExternal: ['butterchurn', 'butterchurn-presets']
+		// Never try to SSR this browser-only package.
+		noExternal: ['butterchurn']
 	},
 });

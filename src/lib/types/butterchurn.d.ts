@@ -26,10 +26,19 @@ declare module 'butterchurn' {
 		treb_att: number;
 	}
 
+	export interface RendererSizeOptions {
+		meshWidth?: number;
+		meshHeight?: number;
+		pixelRatio?: number;
+		textureRatio?: number;
+	}
+
 	export interface Visualizer {
 		connectAudio(audioNode: AudioNode): void;
 		loadPreset(preset: object, blendTime?: number): void;
-		setRendererSize(width: number, height: number): void;
+		setRendererSize(width: number, height: number, opts?: RendererSizeOptions): void;
+		setInternalMeshSize(meshWidth: number, meshHeight: number): void;
+		setOutputAA(enabled: boolean): void;
 		render(opts?: { audioLevels?: Float32Array; elapsedTime?: number }): AudioLevels;
 		dispose(): void;
 	}

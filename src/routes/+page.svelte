@@ -4,9 +4,12 @@
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
-	import { buildPresetList, loadPresetData, searchPresets, type PresetMeta } from '$lib/presets/index.js';
+	import { initPresets, buildPresetList, loadPresetData, searchPresets, type PresetMeta } from '$lib/presets/index.js';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
+	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
+	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
+	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 
 	// — State —————————————————————————————————————————————
 	let canvasA: HTMLCanvasElement | undefined = $state();
@@ -116,17 +119,44 @@
 	let lockA = $state(false);
 	let lockB = $state(false);
 
+	// — Qualité rendu ——————————————————————————————————————
+	let quality = $state<QualityTier>(DEFAULT_TIER);
+	let fps = $state(0);
+
+	// — Overlays ——————————————————————————————————————————
+	let overlays = $state<Overlay[]>([]);
+	let beat = $state(false);
+	let overlayDragOver = $state(false);
+	let expandedOverlayId = $state<string | null>(null);
+
+	const BLEND_MODES = ['screen', 'normal', 'plus-lighter', 'multiply', 'overlay', 'hard-light'];
+
+	// — Virtual list preset ————————————————————————————————
+	const PRESET_ROW_H = 24;
+	const PRESET_BUF = 5;
+	let presetListEl: HTMLUListElement | undefined = $state();
+	let presetScrollTop = $state(0);
+	let presetContainerH = $state(500);
+	let debouncedQuery = $state('');
+
+	function onPresetScroll() {
+		if (presetListEl) presetScrollTop = presetListEl.scrollTop;
+	}
+
 	// — Favoris + tags ————————————————————————————————————
 	let favorites = $state<string[]>([]);
 	let activeTag = $state<string>(''); // '' = tous, '★' = favoris, 'Auteur' = tag
 
 	// — Derived ———————————————————————————————————————————
 	let filteredPresets = $derived.by(() => {
-		let list = searchPresets(presetList, searchQuery);
+		let list = searchPresets(presetList, debouncedQuery);
 		if (activeTag === '★') return list.filter((p) => favorites.includes(p.name));
 		if (activeTag) return list.filter((p) => p.category === activeTag);
 		return list;
 	});
+
+	const vStart = $derived(Math.max(0, Math.floor(presetScrollTop / PRESET_ROW_H) - PRESET_BUF));
+	const vEnd = $derived(Math.min(filteredPresets.length, Math.ceil((presetScrollTop + presetContainerH) / PRESET_ROW_H) + PRESET_BUF));
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let opacityA = $derived(1 - crossfader);
 	let opacityB = $derived(crossfader);
@@ -161,6 +191,63 @@
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-favorites', JSON.stringify(favorites));
+		localStorage.setItem('od-quality', quality);
+		localStorage.setItem('od-overlays', JSON.stringify(overlays));
+	});
+
+	// — Sync overlays vers output ——————————————————————————
+	$effect(() => {
+		sync?.sendOverlays(overlays);
+	});
+
+	// — Appliquer la qualité aux decks + sync output ———————
+	$effect(() => {
+		if (status !== 'running') return;
+		const settings = getQualitySettings(quality);
+		deckA?.applyQuality(settings);
+		deckB?.applyQuality(settings);
+		sync?.sendQuality(quality);
+	});
+
+	// — Debounce recherche preset ——————————————————————————
+	$effect(() => {
+		const q = searchQuery;
+		const t = setTimeout(() => { debouncedQuery = q; }, 150);
+		return () => clearTimeout(t);
+	});
+
+	// — ResizeObserver pour la liste preset ———————————————
+	$effect(() => {
+		if (!presetListEl) return;
+		const ro = new ResizeObserver(([e]) => { presetContainerH = e.contentRect.height; });
+		ro.observe(presetListEl);
+		return () => ro.disconnect();
+	});
+
+	// — Reset scroll quand le filtre change ———————————————
+	$effect(() => {
+		filteredPresets; // track
+		presetScrollTop = 0;
+		if (presetListEl) presetListEl.scrollTop = 0;
+	});
+
+	// — FPS counter ————————————————————————————————————————
+	$effect(() => {
+		if (status !== 'running') return;
+		let count = 0;
+		let last = performance.now();
+		let rafId: number;
+		const tick = (t: number) => {
+			count++;
+			if (t - last >= 500) {
+				fps = Math.round(count * 1000 / (t - last));
+				count = 0;
+				last = t;
+			}
+			rafId = requestAnimationFrame(tick);
+		};
+		rafId = requestAnimationFrame(tick);
+		return () => { cancelAnimationFrame(rafId); fps = 0; };
 	});
 
 	// — Lifecycle ——————————————————————————————————————————
@@ -182,9 +269,14 @@
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
 			const savedFavs = localStorage.getItem('od-favorites');
 			if (savedFavs) favorites = JSON.parse(savedFavs);
+			const savedQuality = localStorage.getItem('od-quality');
+			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
+			const savedOverlays = localStorage.getItem('od-overlays');
+			if (savedOverlays) overlays = JSON.parse(savedOverlays);
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
+		await initPresets();
 		presetList = buildPresetList();
 		if (presetList.length > 0) presetA = presetList[0].name;
 		if (presetList.length > 1) presetB = presetList[1].name;
@@ -222,8 +314,9 @@
 			deckA = new Deck(canvasA, 'deck-a');
 			deckB = new Deck(canvasB, 'deck-b');
 
-			await deckA.init(audio.ctx, { width: w, height: h });
-			await deckB.init(audio.ctx, { width: w, height: h });
+			const q = getQualitySettings(quality);
+			await deckA.init(audio.ctx, { width: w, height: h, ...q });
+			await deckB.init(audio.ctx, { width: w, height: h, ...q });
 
 			if (presetA) { const d = await loadPresetData(presetA); if (d) deckA.loadPreset(d, 0.0); }
 			if (presetB) { const d = await loadPresetData(presetB); if (d) deckB.loadPreset(d, 0.0); }
@@ -252,6 +345,8 @@
 				sync?.sendPreset('A', presetA);
 				sync?.sendPreset('B', presetB);
 				sync?.sendCrossfader(crossfader);
+				sync?.sendQuality(quality);
+				sync?.sendOverlays(overlays);
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 			});
 
@@ -420,6 +515,11 @@
 	}
 
 	function onBeat() {
+		// Pulse overlay beat-reactive
+		beat = true;
+		setTimeout(() => { beat = false; }, 80);
+		sync?.sendBeat();
+
 		if (autoXfade) {
 			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
 			if (autoXfadeCount === 0) {
@@ -441,6 +541,67 @@
 				else applyMidiAction('preset-next-b', 127);
 			}
 		}
+	}
+
+	// — Overlay helpers ————————————————————————————————————
+	async function addOverlayFromFile(file: File) {
+		return new Promise<void>((resolve) => {
+			const reader = new FileReader();
+			reader.onload = async () => {
+				const dataUrl = reader.result as string;
+				const ov = makeOverlay(file.name.replace(/\.[^.]+$/, ''));
+				await saveAsset(ov.id, dataUrl);
+				overlays = [...overlays, ov];
+				resolve();
+			};
+			reader.readAsDataURL(file);
+		});
+	}
+
+	async function onOverlayFilePick(e: Event) {
+		const files = (e.target as HTMLInputElement).files;
+		if (!files) return;
+		for (const f of Array.from(files)) await addOverlayFromFile(f);
+		(e.target as HTMLInputElement).value = '';
+	}
+
+	function onVisualizerDragOver(e: DragEvent) {
+		if (!e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		overlayDragOver = true;
+	}
+
+	async function onVisualizerDrop(e: DragEvent) {
+		e.preventDefault();
+		overlayDragOver = false;
+		if (!e.dataTransfer?.files.length) return;
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const x = (e.clientX - rect.left) / rect.width;
+		const y = (e.clientY - rect.top) / rect.height;
+		for (const f of Array.from(e.dataTransfer.files)) {
+			if (!f.type.startsWith('image/')) continue;
+			await new Promise<void>((res) => {
+				const reader = new FileReader();
+				reader.onload = async () => {
+					const dataUrl = reader.result as string;
+					const ov = makeOverlay(f.name.replace(/\.[^.]+$/, ''), { x, y });
+					await saveAsset(ov.id, dataUrl);
+					overlays = [...overlays, ov];
+					res();
+				};
+				reader.readAsDataURL(f);
+			});
+		}
+	}
+
+	async function removeOverlay(id: string) {
+		await deleteAsset(id);
+		overlays = overlays.filter(o => o.id !== id);
+		if (expandedOverlayId === id) expandedOverlayId = null;
+	}
+
+	function updateOverlay(id: string, patch: Partial<Overlay>) {
+		overlays = overlays.map(o => o.id === id ? { ...o, ...patch } : o);
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
@@ -684,19 +845,29 @@
 <audio bind:this={audioEl} style="display:none" crossorigin="anonymous"></audio>
 
 <main>
-	<div class="visualizer-wrap">
+	<div
+		class="visualizer-wrap"
+		class:drag-over={overlayDragOver}
+		ondragover={onVisualizerDragOver}
+		ondragleave={() => overlayDragOver = false}
+		ondrop={onVisualizerDrop}
+		role="region"
+		aria-label="Visualizer"
+	>
 		<!-- Deck A — base layer -->
 		<canvas
 			bind:this={canvasA}
 			class="deck-canvas"
 			style="opacity:{opacityA}"
 		></canvas>
-		<!-- Deck B — top layer -->
+		<!-- Deck B — top layer, screen blend pour rendu additif -->
 		<canvas
 			bind:this={canvasB}
-			class="deck-canvas"
+			class="deck-canvas deck-canvas-b"
 			style="opacity:{opacityB}"
 		></canvas>
+		<!-- Overlay sprites -->
+		<OverlayLayer {overlays} {beat} />
 
 		{#if status === 'idle'}
 			<div class="overlay">
@@ -900,6 +1071,74 @@
 			</div>
 		</div>
 
+		<!-- Overlays -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Overlays ({overlays.length})</span>
+				<label class="btn-sm file-label" title="Ajouter une image">
+					+ Image
+					<input type="file" accept="image/*" multiple onchange={onOverlayFilePick} style="display:none" />
+				</label>
+			</div>
+			{#if overlays.length === 0}
+				<p class="hint">Glisse une image sur le visualizer ou clique + Image</p>
+			{/if}
+			<ul class="overlay-list">
+				{#each overlays as ov (ov.id)}
+					<li class="overlay-item">
+						<div class="overlay-row">
+							<button class="overlay-name" onclick={() => expandedOverlayId = expandedOverlayId === ov.id ? null : ov.id}>
+								{ov.name}
+							</button>
+							<button class="btn-sm pl-btn" class:active={ov.beatReactive} onclick={() => updateOverlay(ov.id, { beatReactive: !ov.beatReactive })} title="Beat reactive">♩</button>
+							<button class="pl-remove" onclick={() => removeOverlay(ov.id)} title="Supprimer">×</button>
+						</div>
+						{#if expandedOverlayId === ov.id}
+							<div class="overlay-controls">
+								<label class="ov-label">Opacity
+									<input type="range" min="0" max="1" step="0.01" value={ov.opacity} oninput={(e) => updateOverlay(ov.id, { opacity: +(e.target as HTMLInputElement).value })} />
+								</label>
+								<label class="ov-label">Scale
+									<input type="range" min="0.05" max="4" step="0.05" value={ov.scale} oninput={(e) => updateOverlay(ov.id, { scale: +(e.target as HTMLInputElement).value })} />
+								</label>
+								<label class="ov-label">X
+									<input type="range" min="0" max="1" step="0.01" value={ov.x} oninput={(e) => updateOverlay(ov.id, { x: +(e.target as HTMLInputElement).value })} />
+								</label>
+								<label class="ov-label">Y
+									<input type="range" min="0" max="1" step="0.01" value={ov.y} oninput={(e) => updateOverlay(ov.id, { y: +(e.target as HTMLInputElement).value })} />
+								</label>
+								<label class="ov-label">Rotation
+									<input type="range" min="-180" max="180" step="1" value={ov.rotation} oninput={(e) => updateOverlay(ov.id, { rotation: +(e.target as HTMLInputElement).value })} />
+								</label>
+								<label class="ov-label">Blend
+									<select class="ov-select" value={ov.blendMode} onchange={(e) => updateOverlay(ov.id, { blendMode: (e.target as HTMLSelectElement).value })}>
+										{#each BLEND_MODES as mode}
+											<option value={mode}>{mode}</option>
+										{/each}
+									</select>
+								</label>
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		</div>
+
+		<!-- Qualité rendu -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Qualité rendu</span>
+				{#if status === 'running' && fps > 0}
+					<span class="label" style="color:#7af">{fps} fps</span>
+				{/if}
+			</div>
+			<div class="btn-row">
+				<button class="btn-sm" class:active={quality === 'low'} onclick={() => quality = 'low'} disabled={status !== 'running'}>Low</button>
+				<button class="btn-sm" class:active={quality === 'medium'} onclick={() => quality = 'medium'} disabled={status !== 'running'}>Med</button>
+				<button class="btn-sm" class:active={quality === 'high'} onclick={() => quality = 'high'} disabled={status !== 'running'}>High</button>
+			</div>
+		</div>
+
 		<!-- Output -->
 		<div class="controls-section">
 			<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
@@ -950,7 +1189,7 @@
 
 		<!-- Preset browser -->
 		<div class="controls-section preset-browser">
-			<span class="label">Presets → Deck {activeDeck} ({filteredPresets.length})</span>
+			<span class="label">Presets → Deck {activeDeck} ({filteredPresets.length}/{presetList.length})</span>
 			<input
 				class="search-input"
 				type="search"
@@ -961,8 +1200,9 @@
 			<div class="tag-chips">
 				<button class="tag-chip" class:tag-active={activeTag === '★'} onclick={() => activeTag = activeTag === '★' ? '' : '★'}>★ Favorites</button>
 			</div>
-			<ul class="preset-list">
-				{#each filteredPresets as p (p.name)}
+			<ul class="preset-list" bind:this={presetListEl} onscroll={onPresetScroll}>
+				<li style="height:{vStart * PRESET_ROW_H}px" aria-hidden="true"></li>
+				{#each filteredPresets.slice(vStart, vEnd) as p (p.name)}
 					{@const isFav = favorites.includes(p.name)}
 					<li class="preset-row">
 						<button
@@ -982,6 +1222,7 @@
 						<button class="pl-add" class:in-list={playlistBItems.includes(p.name)} onclick={() => addToPlaylist('B', p.name)} title="Add to playlist B">B</button>
 					</li>
 				{/each}
+				<li style="height:{Math.max(0, filteredPresets.length - vEnd) * PRESET_ROW_H}px" aria-hidden="true"></li>
 			</ul>
 		</div>
 	</aside>
@@ -1014,9 +1255,10 @@
 
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
-	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; }
+	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+	.deck-canvas-b { mix-blend-mode: screen; }
 
 	/* Overlay start screen */
 	.overlay {
@@ -1294,7 +1536,7 @@
 	.fav-btn.fav-on { color: #ffcc00; text-shadow: 0 0 8px rgba(255,204,0,0.7); }
 
 	/* Preset rows +A +B */
-	.preset-row { display: flex; align-items: center; gap: 2px; }
+	.preset-row { display: flex; align-items: center; gap: 2px; height: 24px; box-sizing: border-box; }
 	.preset-row .preset-item { flex: 1; min-width: 0; }
 
 	.pl-add {
@@ -1369,4 +1611,94 @@
 	}
 
 	.btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
+
+	/* Visualizer drag-over */
+	.visualizer-wrap.drag-over::after {
+		content: '';
+		position: absolute;
+		inset: 0;
+		border: 2px dashed #b44fff;
+		border-radius: 6px;
+		pointer-events: none;
+		z-index: 20;
+	}
+
+	/* Overlay panel */
+	.overlay-list {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		max-height: 200px;
+		overflow-y: auto;
+		scrollbar-width: thin;
+		scrollbar-color: #2a2a5a transparent;
+	}
+
+	.overlay-item {
+		background: #0a0a1e;
+		border: 1px solid #161640;
+		border-radius: 5px;
+		overflow: hidden;
+	}
+
+	.overlay-row {
+		display: flex;
+		align-items: center;
+		gap: 3px;
+		padding: 2px 4px;
+	}
+
+	.overlay-name {
+		flex: 1;
+		background: none;
+		border: none;
+		color: #6666aa;
+		font-size: 11px;
+		cursor: pointer;
+		text-align: left;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		padding: 2px 0;
+		transition: color 0.1s;
+	}
+	.overlay-name:hover { color: #b44fff; }
+
+	.overlay-controls {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		padding: 4px 6px 5px;
+		border-top: 1px solid #161640;
+		background: #06061a;
+	}
+
+	.ov-label {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 6px;
+		font-size: 10px;
+		color: #44447a;
+	}
+
+	.ov-label input[type="range"] {
+		flex: 1;
+		height: 3px;
+		accent-color: #b44fff;
+		cursor: pointer;
+	}
+
+	.ov-select {
+		flex: 1;
+		background: #0e0e26;
+		color: #7777aa;
+		border: 1px solid #1e1e48;
+		border-radius: 4px;
+		font-size: 10px;
+		padding: 1px 3px;
+		cursor: pointer;
+	}
+	.ov-select:focus { outline: none; border-color: #b44fff; }
 </style>

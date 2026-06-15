@@ -1,7 +1,12 @@
+import type { Overlay } from '$lib/engine/overlay.js';
+
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
 	| { type: 'crossfader'; value: number }
 	| { type: 'source'; deviceId: string }
+	| { type: 'quality'; tier: string }
+	| { type: 'overlays'; list: Overlay[] }
+	| { type: 'beat' }
 	| { type: 'hello' };
 
 const CHANNEL = 'opendrop-output';
@@ -46,6 +51,18 @@ export class MainSync {
 
 	sendSource(deviceId: string) {
 		sendMsg(this.bc, { type: 'source', deviceId });
+	}
+
+	sendQuality(tier: string) {
+		sendMsg(this.bc, { type: 'quality', tier });
+	}
+
+	sendOverlays(list: Overlay[]) {
+		sendMsg(this.bc, { type: 'overlays', list });
+	}
+
+	sendBeat() {
+		sendMsg(this.bc, { type: 'beat' });
 	}
 
 	destroy() {

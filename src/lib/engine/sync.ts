@@ -58,16 +58,16 @@ export class OutputSync {
 	private bc: BroadcastChannel | null = eAPI ? null : new BroadcastChannel(CHANNEL);
 	private unlisten: (() => void) | null = null;
 
-	constructor() {
-		sendMsg(this.bc, { type: 'hello' });
-	}
-
 	listen(cb: (msg: SyncMessage) => void) {
 		if (eAPI) {
 			this.unlisten = eAPI.onBroadcast((data) => cb(data as SyncMessage));
 		} else {
 			this.bc!.onmessage = (e) => cb(e.data as SyncMessage);
 		}
+	}
+
+	sendHello() {
+		sendMsg(this.bc, { type: 'hello' });
 	}
 
 	destroy() {

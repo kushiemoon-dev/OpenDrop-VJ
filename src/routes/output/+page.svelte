@@ -3,7 +3,7 @@
 	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { OutputSync } from '$lib/engine/sync.js';
-	import { loadPresetData } from '$lib/presets/index.js';
+	import { buildPresetList, loadPresetData } from '$lib/presets/index.js';
 
 	let canvasA: HTMLCanvasElement | undefined = $state();
 	let canvasB: HTMLCanvasElement | undefined = $state();
@@ -15,6 +15,7 @@
 	let deckB: Deck | null = null;
 	let audio: AudioEngine | null = null;
 	let sync: OutputSync | null = null;
+	let helloTimer: ReturnType<typeof setInterval> | null = null;
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
@@ -35,14 +36,23 @@
 			deckA.startRenderLoop();
 			deckB.startRenderLoop();
 
+			// Charger les presets par défaut (mêmes indices 0/1 que le main) pour ne jamais
+			// être noir si le handshake de sync tarde ou est absent.
+			const list = buildPresetList();
+			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) deckA.loadPreset(d, 0.0); }
+			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) deckB.loadPreset(d, 0.0); }
+
 			sync = new OutputSync();
+			let gotState = false;
 			sync.listen(async (msg) => {
 				if (msg.type === 'preset') {
+					gotState = true;
 					const preset = await loadPresetData(msg.name);
 					if (!preset) return;
 					if (msg.deck === 'A') deckA?.loadPreset(preset, 2.0);
 					else deckB?.loadPreset(preset, 2.0);
 				} else if (msg.type === 'crossfader') {
+					gotState = true;
 					crossfader = msg.value;
 				} else if (msg.type === 'source') {
 					try {
@@ -56,6 +66,15 @@
 				}
 			});
 
+			// Émettre hello après listen() pour ne rater aucune réponse.
+			// Retry jusqu'à réception du premier état du main (~12 × 700 ms ≈ 8 s max).
+			sync.sendHello();
+			let tries = 0;
+			helloTimer = setInterval(() => {
+				if (gotState || tries++ > 12) { clearInterval(helloTimer!); helloTimer = null; return; }
+				sync!.sendHello();
+			}, 700);
+
 			status = 'ready';
 		} catch (e) {
 			status = 'error';
@@ -64,6 +83,7 @@
 	});
 
 	onDestroy(() => {
+		if (helloTimer !== null) clearInterval(helloTimer);
 		deckA?.destroy();
 		deckB?.destroy();
 		audio?.destroy();

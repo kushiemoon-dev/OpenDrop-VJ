@@ -1,0 +1,85 @@
+diff --git a/binding.gyp b/binding.gyp
+index 1830e5f477ec99e9c52e4ff54e750673d362fa61..ab5e53097a4e7bbb455dbe3d7b47ccd8363f4296 100644
+--- a/binding.gyp
++++ b/binding.gyp
+@@ -10,17 +10,33 @@
+         "src/grandiose.cc"
+       ],
+       "include_dirs": [ "include" ],
+-      "link_settings": {
+-        "libraries": [ "Processing.NDI.Lib.x64.lib" ],
+-        "library_dirs": [ "lib/win_x64" ]
+-      },
+-      "copies": [
+-        {
+-          "destination": "build/Release",
+-          "files": [
+-            "lib/win_x64/Processing.NDI.Lib.x64.dll"
++      "conditions": [
++        ["OS=='win'", {
++          "link_settings": {
++            "libraries": [ "Processing.NDI.Lib.x64.lib" ],
++            "library_dirs": [ "lib/win_x64" ]
++          },
++          "copies": [
++            {
++              "destination": "build/Release",
++              "files": [ "lib/win_x64/Processing.NDI.Lib.x64.dll" ]
++            }
+           ]
+-        }
++        }],
++        ["OS=='linux'", {
++          "include_dirs": [ "/usr/include" ],
++          "link_settings": {
++            "libraries": [ "-lndi" ],
++            "library_dirs": [ "/usr/lib" ]
++          }
++        }],
++        ["OS=='mac'", {
++          "include_dirs": [ "/usr/local/include" ],
++          "link_settings": {
++            "libraries": [ "-lndi" ],
++            "library_dirs": [ "/usr/local/lib" ]
++          }
++        }]
+       ]
+     }
+   ]
+diff --git a/src/grandiose_send.cc b/src/grandiose_send.cc
+index 76134172ca68c324dadf03d0f77933624029ad9a..663af75aa98977fa41e4e292c2ce815bbb6f568c 100644
+--- a/src/grandiose_send.cc
++++ b/src/grandiose_send.cc
+@@ -13,6 +13,7 @@
+   limitations under the License.
+ */
+ 
++#include <cmath>
+ #include <Processing.NDI.Lib.h>
+ 
+ #ifdef _WIN32
+diff --git a/src/grandiose_util.cc b/src/grandiose_util.cc
+index 833b6814bdfca144e0cb52b9ce9352fc741b729e..7964a624b010b6daf21337bb7bdf2ff62d936f38 100644
+--- a/src/grandiose_util.cc
++++ b/src/grandiose_util.cc
+@@ -44,8 +44,9 @@ napi_status checkStatus(napi_env env, napi_status status,
+   }
+ 
+   char errorCode[20];
++  snprintf(errorCode, sizeof(errorCode), "%d", (int)errorInfo->error_code);
+   throwStatus = napi_throw_error(env,
+-    itoa(errorInfo->error_code, errorCode, 10), errorInfo->error_message);
++    errorCode, errorInfo->error_message);
+   assert(throwStatus == napi_ok);
+ 
+   return napi_pending_exception; // Expect to be cast to void
+@@ -131,7 +132,8 @@ int32_t rejectStatus(napi_env env, carrier* c, char* file, int32_t line) {
+     }
+     char* extMsg = (char *) malloc(sizeof(char) * c->errorMsg.length() + 200);
+     sprintf(extMsg, "In file %s on line %i, found error: %s", file, line, c->errorMsg.c_str());
+-    status = napi_create_string_utf8(env, itoa(c->status, errorChars, 10),
++    snprintf(errorChars, sizeof(errorChars), "%d", (int)c->status);
++    status = napi_create_string_utf8(env, errorChars,
+       NAPI_AUTO_LENGTH, &errorCode);
+     FLOATING_STATUS;
+     status = napi_create_string_utf8(env, extMsg, NAPI_AUTO_LENGTH, &errorMsg);

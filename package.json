@@ -23,9 +23,11 @@
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",
 		"butterchurn": "^2.6.7",
-		"butterchurn-presets": "^2.4.7"
+		"butterchurn-presets": "^2.4.7",
+		"grandiose": "^0.0.4"
 	},
 	"devDependencies": {
+		"@electron/rebuild": "^4.0.4",
 		"@playwright/test": "^1.60.0",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.65.0",

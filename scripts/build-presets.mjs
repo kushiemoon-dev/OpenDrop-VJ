@@ -93,6 +93,28 @@ async function main() {
 	console.log(`📋 Copie de ${copyTasks.length} fichiers (concurrence ${CONCURRENCY})...`);
 	await runConcurrent(copyTasks, CONCURRENCY);
 
+	// Si le megapack était absent, des fichiers JSON existants dans OUT_DIR
+	// (d'un build précédent) ne sont pas dans entries — on les préserve dans le manifest
+	// plutôt que de les perdre.
+	const megapackAbsent = !(await exists(MEGAPACK_DIR));
+	if (megapackAbsent) {
+		const existingFiles = (await readdir(OUT_DIR))
+			.filter(f => f.endsWith('.json') && f !== 'manifest.json');
+		const newSlugs = new Set(entries.map(e => e.slug));
+		let preserved = 0;
+		for (const f of existingFiles) {
+			const slug = f.slice(0, -5);
+			if (!newSlugs.has(slug)) {
+				entries.push({ slug, name: slug });
+				preserved++;
+			}
+		}
+		if (preserved > 0) {
+			console.log(`⚠️  MEGAPACK_DIR absent — ${preserved} presets existants préservés via slug`);
+			console.log(`   Pour des noms complets, relancer avec : MEGAPACK_DIR=/chemin/vers/converted node scripts/build-presets.mjs`);
+		}
+	}
+
 	const manifest = { version: 1, count: entries.length, entries };
 	await writeFile(join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest));
 	console.log(`✅ Done: ${entries.length} presets → ${OUT_DIR}`);

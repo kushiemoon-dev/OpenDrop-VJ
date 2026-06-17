@@ -20,6 +20,9 @@
 		"electron:build": "vite build && electron-builder",
 		"electron:rebuild": "electron-rebuild -f -w grandiose -w naudiodon-loopback"
 	},
+	"pnpm": {
+		"onlyBuiltDependencies": ["core-js", "electron", "esbuild", "electron-winstaller", "grandiose", "naudiodon", "segfault-handler"]
+	},
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",
 		"butterchurn": "^2.6.7",

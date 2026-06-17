@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -189,6 +189,13 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Allow getUserMedia (audio device enumeration + capture) and display-capture
+  // Without this, Electron may silently deny media permission requests, causing
+  // enumerateDevices() to return only the default mic without labels.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(['media', 'display-capture', 'mediaKeySystem'].includes(permission));
+  });
+
   if (!isDev) registerProtocol();
 
   createWindow();

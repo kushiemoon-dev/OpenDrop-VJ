@@ -141,13 +141,20 @@ function createWindow() {
   // the UI routes to Path B (device picker / BlackHole / .monitor) before
   // calling connectDisplay(), so this handler is a graceful fallback only.
   win.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-    if (process.platform === 'win32') {
-      callback({ audio: 'loopback' });
-      return;
-    }
-    desktopCapturer.getSources({ types: ['screen'] })
-      .then((sources) => callback(sources.length ? { video: sources[0] } : {}))
-      .catch(() => callback({}));
+    // getDisplayMedia({ audio: true, video: true }) requires both streams to be
+    // fulfilled — returning audio-only causes "Invalid capture constraints".
+    // Always include a screen source so the video constraint is satisfied;
+    // the renderer stops the video track immediately after capture.
+    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+      const video = sources[0] ?? null;
+      if (!video) { callback({}); return; }
+      if (process.platform === 'win32') {
+        // Windows WASAPI loopback — captures all system audio output
+        callback({ audio: 'loopback', video });
+      } else {
+        callback({ video });
+      }
+    }).catch(() => callback({}));
   }, { useSystemPicker: false });
 
   if (isDev) {

@@ -17,6 +17,10 @@ declare global {
 			onBroadcast: (cb: (data: unknown) => void) => () => void;
 			ndiStart: (name: string, width: number, height: number) => Promise<{ ok: boolean; error?: string }>;
 			ndiStop: () => Promise<{ ok: boolean }>;
+			listOutputDevices: () => Promise<{ ok: boolean; devices: Array<{ id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number }>; error?: string }>;
+			startLoopback: (deviceId: number) => Promise<{ ok: boolean; sampleRate?: number; channels?: number; error?: string }>;
+			stopLoopback: () => Promise<{ ok: boolean }>;
+			onLoopbackData: (cb: (data: { sampleRate: number; channels: number; pcm: Uint8Array }) => void) => () => void;
 		};
 	}
 }

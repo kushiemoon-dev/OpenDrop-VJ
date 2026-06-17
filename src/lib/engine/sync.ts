@@ -4,6 +4,7 @@ export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
 	| { type: 'crossfader'; value: number }
 	| { type: 'source'; deviceId: string }
+	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'beat' }
@@ -51,6 +52,10 @@ export class MainSync {
 
 	sendSource(deviceId: string) {
 		sendMsg(this.bc, { type: 'source', deviceId });
+	}
+
+	sendLoopback(deviceId: number) {
+		sendMsg(this.bc, { type: 'loopback', deviceId });
 	}
 
 	sendQuality(tier: string) {

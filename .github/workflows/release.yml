@@ -46,7 +46,7 @@ jobs:
         run: pnpm build
 
       - name: Rebuild native modules for Electron
-        run: pnpm exec electron-rebuild -f -w grandiose || true
+        run: pnpm exec electron-rebuild -f -w grandiose -w naudiodon-loopback || true
 
       - name: Package Electron app
         run: pnpm exec electron-builder --publish never

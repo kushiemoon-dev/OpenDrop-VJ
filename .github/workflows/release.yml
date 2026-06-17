@@ -36,6 +36,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Download megapack presets
+        shell: bash
+        run: |
+          curl -L https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/megapack-v1/presets-megapack.tar.gz \
+            | tar xz -C static/
+
       - name: Build SPA
         run: pnpm build
 

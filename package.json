@@ -23,7 +23,9 @@
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",
 		"butterchurn": "^2.6.7",
-		"butterchurn-presets": "^2.4.7",
+		"butterchurn-presets": "^2.4.7"
+	},
+	"optionalDependencies": {
 		"grandiose": "^0.0.4"
 	},
 	"devDependencies": {

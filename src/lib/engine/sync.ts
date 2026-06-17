@@ -1,4 +1,5 @@
 import type { Overlay } from '$lib/engine/overlay.js';
+import type { ClipRef } from '$lib/engine/video-store.js';
 
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
@@ -7,6 +8,7 @@ export type SyncMessage =
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
 	| { type: 'overlays'; list: Overlay[] }
+	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat' }
 	| { type: 'hello' };
 
@@ -64,6 +66,10 @@ export class MainSync {
 
 	sendOverlays(list: Overlay[]) {
 		sendMsg(this.bc, { type: 'overlays', list });
+	}
+
+	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {
+		sendMsg(this.bc, { type: 'video', ...state });
 	}
 
 	sendBeat() {

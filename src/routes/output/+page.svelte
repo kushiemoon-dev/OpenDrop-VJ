@@ -24,6 +24,7 @@
 	let audio: AudioEngine | null = null;
 	let sync: OutputSync | null = null;
 	let helloTimer: ReturnType<typeof setInterval> | null = null;
+	let loopbackUnlisten: (() => void) | null = null;
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
@@ -75,6 +76,8 @@
 					if (beatTimer !== null) clearTimeout(beatTimer);
 					beatTimer = setTimeout(() => { beat = false; beatTimer = null; }, 80);
 				} else if (msg.type === 'source') {
+					loopbackUnlisten?.();
+					loopbackUnlisten = null;
 					try {
 						await audio!.resume();
 						await audio!.connectDevice(msg.deviceId);
@@ -82,6 +85,23 @@
 						deckB?.connectAudio(audio!.gainNode);
 					} catch {
 						// device may not be available in output window context
+					}
+				} else if (msg.type === 'loopback') {
+					loopbackUnlisten?.();
+					loopbackUnlisten = null;
+					try {
+						await audio!.resume();
+						await audio!.connectLoopbackPcm();
+						deckA?.connectAudio(audio!.gainNode);
+						deckB?.connectAudio(audio!.gainNode);
+						const eAPI = window.electronAPI;
+						if (eAPI) {
+							loopbackUnlisten = eAPI.onLoopbackData((data) => {
+								audio?.pushLoopbackPcm(data);
+							});
+						}
+					} catch {
+						// loopback may not be available
 					}
 				}
 			});
@@ -103,6 +123,7 @@
 	});
 
 	onDestroy(() => {
+		loopbackUnlisten?.();
 		if (beatTimer !== null) clearTimeout(beatTimer);
 		if (helloTimer !== null) clearInterval(helloTimer);
 		deckA?.destroy();

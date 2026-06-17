@@ -13,11 +13,11 @@ files:
   - electron/**
   - package.json
   - node_modules/grandiose/**
-  - node_modules/naudiodon-loopback/**
+  - node_modules/audify/**
 
 asarUnpack:
   - node_modules/grandiose/**
-  - node_modules/naudiodon-loopback/**
+  - node_modules/audify/**
 
 mac:
   category: public.app-category.music

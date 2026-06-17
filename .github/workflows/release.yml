@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           pnpm install --no-frozen-lockfile --ignore-scripts
-          pnpm rebuild electron esbuild core-js electron-winstaller || true
+          pnpm rebuild electron esbuild core-js electron-winstaller audify || true
 
       - name: Download megapack presets
         shell: bash
@@ -48,7 +48,7 @@ jobs:
         run: pnpm build
 
       - name: Rebuild native modules for Electron
-        run: pnpm exec electron-rebuild -f -w grandiose -w naudiodon-loopback || true
+        run: pnpm exec electron-rebuild -f -w grandiose || true
 
       - name: Package Electron app
         run: pnpm exec electron-builder --publish never

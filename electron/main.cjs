@@ -34,9 +34,8 @@ let ndiSender = null;
 let ndiTimer = null;
 let outputWin = null;     // tracked below in did-create-window
 
-// ── Per-device output loopback (optional — Windows, requires naudiodon-loopback) ──
-let naudiodon = null;
-let loopbackIO = null;
+// ── Per-device output loopback (optional — Windows, requires audify) ──
+let loopbackRt = null;
 
 const isDev = !app.isPackaged;
 const DEV_URL = 'http://localhost:1420';
@@ -103,13 +102,20 @@ ipcMain.handle('ndi:stop', async () => {
 // ── Per-device output loopback handlers ────────────────────────────────────
 ipcMain.handle('loopback:list', async () => {
   try {
-    if (!naudiodon) naudiodon = require('naudiodon-loopback');
-    const devices = naudiodon.getDevices();
-    // On Windows with WASAPI loopback-enabled PortAudio, output devices appear
-    // with maxInputChannels > 0 (the loopback capture endpoint).
-    // We return all devices that have output channels so the UI can list them;
-    // only those with maxInputChannels > 0 can actually be captured in loopback.
-    const outputs = devices.filter((d) => d.maxOutputChannels > 0);
+    const { RtAudio, RtAudioApi } = require('audify');
+    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined);
+    const devices = rt.getDevices();
+    // Output devices with outputChannels > 0 can be captured via WASAPI loopback
+    // by opening them as input streams — RtAudio applies AUDCLNT_STREAMFLAGS_LOOPBACK.
+    const outputs = devices
+      .filter((d) => d.outputChannels > 0)
+      .map((d) => ({
+        id: d.id,
+        name: d.name,
+        maxInputChannels: d.inputChannels,
+        maxOutputChannels: d.outputChannels,
+        defaultSampleRate: d.preferredSampleRate,
+      }));
     return { ok: true, devices: outputs };
   } catch (e) {
     return { ok: false, error: e.message, devices: [] };
@@ -118,43 +124,37 @@ ipcMain.handle('loopback:list', async () => {
 
 ipcMain.handle('loopback:start', async (_, { deviceId }) => {
   try {
-    if (!naudiodon) naudiodon = require('naudiodon-loopback');
+    const { RtAudio, RtAudioApi, RtAudioFormat } = require('audify');
     // Idempotent teardown
-    if (loopbackIO) { try { loopbackIO.quit(); } catch {} loopbackIO = null; }
+    if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
 
-    const devices = naudiodon.getDevices();
+    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined);
+    const devices = rt.getDevices();
     const device = devices.find((d) => d.id === deviceId);
     if (!device) return { ok: false, error: `Device ${deviceId} not found` };
-    if (device.maxInputChannels === 0) {
-      return { ok: false, error: `Device "${device.name}" has no loopback input channels. Try a different output device.` };
-    }
 
-    const sampleRate = device.defaultSampleRate || 48000;
-    const channels = Math.min(device.maxInputChannels, 2);
-
-    loopbackIO = new naudiodon.AudioIO({
-      inOptions: {
-        channelCount: channels,
-        sampleFormat: naudiodon.SampleFormat16Bit,
-        sampleRate,
-        deviceId,
-        closeOnError: false,
-        framesPerBuffer: 2048,
-      },
-    });
+    const sampleRate = device.preferredSampleRate || 48000;
+    const channels = Math.min(device.outputChannels, 2) || 2;
+    const frameSize = 1920; // ~40ms @48kHz
 
     const liveWindows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
 
-    loopbackIO.on('data', (buf) => {
-      const payload = { sampleRate, channels, pcm: buf };
-      liveWindows().forEach((w) => w.webContents.send('loopback:data', payload));
-    });
+    // Pass the output device id as inputParameters — WASAPI loopback mode.
+    rt.openStream(
+      null,
+      { deviceId, nChannels: channels, firstChannel: 0 },
+      RtAudioFormat.RTAUDIO_SINT16,
+      sampleRate,
+      frameSize,
+      'OpenDropLoopback',
+      (pcm) => liveWindows().forEach((w) => w.webContents.send('loopback:data', { sampleRate, channels, pcm })),
+      null,
+      0,
+      (err) => liveWindows().forEach((w) => w.webContents.send('loopback:error', String(err)))
+    );
 
-    loopbackIO.on('error', (err) => {
-      liveWindows().forEach((w) => w.webContents.send('loopback:error', String(err)));
-    });
-
-    loopbackIO.start();
+    rt.start();
+    loopbackRt = rt;
     return { ok: true, sampleRate, channels };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -162,7 +162,7 @@ ipcMain.handle('loopback:start', async (_, { deviceId }) => {
 });
 
 ipcMain.handle('loopback:stop', async () => {
-  if (loopbackIO) { try { loopbackIO.quit(); } catch {} loopbackIO = null; }
+  if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
   return { ok: true };
 });
 
@@ -276,6 +276,6 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (loopbackIO) { try { loopbackIO.quit(); } catch {} loopbackIO = null; }
+  if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
   if (process.platform !== 'darwin') app.quit();
 });

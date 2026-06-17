@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 // ── NDI (optional — requires NDI SDK + grandiose) ──────────────────────────
 let grandiose = null;
@@ -76,13 +77,17 @@ ipcMain.handle('ndi:stop', async () => {
 function registerProtocol() {
   protocol.handle('app', async (request) => {
     const { pathname } = new URL(request.url);
-    const ext = path.extname(pathname);
-    const candidate = path.join(BUILD_DIR, pathname === '/' ? 'index.html' : pathname);
+    // decodeURIComponent handles percent-encoded preset filenames (megapack etc.)
+    const rel = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
+    const ext = path.extname(rel);
+    const candidate = path.join(BUILD_DIR, rel);
     if (ext && fs.existsSync(candidate)) {
-      return net.fetch(`file://${candidate}`);
+      // pathToFileURL produces a valid file:// URL on all platforms including
+      // Windows (handles drive letters + backslashes that break bare concatenation)
+      return net.fetch(pathToFileURL(candidate).href);
     }
     // SPA fallback — let the client router handle the route
-    return net.fetch(`file://${path.join(BUILD_DIR, 'index.html')}`);
+    return net.fetch(pathToFileURL(path.join(BUILD_DIR, 'index.html')).href);
   });
 }
 

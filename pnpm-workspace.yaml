@@ -2,12 +2,12 @@ packages:
   - '.'
 
 allowBuilds:
+  audify: true
   core-js: true
   electron: true
   esbuild: true
   electron-winstaller: true
   grandiose: true
-  segfault-handler: true
 
 overrides:
   shell-quote: ">=1.8.4"

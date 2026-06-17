@@ -1,7 +1,7 @@
 {
 	"name": "opendrop",
 	"private": true,
-	"version": "0.4.6",
+	"version": "0.4.7",
 	"homepage": "https://opendrop.kushie.dev",
 	"type": "module",
 	"main": "electron/main.cjs",
@@ -18,10 +18,7 @@
 		"test:e2e": "playwright test",
 		"electron:dev": "concurrently \"vite dev\" \"wait-on http://localhost:1420 && electron .\"",
 		"electron:build": "vite build && electron-builder",
-		"electron:rebuild": "electron-rebuild -f -w grandiose -w naudiodon-loopback"
-	},
-	"pnpm": {
-		"neverBuiltDependencies": ["naudiodon"]
+		"electron:rebuild": "electron-rebuild -f -w grandiose"
 	},
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",
@@ -29,8 +26,8 @@
 		"butterchurn-presets": "^2.4.7"
 	},
 	"optionalDependencies": {
-		"grandiose": "^0.0.4",
-		"naudiodon-loopback": "github:Axiver/naudiodon-loopback"
+		"audify": "^1.10.1",
+		"grandiose": "^0.0.4"
 	},
 	"devDependencies": {
 		"@electron/rebuild": "^4.0.4",

@@ -10,6 +10,9 @@
 	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
+	import VideoLayer from '$lib/components/VideoLayer.svelte';
+	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
+	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 
 	// — State —————————————————————————————————————————————
 	let canvasA: HTMLCanvasElement | undefined = $state();
@@ -103,6 +106,20 @@
 	const effectiveOS = $derived(platform || detectWebOS());
 	const loopbackSupported = $derived(isElectron && platform === 'win32' && !!window.electronAPI?.listOutputDevices);
 
+	// — Video loops ———————————————————————————————————————
+	let videoEnabled = $state(false);
+	let videoOpacity = $state(0.6);
+	let videoAdvance = $state<'shuffle' | 'sequential' | 'manual'>('shuffle');
+	let videoBeatsPerCut = $state(8);
+	let vrCut = $state(true);
+	let vrFlash = $state(true);
+	let vrWarp = $state(true);
+	let vrHue = $state(false);
+	let userClips = $state<VideoClipMeta[]>([]);
+	let currentClipIndex = $state(0);
+	let videoPlaybackRate = $state(1);
+	let videoBeatCount = 0;
+
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
 	let detectedBpm = $state(0);
@@ -166,18 +183,31 @@
 	let opacityB = $derived(crossfader);
 	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
 	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
+	const allClips = $derived([...builtinClips, ...userClips]);
+	const currentClip = $derived<ClipRef | null>(
+		videoEnabled && allClips.length > 0 ? allClips[currentClipIndex % allClips.length].ref : null
+	);
+	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
+	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
 
 	// — Sync crossfader to output window ——————————————————
 	$effect(() => {
 		sync?.sendCrossfader(crossfader);
 	});
 
-	// — VU meter polling ——————————————————————————————————
+	// — VU meter polling + video speed warp ——————————————
 	$effect(() => {
 		if (status !== 'running' || !audio) return;
 		let rafId: number;
 		const tick = () => {
-			vuLevel = audio!.getLevels().rms;
+			const lv = audio!.getLevels();
+			vuLevel = lv.rms;
+			if (videoEnabled && vrWarp) {
+				const target = 0.6 + lv.bass * 1.4;
+				videoPlaybackRate += (target - videoPlaybackRate) * 0.15;
+			} else {
+				videoPlaybackRate = 1;
+			}
 			rafId = requestAnimationFrame(tick);
 		};
 		rafId = requestAnimationFrame(tick);
@@ -199,9 +229,32 @@
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
 	});
 
+	// — Persistance localStorage vidéo ———————————————————
+	$effect(() => {
+		if (!_ready) return;
+		localStorage.setItem('od-video-enabled', String(videoEnabled));
+		localStorage.setItem('od-video-opacity', String(videoOpacity));
+		localStorage.setItem('od-video-advance', videoAdvance);
+		localStorage.setItem('od-video-beats', String(videoBeatsPerCut));
+		localStorage.setItem('od-video-reactions', JSON.stringify({ cut: vrCut, flash: vrFlash, warp: vrWarp, hue: vrHue }));
+		localStorage.setItem('od-video-userclips', JSON.stringify(userClips));
+	});
+
 	// — Sync overlays vers output ——————————————————————————
 	$effect(() => {
 		sync?.sendOverlays(overlays);
+	});
+
+	// — Sync vidéo vers output ————————————————————————————
+	$effect(() => {
+		sync?.sendVideo({
+			enabled: videoEnabled,
+			clip: currentClip,
+			opacity: videoOpacity,
+			playbackRate: videoPlaybackRateStep,
+			flashOn: vrFlash,
+			hueOn: vrHue,
+		});
 	});
 
 	// — Appliquer la qualité aux decks + sync output ———————
@@ -277,10 +330,23 @@
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedOverlays = localStorage.getItem('od-overlays');
 			if (savedOverlays) overlays = JSON.parse(savedOverlays);
+			const savedVideoEnabled = localStorage.getItem('od-video-enabled');
+			if (savedVideoEnabled) videoEnabled = savedVideoEnabled === 'true';
+			const savedVideoOpacity = localStorage.getItem('od-video-opacity');
+			if (savedVideoOpacity) videoOpacity = Number(savedVideoOpacity);
+			const savedVideoAdvance = localStorage.getItem('od-video-advance');
+			if (savedVideoAdvance === 'shuffle' || savedVideoAdvance === 'sequential' || savedVideoAdvance === 'manual') videoAdvance = savedVideoAdvance;
+			const savedVideoBeats = localStorage.getItem('od-video-beats');
+			if (savedVideoBeats) videoBeatsPerCut = Number(savedVideoBeats);
+			const savedVideoReactions = localStorage.getItem('od-video-reactions');
+			if (savedVideoReactions) { try { const r = JSON.parse(savedVideoReactions); vrCut = !!r.cut; vrFlash = !!r.flash; vrWarp = !!r.warp; vrHue = !!r.hue; } catch {} }
+			const savedVideoClips = localStorage.getItem('od-video-userclips');
+			if (savedVideoClips) { try { userClips = JSON.parse(savedVideoClips); } catch {} }
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
 		await initPresets();
+		await initVideoLoops();
 		presetList = buildPresetList();
 		if (presetList.length > 0) presetA = presetList[0].name;
 		if (presetList.length > 1) presetB = presetList[1].name;
@@ -352,6 +418,7 @@
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
 				sync?.sendOverlays(overlays);
+				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
 			});
@@ -566,6 +633,15 @@
 		setTimeout(() => { beat = false; }, 80);
 		sync?.sendBeat();
 
+		if (videoEnabled && vrCut && videoAdvance !== 'manual' && allClips.length > 1) {
+			videoBeatCount = (videoBeatCount + 1) % videoBeatsPerCut;
+			if (videoBeatCount === 0) {
+				currentClipIndex = videoAdvance === 'shuffle'
+					? Math.floor(Math.random() * allClips.length)
+					: (currentClipIndex + 1) % allClips.length;
+			}
+		}
+
 		if (autoXfade) {
 			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
 			if (autoXfadeCount === 0) {
@@ -625,6 +701,14 @@
 		const x = (e.clientX - rect.left) / rect.width;
 		const y = (e.clientY - rect.top) / rect.height;
 		for (const f of Array.from(e.dataTransfer.files)) {
+			if (f.type.startsWith('video/')) {
+				if (f.size > 50 * 1024 * 1024) continue;
+				const id = crypto.randomUUID();
+				await saveVideo(id, f);
+				userClips = [...userClips, { ref: { kind: 'user', id }, name: f.name.replace(/\.[^.]+$/, '') }];
+				if (!videoEnabled) videoEnabled = true;
+				continue;
+			}
 			if (!f.type.startsWith('image/')) continue;
 			await new Promise<void>((res) => {
 				const reader = new FileReader();
@@ -648,6 +732,28 @@
 
 	function updateOverlay(id: string, patch: Partial<Overlay>) {
 		overlays = overlays.map(o => o.id === id ? { ...o, ...patch } : o);
+	}
+
+	async function addVideoFromFile(file: File) {
+		if (file.size > 50 * 1024 * 1024) return;
+		const id = crypto.randomUUID();
+		await saveVideo(id, file);
+		userClips = [...userClips, { ref: { kind: 'user', id }, name: file.name.replace(/\.[^.]+$/, '') }];
+		if (!videoEnabled) videoEnabled = true;
+	}
+
+	async function onVideoFilePick(e: Event) {
+		const files = (e.target as HTMLInputElement).files;
+		if (!files) return;
+		for (const f of Array.from(files)) await addVideoFromFile(f);
+		(e.target as HTMLInputElement).value = '';
+	}
+
+	async function removeVideoClip(index: number) {
+		const clip = userClips[index - builtinClips.length];
+		if (clip?.ref.kind === 'user') await deleteVideo(clip.ref.id);
+		userClips = userClips.filter((_, i) => i !== index - builtinClips.length);
+		if (currentClipIndex >= allClips.length) currentClipIndex = 0;
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
@@ -900,11 +1006,13 @@
 		role="region"
 		aria-label="Visualizer"
 	>
-		<!-- Deck A — base layer -->
+		<!-- Video loop — premier enfant = derrière les decks -->
+		<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
+		<!-- Deck A — base layer, screen si vidéo active pour laisser transparaître -->
 		<canvas
 			bind:this={canvasA}
 			class="deck-canvas"
-			style="opacity:{opacityA}"
+			style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"
 		></canvas>
 		<!-- Deck B — top layer, screen blend pour rendu additif -->
 		<canvas
@@ -1173,6 +1281,68 @@
 								</label>
 							</div>
 						{/if}
+					</li>
+				{/each}
+			</ul>
+		</div>
+
+		<!-- Video loops -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Video ({allClips.length})</span>
+				<button class="btn-sm pl-btn" class:active={videoEnabled} onclick={() => videoEnabled = !videoEnabled}>
+					{videoEnabled ? 'ON' : 'OFF'}
+				</button>
+			</div>
+			{#if videoEnabled}
+				<div class="crossfader-row">
+					<span class="cf-label">α</span>
+					<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={videoOpacity} />
+					<span class="cf-label bright">{Math.round(videoOpacity * 100)}%</span>
+				</div>
+				<div class="btn-row">
+					<button class="btn-sm" class:active={videoAdvance === 'shuffle'} onclick={() => videoAdvance = 'shuffle'}>Shuffle</button>
+					<button class="btn-sm" class:active={videoAdvance === 'sequential'} onclick={() => videoAdvance = 'sequential'}>Seq</button>
+					<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => videoAdvance = 'manual'}>Manuel</button>
+					<select class="beats-select" bind:value={videoBeatsPerCut} disabled={videoAdvance === 'manual'}>
+						<option value={4}>4</option>
+						<option value={8}>8</option>
+						<option value={16}>16</option>
+						<option value={32}>32</option>
+					</select>
+				</div>
+				<div class="btn-row">
+					<button class="btn-sm pl-btn" class:active={vrCut} onclick={() => vrCut = !vrCut} disabled={videoAdvance === 'manual'} title="Cut de clip sur le beat">✂ Cut</button>
+					<button class="btn-sm pl-btn" class:active={vrFlash} onclick={() => vrFlash = !vrFlash} title="Flash brightness sur le beat">✦ Flash</button>
+					<button class="btn-sm pl-btn" class:active={vrWarp} onclick={() => vrWarp = !vrWarp} title="Speed warp sur les basses">⏩ Warp</button>
+					<button class="btn-sm pl-btn" class:active={vrHue} onclick={() => vrHue = !vrHue} title="Hue rotate sur le beat">🌈 Hue</button>
+				</div>
+			{/if}
+			<div class="pl-header" style="margin-top:0.2rem">
+				<label class="btn-sm file-label" title="Ajouter une vidéo">
+					+ Video
+					<input type="file" accept="video/*" multiple onchange={onVideoFilePick} style="display:none" />
+				</label>
+			</div>
+			{#if allClips.length === 0}
+				<p class="hint">Glisse une vidéo sur le visualizer ou clique + Video</p>
+			{/if}
+			<ul class="overlay-list">
+				{#each allClips as clip, i (clip.ref.kind === 'user' ? clip.ref.id : clip.ref.src)}
+					<li class="overlay-item">
+						<div class="overlay-row">
+							<button
+								class="overlay-name"
+								class:pl-active={i === currentClipIndex % allClips.length}
+								onclick={() => currentClipIndex = i}
+								title={clip.ref.kind === 'builtin' ? 'Intégré' : 'Utilisateur'}
+							>
+								{clip.ref.kind === 'builtin' ? '📦 ' : ''}{clip.name}
+							</button>
+							{#if clip.ref.kind === 'user'}
+								<button class="pl-remove" onclick={() => removeVideoClip(i)} title="Supprimer">×</button>
+							{/if}
+						</div>
 					</li>
 				{/each}
 			</ul>
@@ -1718,6 +1888,7 @@
 		transition: color 0.1s;
 	}
 	.overlay-name:hover { color: #b44fff; }
+	.overlay-name.pl-active { color: #00e5ff; text-shadow: 0 0 6px rgba(0,229,255,0.5); }
 
 	.overlay-controls {
 		display: flex;

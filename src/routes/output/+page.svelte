@@ -7,6 +7,8 @@
 	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
+	import VideoLayer from '$lib/components/VideoLayer.svelte';
+	import type { ClipRef } from '$lib/engine/video-store.js';
 
 	let canvasA: HTMLCanvasElement | undefined = $state();
 	let canvasB: HTMLCanvasElement | undefined = $state();
@@ -18,6 +20,14 @@
 	let errorMsg = $state('');
 	let ndiActive = $state(false);
 	let ndiError = $state('');
+
+	// — Video loops ———————————————————————————————————————
+	let videoEnabled = $state(false);
+	let videoClip = $state<ClipRef | null>(null);
+	let videoOpacity = $state(0.6);
+	let videoPlaybackRate = $state(1);
+	let vrFlash = $state(true);
+	let vrHue = $state(false);
 
 	let deckA: Deck | null = null;
 	let deckB: Deck | null = null;
@@ -71,6 +81,14 @@
 					deckB?.applyQuality(settings);
 				} else if (msg.type === 'overlays') {
 					overlays = msg.list;
+				} else if (msg.type === 'video') {
+					gotState = true;
+					videoEnabled = msg.enabled;
+					videoClip = msg.clip;
+					videoOpacity = msg.opacity;
+					videoPlaybackRate = msg.playbackRate;
+					vrFlash = msg.flashOn;
+					vrHue = msg.hueOn;
 				} else if (msg.type === 'beat') {
 					beat = true;
 					if (beatTimer !== null) clearTimeout(beatTimer);
@@ -161,7 +179,8 @@
 <svelte:window onresize={onResize} />
 
 <div class="output">
-	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}"></canvas>
+	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
+	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
 	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 

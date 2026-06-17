@@ -1,9 +1,32 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL } = require('url');
+
+// Must be called before app is ready — makes app:// behave like https://
+// (standard origin, secure context, fetch API, dynamic import support)
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'app',
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+}]);
+
+const MIME = {
+  '.html': 'text/html',
+  '.js':   'text/javascript',
+  '.mjs':  'text/javascript',
+  '.css':  'text/css',
+  '.json': 'application/json',
+  '.svg':  'image/svg+xml',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.woff2':'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf':  'font/ttf',
+  '.ico':  'image/x-icon',
+};
 
 // ── NDI (optional — requires NDI SDK + grandiose) ──────────────────────────
 let grandiose = null;
@@ -75,19 +98,21 @@ ipcMain.handle('ndi:stop', async () => {
 
 // ── Custom app:// protocol for production SPA routing ─────────────────────
 function registerProtocol() {
-  protocol.handle('app', async (request) => {
+  protocol.handle('app', (request) => {
     const { pathname } = new URL(request.url);
-    // decodeURIComponent handles percent-encoded preset filenames (megapack etc.)
     const rel = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
-    const ext = path.extname(rel);
+    const ext = path.extname(rel).toLowerCase();
     const candidate = path.join(BUILD_DIR, rel);
-    if (ext && fs.existsSync(candidate)) {
-      // pathToFileURL produces a valid file:// URL on all platforms including
-      // Windows (handles drive letters + backslashes that break bare concatenation)
-      return net.fetch(pathToFileURL(candidate).href);
+    const filePath = (ext && fs.existsSync(candidate))
+      ? candidate
+      : path.join(BUILD_DIR, 'index.html');
+    try {
+      const data = fs.readFileSync(filePath);
+      const mime = MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+      return new Response(data, { headers: { 'Content-Type': mime } });
+    } catch {
+      return new Response('Not Found', { status: 404 });
     }
-    // SPA fallback — let the client router handle the route
-    return net.fetch(pathToFileURL(path.join(BUILD_DIR, 'index.html')).href);
   });
 }
 

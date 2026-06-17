@@ -44,6 +44,12 @@ jobs:
           curl -L https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/megapack-v1/presets-megapack.tar.gz \
             | tar xz -C static/
 
+      - name: Download video loops megapack (optional)
+        shell: bash
+        run: |
+          curl -fL https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/video-megapack-v1/video-megapack.tar.gz \
+            | tar xz -C static/ || true
+
       - name: Build SPA
         run: pnpm build
 

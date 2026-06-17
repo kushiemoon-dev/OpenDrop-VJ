@@ -33,7 +33,10 @@
 	let sourceError = $state('');
 	let audioEl: HTMLAudioElement | undefined = $state();
 	let audioDevices = $state<MediaDeviceInfo[]>([]);
+	let outputDevices = $state<Array<{id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}>>([]);
 	let showDevicePicker = $state(false);
+	let loopbackUnlisten: (() => void) | null = null;
+	let currentLoopbackDeviceId = $state(0);
 	let vuLevel = $state(0);
 	let outputOpen = $state(false);
 	let sync: MainSync | null = null;
@@ -98,6 +101,7 @@
 	}
 	/** Effective OS: Electron gives us the real value; web falls back to UA detection. */
 	const effectiveOS = $derived(platform || detectWebOS());
+	const loopbackSupported = $derived(isElectron && platform === 'win32' && !!window.electronAPI?.listOutputDevices);
 
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
@@ -283,6 +287,7 @@
 	});
 
 	onDestroy(() => {
+		_stopLoopbackIpc();
 		playlistA?.destroy();
 		playlistB?.destroy();
 		deckA?.destroy();
@@ -348,6 +353,7 @@
 				sync?.sendQuality(quality);
 				sync?.sendOverlays(overlays);
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
+				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
 			});
 
 			beatDetector = new BeatDetector(audio.analyser);
@@ -366,6 +372,7 @@
 	async function captureSystemAudio() {
 		if (!audio) return;
 		sourceError = '';
+		_stopLoopbackIpc();
 		try {
 			await audio.resume();
 			if (isElectron && platform === 'win32') {
@@ -402,6 +409,7 @@
 	async function connectMic() {
 		if (!audio) return;
 		sourceError = '';
+		_stopLoopbackIpc();
 		try {
 			await audio.resume();
 			await audio.connectMic();
@@ -415,22 +423,60 @@
 		sourceError = '';
 		try {
 			audioDevices = await AudioEngine.listAudioDevices();
+			if (loopbackSupported) {
+				const res = await window.electronAPI!.listOutputDevices();
+				outputDevices = res.ok ? res.devices : [];
+			} else {
+				outputDevices = [];
+			}
 			showDevicePicker = true;
 		} catch (e) {
 			sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
+	function _stopLoopbackIpc() {
+		loopbackUnlisten?.();
+		loopbackUnlisten = null;
+		currentLoopbackDeviceId = 0;
+		window.electronAPI?.stopLoopback();
+	}
+
 	async function connectDevice(device: MediaDeviceInfo) {
 		if (!audio) return;
 		sourceError = '';
 		showDevicePicker = false;
+		_stopLoopbackIpc();
 		try {
 			await audio.resume();
 			await audio.connectDevice(device.deviceId);
 			currentDeviceId = device.deviceId;
 			sourceLabel = device.label || device.deviceId;
 			sync?.sendSource(device.deviceId);
+		} catch (e) {
+			sourceError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
+	async function connectLoopback(device: {id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}) {
+		if (!audio) return;
+		sourceError = '';
+		showDevicePicker = false;
+		_stopLoopbackIpc();
+		try {
+			await audio.resume();
+			await audio.connectLoopbackPcm();
+			deckA?.connectAudio(audio.gainNode);
+			deckB?.connectAudio(audio.gainNode);
+			loopbackUnlisten = window.electronAPI!.onLoopbackData((data) => {
+				audio?.pushLoopbackPcm(data);
+			});
+			const res = await window.electronAPI!.startLoopback(device.id);
+			if (!res.ok) throw new Error(res.error ?? 'loopback start failed');
+			currentLoopbackDeviceId = device.id;
+			currentDeviceId = '';
+			sourceLabel = device.name;
+			sync?.sendLoopback(device.id);
 		} catch (e) {
 			sourceError = e instanceof Error ? e.message : String(e);
 		}
@@ -931,12 +977,20 @@
 			{/if}
 			{#if showDevicePicker}
 				<div class="device-picker">
-					<span class="label">Select input device</span>
+					<span class="label">🎤 Inputs</span>
 					{#each audioDevices as device}
 						<button class="device-item" onclick={() => connectDevice(device)}>
 							{device.label || `Device ${device.deviceId.slice(0, 8)}`}
 						</button>
 					{/each}
+					{#if loopbackSupported && outputDevices.length > 0}
+						<span class="label" style="margin-top:6px">🔊 Outputs (loopback)</span>
+						{#each outputDevices as device}
+							<button class="device-item" onclick={() => connectLoopback(device)}>
+								{device.name}
+							</button>
+						{/each}
+					{/if}
 					<button class="btn-sm" onclick={() => showDevicePicker = false}>Cancel</button>
 				</div>
 			{/if}

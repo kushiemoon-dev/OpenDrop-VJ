@@ -5,7 +5,7 @@
  * to all active decks via Deck.connectAudio(analyser).
  */
 
-export type AudioSourceType = 'none' | 'mic' | 'file' | 'display';
+export type AudioSourceType = 'none' | 'mic' | 'file' | 'display' | 'loopback';
 
 export interface AudioLevels {
 	rms: number; // 0–1 overall RMS
@@ -24,6 +24,9 @@ export class AudioEngine {
 	private _sourceType: AudioSourceType = 'none';
 	// HTMLMediaElement can only have one MediaElementAudioSourceNode — cache it.
 	private mediaElementSource: MediaElementAudioSourceNode | null = null;
+	// AudioWorklet for native loopback PCM injection.
+	private loopbackNode: AudioWorkletNode | null = null;
+	private workletLoaded = false;
 
 	private readonly fftData: Uint8Array<ArrayBuffer>;
 
@@ -111,6 +114,43 @@ export class AudioEngine {
 		this._connectStream(audioOnlyStream, 'display');
 	}
 
+	/**
+	 * Prepare the AudioWorklet for native loopback PCM injection.
+	 * Call once before the first pushLoopbackPcm() call; idempotent thereafter.
+	 * The renderer must subscribe to IPC loopback:data and call pushLoopbackPcm per chunk.
+	 */
+	async connectLoopbackPcm(): Promise<void> {
+		this._disconnectCurrent();
+		if (!this.workletLoaded) {
+			await this.ctx.audioWorklet.addModule('/loopback-worklet.js');
+			this.workletLoaded = true;
+		}
+		this.loopbackNode = new AudioWorkletNode(this.ctx, 'loopback-pcm', {
+			numberOfInputs: 0,
+			numberOfOutputs: 1,
+			outputChannelCount: [2],
+		});
+		this.loopbackNode.connect(this.gainNode);
+		this.currentSource = this.loopbackNode;
+		this._sourceType = 'loopback';
+	}
+
+	/**
+	 * Push a PCM chunk (Int16 interleaved) received from the Electron main process
+	 * via IPC into the loopback AudioWorklet ring buffer.
+	 */
+	pushLoopbackPcm(data: { sampleRate: number; channels: number; pcm: Uint8Array }): void {
+		if (!this.loopbackNode) return;
+		// Convert IPC Uint8Array view to Int16Array — zero-copy reinterpret.
+		const i16view = new Int16Array(data.pcm.buffer, data.pcm.byteOffset, data.pcm.byteLength / 2);
+		// Copy so we can transfer the buffer (transferring the original would detach the IPC buffer).
+		const i16copy = new Int16Array(i16view);
+		this.loopbackNode.port.postMessage(
+			{ sampleRate: data.sampleRate, channels: data.channels, pcm: i16copy },
+			[i16copy.buffer],
+		);
+	}
+
 	/** Connect an audio file element as the source. */
 	connectMediaElement(el: HTMLMediaElement): void {
 		this._disconnectCurrent();
@@ -191,6 +231,8 @@ export class AudioEngine {
 			}
 			this.currentSource = null;
 		}
+		// loopbackNode is always stored as currentSource — null it here too.
+		this.loopbackNode = null;
 		if (this.currentStream) {
 			this.currentStream.getTracks().forEach((t) => t.stop());
 			this.currentStream = null;

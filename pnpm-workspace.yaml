@@ -7,8 +7,8 @@ allowBuilds:
   esbuild: true
   electron-winstaller: true
   grandiose: true
-  naudiodon: set this to true or false
-  segfault-handler: set this to true or false
+  naudiodon: true
+  segfault-handler: true
 
 overrides:
   shell-quote: ">=1.8.4"

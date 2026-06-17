@@ -43,9 +43,7 @@ jobs:
         run: pnpm exec electron-rebuild -f -w grandiose || true
 
       - name: Package Electron app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm exec electron-builder --publish always
+        run: pnpm exec electron-builder --publish never
 
       - uses: actions/upload-artifact@v4
         with:

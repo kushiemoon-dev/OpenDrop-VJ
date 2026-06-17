@@ -88,6 +88,9 @@ importers:
       grandiose:
         specifier: ^0.0.4
         version: 0.0.4(patch_hash=6bf4a9745268248c132f5d886e2c7ddca3232b55bf38aec2883dc3eb796e250b)
+      naudiodon-loopback:
+        specifier: github:Axiver/naudiodon-loopback
+        version: naudiodon@https://codeload.github.com/Axiver/naudiodon-loopback/tar.gz/776d37e60ba9da6065fd611c6b2f192bd7e55fc0
 
 packages:
 
@@ -1873,10 +1876,17 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
+  nan@2.27.0:
+    resolution: {integrity: sha512-hC+0LidcL3XE4rp1C4H54KujgXKzbfyTngZTwBByQxsOxCEKZT0MPQ4hOKUH2jU1OYstqdDH4onyHPDzcV0XdQ==}
+
   nanoid@3.3.12:
     resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
+
+  naudiodon@https://codeload.github.com/Axiver/naudiodon-loopback/tar.gz/776d37e60ba9da6065fd611c6b2f192bd7e55fc0:
+    resolution: {gitHosted: true, integrity: sha512-DxYfGS0yUZRIW25TVmnv8QwYKWEKgcBJ7b4brAgypu7fUJLS6ItCRMjvBTojDfmcCQi/1/suEwBheGW4WWOTHQ==, tarball: https://codeload.github.com/Axiver/naudiodon-loopback/tar.gz/776d37e60ba9da6065fd611c6b2f192bd7e55fc0}
+    version: 2.4.0
 
   node-abi@4.31.0:
     resolution: {integrity: sha512-Erq5w/t3syw3s4sDsUaX4QttIdBPsGKTT1DTRsCkTonGggczhlDKm/wDX3o+HPJpQ41EjXCbcmXf0tgr5YZJXw==}
@@ -2114,6 +2124,9 @@ packages:
   saxes@6.0.0:
     resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==}
     engines: {node: '>=v12.22.7'}
+
+  segfault-handler@1.3.0:
+    resolution: {integrity: sha512-p7kVHo+4uoYkr0jmIiTBthwV5L2qmWtben/KDunDZ834mbos+tY+iO0//HpAJpOFSQZZ+wxKWuRo4DxV02B7Lg==}
 
   semver-compare@1.0.0:
     resolution: {integrity: sha512-YM3/ITh2MJ5MtzaM429anh+x2jiLVjqILF4m4oyQB18W7Ggea7BfqdH/wGMK7dDiMghv/6WG7znWMwUDzJiXow==}
@@ -4349,7 +4362,16 @@ snapshots:
 
   ms@2.1.3: {}
 
+  nan@2.27.0:
+    optional: true
+
   nanoid@3.3.12: {}
+
+  naudiodon@https://codeload.github.com/Axiver/naudiodon-loopback/tar.gz/776d37e60ba9da6065fd611c6b2f192bd7e55fc0:
+    dependencies:
+      bindings: 1.5.0
+      segfault-handler: 1.3.0
+    optional: true
 
   node-abi@4.31.0:
     dependencies:
@@ -4628,6 +4650,12 @@ snapshots:
   saxes@6.0.0:
     dependencies:
       xmlchars: 2.2.0
+
+  segfault-handler@1.3.0:
+    dependencies:
+      bindings: 1.5.0
+      nan: 2.27.0
+    optional: true
 
   semver-compare@1.0.0:
     optional: true

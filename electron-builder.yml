@@ -13,9 +13,11 @@ files:
   - electron/**
   - package.json
   - node_modules/grandiose/**
+  - node_modules/naudiodon-loopback/**
 
 asarUnpack:
   - node_modules/grandiose/**
+  - node_modules/naudiodon-loopback/**
 
 mac:
   category: public.app-category.music

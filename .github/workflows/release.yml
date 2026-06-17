@@ -39,6 +39,9 @@ jobs:
       - name: Build SPA
         run: pnpm build
 
+      - name: Rebuild native modules for Electron
+        run: pnpm exec electron-rebuild -f -w grandiose || true
+
       - name: Package Electron app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

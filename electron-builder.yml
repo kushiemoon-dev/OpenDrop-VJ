@@ -2,6 +2,8 @@ appId: dev.kushiemoon.opendrop
 productName: OpenDrop VJ
 copyright: Copyright © 2026 kushiemoon-dev
 
+npmRebuild: false
+
 directories:
   output: dist-electron
   buildResources: assets

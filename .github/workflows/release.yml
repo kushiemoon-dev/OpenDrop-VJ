@@ -34,7 +34,9 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          pnpm install --no-frozen-lockfile --ignore-scripts
+          pnpm rebuild electron esbuild core-js electron-winstaller || true
 
       - name: Download megapack presets
         shell: bash

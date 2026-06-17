@@ -21,7 +21,7 @@
 		"electron:rebuild": "electron-rebuild -f -w grandiose -w naudiodon-loopback"
 	},
 	"pnpm": {
-		"onlyBuiltDependencies": ["core-js", "electron", "esbuild", "electron-winstaller", "grandiose", "naudiodon", "naudiodon-loopback", "segfault-handler"]
+		"neverBuiltDependencies": ["naudiodon"]
 	},
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",

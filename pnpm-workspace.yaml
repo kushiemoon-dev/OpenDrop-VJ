@@ -1,15 +1,6 @@
 packages:
   - '.'
 
-allowBuilds:
-  core-js: true
-  electron: true
-  esbuild: true
-  electron-winstaller: true
-  grandiose: true
-  naudiodon: true
-  segfault-handler: true
-
 overrides:
   shell-quote: ">=1.8.4"
   tar: ">=7.5.7"

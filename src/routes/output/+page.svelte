@@ -99,8 +99,8 @@
 					try {
 						await audio!.resume();
 						await audio!.connectDevice(msg.deviceId);
-						deckA?.connectAudio(audio!.gainNode);
-						deckB?.connectAudio(audio!.gainNode);
+						deckA?.connectAudio(audio!.analyser);
+						deckB?.connectAudio(audio!.analyser);
 					} catch {
 						// device may not be available in output window context
 					}
@@ -110,8 +110,8 @@
 					try {
 						await audio!.resume();
 						await audio!.connectLoopbackPcm();
-						deckA?.connectAudio(audio!.gainNode);
-						deckB?.connectAudio(audio!.gainNode);
+						deckA?.connectAudio(audio!.analyser);
+						deckB?.connectAudio(audio!.analyser);
 						const eAPI = window.electronAPI;
 						if (eAPI) {
 							loopbackUnlisten = eAPI.onLoopbackData((data) => {

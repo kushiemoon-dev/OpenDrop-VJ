@@ -1,0 +1,19 @@
+{
+  "providers": {
+    "pexels": "PEXELS_API_KEY",
+    "pixabay": "PIXABAY_API_KEY"
+  },
+  "queries": [
+    { "provider": "pexels",  "term": "neon city night",    "count": 6, "bundle": true  },
+    { "provider": "pixabay", "term": "glitch vhs retro",   "count": 6, "bundle": true  },
+    { "provider": "pexels",  "term": "tokyo rain night",   "count": 6                  },
+    { "provider": "pixabay", "term": "vaporwave grid",     "count": 5                  },
+    { "provider": "pexels",  "term": "cyberpunk city",     "count": 5                  },
+    { "provider": "pixabay", "term": "synthwave neon",     "count": 5                  },
+    { "provider": "pexels",  "term": "japan neon signs",   "count": 5                  },
+    { "provider": "pixabay", "term": "crt static noise",   "count": 5                  },
+    { "provider": "pexels",  "term": "night drive city",   "count": 5                  },
+    { "provider": "pixabay", "term": "abstract glitch",    "count": 5                  }
+  ],
+  "manual": "video-sources/manual"
+}

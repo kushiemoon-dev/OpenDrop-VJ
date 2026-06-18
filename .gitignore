@@ -35,3 +35,10 @@ playwright-report
 
 # Screenshots (debug)
 *.png
+
+# Video loops CDN (généré par video-loops:build, uploadé via rsync)
+/cdn-video-loops
+/.video-tmp
+
+# Sources manuelles non committées (fichiers bruts avant transcodage)
+/video-sources/manual

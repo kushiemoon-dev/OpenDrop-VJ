@@ -1,5 +1,8 @@
 <script lang="ts">
-  import { searchPresets, type PresetMeta } from '$lib/presets/index.js'
+  import { searchPresets, getSlug, type PresetMeta } from '$lib/presets/index.js'
+  import PresetTile from './PresetTile.svelte'
+  import { computeGrid, type GridWindow } from '$lib/presets/grid-virtual.js'
+  import { thumbUrls, requestThumb, releaseThumb } from '$lib/presets/thumbnailer.svelte.js'
 
   interface Props {
     presets: PresetMeta[]
@@ -11,6 +14,7 @@
     onLoadPreset: (name: string) => void
     onAddToPlaylist: (deck: 'A' | 'B', name: string) => void
     targetSlot?: number
+    variant?: 'list' | 'grid'
   }
 
   let {
@@ -23,6 +27,7 @@
     onLoadPreset,
     onAddToPlaylist,
     targetSlot = undefined,
+    variant = 'list',
   }: Props = $props()
 
   // ── Recherche ──────────────────────────────────────────────────────────────
@@ -75,10 +80,44 @@
     filteredPresets // track
     scrollTop = 0
     if (listEl) listEl.scrollTop = 0
+    gridScrollTop = 0
+    if (gridEl) gridEl.scrollTop = 0
   })
 
   function onScroll(e: Event) {
     scrollTop = (e.currentTarget as HTMLElement).scrollTop
+  }
+
+  // ── Virtualisation grille ──────────────────────────────────────────────────
+  const CARD_MIN_W = 120
+  const CARD_H = 100   // hauteur approximative (thumb 16/9 ~67px + nom ~16px + pied ~17px)
+  const GRID_GAP = 8
+
+  let gridEl: HTMLElement | undefined = $state()
+  let gridW: number = $state(600)
+  let gridH: number = $state(300)
+  let gridScrollTop: number = $state(0)
+
+  let gridWindow: GridWindow = $derived(
+    computeGrid({
+      count: filteredPresets.length,
+      containerW: gridW,
+      containerH: gridH,
+      scrollTop: gridScrollTop,
+      cardMinW: CARD_MIN_W,
+      cardH: CARD_H,
+      gap: GRID_GAP,
+      overscanRows: 2,
+    })
+  )
+
+  // Map nom→slug précalculée pour O(1)
+  let slugMap: Map<string, string> = $derived(
+    new Map(filteredPresets.map(p => [p.name, getSlug(p.name) ?? p.name]))
+  )
+
+  function onGridScroll(e: Event) {
+    gridScrollTop = (e.currentTarget as HTMLElement).scrollTop
   }
 
   // ── Fermeture clavier ──────────────────────────────────────────────────────
@@ -121,49 +160,86 @@
     <button class="preset-drawer__close" onclick={onClose} type="button" aria-label="Fermer">✕</button>
   </div>
 
-  <ul
-    class="preset-list"
-    bind:this={listEl}
-    bind:clientHeight={containerH}
-    onscroll={onScroll}
-  >
-    <li style="height:{vStart * PRESET_ROW_H}px" aria-hidden="true"></li>
+  {#if variant === 'grid'}
+    <div
+      class="preset-grid"
+      bind:this={gridEl}
+      bind:clientWidth={gridW}
+      bind:clientHeight={gridH}
+      onscroll={onGridScroll}
+    >
+      <div class="preset-grid__sizer" style="height:{gridWindow.totalH}px">
+        <div
+          class="preset-grid__inner"
+          style="transform:translateY({gridWindow.offsetY}px); grid-template-columns:repeat({gridWindow.cols},minmax(0,1fr));"
+        >
+          {#each filteredPresets.slice(gridWindow.vStart, gridWindow.vEnd) as p (slugMap.get(p.name) ?? p.name)}
+            {@const slug = slugMap.get(p.name) ?? p.name}
+            {@const isFav = favorites.includes(p.name)}
+            <PresetTile
+              preset={p}
+              {slug}
+              thumbUrl={thumbUrls.get(slug)}
+              {isFav}
+              inA={playlistAItems.includes(p.name)}
+              inB={playlistBItems.includes(p.name)}
+              isSelected={false}
+              onLoad={() => onLoadPreset(p.name)}
+              onToggleFav={() => toggleFavorite(p.name)}
+              onAddA={() => onAddToPlaylist('A', p.name)}
+              onAddB={() => onAddToPlaylist('B', p.name)}
+              onVisible={() => requestThumb(slug, p.name)}
+              onHidden={() => releaseThumb(slug)}
+            />
+          {/each}
+        </div>
+      </div>
+    </div>
+  {:else}
+    <ul
+      class="preset-list"
+      bind:this={listEl}
+      bind:clientHeight={containerH}
+      onscroll={onScroll}
+    >
+      <li style="height:{vStart * PRESET_ROW_H}px" aria-hidden="true"></li>
 
-    {#each filteredPresets.slice(vStart, vEnd) as p (p.name)}
-      {@const isFav = favorites.includes(p.name)}
-      <li class="preset-row">
-        <button
-          class="fav-btn"
-          class:fav-on={isFav}
-          onclick={() => toggleFavorite(p.name)}
-          type="button"
-          aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-        >★</button>
+      {#each filteredPresets.slice(vStart, vEnd) as p (p.name)}
+        {@const isFav = favorites.includes(p.name)}
+        <li class="preset-row">
+          <button
+            class="fav-btn"
+            class:fav-on={isFav}
+            onclick={() => toggleFavorite(p.name)}
+            type="button"
+            aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          >★</button>
 
-        <button
-          class="preset-item"
-          onclick={() => onLoadPreset(p.name)}
-          type="button"
-          title={p.name}
-        >{p.name}</button>
+          <button
+            class="preset-item"
+            onclick={() => onLoadPreset(p.name)}
+            type="button"
+            title={p.name}
+          >{p.name}</button>
 
-        <button
-          class="pl-add"
-          class:in-list={playlistAItems.includes(p.name)}
-          onclick={() => onAddToPlaylist('A', p.name)}
-          type="button"
-        >A</button>
-        <button
-          class="pl-add"
-          class:in-list={playlistBItems.includes(p.name)}
-          onclick={() => onAddToPlaylist('B', p.name)}
-          type="button"
-        >B</button>
-      </li>
-    {/each}
+          <button
+            class="pl-add"
+            class:in-list={playlistAItems.includes(p.name)}
+            onclick={() => onAddToPlaylist('A', p.name)}
+            type="button"
+          >A</button>
+          <button
+            class="pl-add"
+            class:in-list={playlistBItems.includes(p.name)}
+            onclick={() => onAddToPlaylist('B', p.name)}
+            type="button"
+          >B</button>
+        </li>
+      {/each}
 
-    <li style="height:{Math.max(0, filteredPresets.length - vEnd) * PRESET_ROW_H}px" aria-hidden="true"></li>
-  </ul>
+      <li style="height:{Math.max(0, filteredPresets.length - vEnd) * PRESET_ROW_H}px" aria-hidden="true"></li>
+    </ul>
+  {/if}
 </div>
 
 <style>
@@ -320,4 +396,24 @@
 
   .pl-add:hover { border-color: #ff2d78; color: #ff2d78; }
   .in-list { border-color: #ff2d78; color: #ff2d78; background: #1a0a22; }
+
+  /* Grille de presets virtualisée */
+  .preset-grid {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .preset-grid__sizer {
+    position: relative;
+    width: 100%;
+  }
+
+  .preset-grid__inner {
+    position: absolute;
+    inset: 0 0 auto 0;
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+  }
 </style>

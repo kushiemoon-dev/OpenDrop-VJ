@@ -52,6 +52,8 @@ jobs:
 
       - name: Build SPA
         run: pnpm build
+        env:
+          PUBLIC_VIDEO_CDN: ''
 
       - name: Rebuild native modules for Electron
         run: pnpm exec electron-rebuild -f -w grandiose || true

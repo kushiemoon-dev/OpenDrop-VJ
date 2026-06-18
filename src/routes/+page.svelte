@@ -17,6 +17,7 @@
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
 	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
+	import MixerLayout from '$lib/components/MixerLayout.svelte';
 	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
@@ -974,6 +975,7 @@
 <audio bind:this={audioEl} style="display:none" crossorigin="anonymous"></audio>
 
 <main>
+{#if layout === 'stage'}
 	<div
 		class="visualizer-wrap"
 		class:drag-over={overlayDragOver}
@@ -1020,7 +1022,6 @@
 			<LayoutToggle {layout} onToggle={(l) => { layout = l }} />
 		</div>
 
-		{#if layout === 'stage'}
 		<!-- Audio source -->
 		<SidebarAudio
 			{sourceLabel}
@@ -1216,13 +1217,6 @@
 			{/if}
 		</div>
 
-		{:else}
-		<!-- placeholder : Task 4 -->
-		<div class="controls-section">
-			<span class="label">Mixer — coming soon</span>
-		</div>
-		{/if}
-
 	</aside>
 	<PresetBrowser
 		presets={presetList}
@@ -1234,6 +1228,82 @@
 		onLoadPreset={selectPreset}
 		onAddToPlaylist={addToPlaylist}
 	/>
+{:else}
+  {#snippet audioSection()}
+    <SidebarAudio
+      {sourceLabel}
+      {status}
+      {effectiveOS}
+      {vuLevel}
+      {sourceError}
+      {showSystemAudioHelp}
+      {showDevicePicker}
+      {audioDevices}
+      {outputDevices}
+      {loopbackSupported}
+      audioElHasSrc={!!audioEl?.src}
+      onConnectMic={connectMic}
+      onOpenDevicePicker={openDevicePicker}
+      onCaptureSystemAudio={captureSystemAudio}
+      onConnectFile={connectFile}
+      {onFileChange}
+      onConnectDevice={connectDevice}
+      onConnectLoopback={connectLoopback}
+      onDismissSystemAudioHelp={() => { showSystemAudioHelp = false }}
+      onDismissDevicePicker={() => { showDevicePicker = false }}
+    />
+  {/snippet}
+  {#snippet videoSection()}
+    <SidebarVideo
+      {videoEnabled}
+      {videoOpacity}
+      {videoAdvance}
+      {videoBeatsPerCut}
+      {vrCut}
+      {vrFlash}
+      {vrWarp}
+      {vrHue}
+      {currentClipIndex}
+      {allClips}
+      onToggleVideo={() => { videoEnabled = !videoEnabled }}
+      onOpacityChange={(v) => { videoOpacity = v }}
+      onAdvanceChange={(v) => { videoAdvance = v }}
+      onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
+      onToggleVrCut={() => { vrCut = !vrCut }}
+      onToggleVrFlash={() => { vrFlash = !vrFlash }}
+      onToggleVrWarp={() => { vrWarp = !vrWarp }}
+      onToggleVrHue={() => { vrHue = !vrHue }}
+      onSelectClip={(i) => { currentClipIndex = i }}
+      onRemoveClip={(i) => removeVideoClip(i)}
+      onAddVideo={onVideoFilePick}
+    />
+  {/snippet}
+  <MixerLayout
+    {canvases}
+    {presets4}
+    {deckBus}
+    runningCount={manager.runningCount()}
+    {isRunning}
+    selectedSlot={mixerSelectedSlot}
+    {crossfader}
+    {presetList}
+    {playlistAItems}
+    {playlistBItems}
+    {status}
+    {layout}
+    onStartSlot={startSlot}
+    onPauseSlot={pauseSlot}
+    onSelectSlot={(s) => { mixerSelectedSlot = s }}
+    onCycleBus={cycleBus}
+    onCrossfaderChange={(v) => { crossfader = v }}
+    onLoadPreset={selectPreset}
+    onAddToPlaylist={addToPlaylist}
+    onOpenOutput={openOutput}
+    onLayoutToggle={(l) => { layout = l }}
+    {audioSection}
+    {videoSection}
+  />
+{/if}
 </main>
 
 <style>

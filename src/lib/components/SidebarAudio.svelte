@@ -113,14 +113,14 @@
 
 <style>
 	.controls-section {
-		padding: 0.7rem 0.75rem;
-		border-bottom: 1px solid #131330;
+		padding: var(--sp-3);
+		border-bottom: 1px solid var(--border-subtle);
 		display: flex; flex-direction: column; gap: 0.4rem;
 	}
 
 	.label {
-		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
-		color: #444470; font-weight: 600;
+		font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+		color: var(--accent); font-weight: 600;
 	}
 
 	.btn-row, .file-row { display: flex; gap: 0.4rem; }
@@ -129,52 +129,52 @@
 	.source-error { font-size: 11px; color: #ff6090; word-break: break-word; }
 
 	.vu-meter {
-		height: 5px; background: #111130; border-radius: 3px; overflow: hidden;
-		border: 1px solid #1a1a40;
+		height: 5px; background: var(--bg-base); border-radius: var(--r-sm); overflow: hidden;
+		border: 1px solid var(--border-subtle);
 	}
 
 	.vu-bar {
 		height: 100%;
-		background: linear-gradient(90deg, #ff2d78, #b44fff 50%, #00e5ff);
-		border-radius: 3px;
+		background: linear-gradient(90deg, var(--accent), #b44fff 50%, #00e5ff);
+		border-radius: var(--r-sm);
 		transition: width 50ms linear;
-		box-shadow: 0 0 8px rgba(255, 45, 120, 0.5);
+		box-shadow: 0 0 8px var(--accent-glow);
 	}
 
 	.device-picker {
 		display: flex; flex-direction: column; gap: 0.2rem;
 		margin-top: 0.2rem; padding: 0.4rem;
-		background: #0e0e28; border: 1px solid #232350; border-radius: 6px;
+		background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--r-md);
 	}
 
 	.device-item {
 		display: block; width: 100%; text-align: left;
-		background: none; border: none; color: #aaaacc;
+		background: none; border: none; color: var(--text-secondary);
 		padding: 0.3rem 0.4rem; cursor: pointer; font-size: 11px;
-		border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-		transition: all 0.1s;
+		border-radius: var(--r-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		transition: all var(--t-fast);
 	}
 
-	.device-item:hover { background: #191940; color: #fff; }
+	.device-item:hover { background: var(--bg-hover); color: #fff; }
 
-	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
+	.hint { margin: 0.2rem 0; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
 
-	.hint code { background: #191940; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 10px; }
+	.hint code { background: var(--bg-hover); padding: 0.1rem 0.3rem; border-radius: var(--r-sm); font-size: 10px; }
 
-	.hint strong { color: #e0e0ff; }
+	.hint strong { color: var(--text-primary); }
 
 	.btn-sm {
-		background: #0e0e26; color: #7777aa;
-		border: 1px solid #1e1e48; border-radius: 5px;
+		background: var(--bg-elevated); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
 		padding: 0.25rem 0.6rem; font-size: 12px; cursor: pointer;
-		transition: all 0.12s;
+		transition: border-color var(--t-fast), color var(--t-fast);
 	}
 
-	.btn-sm:hover:not(:disabled) { background: #141436; color: #ddddf5; border-color: #3a3a6a; }
+	.btn-sm:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
 
 	.btn-sm.active {
-		background: #1a0822; border-color: #ff2d78; color: #ff2d78;
-		box-shadow: 0 0 8px rgba(255,45,120,0.25);
+		background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+		box-shadow: 0 0 8px var(--accent-dim);
 	}
 
 	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }

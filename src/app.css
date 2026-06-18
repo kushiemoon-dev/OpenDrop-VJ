@@ -31,3 +31,20 @@
   /* Transitions */
   --t-fast: 150ms ease;
 }
+
+/* ── Mixer utilitaires ── */
+
+/* Grille des 4 decks responsive */
+.mixer-decks-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-2);
+}
+
+/* Override: PresetBrowser en mode inline (dans MixerLayout) */
+.mixer-preset-inline .preset-drawer {
+  position: static;
+  transform: none;
+  flex: 1;
+  border-top: 1px solid var(--accent);
+}

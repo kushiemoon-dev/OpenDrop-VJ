@@ -28,7 +28,7 @@
   })
 
   const BUS_LABELS: Record<'A' | 'B' | 'off', string> = { A: '● A', B: '● B', off: '○ —' }
-  const BUS_COLORS: Record<'A' | 'B' | 'off', string> = { A: '#ff2d78', B: '#00e096', off: '#44447a' }
+  const BUS_COLORS: Record<'A' | 'B' | 'off', string> = { A: 'var(--accent)', B: 'var(--live)', off: 'var(--text-muted)' }
 </script>
 
 <div

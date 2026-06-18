@@ -16,6 +16,7 @@
 	import SidebarOverlays from '$lib/components/SidebarOverlays.svelte';
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
+	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
@@ -96,6 +97,8 @@
 	let platform = $state('');
 	let showSystemAudioHelp = $state(false);
 	let showPresetBrowser = $state(false);
+	let layout = $state<'stage' | 'mixer'>('stage');
+	let mixerSelectedSlot = $state(0);
 
 	/** Detect OS in web builds (navigator.userAgent) — used for help text only. */
 	function detectWebOS(): string {
@@ -212,6 +215,7 @@
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
+		localStorage.setItem('od-layout', layout);
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -306,6 +310,8 @@
 			if (savedDeckBus) {
 				try { deckBus = JSON.parse(savedDeckBus); } catch {}
 			}
+			const savedLayout = localStorage.getItem('od-layout');
+			if (savedLayout === 'stage' || savedLayout === 'mixer') layout = savedLayout;
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
@@ -1009,6 +1015,12 @@
 	</div>
 
 	<aside class="controls">
+		<!-- Layout toggle -->
+		<div class="controls-section">
+			<LayoutToggle {layout} onToggle={(l) => { layout = l }} />
+		</div>
+
+		{#if layout === 'stage'}
 		<!-- Audio source -->
 		<SidebarAudio
 			{sourceLabel}
@@ -1203,6 +1215,13 @@
 				</div>
 			{/if}
 		</div>
+
+		{:else}
+		<!-- placeholder : Task 4 -->
+		<div class="controls-section">
+			<span class="label">Mixer — coming soon</span>
+		</div>
+		{/if}
 
 	</aside>
 	<PresetBrowser

@@ -28,7 +28,8 @@ export const WEBP_QUALITY = 0.7
 // ─── Reactive state ───────────────────────────────────────────────────────────
 
 // Extension .svelte.ts required for $state
-export const thumbUrls = $state(new Map<string, string>())
+// `let` (not `const`) so the reference can be reassigned immutably (new Map per update)
+export let thumbUrls = $state(new Map<string, string>())
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ export function requestThumb(slug: string, name: string): void {
 
 	getThumbUrl(slug).then(url => {
 		if (url) {
-			thumbUrls.set(slug, url)
+			thumbUrls = new Map(thumbUrls).set(slug, url)
 			return
 		}
 		if (!_inFlight.has(slug)) {
@@ -170,7 +171,7 @@ async function pumpNext(): Promise<void> {
 
 	try {
 		const data = await loadPresetData(job.name)
-		if (!data) { _inFlight.delete(job.slug); pumpNext(); return }
+		if (!data) { _inFlight.delete(job.slug); setTimeout(pumpNext, 0); return }
 
 		_viz!.loadPreset(data, 0)
 
@@ -185,18 +186,18 @@ async function pumpNext(): Promise<void> {
 		_viz!.render()
 		_canvas!.toBlob(
 			(blob) => {
-				if (!blob) { _inFlight.delete(job.slug); pumpNext(); return }
+				if (!blob) { _inFlight.delete(job.slug); setTimeout(pumpNext, 0); return }
 				putThumbBlob(job.slug, blob).catch(() => {})
 				const url = cacheUrl(job.slug, blob)
-				thumbUrls.set(job.slug, url)
+				thumbUrls = new Map(thumbUrls).set(job.slug, url)
 				_inFlight.delete(job.slug)
-				pumpNext()
+				setTimeout(pumpNext, 0)
 			},
 			'image/webp',
 			WEBP_QUALITY
 		)
 	} catch {
 		_inFlight.delete(job.slug)
-		pumpNext()
+		setTimeout(pumpNext, 0)
 	}
 }

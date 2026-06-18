@@ -6,9 +6,8 @@
   }
   let { value, onchange }: Props = $props()
 
-  // Equal-power : gain A = cos(x * π/2), gain B = sin(x * π/2)
-  const gainA = $derived(Math.round(Math.cos(value * Math.PI / 2) * 100))
-  const gainB = $derived(Math.round(Math.sin(value * Math.PI / 2) * 100))
+  const gainA = $derived(Math.round((1 - value) * 100))
+  const gainB = $derived(Math.round(value * 100))
 </script>
 
 <div class="xcf">
@@ -29,7 +28,7 @@
     {value}
     oninput={(e) => onchange(Number((e.currentTarget as HTMLInputElement).value))}
   />
-  <div class="xcf__curve">Equal Power</div>
+  <div class="xcf__curve">Linear</div>
 </div>
 
 <style>

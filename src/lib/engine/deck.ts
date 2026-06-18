@@ -120,6 +120,15 @@ export class Deck {
 	}
 
 	/**
+	 * Resume the render loop after a pause.
+	 * Sets state back to 'running' and restarts the RAF loop.
+	 */
+	resume(): void {
+		this._state = 'running';
+		this.startRenderLoop();
+	}
+
+	/**
 	 * Resize the renderer. Call on window resize.
 	 */
 	resize(width: number, height: number): void {

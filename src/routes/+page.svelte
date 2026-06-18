@@ -4,7 +4,8 @@
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
-	import { initPresets, buildPresetList, loadPresetData, searchPresets, type PresetMeta } from '$lib/presets/index.js';
+	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
+	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
@@ -27,7 +28,6 @@
 	let audio: AudioEngine | null = null;
 
 	let presetList: PresetMeta[] = $state([]);
-	let searchQuery = $state('');
 
 	let activeDeck = $state<'A' | 'B'>('A');
 	let presetA = $state('');
@@ -158,32 +158,6 @@
 
 	const BLEND_MODES = ['screen', 'normal', 'plus-lighter', 'multiply', 'overlay', 'hard-light'];
 
-	// — Virtual list preset ————————————————————————————————
-	const PRESET_ROW_H = 24;
-	const PRESET_BUF = 5;
-	let presetListEl: HTMLUListElement | undefined = $state();
-	let presetScrollTop = $state(0);
-	let presetContainerH = $state(500);
-	let debouncedQuery = $state('');
-
-	function onPresetScroll() {
-		if (presetListEl) presetScrollTop = presetListEl.scrollTop;
-	}
-
-	// — Favoris + tags ————————————————————————————————————
-	let favorites = $state<string[]>([]);
-	let activeTag = $state<string>(''); // '' = tous, '★' = favoris, 'Auteur' = tag
-
-	// — Derived ———————————————————————————————————————————
-	let filteredPresets = $derived.by(() => {
-		let list = searchPresets(presetList, debouncedQuery);
-		if (activeTag === '★') return list.filter((p) => favorites.includes(p.name));
-		if (activeTag) return list.filter((p) => p.category === activeTag);
-		return list;
-	});
-
-	const vStart = $derived(Math.max(0, Math.floor(presetScrollTop / PRESET_ROW_H) - PRESET_BUF));
-	const vEnd = $derived(Math.min(filteredPresets.length, Math.ceil((presetScrollTop + presetContainerH) / PRESET_ROW_H) + PRESET_BUF));
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let opacityA = $derived(1 - crossfader);
 	let opacityB = $derived(crossfader);
@@ -230,7 +204,6 @@
 		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
-		localStorage.setItem('od-favorites', JSON.stringify(favorites));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
 	});
@@ -272,28 +245,6 @@
 		sync?.sendQuality(quality);
 	});
 
-	// — Debounce recherche preset ——————————————————————————
-	$effect(() => {
-		const q = searchQuery;
-		const t = setTimeout(() => { debouncedQuery = q; }, 150);
-		return () => clearTimeout(t);
-	});
-
-	// — ResizeObserver pour la liste preset ———————————————
-	$effect(() => {
-		if (!presetListEl) return;
-		const ro = new ResizeObserver(([e]) => { presetContainerH = e.contentRect.height; });
-		ro.observe(presetListEl);
-		return () => ro.disconnect();
-	});
-
-	// — Reset scroll quand le filtre change ———————————————
-	$effect(() => {
-		filteredPresets; // track
-		presetScrollTop = 0;
-		if (presetListEl) presetListEl.scrollTop = 0;
-	});
-
 	// — FPS counter ————————————————————————————————————————
 	$effect(() => {
 		if (status !== 'running') return;
@@ -330,8 +281,6 @@
 			if (savedMode) playlistMode = savedMode as PlaylistMode;
 			const savedMidi = localStorage.getItem('od-midi-mappings');
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
-			const savedFavs = localStorage.getItem('od-favorites');
-			if (savedFavs) favorites = JSON.parse(savedFavs);
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedOverlays = localStorage.getItem('od-overlays');
@@ -893,14 +842,6 @@
 		}
 	}
 
-	function toggleFavorite(name: string) {
-		if (favorites.includes(name)) {
-			favorites = favorites.filter((n) => n !== name);
-		} else {
-			favorites = [...favorites, name];
-		}
-	}
-
 	function exportPlaylists() {
 		const data = JSON.stringify({
 			version: 1,
@@ -1239,45 +1180,17 @@
 			{/if}
 		</div>
 
-		<!-- Preset browser -->
-		<div class="controls-section preset-browser">
-			<span class="label">Presets → Deck {activeDeck} ({filteredPresets.length}/{presetList.length})</span>
-			<input
-				class="search-input"
-				type="search"
-				placeholder="Search presets…"
-				bind:value={searchQuery}
-			/>
-			<!-- Filtre favoris -->
-			<div class="tag-chips">
-				<button class="tag-chip" class:tag-active={activeTag === '★'} onclick={() => activeTag = activeTag === '★' ? '' : '★'}>★ Favorites</button>
-			</div>
-			<ul class="preset-list" bind:this={presetListEl} onscroll={onPresetScroll}>
-				<li style="height:{vStart * PRESET_ROW_H}px" aria-hidden="true"></li>
-				{#each filteredPresets.slice(vStart, vEnd) as p (p.name)}
-					{@const isFav = favorites.includes(p.name)}
-					<li class="preset-row">
-						<button
-							class="fav-btn"
-							class:fav-on={isFav}
-							onclick={() => toggleFavorite(p.name)}
-							title={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-						>★</button>
-						<button
-							class="preset-item"
-							class:active={p.name === activePreset}
-							onclick={() => selectPreset(p.name)}
-						>
-							{p.name}
-						</button>
-						<button class="pl-add" class:in-list={playlistAItems.includes(p.name)} onclick={() => addToPlaylist('A', p.name)} title="Add to playlist A">A</button>
-						<button class="pl-add" class:in-list={playlistBItems.includes(p.name)} onclick={() => addToPlaylist('B', p.name)} title="Add to playlist B">B</button>
-					</li>
-				{/each}
-				<li style="height:{Math.max(0, filteredPresets.length - vEnd) * PRESET_ROW_H}px" aria-hidden="true"></li>
-			</ul>
-		</div>
 	</aside>
+	<PresetBrowser
+		presets={presetList}
+		isOpen={showPresetBrowser}
+		{activeDeck}
+		{playlistAItems}
+		{playlistBItems}
+		onClose={() => { showPresetBrowser = false }}
+		onLoadPreset={selectPreset}
+		onAddToPlaylist={addToPlaylist}
+	/>
 </main>
 
 <style>
@@ -1350,8 +1263,6 @@
 		border-bottom: 1px solid #131330;
 		display: flex; flex-direction: column; gap: 0.4rem;
 	}
-
-	.preset-browser { flex: 1 0 180px; overflow: hidden; }
 
 	.label {
 		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;

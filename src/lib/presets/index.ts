@@ -67,3 +67,8 @@ export function searchPresets(list: PresetMeta[], query: string): PresetMeta[] {
 	const q = query.toLowerCase();
 	return list.filter((p) => p.name.toLowerCase().includes(q));
 }
+
+/** Récupérer le slug d'un preset par son nom. */
+export function getSlug(name: string): string | undefined {
+	return _nameToSlug.get(name);
+}

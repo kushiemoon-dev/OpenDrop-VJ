@@ -4,10 +4,11 @@
     canvas: HTMLCanvasElement | undefined
     presetName: string
     isActive: boolean
+    isLive: boolean
     onSelect: () => void
   }
 
-  let { letter, canvas, presetName, isActive, onSelect }: Props = $props()
+  let { letter, canvas, presetName, isActive, isLive, onSelect }: Props = $props()
 
   let videoEl: HTMLVideoElement | undefined = $state()
 
@@ -30,7 +31,7 @@
 >
   <div class="deck-card__header">
     <span class="deck-card__letter">{letter}</span>
-    {#if presetName}
+    {#if isLive}
       <span class="deck-card__live">●</span>
     {/if}
   </div>

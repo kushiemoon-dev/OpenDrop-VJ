@@ -10,6 +10,7 @@
     onClose: () => void
     onLoadPreset: (name: string) => void
     onAddToPlaylist: (deck: 'A' | 'B', name: string) => void
+    targetSlot?: number
   }
 
   let {
@@ -21,6 +22,7 @@
     onClose,
     onLoadPreset,
     onAddToPlaylist,
+    targetSlot = undefined,
   }: Props = $props()
 
   // ── Recherche ──────────────────────────────────────────────────────────────
@@ -90,7 +92,7 @@
 <div class="preset-drawer" class:preset-drawer--open={isOpen} aria-hidden={!isOpen}>
   <div class="preset-drawer__bar">
     <span class="preset-drawer__title">
-      Presets → Deck {activeDeck}
+      Presets → {targetSlot !== undefined ? `Deck ${targetSlot + 1}` : `Deck ${activeDeck}`}
       <span class="preset-drawer__count">({filteredPresets.length}/{presets.length})</span>
     </span>
 

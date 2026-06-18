@@ -158,6 +158,7 @@
 	let overlayDragOver = $state(false);
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
+	let _slotEpoch = $state(0);
 	let preset2 = $state('');
 	let preset3 = $state('');
 	const presets4 = $derived([presetA, presetB, preset2, preset3]);
@@ -176,6 +177,7 @@
 
 	/** Returns the preset of the first running deck on a given bus, or the last known preset if none running. */
 	function primaryPreset(bus: 'A' | 'B'): string {
+		void _slotEpoch; // force reactive tracking
 		for (let i = 0; i < 4; i++) {
 			if (deckBus[i] === bus && isRunning(i)) return presets4[i];
 		}
@@ -184,6 +186,7 @@
 
 	const busPresetA = $derived(primaryPreset('A'));
 	const busPresetB = $derived(primaryPreset('B'));
+	const runningCount = $derived([0, 1, 2, 3].filter(i => manager.isRunning(i)).length);
 
 	const currentClip = $derived<ClipRef | null>(
 		videoEnabled && allClips.length > 0 ? allClips[currentClipIndex % allClips.length].ref : null
@@ -923,10 +926,12 @@
 		const name = presets4[slot];
 		const presetData = name ? await loadPresetData(name) : null;
 		await manager.start(slot, audio.ctx, audio.gainNode, q, presetData);
+		_slotEpoch++;
 	}
 
 	function pauseSlot(slot: number) {
 		manager.pause(slot);
+		_slotEpoch++;
 	}
 
 	function cycleBus(slot: number) {
@@ -1294,7 +1299,7 @@
     {canvases}
     {presets4}
     {deckBus}
-    runningCount={manager.runningCount()}
+    {runningCount}
     {isRunning}
     selectedSlot={mixerSelectedSlot}
     {crossfader}

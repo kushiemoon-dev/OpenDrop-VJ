@@ -1259,14 +1259,14 @@
 	}
 
 	.controls-section {
-		padding: 0.7rem 0.75rem;
-		border-bottom: 1px solid #131330;
+		padding: var(--sp-3);
+		border-bottom: 1px solid var(--border-subtle);
 		display: flex; flex-direction: column; gap: 0.4rem;
 	}
 
 	.label {
-		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
-		color: #444470; font-weight: 600;
+		font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+		color: var(--accent); font-weight: 600;
 	}
 
 	.btn-row { display: flex; gap: 0.4rem; }
@@ -1286,40 +1286,40 @@
 	.crossfader-row { display: flex; align-items: center; gap: 0.4rem; }
 
 	.cf-label {
-		font-size: 11px; font-weight: 700; color: #33335a;
-		width: 12px; text-align: center; transition: color 0.15s;
+		font-size: 11px; font-weight: 700; color: var(--text-muted);
+		width: 12px; text-align: center; transition: color var(--t-fast);
 	}
 
-	.cf-label.bright { color: #ff2d78; text-shadow: 0 0 8px rgba(255,45,120,0.8); }
+	.cf-label.bright { color: var(--accent); text-shadow: 0 0 8px var(--accent-glow); }
 
-	.crossfader { flex: 1; accent-color: #ff2d78; cursor: pointer; }
+	.crossfader { flex: 1; accent-color: var(--accent); cursor: pointer; }
 
 	/* ── Preset browser ── */
 	.search-input {
 		width: 100%;
-		background: #0e0e26; border: 1px solid #1e1e48;
-		border-radius: 6px; color: #ddddf5;
+		background: var(--bg-elevated); border: 1px solid var(--border);
+		border-radius: var(--r-md); color: var(--text-primary);
 		padding: 0.35rem 0.5rem; font-size: 12px; outline: none;
-		transition: border-color 0.15s;
+		transition: border-color var(--t-fast);
 	}
 
 	.search-input:focus { border-color: #00e5ff; box-shadow: 0 0 0 2px rgba(0,229,255,0.1); }
-	.search-input::placeholder { color: #33335a; }
+	.search-input::placeholder { color: var(--text-muted); }
 
 	.preset-list { flex: 1; overflow-y: auto; list-style: none; }
 
 	.preset-item {
 		display: block; width: 100%; text-align: left;
-		background: none; border: none; color: #8888bb;
+		background: none; border: none; color: var(--text-secondary);
 		padding: 0.15rem 0.4rem; cursor: pointer; font-size: 11px;
-		border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-		transition: all 0.1s;
+		border-radius: var(--r-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+		transition: all var(--t-fast);
 	}
 
-	.preset-item:hover { background: #111130; color: #eeeeff; }
+	.preset-item:hover { background: var(--bg-surface); color: #eeeeff; }
 
 	.preset-item.active {
-		background: #0c0c2a;
+		background: var(--bg-base);
 		color: #00e5ff;
 		text-shadow: 0 0 8px rgba(0,229,255,0.5);
 	}
@@ -1348,17 +1348,17 @@
 	.btn-secondary:hover { border-color: #ff2d78; color: #fff; }
 
 	.btn-sm {
-		background: #0e0e26; color: #7777aa;
-		border: 1px solid #1e1e48; border-radius: 5px;
+		background: var(--bg-elevated); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
 		padding: 0.25rem 0.6rem; font-size: 12px; cursor: pointer;
-		transition: all 0.12s;
+		transition: border-color var(--t-fast), color var(--t-fast);
 	}
 
-	.btn-sm:hover:not(:disabled) { background: #141436; color: #ddddf5; border-color: #3a3a6a; }
+	.btn-sm:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); border-color: var(--accent); }
 
 	.btn-sm.active {
-		background: #1a0822; border-color: #ff2d78; color: #ff2d78;
-		box-shadow: 0 0 8px rgba(255,45,120,0.25);
+		background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+		box-shadow: 0 0 8px var(--accent-dim);
 	}
 
 	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -1368,25 +1368,25 @@
 	.pl-header { display: flex; align-items: center; justify-content: space-between; }
 
 	.pl-remove {
-		background: none; border: none; color: #33335a;
+		background: none; border: none; color: var(--text-muted);
 		cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; flex-shrink: 0;
-		transition: color 0.1s;
+		transition: color var(--t-fast);
 	}
 
-	.pl-remove:hover { color: #ff2d78; }
+	.pl-remove:hover { color: var(--accent); }
 
 	/* Tag chips */
 	.tag-chips {
 		display: flex; flex-wrap: wrap; gap: 3px;
 		max-height: 52px; overflow-y: auto;
-		scrollbar-width: thin; scrollbar-color: #2a2a5a transparent;
+		scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 	}
 
 	.tag-chip {
-		background: #0e0e26; border: 1px solid #1e1e48;
-		border-radius: 10px; color: #44447a;
+		background: var(--bg-elevated); border: 1px solid var(--border);
+		border-radius: 10px; color: var(--text-muted);
 		font-size: 10px; padding: 2px 7px; cursor: pointer;
-		white-space: nowrap; transition: all 0.12s;
+		white-space: nowrap; transition: all var(--t-fast);
 	}
 
 	.tag-chip:hover { border-color: #b44fff; color: #b44fff; }
@@ -1411,13 +1411,13 @@
 	.preset-row .preset-item { flex: 1; min-width: 0; }
 
 	.pl-add {
-		flex-shrink: 0; background: #0e0e26;
-		border: 1px solid #1e1e48; border-radius: 3px;
-		color: #2a2a52; font-size: 10px; font-weight: 800;
-		padding: 2px 5px; cursor: pointer; line-height: 1; transition: all 0.1s;
+		flex-shrink: 0; background: var(--bg-elevated);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
+		color: var(--border); font-size: 10px; font-weight: 800;
+		padding: 2px 5px; cursor: pointer; line-height: 1; transition: all var(--t-fast);
 	}
 
-	.pl-add:hover { border-color: #ff2d78; color: #ff2d78; background: #150a1a; }
+	.pl-add:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 	.pl-add.in-list { color: #00e5ff; border-color: #005566; background: #04101a; }
 
 	/* MIDI */
@@ -1428,10 +1428,10 @@
 
 	.midi-row { display: flex; align-items: center; gap: 3px; }
 
-	.midi-label { font-size: 10px; color: #44447a; width: 80px; flex-shrink: 0; white-space: nowrap; }
+	.midi-label { font-size: 10px; color: var(--text-muted); width: 80px; flex-shrink: 0; white-space: nowrap; }
 
 	.midi-binding {
-		flex: 1; font-size: 10px; color: #33335a; font-family: 'Courier New', monospace;
+		flex: 1; font-size: 10px; color: var(--text-muted); font-family: 'Courier New', monospace;
 		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
 

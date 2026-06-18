@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
@@ -17,14 +16,13 @@
 	import SidebarOverlays from '$lib/components/SidebarOverlays.svelte';
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
+	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 
 	// — State —————————————————————————————————————————————
-	let canvasA: HTMLCanvasElement | undefined = $state();
-	let canvasB: HTMLCanvasElement | undefined = $state();
-	let deckA: Deck | null = null;
-	let deckB: Deck | null = null;
+	let canvases = $state<(HTMLCanvasElement | undefined)[]>([undefined, undefined, undefined, undefined]);
+	const manager = new DeckManager();
 	let audio: AudioEngine | null = null;
 
 	let presetList: PresetMeta[] = $state([]);
@@ -155,8 +153,19 @@
 	let beat = $state(false);
 	let overlayDragOver = $state(false);
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
-	let opacityA = $derived(1 - crossfader);
-	let opacityB = $derived(crossfader);
+	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
+	let preset2 = $state('');
+	let preset3 = $state('');
+	const presets4 = $derived([presetA, presetB, preset2, preset3]);
+
+	function busGain(bus: 'A' | 'B' | 'off', x: number): number {
+		if (bus === 'A') return 1 - x;
+		if (bus === 'B') return x;
+		return 0;
+	}
+	const opacities = $derived(deckBus.map((bus) => busGain(bus, crossfader)));
+	const opacityA = $derived(opacities[0]);
+	const opacityB = $derived(opacities[1]);
 	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
 	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
 	const allClips = $derived([...builtinClips, ...userClips]);
@@ -202,6 +211,7 @@
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
+		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -236,8 +246,7 @@
 	$effect(() => {
 		if (status !== 'running') return;
 		const settings = getQualitySettings(quality);
-		deckA?.applyQuality(settings);
-		deckB?.applyQuality(settings);
+		manager.applyQuality(settings);
 		sync?.sendQuality(quality);
 	});
 
@@ -293,6 +302,10 @@
 			if (savedVideoReactions) { try { const r = JSON.parse(savedVideoReactions); vrCut = !!r.cut; vrFlash = !!r.flash; vrWarp = !!r.warp; vrHue = !!r.hue; } catch {} }
 			const savedVideoClips = localStorage.getItem('od-video-userclips');
 			if (savedVideoClips) { try { userClips = JSON.parse(savedVideoClips); } catch {} }
+			const savedDeckBus = localStorage.getItem('od-deck-bus');
+			if (savedDeckBus) {
+				try { deckBus = JSON.parse(savedDeckBus); } catch {}
+			}
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
@@ -307,8 +320,7 @@
 		_stopLoopbackIpc();
 		playlistA?.destroy();
 		playlistB?.destroy();
-		deckA?.destroy();
-		deckB?.destroy();
+		manager.destroyAll();
 		audio?.destroy();
 		sync?.destroy();
 		midi?.destroy();
@@ -318,9 +330,9 @@
 
 	// — Actions ————————————————————————————————————————————
 	async function startVisualizer() {
-		if (!canvasA || !canvasB) return;
+		if (!canvases[0] || !canvases[1]) return;
 		try {
-			const testCtx = canvasA.getContext('webgl2');
+			const testCtx = canvases[0].getContext('webgl2');
 			if (!testCtx) {
 				throw new Error(
 					'WebGL2 unavailable. In LibreWolf/Firefox: go to about:config → set webgl.disabled = false.'
@@ -330,34 +342,28 @@
 			audio = new AudioEngine();
 			await audio.resume();
 
-			const w = canvasA.clientWidth || 1280;
-			const h = canvasA.clientHeight || 720;
-
-			deckA = new Deck(canvasA, 'deck-a');
-			deckB = new Deck(canvasB, 'deck-b');
+			// Attacher les 4 canvases au manager (slots 2-3 peuvent être undefined)
+			for (let i = 0; i < 4; i++) {
+				const c = canvases[i];
+				if (c) manager.attachCanvas(i, c);
+			}
 
 			const q = getQualitySettings(quality);
-			await deckA.init(audio.ctx, { width: w, height: h, ...q });
-			await deckB.init(audio.ctx, { width: w, height: h, ...q });
 
-			if (presetA) { const d = await loadPresetData(presetA); if (d) deckA.loadPreset(d, 0.0); }
-			if (presetB) { const d = await loadPresetData(presetB); if (d) deckB.loadPreset(d, 0.0); }
-
-			deckA.connectAudio(audio.gainNode);
-			deckB.connectAudio(audio.gainNode);
-
-			deckA.startRenderLoop();
-			deckB.startRenderLoop();
+			const d0 = presetA ? await loadPresetData(presetA) : null;
+			const d1 = presetB ? await loadPresetData(presetB) : null;
+			await manager.start(0, audio.ctx, audio.gainNode, q, d0);
+			await manager.start(1, audio.ctx, audio.gainNode, q, d1);
 
 			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetA = name;
-				const d = await loadPresetData(name); if (d) deckA?.loadPreset(d, 2.0);
+				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, 2.0);
 				sync?.sendPreset('A', name);
 				playlistAPlaying = playlistA?.playing ?? false;
 			});
 			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetB = name;
-				const d = await loadPresetData(name); if (d) deckB?.loadPreset(d, 2.0);
+				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, 2.0);
 				sync?.sendPreset('B', name);
 				playlistBPlaying = playlistB?.playing ?? false;
 			});
@@ -484,8 +490,7 @@
 		try {
 			await audio.resume();
 			await audio.connectLoopbackPcm();
-			deckA?.connectAudio(audio.gainNode);
-			deckB?.connectAudio(audio.gainNode);
+			manager.connectAudio(audio.gainNode);
 			loopbackUnlisten = window.electronAPI!.onLoopbackData((data) => {
 				audio?.pushLoopbackPcm(data);
 			});
@@ -525,11 +530,11 @@
 		if (!d) return;
 		if (activeDeck === 'A') {
 			presetA = name;
-			deckA?.loadPreset(d, 2.0);
+			manager.loadPreset(0, d, 2.0);
 			sync?.sendPreset('A', name);
 		} else {
 			presetB = name;
-			deckB?.loadPreset(d, 2.0);
+			manager.loadPreset(1, d, 2.0);
 			sync?.sendPreset('B', name);
 		}
 	}
@@ -828,11 +833,11 @@
 		if (!d) return;
 		if (deck === 'A') {
 			presetA = name;
-			deckA?.loadPreset(d, 2.0);
+			manager.loadPreset(0, d, 2.0);
 			sync?.sendPreset('A', name);
 		} else {
 			presetB = name;
-			deckB?.loadPreset(d, 2.0);
+			manager.loadPreset(1, d, 2.0);
 			sync?.sendPreset('B', name);
 		}
 	}
@@ -887,8 +892,32 @@
 
 	function onResize() {
 		if (status !== 'running') return;
-		if (canvasA) deckA?.resize(canvasA.clientWidth, canvasA.clientHeight);
-		if (canvasB) deckB?.resize(canvasB.clientWidth, canvasB.clientHeight);
+		for (let i = 0; i < 4; i++) {
+			const c = canvases[i];
+			if (c) manager.resize(i, c.clientWidth, c.clientHeight);
+		}
+	}
+
+	async function startSlot(slot: number) {
+		if (!audio || status !== 'running') return;
+		const q = getQualitySettings(quality);
+		const name = presets4[slot];
+		const presetData = name ? await loadPresetData(name) : null;
+		await manager.start(slot, audio.ctx, audio.gainNode, q, presetData);
+	}
+
+	function pauseSlot(slot: number) {
+		manager.pause(slot);
+	}
+
+	function cycleBus(slot: number) {
+		const order: Array<'A' | 'B' | 'off'> = ['A', 'B', 'off'];
+		const next = order[(order.indexOf(deckBus[slot]) + 1) % order.length];
+		deckBus = deckBus.map((b, i) => (i === slot ? next : b)) as Array<'A' | 'B' | 'off'>;
+	}
+
+	function isRunning(slot: number): boolean {
+		return manager.isRunning(slot);
 	}
 
 	function onKeydown(e: KeyboardEvent) {
@@ -950,18 +979,16 @@
 	>
 		<!-- Video loop — premier enfant = derrière les decks -->
 		<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-		<!-- Deck A — base layer, screen si vidéo active pour laisser transparaître -->
-		<canvas
-			bind:this={canvasA}
-			class="deck-canvas"
-			style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"
-		></canvas>
-		<!-- Deck B — top layer, screen blend pour rendu additif -->
-		<canvas
-			bind:this={canvasB}
-			class="deck-canvas deck-canvas-b"
-			style="opacity:{opacityB}"
-		></canvas>
+		<!-- Deck canvases — slots 0-1 visibles, slots 2-3 masqués (futurs) -->
+		{#each [0, 1, 2, 3] as i}
+			<canvas
+				bind:this={canvases[i]}
+				class="deck-canvas"
+				style:opacity={opacities[i]}
+				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : 'screen'}
+				style:display={i >= 2 ? 'none' : null}
+			></canvas>
+		{/each}
 		<!-- Overlay sprites -->
 		<OverlayLayer {overlays} {beat} />
 
@@ -1012,7 +1039,7 @@
 			<div class="deck-cards-row">
 				<DeckCard
 					letter="A"
-					canvas={canvasA}
+					canvas={canvases[0]}
 					presetName={presetA}
 					isActive={activeDeck === 'A'}
 					isLive={crossfader <= 0.5}
@@ -1020,7 +1047,7 @@
 				/>
 				<DeckCard
 					letter="B"
-					canvas={canvasB}
+					canvas={canvases[1]}
 					presetName={presetB}
 					isActive={activeDeck === 'B'}
 					isLive={crossfader > 0.5}
@@ -1220,7 +1247,6 @@
 	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-	.deck-canvas-b { mix-blend-mode: screen; }
 
 	/* Overlay start screen */
 	.overlay {

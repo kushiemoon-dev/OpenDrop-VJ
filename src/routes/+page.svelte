@@ -12,6 +12,9 @@
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import SidebarAudio from '$lib/components/SidebarAudio.svelte';
+	import SidebarPlaylist from '$lib/components/SidebarPlaylist.svelte';
+	import SidebarOverlays from '$lib/components/SidebarOverlays.svelte';
+	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 
@@ -1101,213 +1104,76 @@
 		</div>
 
 		<!-- Playlist -->
-		<div class="controls-section pl-section">
-			<div class="pl-header">
-				<span class="label">Playlist</span>
-				<div class="btn-row">
-					<button class="btn-sm" class:active={playlistMode === 'sequential'} onclick={() => playlistMode = 'sequential'}>Seq</button>
-					<button class="btn-sm" class:active={playlistMode === 'shuffle'} onclick={() => playlistMode = 'shuffle'}>Shuffle</button>
-					<button class="btn-sm" onclick={exportPlaylists} title="Exporter les playlists">⬇</button>
-					<label class="btn-sm file-label" title="Importer des playlists">⬆<input type="file" accept=".json" onchange={importPlaylists} style="display:none" /></label>
-				</div>
-			</div>
-			<div class="crossfader-row">
-				<span class="cf-label">⏱</span>
-				<input class="crossfader" type="range" min="2" max="120" step="1" bind:value={playlistIntervalSec} />
-				<span class="cf-label bright">{playlistIntervalSec}s</span>
-			</div>
-
-			<!-- Beat sync -->
-			{#if status === 'running'}
-				<div class="beat-sync-row">
-					<span class="bpm-display" class:manual={manualBpm > 0}>♩ {manualBpm > 0 ? manualBpm : detectedBpm > 0 ? detectedBpm : '—'}</span>
-					<button class="btn-sm tap-btn" onclick={tapTempo} title="Tap tempo">TAP</button>
-					{#if manualBpm > 0}
-						<button class="btn-sm" onclick={clearManualBpm} title="Clear manual BPM">✕</button>
-					{/if}
-					<select class="beats-select" bind:value={beatsPerChange}>
-						<option value={4}>4</option>
-						<option value={8}>8</option>
-						<option value={16}>16</option>
-						<option value={32}>32</option>
-					</select>
-					<button class="btn-sm pl-btn" class:active={beatSyncA} onclick={() => toggleBeatSync('A')} title="Beat-sync Deck A">A</button>
-					<button class="btn-sm pl-btn" class:active={beatSyncB} onclick={() => toggleBeatSync('B')} title="Beat-sync Deck B">B</button>
-					<button class="btn-sm pl-btn" class:active={autoXfade} onclick={() => { autoXfade = !autoXfade; autoXfadeCount = 0; }} title="Auto-cut crossfader on beat">⇄</button>
-				</div>
-			{/if}
-
-			<!-- Deck A playlist -->
-			<div class="pl-deck">
-				<div class="pl-deck-header">
-					<span class="pl-deck-label">A</span>
-					<span class="label">{playlistAItems.length} preset{playlistAItems.length !== 1 ? 's' : ''}</span>
-					<div class="pl-transport">
-						<button class="btn-sm pl-btn" onclick={() => playlistPrev('A')} disabled={status !== 'running' || playlistAItems.length === 0}>⏮</button>
-						<button class="btn-sm pl-btn" class:active={playlistAPlaying} onclick={() => togglePlaylist('A')} disabled={status !== 'running' || playlistAItems.length === 0}>
-							{playlistAPlaying ? '⏹' : '▶'}
-						</button>
-						<button class="btn-sm pl-btn" onclick={() => playlistNext('A')} disabled={status !== 'running' || playlistAItems.length === 0}>⏭</button>
-						<button class="btn-sm pl-btn lock-btn" class:locked={lockA} onclick={() => lockA = !lockA} title={lockA ? 'Unlock deck A' : 'Lock deck A'}>🔒</button>
-					</div>
-				</div>
-				{#if playlistAItems.length > 0}
-					<ul class="pl-items">
-						{#each playlistAItems as name (name)}
-							<li class="pl-item">
-								<span class="pl-item-name" class:pl-active={name === presetA}>{name}</span>
-								<button class="pl-remove" onclick={() => removeFromPlaylist('A', name)}>×</button>
-							</li>
-						{/each}
-					</ul>
-				{:else}
-					<p class="pl-empty">Use +A in the preset list below</p>
-				{/if}
-			</div>
-
-			<!-- Deck B playlist -->
-			<div class="pl-deck">
-				<div class="pl-deck-header">
-					<span class="pl-deck-label">B</span>
-					<span class="label">{playlistBItems.length} preset{playlistBItems.length !== 1 ? 's' : ''}</span>
-					<div class="pl-transport">
-						<button class="btn-sm pl-btn" onclick={() => playlistPrev('B')} disabled={status !== 'running' || playlistBItems.length === 0}>⏮</button>
-						<button class="btn-sm pl-btn" class:active={playlistBPlaying} onclick={() => togglePlaylist('B')} disabled={status !== 'running' || playlistBItems.length === 0}>
-							{playlistBPlaying ? '⏹' : '▶'}
-						</button>
-						<button class="btn-sm pl-btn" onclick={() => playlistNext('B')} disabled={status !== 'running' || playlistBItems.length === 0}>⏭</button>
-						<button class="btn-sm pl-btn lock-btn" class:locked={lockB} onclick={() => lockB = !lockB} title={lockB ? 'Unlock deck B' : 'Lock deck B'}>🔒</button>
-					</div>
-				</div>
-				{#if playlistBItems.length > 0}
-					<ul class="pl-items">
-						{#each playlistBItems as name (name)}
-							<li class="pl-item">
-								<span class="pl-item-name" class:pl-active={name === presetB}>{name}</span>
-								<button class="pl-remove" onclick={() => removeFromPlaylist('B', name)}>×</button>
-							</li>
-						{/each}
-					</ul>
-				{:else}
-					<p class="pl-empty">Use +B in the preset list below</p>
-				{/if}
-			</div>
-		</div>
+		<SidebarPlaylist
+			{playlistMode}
+			{playlistIntervalSec}
+			{beatSyncA}
+			{beatSyncB}
+			{autoXfade}
+			{beatsPerChange}
+			{detectedBpm}
+			{manualBpm}
+			{playlistAItems}
+			{playlistBItems}
+			{playlistAPlaying}
+			{playlistBPlaying}
+			audioRunning={status === 'running'}
+			{presetA}
+			{presetB}
+			{lockA}
+			{lockB}
+			onModeChange={(m) => { playlistMode = m }}
+			onIntervalChange={(s) => { playlistIntervalSec = s }}
+			onBeatsPerChangeChange={(n) => { beatsPerChange = n }}
+			onTapTempo={tapTempo}
+			onClearManualBpm={clearManualBpm}
+			onToggleBeatSyncA={() => toggleBeatSync('A')}
+			onToggleBeatSyncB={() => toggleBeatSync('B')}
+			onToggleAutoXfade={() => { autoXfade = !autoXfade; autoXfadeCount = 0; }}
+			onTogglePlaylistA={() => togglePlaylist('A')}
+			onTogglePlaylistB={() => togglePlaylist('B')}
+			onPlaylistNext={(deck) => playlistNext(deck)}
+			onPlaylistPrev={(deck) => playlistPrev(deck)}
+			onRemoveFromPlaylistA={(name) => removeFromPlaylist('A', name)}
+			onRemoveFromPlaylistB={(name) => removeFromPlaylist('B', name)}
+			onToggleLockA={() => { lockA = !lockA }}
+			onToggleLockB={() => { lockB = !lockB }}
+			onExportPlaylists={exportPlaylists}
+			onImportPlaylists={importPlaylists}
+		/>
 
 		<!-- Overlays -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Overlays ({overlays.length})</span>
-				<label class="btn-sm file-label" title="Ajouter une image">
-					+ Image
-					<input type="file" accept="image/*" multiple onchange={onOverlayFilePick} style="display:none" />
-				</label>
-			</div>
-			{#if overlays.length === 0}
-				<p class="hint">Glisse une image sur le visualizer ou clique + Image</p>
-			{/if}
-			<ul class="overlay-list">
-				{#each overlays as ov (ov.id)}
-					<li class="overlay-item">
-						<div class="overlay-row">
-							<button class="overlay-name" onclick={() => expandedOverlayId = expandedOverlayId === ov.id ? null : ov.id}>
-								{ov.name}
-							</button>
-							<button class="btn-sm pl-btn" class:active={ov.beatReactive} onclick={() => updateOverlay(ov.id, { beatReactive: !ov.beatReactive })} title="Beat reactive">♩</button>
-							<button class="pl-remove" onclick={() => removeOverlay(ov.id)} title="Supprimer">×</button>
-						</div>
-						{#if expandedOverlayId === ov.id}
-							<div class="overlay-controls">
-								<label class="ov-label">Opacity
-									<input type="range" min="0" max="1" step="0.01" value={ov.opacity} oninput={(e) => updateOverlay(ov.id, { opacity: +(e.target as HTMLInputElement).value })} />
-								</label>
-								<label class="ov-label">Scale
-									<input type="range" min="0.05" max="4" step="0.05" value={ov.scale} oninput={(e) => updateOverlay(ov.id, { scale: +(e.target as HTMLInputElement).value })} />
-								</label>
-								<label class="ov-label">X
-									<input type="range" min="0" max="1" step="0.01" value={ov.x} oninput={(e) => updateOverlay(ov.id, { x: +(e.target as HTMLInputElement).value })} />
-								</label>
-								<label class="ov-label">Y
-									<input type="range" min="0" max="1" step="0.01" value={ov.y} oninput={(e) => updateOverlay(ov.id, { y: +(e.target as HTMLInputElement).value })} />
-								</label>
-								<label class="ov-label">Rotation
-									<input type="range" min="-180" max="180" step="1" value={ov.rotation} oninput={(e) => updateOverlay(ov.id, { rotation: +(e.target as HTMLInputElement).value })} />
-								</label>
-								<label class="ov-label">Blend
-									<select class="ov-select" value={ov.blendMode} onchange={(e) => updateOverlay(ov.id, { blendMode: (e.target as HTMLSelectElement).value })}>
-										{#each BLEND_MODES as mode}
-											<option value={mode}>{mode}</option>
-										{/each}
-									</select>
-								</label>
-							</div>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		</div>
+		<SidebarOverlays
+			{overlays}
+			onAddOverlays={onOverlayFilePick}
+			onRemoveOverlay={(id) => removeOverlay(id)}
+			onUpdateOverlay={(id, patch) => updateOverlay(id, patch)}
+		/>
 
 		<!-- Video loops -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Video ({allClips.length})</span>
-				<button class="btn-sm pl-btn" class:active={videoEnabled} onclick={() => videoEnabled = !videoEnabled}>
-					{videoEnabled ? 'ON' : 'OFF'}
-				</button>
-			</div>
-			{#if videoEnabled}
-				<div class="crossfader-row">
-					<span class="cf-label">α</span>
-					<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={videoOpacity} />
-					<span class="cf-label bright">{Math.round(videoOpacity * 100)}%</span>
-				</div>
-				<div class="btn-row">
-					<button class="btn-sm" class:active={videoAdvance === 'shuffle'} onclick={() => videoAdvance = 'shuffle'}>Shuffle</button>
-					<button class="btn-sm" class:active={videoAdvance === 'sequential'} onclick={() => videoAdvance = 'sequential'}>Seq</button>
-					<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => videoAdvance = 'manual'}>Manuel</button>
-					<select class="beats-select" bind:value={videoBeatsPerCut} disabled={videoAdvance === 'manual'}>
-						<option value={4}>4</option>
-						<option value={8}>8</option>
-						<option value={16}>16</option>
-						<option value={32}>32</option>
-					</select>
-				</div>
-				<div class="btn-row">
-					<button class="btn-sm pl-btn" class:active={vrCut} onclick={() => vrCut = !vrCut} disabled={videoAdvance === 'manual'} title="Cut de clip sur le beat">✂ Cut</button>
-					<button class="btn-sm pl-btn" class:active={vrFlash} onclick={() => vrFlash = !vrFlash} title="Flash brightness sur le beat">✦ Flash</button>
-					<button class="btn-sm pl-btn" class:active={vrWarp} onclick={() => vrWarp = !vrWarp} title="Speed warp sur les basses">⏩ Warp</button>
-					<button class="btn-sm pl-btn" class:active={vrHue} onclick={() => vrHue = !vrHue} title="Hue rotate sur le beat">🌈 Hue</button>
-				</div>
-			{/if}
-			<div class="pl-header" style="margin-top:0.2rem">
-				<label class="btn-sm file-label" title="Ajouter une vidéo">
-					+ Video
-					<input type="file" accept="video/*" multiple onchange={onVideoFilePick} style="display:none" />
-				</label>
-			</div>
-			{#if allClips.length === 0}
-				<p class="hint">Glisse une vidéo sur le visualizer ou clique + Video</p>
-			{/if}
-			<ul class="overlay-list">
-				{#each allClips as clip, i (clip.ref.kind === 'user' ? clip.ref.id : clip.ref.src)}
-					<li class="overlay-item">
-						<div class="overlay-row">
-							<button
-								class="overlay-name"
-								class:pl-active={i === currentClipIndex % allClips.length}
-								onclick={() => currentClipIndex = i}
-								title={clip.ref.kind === 'builtin' ? 'Intégré' : 'Utilisateur'}
-							>
-								{clip.ref.kind === 'builtin' ? '📦 ' : ''}{clip.name}
-							</button>
-							{#if clip.ref.kind === 'user'}
-								<button class="pl-remove" onclick={() => removeVideoClip(i)} title="Supprimer">×</button>
-							{/if}
-						</div>
-					</li>
-				{/each}
-			</ul>
-		</div>
+		<SidebarVideo
+			{videoEnabled}
+			{videoOpacity}
+			{videoAdvance}
+			{videoBeatsPerCut}
+			{vrCut}
+			{vrFlash}
+			{vrWarp}
+			{vrHue}
+			{currentClipIndex}
+			{allClips}
+			onToggleVideo={() => { videoEnabled = !videoEnabled }}
+			onOpacityChange={(v) => { videoOpacity = v }}
+			onAdvanceChange={(v) => { videoAdvance = v }}
+			onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
+			onToggleVrCut={() => { vrCut = !vrCut }}
+			onToggleVrFlash={() => { vrFlash = !vrFlash }}
+			onToggleVrWarp={() => { vrWarp = !vrWarp }}
+			onToggleVrHue={() => { vrHue = !vrHue }}
+			onSelectClip={(i) => { currentClipIndex = i }}
+			onRemoveClip={(i) => removeVideoClip(i)}
+			onAddVideo={onVideoFilePick}
+		/>
 
 		<!-- Qualité rendu -->
 		<div class="controls-section">
@@ -1495,12 +1361,6 @@
 
 	.source-badge { font-size: 11px; color: #00e5ff; }
 
-	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
-
-	.tap-btn { font-weight: 700; letter-spacing: 0.05em; }
-	.bpm-display.manual { color: #b44fff; text-shadow: 0 0 8px rgba(180,79,255,0.5); }
-	.lock-btn { opacity: 0.35; }
-	.lock-btn.locked { opacity: 1; color: #ff2d78; }
 
 	/* ── Mixer ── */
 	.deck-tabs { display: flex; gap: 0.4rem; }
@@ -1609,42 +1469,9 @@
 
 	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
 
-	.file-label { display: inline-block; cursor: pointer; }
-
 	.pl-btn { padding: 0.22rem 0.4rem; font-size: 11px; }
 
-	.pl-section { gap: 0.5rem; }
-
 	.pl-header { display: flex; align-items: center; justify-content: space-between; }
-
-	.pl-deck {
-		background: #0a0a1e; border: 1px solid #161640;
-		border-radius: 6px; padding: 0.4rem;
-		display: flex; flex-direction: column; gap: 0.3rem;
-	}
-
-	.pl-deck-header { display: flex; align-items: center; gap: 0.4rem; }
-
-	.pl-deck-label {
-		font-size: 13px; font-weight: 800; width: 14px;
-		color: #ff2d78; text-shadow: 0 0 8px rgba(255,45,120,0.7);
-	}
-
-	.pl-transport { display: flex; gap: 0.25rem; margin-left: auto; }
-
-	.pl-items {
-		list-style: none; max-height: 80px; overflow-y: auto;
-		display: flex; flex-direction: column; gap: 1px;
-	}
-
-	.pl-item { display: flex; align-items: center; gap: 0.25rem; }
-
-	.pl-item-name {
-		flex: 1; font-size: 11px; color: #666690;
-		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-	}
-
-	.pl-item-name.pl-active { color: #00e5ff; text-shadow: 0 0 6px rgba(0,229,255,0.5); }
 
 	.pl-remove {
 		background: none; border: none; color: #33335a;
@@ -1653,8 +1480,6 @@
 	}
 
 	.pl-remove:hover { color: #ff2d78; }
-
-	.pl-empty { font-size: 10px; color: #2a2a50; font-style: italic; }
 
 	/* Tag chips */
 	.tag-chips {
@@ -1720,31 +1545,6 @@
 
 	@keyframes blink { 50% { opacity: 0; } }
 
-	/* Beat sync */
-	.beat-sync-row {
-		display: flex; align-items: center; gap: 0.4rem;
-		padding: 0.3rem 0.5rem;
-		background: #08081e; border: 1px solid #141440;
-		border-radius: 6px;
-	}
-
-	.bpm-display {
-		font-size: 12px; font-weight: 700; color: #b44fff;
-		text-shadow: 0 0 10px rgba(180,79,255,0.6);
-		min-width: 48px; font-family: 'Courier New', monospace;
-		flex-shrink: 0;
-	}
-
-	.beats-select {
-		background: #0e0e26; color: #7777aa;
-		border: 1px solid #1e1e48; border-radius: 5px;
-		padding: 0.2rem 0.3rem; font-size: 10px; cursor: pointer;
-		-webkit-appearance: none; appearance: none;
-		flex: 1; min-width: 0;
-	}
-
-	.beats-select:focus { outline: none; border-color: #b44fff; }
-
 	/* Output button */
 	.btn-output {
 		width: 100%;
@@ -1775,83 +1575,4 @@
 		z-index: 20;
 	}
 
-	/* Overlay panel */
-	.overlay-list {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		max-height: 200px;
-		overflow-y: auto;
-		scrollbar-width: thin;
-		scrollbar-color: #2a2a5a transparent;
-	}
-
-	.overlay-item {
-		background: #0a0a1e;
-		border: 1px solid #161640;
-		border-radius: 5px;
-		overflow: hidden;
-	}
-
-	.overlay-row {
-		display: flex;
-		align-items: center;
-		gap: 3px;
-		padding: 2px 4px;
-	}
-
-	.overlay-name {
-		flex: 1;
-		background: none;
-		border: none;
-		color: #6666aa;
-		font-size: 11px;
-		cursor: pointer;
-		text-align: left;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		padding: 2px 0;
-		transition: color 0.1s;
-	}
-	.overlay-name:hover { color: #b44fff; }
-	.overlay-name.pl-active { color: #00e5ff; text-shadow: 0 0 6px rgba(0,229,255,0.5); }
-
-	.overlay-controls {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-		padding: 4px 6px 5px;
-		border-top: 1px solid #161640;
-		background: #06061a;
-	}
-
-	.ov-label {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 6px;
-		font-size: 10px;
-		color: #44447a;
-	}
-
-	.ov-label input[type="range"] {
-		flex: 1;
-		height: 3px;
-		accent-color: #b44fff;
-		cursor: pointer;
-	}
-
-	.ov-select {
-		flex: 1;
-		background: #0e0e26;
-		color: #7777aa;
-		border: 1px solid #1e1e48;
-		border-radius: 4px;
-		font-size: 10px;
-		padding: 1px 3px;
-		cursor: pointer;
-	}
-	.ov-select:focus { outline: none; border-color: #b44fff; }
 </style>

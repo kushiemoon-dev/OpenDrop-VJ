@@ -154,10 +154,6 @@
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
 	let overlayDragOver = $state(false);
-	let expandedOverlayId = $state<string | null>(null);
-
-	const BLEND_MODES = ['screen', 'normal', 'plus-lighter', 'multiply', 'overlay', 'hard-light'];
-
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let opacityA = $derived(1 - crossfader);
 	let opacityB = $derived(crossfader);
@@ -682,7 +678,6 @@
 	async function removeOverlay(id: string) {
 		await deleteAsset(id);
 		overlays = overlays.filter(o => o.id !== id);
-		if (expandedOverlayId === id) expandedOverlayId = null;
 	}
 
 	function updateOverlay(id: string, patch: Partial<Overlay>) {
@@ -1020,6 +1015,7 @@
 					canvas={canvasA}
 					presetName={presetA}
 					isActive={activeDeck === 'A'}
+					isLive={crossfader <= 0.5}
 					onSelect={() => { activeDeck = 'A' }}
 				/>
 				<DeckCard
@@ -1027,6 +1023,7 @@
 					canvas={canvasB}
 					presetName={presetB}
 					isActive={activeDeck === 'B'}
+					isLive={crossfader > 0.5}
 					onSelect={() => { activeDeck = 'B' }}
 				/>
 			</div>
@@ -1294,36 +1291,6 @@
 
 	.crossfader { flex: 1; accent-color: var(--accent); cursor: pointer; }
 
-	/* ── Preset browser ── */
-	.search-input {
-		width: 100%;
-		background: var(--bg-elevated); border: 1px solid var(--border);
-		border-radius: var(--r-md); color: var(--text-primary);
-		padding: 0.35rem 0.5rem; font-size: 12px; outline: none;
-		transition: border-color var(--t-fast);
-	}
-
-	.search-input:focus { border-color: #00e5ff; box-shadow: 0 0 0 2px rgba(0,229,255,0.1); }
-	.search-input::placeholder { color: var(--text-muted); }
-
-	.preset-list { flex: 1; overflow-y: auto; list-style: none; }
-
-	.preset-item {
-		display: block; width: 100%; text-align: left;
-		background: none; border: none; color: var(--text-secondary);
-		padding: 0.15rem 0.4rem; cursor: pointer; font-size: 11px;
-		border-radius: var(--r-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-		transition: all var(--t-fast);
-	}
-
-	.preset-item:hover { background: var(--bg-surface); color: #eeeeff; }
-
-	.preset-item.active {
-		background: var(--bg-base);
-		color: #00e5ff;
-		text-shadow: 0 0 8px rgba(0,229,255,0.5);
-	}
-
 	/* ── Buttons ── */
 	.btn-primary {
 		background: linear-gradient(135deg, #ff2d78, #b44fff);
@@ -1374,51 +1341,6 @@
 	}
 
 	.pl-remove:hover { color: var(--accent); }
-
-	/* Tag chips */
-	.tag-chips {
-		display: flex; flex-wrap: wrap; gap: 3px;
-		max-height: 52px; overflow-y: auto;
-		scrollbar-width: thin; scrollbar-color: var(--border) transparent;
-	}
-
-	.tag-chip {
-		background: var(--bg-elevated); border: 1px solid var(--border);
-		border-radius: 10px; color: var(--text-muted);
-		font-size: 10px; padding: 2px 7px; cursor: pointer;
-		white-space: nowrap; transition: all var(--t-fast);
-	}
-
-	.tag-chip:hover { border-color: #b44fff; color: #b44fff; }
-
-	.tag-chip.tag-active {
-		background: #1a0830; border-color: #b44fff; color: #b44fff;
-		box-shadow: 0 0 8px rgba(180,79,255,0.35);
-	}
-
-	/* Bouton favori ★ */
-	.fav-btn {
-		background: none; border: none; color: #22224a;
-		font-size: 11px; cursor: pointer; padding: 0 2px;
-		flex-shrink: 0; transition: all 0.1s; line-height: 1;
-	}
-
-	.fav-btn:hover { color: #ffcc00; }
-	.fav-btn.fav-on { color: #ffcc00; text-shadow: 0 0 8px rgba(255,204,0,0.7); }
-
-	/* Preset rows +A +B */
-	.preset-row { display: flex; align-items: center; gap: 2px; height: 24px; box-sizing: border-box; }
-	.preset-row .preset-item { flex: 1; min-width: 0; }
-
-	.pl-add {
-		flex-shrink: 0; background: var(--bg-elevated);
-		border: 1px solid var(--border); border-radius: var(--r-sm);
-		color: var(--border); font-size: 10px; font-weight: 800;
-		padding: 2px 5px; cursor: pointer; line-height: 1; transition: all var(--t-fast);
-	}
-
-	.pl-add:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
-	.pl-add.in-list { color: #00e5ff; border-color: #005566; background: #04101a; }
 
 	/* MIDI */
 	.midi-list {

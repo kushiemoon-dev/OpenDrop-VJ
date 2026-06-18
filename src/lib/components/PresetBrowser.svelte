@@ -90,7 +90,7 @@
 
   // ── Virtualisation grille ──────────────────────────────────────────────────
   const CARD_MIN_W = 120
-  const CARD_H = 100   // hauteur approximative (thumb 16/9 ~67px + nom ~16px + pied ~17px)
+  const CARD_H = 120   // hauteur approximative (thumb 16/9 ~80px + nom ~16px + pied ~24px)
   const GRID_GAP = 8
 
   let gridEl: HTMLElement | undefined = $state()

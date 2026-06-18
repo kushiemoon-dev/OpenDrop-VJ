@@ -20,10 +20,10 @@ const bc = (_butterchurn as any).createVisualizer
 
 // ─── Exported constants ───────────────────────────────────────────────────────
 
-export const THUMB_W = 256
-export const THUMB_H = 144
-export const WARMUP_FRAMES = 90
-export const WEBP_QUALITY = 0.85
+export const THUMB_W = 192
+export const THUMB_H = 108
+export const WARMUP_FRAMES = 30
+export const WEBP_QUALITY = 0.7
 
 // ─── Reactive state ───────────────────────────────────────────────────────────
 

@@ -28,8 +28,8 @@ export const WEBP_QUALITY = 0.7
 // ─── Reactive state ───────────────────────────────────────────────────────────
 
 // Extension .svelte.ts required for $state
-// `let` (not `const`) so the reference can be reassigned immutably (new Map per update)
-export let thumbUrls = $state(new Map<string, string>())
+// Svelte 5 $state Map — .set()/.delete() sont les mutations correctes sur un proxy réactif
+export const thumbUrls = $state(new Map<string, string>())
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ export function requestThumb(slug: string, name: string): void {
 
 	getThumbUrl(slug).then(url => {
 		if (url) {
-			thumbUrls = new Map(thumbUrls).set(slug, url)
+			thumbUrls.set(slug, url)
 			return
 		}
 		if (!_inFlight.has(slug)) {
@@ -189,7 +189,7 @@ async function pumpNext(): Promise<void> {
 				if (!blob) { _inFlight.delete(job.slug); setTimeout(pumpNext, 0); return }
 				putThumbBlob(job.slug, blob).catch(() => {})
 				const url = cacheUrl(job.slug, blob)
-				thumbUrls = new Map(thumbUrls).set(job.slug, url)
+				thumbUrls.set(job.slug, url)
 				_inFlight.delete(job.slug)
 				setTimeout(pumpNext, 0)
 			},

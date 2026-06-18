@@ -11,6 +11,7 @@
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
+	import SidebarAudio from '$lib/components/SidebarAudio.svelte';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 
@@ -1041,68 +1042,28 @@
 
 	<aside class="controls">
 		<!-- Audio source -->
-		<div class="controls-section">
-			<span class="label">Audio source</span>
-			<div class="btn-row">
-				<button class="btn-sm" class:active={sourceLabel === 'microphone'} onclick={connectMic} disabled={status !== 'running'}>Mic</button>
-				<button class="btn-sm" onclick={openDevicePicker} disabled={status !== 'running'}>Pick device</button>
-				<button class="btn-sm" class:active={sourceLabel === 'system audio'} onclick={captureSystemAudio} disabled={status !== 'running'} title="Capturer le son système">🔊 Audio système</button>
-			</div>
-			{#if showSystemAudioHelp}
-				<div class="device-picker">
-					{#if effectiveOS === 'darwin'}
-						<span class="label">Audio système sur macOS</span>
-						<p class="hint">Installer <strong>BlackHole</strong> (gratuit) :<br><code>brew install blackhole-2ch</code><br>Créer un Multi-Output Device dans Audio MIDI Setup,<br>puis <strong>Pick device</strong> → BlackHole.</p>
-					{:else if effectiveOS === 'linux'}
-						<span class="label">Audio système sur Linux</span>
-						<p class="hint">Aucun périphérique monitor trouvé.<br>Utilisez <strong>Pick device</strong> → entrée se terminant par <code>.monitor</code> (sortie système).<br>Optionnel : <code>bash scripts/setup-audio.sh</code> pour un device nommé.</p>
-					{:else}
-						<span class="label">Audio système</span>
-						<p class="hint">Dans Chrome/Edge : cliquer <strong>Audio système</strong> → choisir <strong>Écran entier</strong> → cocher <strong>"Partager l'audio système"</strong>.</p>
-					{/if}
-					<button class="btn-sm" onclick={() => showSystemAudioHelp = false}>OK</button>
-				</div>
-			{/if}
-			<div class="file-row">
-				<label class="btn-sm file-label">
-					File
-					<input type="file" accept="audio/*" onchange={onFileChange} style="display:none" />
-				</label>
-				{#if audioEl?.src && status === 'running'}
-					<button class="btn-sm" class:active={sourceLabel === 'file'} onclick={connectFile}>▶ Play</button>
-				{/if}
-			</div>
-			{#if sourceLabel !== 'none'}
-				<span class="source-badge">▶ {sourceLabel}</span>
-			{/if}
-			{#if status === 'running'}
-				<div class="vu-meter">
-					<div class="vu-bar" style="width:{Math.round(vuLevel * 100)}%"></div>
-				</div>
-			{/if}
-			{#if sourceError}
-				<span class="source-error">⚠ {sourceError}</span>
-			{/if}
-			{#if showDevicePicker}
-				<div class="device-picker">
-					<span class="label">🎤 Inputs</span>
-					{#each audioDevices as device}
-						<button class="device-item" onclick={() => connectDevice(device)}>
-							{device.label || `Device ${device.deviceId.slice(0, 8)}`}
-						</button>
-					{/each}
-					{#if loopbackSupported && outputDevices.length > 0}
-						<span class="label" style="margin-top:6px">🔊 Outputs (loopback)</span>
-						{#each outputDevices as device}
-							<button class="device-item" onclick={() => connectLoopback(device)}>
-								{device.name}
-							</button>
-						{/each}
-					{/if}
-					<button class="btn-sm" onclick={() => showDevicePicker = false}>Cancel</button>
-				</div>
-			{/if}
-		</div>
+		<SidebarAudio
+			{sourceLabel}
+			{status}
+			{effectiveOS}
+			{vuLevel}
+			{sourceError}
+			{showSystemAudioHelp}
+			{showDevicePicker}
+			{audioDevices}
+			{outputDevices}
+			{loopbackSupported}
+			audioElHasSrc={!!audioEl?.src}
+			onConnectMic={connectMic}
+			onOpenDevicePicker={openDevicePicker}
+			onCaptureSystemAudio={captureSystemAudio}
+			onConnectFile={connectFile}
+			{onFileChange}
+			onConnectDevice={connectDevice}
+			onConnectLoopback={connectLoopback}
+			onDismissSystemAudioHelp={() => showSystemAudioHelp = false}
+			onDismissDevicePicker={() => showDevicePicker = false}
+		/>
 
 		<!-- Mixer -->
 		<div class="controls-section">
@@ -1530,44 +1491,11 @@
 		color: #444470; font-weight: 600;
 	}
 
-	.btn-row, .file-row { display: flex; gap: 0.4rem; }
+	.btn-row { display: flex; gap: 0.4rem; }
 
 	.source-badge { font-size: 11px; color: #00e5ff; }
-	.source-error { font-size: 11px; color: #ff6090; word-break: break-word; }
-
-	/* VU meter — pink→cyan gradient */
-	.vu-meter {
-		height: 5px; background: #111130; border-radius: 3px; overflow: hidden;
-		border: 1px solid #1a1a40;
-	}
-
-	.vu-bar {
-		height: 100%;
-		background: linear-gradient(90deg, #ff2d78, #b44fff 50%, #00e5ff);
-		border-radius: 3px;
-		transition: width 50ms linear;
-		box-shadow: 0 0 8px rgba(255, 45, 120, 0.5);
-	}
-
-	.device-picker {
-		display: flex; flex-direction: column; gap: 0.2rem;
-		margin-top: 0.2rem; padding: 0.4rem;
-		background: #0e0e28; border: 1px solid #232350; border-radius: 6px;
-	}
-
-	.device-item {
-		display: block; width: 100%; text-align: left;
-		background: none; border: none; color: #aaaacc;
-		padding: 0.3rem 0.4rem; cursor: pointer; font-size: 11px;
-		border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-		transition: all 0.1s;
-	}
-
-	.device-item:hover { background: #191940; color: #fff; }
 
 	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
-	.hint code { background: #191940; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 10px; }
-	.hint strong { color: #e0e0ff; }
 
 	.tap-btn { font-weight: 700; letter-spacing: 0.05em; }
 	.bpm-display.manual { color: #b44fff; text-shadow: 0 0 8px rgba(180,79,255,0.5); }

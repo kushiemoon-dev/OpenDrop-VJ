@@ -173,6 +173,18 @@
 	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
 	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
 	const allClips = $derived([...builtinClips, ...userClips]);
+
+	/** Returns the preset of the first running deck on a given bus, or the last known preset if none running. */
+	function primaryPreset(bus: 'A' | 'B'): string {
+		for (let i = 0; i < 4; i++) {
+			if (deckBus[i] === bus && isRunning(i)) return presets4[i];
+		}
+		return bus === 'A' ? presetA : presetB;
+	}
+
+	const busPresetA = $derived(primaryPreset('A'));
+	const busPresetB = $derived(primaryPreset('B'));
+
 	const currentClip = $derived<ClipRef | null>(
 		videoEnabled && allClips.length > 0 ? allClips[currentClipIndex % allClips.length].ref : null
 	);
@@ -377,8 +389,8 @@
 
 			sync = new MainSync();
 			sync.onOutputReady(() => {
-				sync?.sendPreset('A', presetA);
-				sync?.sendPreset('B', presetB);
+				sync?.sendPreset('A', busPresetA);
+				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
 				sync?.sendOverlays(overlays);
@@ -890,8 +902,8 @@
 		outputOpen = true;
 		// Give the window ~800ms to init, then push current state
 		setTimeout(() => {
-			sync?.sendPreset('A', presetA);
-			sync?.sendPreset('B', presetB);
+			sync?.sendPreset('A', busPresetA);
+			sync?.sendPreset('B', busPresetB);
 			sync?.sendCrossfader(crossfader);
 			if (currentDeviceId) sync?.sendSource(currentDeviceId);
 		}, 800);

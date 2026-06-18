@@ -82,6 +82,7 @@
       presets={presetList}
       isOpen={true}
       activeDeck={activeDeckLetter}
+      targetSlot={selectedSlot}
       {playlistAItems}
       {playlistBItems}
       onClose={() => {}}

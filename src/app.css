@@ -1,0 +1,33 @@
+/* src/app.css */
+:root {
+  /* Surfaces */
+  --bg-base:        #0d0d0d;
+  --bg-surface:     #141414;
+  --bg-elevated:    #1a1a1a;
+  --bg-hover:       #1e1e3a;
+  --border:         #1e1e48;
+  --border-subtle:  #131330;
+
+  /* Couleurs */
+  --accent:         #ff2d78;
+  --accent-dim:     rgba(255, 45, 120, 0.15);
+  --accent-glow:    rgba(255, 45, 120, 0.3);
+  --text-primary:   #e0e0ff;
+  --text-secondary: #8888bb;
+  --text-muted:     #44447a;
+  --live:           #00e096;
+
+  /* Spacing (base 4 px) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+
+  /* Radius */
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+
+  /* Transitions */
+  --t-fast: 150ms ease;
+}

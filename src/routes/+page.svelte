@@ -15,6 +15,7 @@
 	import SidebarPlaylist from '$lib/components/SidebarPlaylist.svelte';
 	import SidebarOverlays from '$lib/components/SidebarOverlays.svelte';
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
+	import DeckCard from '$lib/components/DeckCard.svelte';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 
@@ -96,6 +97,7 @@
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
 	let platform = $state('');
 	let showSystemAudioHelp = $state(false);
+	let showPresetBrowser = $state(false);
 
 	/** Detect OS in web builds (navigator.userAgent) — used for help text only. */
 	function detectWebOS(): string {
@@ -1071,36 +1073,35 @@
 		<!-- Mixer -->
 		<div class="controls-section">
 			<span class="label">Mixer</span>
-			<div class="deck-tabs">
-				<button
-					class="deck-tab"
-					class:active={activeDeck === 'A'}
-					onclick={() => activeDeck = 'A'}
-				>
-					<span class="deck-letter">A</span>
-					<span class="deck-preset-name">{presetA.split(' - ')[0] || '—'}</span>
-				</button>
-				<button
-					class="deck-tab"
-					class:active={activeDeck === 'B'}
-					onclick={() => activeDeck = 'B'}
-				>
-					<span class="deck-letter">B</span>
-					<span class="deck-preset-name">{presetB.split(' - ')[0] || '—'}</span>
-				</button>
+			<div class="deck-cards-row">
+				<DeckCard
+					letter="A"
+					canvas={canvasA}
+					presetName={presetA}
+					isActive={activeDeck === 'A'}
+					onSelect={() => { activeDeck = 'A' }}
+				/>
+				<DeckCard
+					letter="B"
+					canvas={canvasB}
+					presetName={presetB}
+					isActive={activeDeck === 'B'}
+					onSelect={() => { activeDeck = 'B' }}
+				/>
 			</div>
 			<div class="crossfader-row">
 				<span class="cf-label" class:bright={crossfader < 0.2}>A</span>
-				<input
-					class="crossfader"
-					type="range"
-					min="0"
-					max="1"
-					step="0.01"
-					bind:value={crossfader}
-				/>
+				<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={crossfader} />
 				<span class="cf-label" class:bright={crossfader > 0.8}>B</span>
 			</div>
+			<button
+				class="btn-sm preset-browser-toggle"
+				class:active={showPresetBrowser}
+				onclick={() => { showPresetBrowser = !showPresetBrowser }}
+				type="button"
+			>
+				Presets {showPresetBrowser ? '▼' : '▲'}
+			</button>
 		</div>
 
 		<!-- Playlist -->
@@ -1363,30 +1364,12 @@
 
 
 	/* ── Mixer ── */
-	.deck-tabs { display: flex; gap: 0.4rem; }
+	.deck-cards-row { display: flex; gap: 0.4rem; }
 
-	.deck-tab {
-		flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
-		padding: 0.45rem 0.4rem;
-		background: #0e0e26; border: 1px solid #1e1e48;
-		border-radius: 6px; cursor: pointer; color: #44447a;
-		transition: all 0.15s;
-	}
-
-	.deck-tab:hover { border-color: #ff2d78; color: #cc88aa; }
-
-	.deck-tab.active {
-		background: #1a0a22;
-		border-color: #ff2d78;
-		color: #ff2d78;
-		box-shadow: 0 0 12px rgba(255, 45, 120, 0.3), inset 0 0 8px rgba(255, 45, 120, 0.06);
-	}
-
-	.deck-letter { font-size: 16px; font-weight: 800; }
-
-	.deck-preset-name {
-		font-size: 10px; white-space: nowrap; overflow: hidden;
-		text-overflow: ellipsis; max-width: 90px; color: inherit;
+	.preset-browser-toggle {
+		width: 100%;
+		text-align: center;
+		margin-top: 0.2rem;
 	}
 
 	.crossfader-row { display: flex; align-items: center; gap: 0.4rem; }

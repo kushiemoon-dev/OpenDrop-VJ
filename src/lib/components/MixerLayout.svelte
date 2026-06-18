@@ -88,6 +88,7 @@
       onClose={() => {}}
       onLoadPreset={onLoadPreset}
       onAddToPlaylist={onAddToPlaylist}
+      variant="grid"
     />
   </div>
 

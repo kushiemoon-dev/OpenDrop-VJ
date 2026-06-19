@@ -21,6 +21,8 @@ declare global {
 			startLoopback: (deviceId: number) => Promise<{ ok: boolean; sampleRate?: number; channels?: number; error?: string }>;
 			stopLoopback: () => Promise<{ ok: boolean }>;
 			onLoopbackData: (cb: (data: { sampleRate: number; channels: number; pcm: Uint8Array }) => void) => () => void;
+			sendAudioFrame: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void;
+			onAudioFrame: (cb: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void) => () => void;
 		};
 	}
 }

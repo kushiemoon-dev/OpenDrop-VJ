@@ -35,6 +35,10 @@
 	let sync: OutputSync | null = null;
 	let helloTimer: ReturnType<typeof setInterval> | null = null;
 	let loopbackUnlisten: (() => void) | null = null;
+	let audioFrameUnlisten: (() => void) | null = null;
+	// Set to true once PCM frames from the main window are flowing — prevents the
+	// output from also trying to re-capture the same device independently (fragile).
+	let audioAcquired = false;
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
@@ -62,6 +66,23 @@
 			const list = buildPresetList();
 			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) deckA.loadPreset(d, 0.0); }
 			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) deckB.loadPreset(d, 0.0); }
+
+			// Subscribe to PCM frames streamed from the main renderer (Electron-only).
+			// On the first frame, initialize the loopback worklet so Butterchurn reacts
+			// to the same audio signal as the main window — regardless of source type.
+			const eAPI = window.electronAPI;
+			if (eAPI?.onAudioFrame) {
+				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
+					if (!audioAcquired) {
+						audioAcquired = true;
+						await audio!.resume();
+						await audio!.connectLoopbackPcm();
+						deckA?.connectAudio(audio!.analyser);
+						deckB?.connectAudio(audio!.analyser);
+					}
+					audio!.pushCapturePcm(frame);
+				});
+			}
 
 			sync = new OutputSync();
 			let gotState = false;
@@ -94,6 +115,9 @@
 					if (beatTimer !== null) clearTimeout(beatTimer);
 					beatTimer = setTimeout(() => { beat = false; beatTimer = null; }, 80);
 				} else if (msg.type === 'source') {
+					// If PCM frames are already flowing from the main window, skip the
+					// independent re-capture (fragile on Linux — same device may be exclusive).
+					if (audioAcquired) return;
 					loopbackUnlisten?.();
 					loopbackUnlisten = null;
 					try {
@@ -105,6 +129,8 @@
 						// device may not be available in output window context
 					}
 				} else if (msg.type === 'loopback') {
+					// Same guard — PCM streaming takes priority over IPC loopback.
+					if (audioAcquired) return;
 					loopbackUnlisten?.();
 					loopbackUnlisten = null;
 					try {
@@ -142,6 +168,7 @@
 
 	onDestroy(() => {
 		loopbackUnlisten?.();
+		audioFrameUnlisten?.();
 		if (beatTimer !== null) clearTimeout(beatTimer);
 		if (helloTimer !== null) clearInterval(helloTimer);
 		deckA?.destroy();

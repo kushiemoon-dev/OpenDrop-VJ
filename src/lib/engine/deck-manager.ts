@@ -12,6 +12,7 @@ export class DeckManager {
 	private slots: SlotEntry[] = [null, null, null, null];
 	private canvases: (HTMLCanvasElement | null)[] = [null, null, null, null];
 	private audioNode: AudioNode | null = null;
+	private _targetFps = 0;  // 0 = illimité
 
 	attachCanvas(slot: number, canvas: HTMLCanvasElement): void {
 		this.canvases[slot] = canvas;
@@ -44,6 +45,7 @@ export class DeckManager {
 		deck.connectAudio(audioNode);
 		if (presetData) deck.loadPreset(presetData, 0.0);
 		deck.startRenderLoop();
+		deck.setTargetFps(this._targetFps);
 		this.slots[slot] = { deck, canvas };
 	}
 
@@ -77,6 +79,24 @@ export class DeckManager {
 		for (const slot of this.slots) {
 			slot?.deck.applyQuality(opts);
 		}
+	}
+
+	/**
+	 * Set a global FPS cap applied to all current and future slots.
+	 * @param fps  Target frames per second. 0 = unlimited.
+	 */
+	setTargetFps(fps: number): void {
+		this._targetFps = fps;
+		for (const slot of this.slots) slot?.deck.setTargetFps(fps);
+	}
+
+	/**
+	 * Set a per-slot FPS cap without changing the global default.
+	 * @param slot  Slot index (0–3).
+	 * @param fps   Target frames per second. 0 = unlimited.
+	 */
+	setSlotTargetFps(slot: number, fps: number): void {
+		this.slots[slot]?.deck.setTargetFps(fps);
 	}
 
 	resize(slot: number, w: number, h: number): void {

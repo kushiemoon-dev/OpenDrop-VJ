@@ -11,6 +11,7 @@ const mockDeckInstance = {
   applyQuality: vi.fn(),
   resize: vi.fn(),
   destroy: vi.fn(),
+  setTargetFps: vi.fn(),
   state: 'running' as 'idle' | 'running' | 'stopped',
 }
 
@@ -105,5 +106,41 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.destroy).toHaveBeenCalledTimes(1)
     expect(manager.runningCount()).toBe(0)
     expect(manager.isRunning(0)).toBe(false)
+  })
+
+  it('setTargetFps(45) applique frameInterval ≈ 22.22 ms sur tous les slots initialisés', async () => {
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    await manager.start(1, audioCtx, audioNode, {}, null)
+    mockDeckInstance.setTargetFps.mockClear()
+    manager.setTargetFps(45)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledTimes(2)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(45)
+  })
+
+  it('setTargetFps(0) passe 0 (illimité) à tous les slots', async () => {
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    mockDeckInstance.setTargetFps.mockClear()
+    manager.setTargetFps(0)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(0)
+  })
+
+  it('setSlotTargetFps() applique le fps uniquement au slot ciblé', async () => {
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    await manager.start(1, audioCtx, audioNode, {}, null)
+    mockDeckInstance.setTargetFps.mockClear()
+    manager.setSlotTargetFps(0, 30)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledTimes(1)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(30)
+  })
+
+  it('setSlotTargetFps() sur slot non initialisé ne plante pas', () => {
+    expect(() => manager.setSlotTargetFps(3, 30)).not.toThrow()
+  })
+
+  it('start() après setTargetFps(30) appelle setTargetFps(30) sur le nouveau deck', async () => {
+    manager.setTargetFps(30)
+    mockDeckInstance.setTargetFps.mockClear()
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(30)
   })
 })

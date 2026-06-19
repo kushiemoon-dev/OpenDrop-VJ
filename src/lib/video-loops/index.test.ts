@@ -47,7 +47,7 @@ describe('_loadManifest', () => {
     }));
     const { _loadManifest } = await import('./index.js');
     const result = await _loadManifest('https://cdn.example');
-    expect(result[0].ref.src).toBe('https://cdn.example/my%20clip%2001.webm');
+    expect(result[0].ref).toMatchObject({ src: 'https://cdn.example/my%20clip%2001.webm' });
   });
 });
 
@@ -136,8 +136,8 @@ describe('initVideoLoops with CDN', () => {
     await mod.initVideoLoops();
     expect(mod.builtinClips).toHaveLength(2);
     expect(mod.builtinClips.map((c) => c.name)).toEqual(['Shared Name', 'CDN Exclusive']);
-    expect(mod.builtinClips[0].ref.src).toBe('/video-loops/bundled.webm'); // bundled wins
-    expect(mod.builtinClips[1].ref.src).toBe('https://loops.example/cdn-b.webm');
+    expect(mod.builtinClips[0].ref).toMatchObject({ src: '/video-loops/bundled.webm' }); // bundled wins
+    expect(mod.builtinClips[1].ref).toMatchObject({ src: 'https://loops.example/cdn-b.webm' });
   });
 
   it('CDN failure does not remove bundled clips', async () => {

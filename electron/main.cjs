@@ -3,6 +3,7 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 
 // Allow AudioContext to auto-start in renderer windows (including the output window
 // which opens programmatically via window.open, with no user gesture of its own).
@@ -45,6 +46,33 @@ let outputWin = null;     // tracked below in did-create-window
 
 // ── Per-device output loopback (optional — Windows, requires audify) ──
 let loopbackRt = null;
+
+// ── v4l2loopback (Linux — via ffmpeg pipe, no native module required) ──────
+let v4l2Proc = null;
+let v4l2Timer = null;
+let v4l2Draining = false;
+let v4l2W = 0;
+let v4l2H = 0;
+let v4l2Error = '';
+
+/** Find the first v4l2loopback device whose label contains "OpenDrop".
+ *  Reads /sys/class/video4linux/video*/name — pure fs, no exec.
+ *  Returns "/dev/videoN" or null.
+ */
+function findV4l2Device() {
+  try {
+    const base = '/sys/class/video4linux';
+    const entries = fs.readdirSync(base);
+    for (const entry of entries) {
+      const namePath = path.join(base, entry, 'name');
+      try {
+        const label = fs.readFileSync(namePath, 'utf8').trim();
+        if (label.includes('OpenDrop')) return `/dev/${entry}`;
+      } catch { /* entry has no name file — skip */ }
+    }
+  } catch { /* /sys not available (non-Linux) */ }
+  return null;
+}
 
 const isDev = !app.isPackaged;
 const DEV_URL = 'http://localhost:1420';
@@ -116,6 +144,100 @@ ipcMain.handle('ndi:stop', async () => {
   if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
   ndiSender?.destroy?.();
   ndiSender = null;
+  return { ok: true };
+});
+
+// ── v4l2loopback handlers ─────────────────────────────────────────────────
+ipcMain.handle('v4l2:start', async () => {
+  // Teardown any prior session
+  if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
+  if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
+  v4l2Draining = false;
+  v4l2Error = '';
+
+  // Locate device before doing anything else
+  const devPath = findV4l2Device();
+  if (!devPath) {
+    return { ok: false, error: "Aucun device v4l2loopback 'OpenDrop' trouvé. Lance scripts/setup-v4l2.sh puis réessaie." };
+  }
+
+  // Capture one frame to lock W×H (rawvideo needs a fixed size at spawn time)
+  const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+  if (!win) return { ok: false, error: 'Fenêtre output introuvable.' };
+
+  let firstImg;
+  try {
+    firstImg = await win.webContents.capturePage();
+  } catch (e) {
+    return { ok: false, error: `Capture initiale échouée : ${e.message}` };
+  }
+  v4l2W = firstImg.getSize().width;
+  v4l2H = firstImg.getSize().height;
+  if (!v4l2W || !v4l2H) return { ok: false, error: 'Résolution nulle — la fenêtre output est-elle visible ?' };
+
+  // Spawn ffmpeg: read raw BGRA from stdin, emit YUV420p to the v4l2 device
+  const proc = spawn('ffmpeg', [
+    '-f', 'rawvideo',
+    '-pix_fmt', 'bgra',
+    '-s', `${v4l2W}x${v4l2H}`,
+    '-r', '30',
+    '-i', 'pipe:0',
+    '-f', 'v4l2',
+    '-pix_fmt', 'yuv420p',
+    devPath,
+  ], { stdio: ['pipe', 'ignore', 'pipe'] });
+
+  proc.on('error', (e) => { v4l2Error = e.code === 'ENOENT' ? 'ffmpeg introuvable — installe ffmpeg et réessaie.' : e.message; });
+  proc.stderr.on('data', (chunk) => { v4l2Error = chunk.toString().trim().split('\n').pop() ?? v4l2Error; });
+  proc.on('exit', (code) => {
+    if (code !== 0 && code !== null) v4l2Error = v4l2Error || `ffmpeg a quitté avec le code ${code}.`;
+    if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
+    v4l2Proc = null;
+  });
+  proc.stdin.on('drain', () => { v4l2Draining = false; });
+
+  v4l2Proc = proc;
+
+  // Allow ffmpeg a short moment to fail fast (ENOENT, bad device, etc.)
+  await new Promise((r) => setTimeout(r, 150));
+  if (!v4l2Proc || v4l2Error.length > 0) {
+    return { ok: false, error: v4l2Error || 'ffmpeg a quitté immédiatement.' };
+  }
+
+  // Push first frame right away so the stream starts immediately
+  const firstBuf = firstImg.toBitmap();
+  if (!v4l2Draining) {
+    const ok = v4l2Proc.stdin.write(firstBuf);
+    if (!ok) v4l2Draining = true;
+  }
+
+  // Capture-and-write loop @30fps
+  v4l2Timer = setInterval(async () => {
+    const w = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+    if (!w || !v4l2Proc || v4l2Draining) return;
+    try {
+      const img = await w.webContents.capturePage();
+      const { width, height } = img.getSize();
+      // Drop frames whose size changed — rawvideo can't handle mid-stream resize
+      if (width !== v4l2W || height !== v4l2H) return;
+      const written = v4l2Proc.stdin.write(img.toBitmap());
+      if (!written) v4l2Draining = true;
+    } catch { /* skip frame on error */ }
+  }, 1000 / 30);
+
+  return { ok: true };
+});
+
+ipcMain.handle('v4l2:stop', async () => {
+  if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
+  if (v4l2Proc) {
+    try { v4l2Proc.stdin.end(); } catch {}
+    try { v4l2Proc.kill('SIGTERM'); } catch {}
+    v4l2Proc = null;
+  }
+  v4l2W = 0;
+  v4l2H = 0;
+  v4l2Draining = false;
   return { ok: true };
 });
 
@@ -297,5 +419,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
+  if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
   if (process.platform !== 'darwin') app.quit();
 });

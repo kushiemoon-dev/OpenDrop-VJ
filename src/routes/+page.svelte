@@ -100,6 +100,13 @@
 	let platform = $state('');
 	let showSystemAudioHelp = $state(false);
 	let showPresetBrowser = $state(false);
+	let showStreamPanel = $state(false);
+	let ndiActive = $state(false);
+	let ndiError = $state('');
+	let v4l2Active = $state(false);
+	let v4l2Error = $state('');
+	let spoutActive = $state(false);
+	let spoutError = $state('');
 	let layout = $state<'stage' | 'mixer'>('stage');
 	let mixerSelectedSlot = $state(0);
 
@@ -955,6 +962,47 @@
 		}
 	}
 
+	async function toggleNdi() {
+		ndiError = '';
+		const eAPI = window.electronAPI;
+		if (ndiActive) {
+			await eAPI?.ndiStop();
+			ndiActive = false;
+		} else {
+			const w = window.screen.width;
+			const h = window.screen.height;
+			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
+			if (res?.ok) ndiActive = true;
+			else ndiError = res?.error ?? 'NDI SDK non trouvé — installez le NDI Runtime depuis ndi.video.';
+		}
+	}
+
+	async function toggleV4l2() {
+		v4l2Error = '';
+		const eAPI = window.electronAPI;
+		if (v4l2Active) {
+			await eAPI?.v4l2Stop();
+			v4l2Active = false;
+		} else {
+			const res = await eAPI?.v4l2Start();
+			if (res?.ok) v4l2Active = true;
+			else v4l2Error = res?.error ?? 'Erreur v4l2 inconnue.';
+		}
+	}
+
+	async function toggleSpout() {
+		spoutError = '';
+		const eAPI = window.electronAPI;
+		if (spoutActive) {
+			await eAPI?.spoutStop();
+			spoutActive = false;
+		} else {
+			const res = await eAPI?.spoutStart('OpenDrop VJ');
+			if (res?.ok) spoutActive = true;
+			else spoutError = res?.error ?? 'Spout indisponible.';
+		}
+	}
+
 	async function startSlot(slot: number) {
 		if (!audio || status !== 'running') return;
 		const q = getQualitySettings(quality);
@@ -1220,11 +1268,43 @@
 
 		<!-- Output -->
 		<div class="controls-section">
-			<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
-				⎋ Open output window
-			</button>
-			{#if outputOpen}
+			<div class="output-row">
+				<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
+					⎋ Open output window
+				</button>
+				{#if isElectron && outputOpen}
+					<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive}
+						onclick={() => showStreamPanel = !showStreamPanel}
+						title="Stream output">
+						⏏ Stream {ndiActive || v4l2Active || spoutActive ? '●' : '○'}
+					</button>
+				{/if}
+			</div>
+			{#if outputOpen && !isElectron}
 				<span class="label" style="color:#7af">Output window open — use as OBS Browser Source</span>
+			{/if}
+			{#if showStreamPanel && isElectron}
+				<div class="stream-panel">
+					{#if platform === 'linux'}
+						<button class="stream-btn" class:stream-btn--on={v4l2Active} onclick={toggleV4l2}
+							title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
+							V4L2 {v4l2Active ? '●' : '○'}
+						</button>
+					{/if}
+					<button class="stream-btn stream-btn--ndi" class:stream-btn--on={ndiActive} onclick={toggleNdi}
+						title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
+						NDI {ndiActive ? '●' : '○'}
+					</button>
+					{#if platform === 'win32'}
+						<button class="stream-btn stream-btn--spout" class:stream-btn--on={spoutActive} onclick={toggleSpout}
+							title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
+							SPOUT {spoutActive ? '●' : '○'}
+						</button>
+					{/if}
+					{#if v4l2Error}<div class="stream-error">{v4l2Error}</div>{/if}
+					{#if ndiError}<div class="stream-error">{ndiError}</div>{/if}
+					{#if spoutError}<div class="stream-error">{spoutError}</div>{/if}
+				</div>
 			{/if}
 		</div>
 
@@ -1544,6 +1624,63 @@
 	}
 
 	.btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
+
+	.output-row {
+		display: flex;
+		gap: 6px;
+		align-items: center;
+	}
+
+	.btn-stream {
+		background: transparent;
+		border: 1px solid #333;
+		border-radius: 6px;
+		color: #555;
+		font-size: 11px;
+		font-family: 'Courier New', monospace;
+		font-weight: 700;
+		padding: 4px 8px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.btn-stream:hover { border-color: #aaa; color: #aaa; }
+	.btn-stream.stream-active { border-color: #7af; color: #7af; }
+
+	.stream-panel {
+		margin-top: 6px;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		align-items: center;
+	}
+
+	.stream-btn {
+		background: rgba(0,0,0,0.4);
+		border: 1px solid #333;
+		border-radius: 6px;
+		color: #555;
+		font-size: 11px;
+		font-family: 'Courier New', monospace;
+		font-weight: 700;
+		letter-spacing: 0.05em;
+		padding: 4px 10px;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.stream-btn:hover { border-color: #aaa; color: #aaa; }
+	.stream-btn--on { border-color: currentColor; }
+	.stream-btn--ndi { color: #555; }
+	.stream-btn--ndi:hover, .stream-btn--ndi.stream-btn--on { border-color: #ff6600; color: #ff6600; background: rgba(255,102,0,0.1); }
+	.stream-btn--spout { color: #555; }
+	.stream-btn--spout:hover, .stream-btn--spout.stream-btn--on { border-color: #b366ff; color: #b366ff; background: rgba(179,102,255,0.1); }
+	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout) { border-color: #00c8ff; color: #00c8ff; background: rgba(0,200,255,0.1); }
+
+	.stream-error {
+		width: 100%;
+		font-size: 10px;
+		color: #f87;
+		font-family: 'Courier New', monospace;
+	}
 
 	/* Visualizer drag-over */
 	.visualizer-wrap.drag-over::after {

@@ -82,6 +82,9 @@
 
 			deckA.startRenderLoop();
 			deckB.startRenderLoop();
+			// Apply initial FPS cap from perf settings (effect fires before decks are ready)
+			deckA.setTargetFps(targetFps);
+			deckB.setTargetFps(targetFps);
 
 			// Charger les presets par défaut (mêmes indices 0/1 que le main) pour ne jamais
 			// être noir si le handshake de sync tarde ou est absent.

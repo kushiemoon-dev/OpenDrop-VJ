@@ -35,6 +35,8 @@ export class Deck {
 	private viz: import('butterchurn').Visualizer | null = null; // typed via src/lib/types/butterchurn.d.ts
 	private rafId: number | null = null;
 	private _state: DeckState = 'idle';
+	private frameInterval = 0;   // ms entre renders (0 = illimité)
+	private lastFrameTime = 0;   // timestamp du dernier viz.render()
 
 	readonly canvas: HTMLCanvasElement;
 	readonly id: string;
@@ -96,13 +98,26 @@ export class Deck {
 	}
 
 	/**
+	 * Set a target FPS cap for this deck's render loop.
+	 * @param fps  Target frames per second. 0 = unlimited.
+	 */
+	setTargetFps(fps: number): void {
+		this.frameInterval = fps > 0 ? 1000 / fps : 0;
+	}
+
+	/**
 	 * Start the render loop on this deck.
 	 */
 	startRenderLoop(): void {
 		if (this.rafId !== null) return;
-		const loop = () => {
+		const loop = (now: number) => {
 			if (this._state !== 'running') return;
-			this.render();
+			if (this.frameInterval === 0 || now - this.lastFrameTime >= this.frameInterval) {
+				this.lastFrameTime = this.frameInterval === 0
+					? now
+					: now - ((now - this.lastFrameTime) % this.frameInterval);
+				this.render();
+			}
 			this.rafId = requestAnimationFrame(loop);
 		};
 		this.rafId = requestAnimationFrame(loop);

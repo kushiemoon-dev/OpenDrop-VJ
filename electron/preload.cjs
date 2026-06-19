@@ -19,6 +19,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ndiStart: (name, width, height) => ipcRenderer.invoke('ndi:start', { name, width, height }),
   ndiStop: () => ipcRenderer.invoke('ndi:stop'),
 
+  // v4l2loopback virtual webcam (Linux — requires ffmpeg + v4l2loopback kernel module)
+  v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
+  v4l2Stop: () => ipcRenderer.invoke('v4l2:stop'),
+
   // Per-device output loopback (Windows, requires naudiodon-loopback)
   listOutputDevices: () => ipcRenderer.invoke('loopback:list'),
   startLoopback: (deviceId) => ipcRenderer.invoke('loopback:start', { deviceId }),

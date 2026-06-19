@@ -20,6 +20,8 @@
 	let errorMsg = $state('');
 	let ndiActive = $state(false);
 	let ndiError = $state('');
+	let v4l2Active = $state(false);
+	let v4l2Error = $state('');
 
 	// — Video loops ———————————————————————————————————————
 	let videoEnabled = $state(false);
@@ -185,6 +187,21 @@
 
 	const eAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
 
+	async function toggleV4l2() {
+		v4l2Error = '';
+		if (v4l2Active) {
+			await eAPI?.v4l2Stop();
+			v4l2Active = false;
+		} else {
+			const res = await eAPI?.v4l2Start();
+			if (res?.ok) {
+				v4l2Active = true;
+			} else {
+				v4l2Error = res?.error ?? 'Erreur v4l2 inconnue.';
+			}
+		}
+	}
+
 	async function toggleNdi() {
 		ndiError = '';
 		if (ndiActive) {
@@ -212,9 +229,15 @@
 	<OverlayLayer {overlays} {beat} />
 
 	{#if eAPI}
+		<button class="v4l2-btn" class:v4l2-on={v4l2Active} onclick={toggleV4l2} title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
+			V4L2 {v4l2Active ? '●' : '○'}
+		</button>
 		<button class="ndi-btn" class:ndi-on={ndiActive} onclick={toggleNdi} title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
 			NDI {ndiActive ? '●' : '○'}
 		</button>
+	{/if}
+	{#if v4l2Error}
+		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{v4l2Error}</div>
 	{/if}
 	{#if ndiError}
 		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{ndiError}</div>
@@ -263,10 +286,9 @@
 
 	.notice.error { color: #f87; }
 
-	.ndi-btn {
+	.ndi-btn, .v4l2-btn {
 		position: absolute;
 		bottom: 12px;
-		right: 12px;
 		z-index: 30;
 		background: rgba(0,0,0,0.6);
 		border: 1px solid #333;
@@ -281,6 +303,12 @@
 		transition: all 0.15s;
 	}
 
+	.ndi-btn { right: 12px; }
+	.v4l2-btn { right: 80px; }
+
 	.ndi-btn:hover { border-color: #ff6600; color: #ff6600; }
 	.ndi-btn.ndi-on { border-color: #ff6600; color: #ff6600; background: rgba(255,102,0,0.12); }
+
+	.v4l2-btn:hover { border-color: #00c8ff; color: #00c8ff; }
+	.v4l2-btn.v4l2-on { border-color: #00c8ff; color: #00c8ff; background: rgba(0,200,255,0.12); }
 </style>

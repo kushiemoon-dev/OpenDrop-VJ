@@ -18,19 +18,6 @@
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
 	let status = $state<'initializing' | 'ready' | 'error'>('initializing');
 	let errorMsg = $state('');
-	let ndiActive = $state(false);
-	let ndiError = $state('');
-	let v4l2Active = $state(false);
-	let v4l2Error = $state('');
-	let spoutActive = $state(false);
-	let spoutError = $state('');
-	let platform = $state('');
-
-	// — Diagnostic audio (temporaire) ————————————————————————
-	let dbgRx = $state(0);
-	let dbgDev = $state('−');
-	let dbgCtx = $state('?');
-
 	// — Video loops ———————————————————————————————————————
 	let videoEnabled = $state(false);
 	let videoClip = $state<ClipRef | null>(null);
@@ -81,11 +68,8 @@
 			// On the first frame, initialize the loopback worklet so Butterchurn reacts
 			// to the same audio signal as the main window — regardless of source type.
 			const eAPI = window.electronAPI;
-			if (eAPI?.getPlatform) platform = await eAPI.getPlatform();
 			if (eAPI?.onAudioFrame) {
 				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
-					dbgRx++;
-					dbgCtx = audio?.ctx.state ?? '?';
 					if (!audioAcquired) {
 						audioAcquired = true;
 						await audio!.resume();
@@ -138,9 +122,8 @@
 						await audio!.connectDevice(msg.deviceId);
 						deckA?.connectAudio(audio!.analyser);
 						deckB?.connectAudio(audio!.analyser);
-						dbgDev = 'ok';
-					} catch (e) {
-						dbgDev = 'err:' + (e instanceof Error ? e.name : String(e));
+					} catch {
+						// device capture failed — audio stays silent
 					}
 				} else if (msg.type === 'loopback') {
 					// Same guard — PCM streaming takes priority over IPC loopback.
@@ -197,51 +180,6 @@
 		deckB?.resize(canvasB.clientWidth, canvasB.clientHeight);
 	}
 
-	const eAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
-
-	async function toggleV4l2() {
-		v4l2Error = '';
-		if (v4l2Active) {
-			await eAPI?.v4l2Stop();
-			v4l2Active = false;
-		} else {
-			const res = await eAPI?.v4l2Start();
-			if (res?.ok) {
-				v4l2Active = true;
-			} else {
-				v4l2Error = res?.error ?? 'Erreur v4l2 inconnue.';
-			}
-		}
-	}
-
-	async function toggleSpout() {
-		spoutError = '';
-		if (spoutActive) {
-			await eAPI?.spoutStop();
-			spoutActive = false;
-		} else {
-			const res = await eAPI?.spoutStart('OpenDrop VJ');
-			if (res?.ok) spoutActive = true;
-			else spoutError = res?.error ?? 'Spout indisponible.';
-		}
-	}
-
-	async function toggleNdi() {
-		ndiError = '';
-		if (ndiActive) {
-			await eAPI?.ndiStop();
-			ndiActive = false;
-		} else {
-			const w = window.innerWidth;
-			const h = window.innerHeight;
-			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
-			if (res?.ok) {
-				ndiActive = true;
-			} else {
-				ndiError = res?.error ?? 'NDI SDK non trouvé — installez le NDI SDK depuis ndi.video puis relancez.';
-			}
-		}
-	}
 </script>
 
 <svelte:window onresize={onResize} />
@@ -251,31 +189,6 @@
 	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
 	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
 	<OverlayLayer {overlays} {beat} />
-
-	<div class="diag-overlay">PCM rx:{dbgRx} | acq:{audioAcquired ? 'Y' : 'N'} | dev:{dbgDev} | ctx:{dbgCtx}</div>
-
-	{#if eAPI}
-		<button class="v4l2-btn" class:v4l2-on={v4l2Active} onclick={toggleV4l2} title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
-			V4L2 {v4l2Active ? '●' : '○'}
-		</button>
-		<button class="ndi-btn" class:ndi-on={ndiActive} onclick={toggleNdi} title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
-			NDI {ndiActive ? '●' : '○'}
-		</button>
-		{#if platform === 'win32'}
-			<button class="spout-btn" class:spout-on={spoutActive} onclick={toggleSpout} title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
-				SPOUT {spoutActive ? '●' : '○'}
-			</button>
-		{/if}
-	{/if}
-	{#if v4l2Error}
-		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{v4l2Error}</div>
-	{/if}
-	{#if ndiError}
-		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{ndiError}</div>
-	{/if}
-	{#if spoutError}
-		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{spoutError}</div>
-	{/if}
 
 	{#if status === 'initializing'}
 		<div class="notice">Initializing…</div>
@@ -319,48 +232,4 @@
 	}
 
 	.notice.error { color: #f87; }
-
-	.diag-overlay {
-		position: absolute;
-		top: 8px;
-		left: 8px;
-		z-index: 50;
-		background: rgba(0,0,0,0.7);
-		color: #0f0;
-		font-family: 'Courier New', monospace;
-		font-size: 10px;
-		padding: 3px 8px;
-		border-radius: 4px;
-		pointer-events: none;
-	}
-
-	.ndi-btn, .v4l2-btn, .spout-btn {
-		position: absolute;
-		bottom: 12px;
-		z-index: 30;
-		background: rgba(0,0,0,0.6);
-		border: 1px solid #333;
-		border-radius: 6px;
-		color: #555;
-		font-size: 11px;
-		font-family: 'Courier New', monospace;
-		font-weight: 700;
-		letter-spacing: 0.05em;
-		padding: 4px 10px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-
-	.ndi-btn { right: 12px; }
-	.v4l2-btn { right: 80px; }
-
-	.ndi-btn:hover { border-color: #ff6600; color: #ff6600; }
-	.ndi-btn.ndi-on { border-color: #ff6600; color: #ff6600; background: rgba(255,102,0,0.12); }
-
-	.v4l2-btn:hover { border-color: #00c8ff; color: #00c8ff; }
-	.v4l2-btn.v4l2-on { border-color: #00c8ff; color: #00c8ff; background: rgba(0,200,255,0.12); }
-
-	.spout-btn { right: 148px; }
-	.spout-btn:hover { border-color: #b366ff; color: #b366ff; }
-	.spout-btn.spout-on { border-color: #b366ff; color: #b366ff; background: rgba(179,102,255,0.12); }
 </style>

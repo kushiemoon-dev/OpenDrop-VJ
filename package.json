@@ -29,7 +29,8 @@
 	},
 	"optionalDependencies": {
 		"audify": "^1.10.1",
-		"grandiose": "^0.0.4"
+		"grandiose": "^0.0.4",
+		"spout-addon": "file:native/spout"
 	},
 	"devDependencies": {
 		"@electron/rebuild": "^4.0.4",

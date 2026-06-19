@@ -60,10 +60,9 @@ let v4l2W = 0;
 let v4l2H = 0;
 let v4l2Error = '';
 
-/** Find the first v4l2loopback device whose label contains "OpenDrop".
- *  Reads /sys/class/video4linux/video*/name — pure fs, no exec.
- *  Returns "/dev/videoN" or null.
- */
+// Find the first v4l2loopback device whose label contains "OpenDrop".
+// Reads /sys/class/video4linux/videoN/name — pure fs, no exec.
+// Returns "/dev/videoN" or null.
 function findV4l2Device() {
   try {
     const base = '/sys/class/video4linux';
@@ -155,13 +154,13 @@ ipcMain.handle('ndi:stop', async () => {
 // ── Spout handlers ────────────────────────────────────────────────────────
 ipcMain.handle('spout:start', async (_, { name }) => {
   try {
-    if (process.platform !== 'win32') return { ok: false, error: 'Spout est disponible uniquement sur Windows.' };
-    if (!spout) return { ok: false, error: 'spout-addon non disponible — recompilez avec : pnpm run electron:rebuild:spout' };
+    if (process.platform !== 'win32') return { ok: false, error: 'Spout is only available on Windows.' };
+    if (!spout) return { ok: false, error: 'spout-addon not available — rebuild with: pnpm run electron:rebuild:spout' };
     if (spoutTimer) { clearInterval(spoutTimer); spoutTimer = null; }
     spout.stop();
 
     const ok = spout.init(name || 'OpenDrop VJ');
-    if (!ok) return { ok: false, error: 'Échec OpenDirectX11 — aucun GPU DirectX 11 disponible.' };
+    if (!ok) return { ok: false, error: 'OpenDirectX11 failed — no DirectX 11 GPU available.' };
 
     spoutTimer = setInterval(async () => {
       const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
@@ -198,7 +197,7 @@ ipcMain.handle('v4l2:start', async () => {
   // Locate device before doing anything else
   const devPath = findV4l2Device();
   if (!devPath) {
-    return { ok: false, error: "Aucun device v4l2loopback 'OpenDrop' trouvé. Lance scripts/setup-v4l2.sh puis réessaie." };
+    return { ok: false, error: "No v4l2loopback device 'OpenDrop' found. Run scripts/setup-v4l2.sh and try again." };
   }
 
   // Capture one frame to lock W×H (rawvideo needs a fixed size at spawn time)
@@ -213,7 +212,7 @@ ipcMain.handle('v4l2:start', async () => {
   }
   v4l2W = firstImg.getSize().width;
   v4l2H = firstImg.getSize().height;
-  if (!v4l2W || !v4l2H) return { ok: false, error: 'Résolution nulle — la fenêtre output est-elle visible ?' };
+  if (!v4l2W || !v4l2H) return { ok: false, error: 'Zero resolution — is the output window visible?' };
 
   // Spawn ffmpeg: read raw BGRA from stdin, emit YUV420p to the v4l2 device
   const proc = spawn('ffmpeg', [
@@ -227,7 +226,7 @@ ipcMain.handle('v4l2:start', async () => {
     devPath,
   ], { stdio: ['pipe', 'ignore', 'pipe'] });
 
-  proc.on('error', (e) => { v4l2Error = e.code === 'ENOENT' ? 'ffmpeg introuvable — installe ffmpeg et réessaie.' : e.message; });
+  proc.on('error', (e) => { v4l2Error = e.code === 'ENOENT' ? 'ffmpeg not found — install ffmpeg and try again.' : e.message; });
   proc.stderr.on('data', (chunk) => { v4l2Error = chunk.toString().trim().split('\n').pop() ?? v4l2Error; });
   proc.on('exit', (code) => {
     if (code !== 0 && code !== null) v4l2Error = v4l2Error || `ffmpeg a quitté avec le code ${code}.`;

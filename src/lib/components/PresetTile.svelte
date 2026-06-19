@@ -60,11 +60,11 @@
 	</button>
 
 	<!-- Pied A/B -->
-	<div class="ptile__footer" onclick={(e) => e.stopPropagation()}>
-		<button class="ptile__pl" class:ptile__pl--in={inA} onclick={onAddA} type="button">
+	<div class="ptile__footer">
+		<button class="ptile__pl" class:ptile__pl--in={inA} onclick={(e) => { e.stopPropagation(); onAddA(); }} type="button">
 			A
 		</button>
-		<button class="ptile__pl" class:ptile__pl--in={inB} onclick={onAddB} type="button">
+		<button class="ptile__pl" class:ptile__pl--in={inB} onclick={(e) => { e.stopPropagation(); onAddB(); }} type="button">
 			B
 		</button>
 	</div>

@@ -216,12 +216,22 @@ export class AudioEngine {
 		if (!this.captureWorkletLoaded) {
 			await this.ctx.audioWorklet.addModule('/capture-worklet.js');
 			this.captureWorkletLoaded = true;
+			console.log('[diag main] capture addModule ok — ctx.state:', this.ctx.state);
 		}
 		const node = new AudioWorkletNode(this.ctx, 'capture-pcm', {
 			numberOfInputs: 1,
 			numberOfOutputs: 1, // required — Chromium skips process() on nodes with no output path
 		});
-		node.port.onmessage = (e) => onFrame(e.data as { sampleRate: number; channels: number; pcm: Int16Array });
+		console.log('[diag main] capture node created — ctx.state:', this.ctx.state, 'source:', this._sourceType);
+		let _diagFrameCount = 0;
+		node.port.onmessage = (e) => {
+			_diagFrameCount++;
+			if (_diagFrameCount === 1 || _diagFrameCount % 50 === 0) {
+				const d = e.data as { sampleRate: number; channels: number; pcm: Int16Array };
+				console.log(`[diag main] pcm frame #${_diagFrameCount} len=${d.pcm.length} sr=${d.sampleRate}`);
+			}
+			onFrame(e.data as { sampleRate: number; channels: number; pcm: Int16Array });
+		};
 		this.gainNode.connect(node); // tap the same signal fed to the analyser
 		// Route the (silent) output to destination so Chromium keeps process() alive.
 		const sink = this.ctx.createGain();

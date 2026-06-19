@@ -23,6 +23,11 @@
 	let v4l2Active = $state(false);
 	let v4l2Error = $state('');
 
+	// — Diagnostic audio (temporaire) ————————————————————————
+	let dbgRx = $state(0);
+	let dbgDev = $state('−');
+	let dbgCtx = $state('?');
+
 	// — Video loops ———————————————————————————————————————
 	let videoEnabled = $state(false);
 	let videoClip = $state<ClipRef | null>(null);
@@ -40,7 +45,7 @@
 	let audioFrameUnlisten: (() => void) | null = null;
 	// Set to true once PCM frames from the main window are flowing — prevents the
 	// output from also trying to re-capture the same device independently (fragile).
-	let audioAcquired = false;
+	let audioAcquired = $state(false);
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
@@ -75,6 +80,8 @@
 			const eAPI = window.electronAPI;
 			if (eAPI?.onAudioFrame) {
 				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
+					dbgRx++;
+					dbgCtx = audio?.ctx.state ?? '?';
 					if (!audioAcquired) {
 						audioAcquired = true;
 						await audio!.resume();
@@ -127,8 +134,9 @@
 						await audio!.connectDevice(msg.deviceId);
 						deckA?.connectAudio(audio!.analyser);
 						deckB?.connectAudio(audio!.analyser);
-					} catch {
-						// device may not be available in output window context
+						dbgDev = 'ok';
+					} catch (e) {
+						dbgDev = 'err:' + (e instanceof Error ? e.name : String(e));
 					}
 				} else if (msg.type === 'loopback') {
 					// Same guard — PCM streaming takes priority over IPC loopback.
@@ -228,6 +236,8 @@
 	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 
+	<div class="diag-overlay">PCM rx:{dbgRx} | acq:{audioAcquired ? 'Y' : 'N'} | dev:{dbgDev} | ctx:{dbgCtx}</div>
+
 	{#if eAPI}
 		<button class="v4l2-btn" class:v4l2-on={v4l2Active} onclick={toggleV4l2} title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
 			V4L2 {v4l2Active ? '●' : '○'}
@@ -285,6 +295,20 @@
 	}
 
 	.notice.error { color: #f87; }
+
+	.diag-overlay {
+		position: absolute;
+		top: 8px;
+		left: 8px;
+		z-index: 50;
+		background: rgba(0,0,0,0.7);
+		color: #0f0;
+		font-family: 'Courier New', monospace;
+		font-size: 10px;
+		padding: 3px 8px;
+		border-radius: 4px;
+		pointer-events: none;
+	}
 
 	.ndi-btn, .v4l2-btn {
 		position: absolute;

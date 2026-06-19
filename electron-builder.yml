@@ -14,10 +14,12 @@ files:
   - package.json
   - node_modules/grandiose/**
   - node_modules/audify/**
+  - node_modules/spout-addon/**
 
 asarUnpack:
   - node_modules/grandiose/**
   - node_modules/audify/**
+  - node_modules/spout-addon/**
 
 mac:
   category: public.app-category.music

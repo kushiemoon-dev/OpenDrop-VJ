@@ -19,6 +19,8 @@ declare global {
 			ndiStop: () => Promise<{ ok: boolean }>;
 			v4l2Start: () => Promise<{ ok: boolean; error?: string }>;
 			v4l2Stop: () => Promise<{ ok: boolean }>;
+			spoutStart: (name: string) => Promise<{ ok: boolean; error?: string }>;
+			spoutStop: () => Promise<{ ok: boolean }>;
 			listOutputDevices: () => Promise<{ ok: boolean; devices: Array<{ id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number }>; error?: string }>;
 			startLoopback: (deviceId: number) => Promise<{ ok: boolean; sampleRate?: number; channels?: number; error?: string }>;
 			stopLoopback: () => Promise<{ ok: boolean }>;

@@ -58,6 +58,10 @@ jobs:
       - name: Rebuild native modules for Electron
         run: pnpm exec electron-rebuild -f -w grandiose || true
 
+      - name: Rebuild Spout addon (Windows only)
+        if: matrix.os == 'windows-latest'
+        run: pnpm exec electron-rebuild -f -w spout-addon || true
+
       - name: Package Electron app
         run: pnpm exec electron-builder --publish never
 

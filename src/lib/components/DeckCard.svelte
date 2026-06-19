@@ -1,14 +1,21 @@
 <script lang="ts">
   interface Props {
-    letter: 'A' | 'B'
+    letter: 'A' | 'B' | 'C' | 'D'
     canvas: HTMLCanvasElement | undefined
     presetName: string
     isActive: boolean
     isLive: boolean
     onSelect: () => void
+    bus?: 'A' | 'B' | 'off'
+    running?: boolean
+    onCycleBus?: () => void
+    onToggleRun?: () => void
   }
 
-  let { letter, canvas, presetName, isActive, isLive, onSelect }: Props = $props()
+  let { letter, canvas, presetName, isActive, isLive, onSelect, bus, running, onCycleBus, onToggleRun }: Props = $props()
+
+  const BUS_LABELS: Record<'A' | 'B' | 'off', string> = { A: '● A', B: '● B', off: '○ —' }
+  const BUS_COLORS: Record<'A' | 'B' | 'off', string> = { A: 'var(--accent)', B: 'var(--live)', off: 'var(--text-muted)' }
 
   let videoEl: HTMLVideoElement | undefined = $state()
 
@@ -23,11 +30,13 @@
   })
 </script>
 
-<button
+<div
   class="deck-card"
   class:deck-card--active={isActive}
   onclick={onSelect}
-  type="button"
+  onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }}
+  role="button"
+  tabindex="0"
 >
   <div class="deck-card__header">
     <span class="deck-card__letter">{letter}</span>
@@ -53,7 +62,26 @@
   <div class="deck-card__name" title={presetName || ''}>
     {presetName ? presetName.split('/').at(-1) ?? presetName : '—'}
   </div>
-</button>
+
+  {#if onCycleBus !== undefined}
+    <div class="deck-card__footer">
+      <button
+        class="deck-card__bus"
+        style:color={BUS_COLORS[bus ?? 'off']}
+        onclick={(e) => { e.stopPropagation(); onCycleBus?.() }}
+        type="button"
+        title="Bus: {bus ?? 'off'} — cliquer pour changer"
+      >{BUS_LABELS[bus ?? 'off']}</button>
+      <button
+        class="deck-card__run"
+        class:deck-card__run--stop={running}
+        onclick={(e) => { e.stopPropagation(); onToggleRun?.() }}
+        type="button"
+        aria-label={running ? 'Stop deck' : 'Start deck'}
+      >{running ? '■' : '▶'}</button>
+    </div>
+  {/if}
+</div>
 
 <style>
   .deck-card {
@@ -139,4 +167,44 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+
+  .deck-card__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 6px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .deck-card__bus {
+    font-size: 9px;
+    font-weight: 700;
+    background: none;
+    border: none;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+    padding: 0;
+    transition: opacity var(--t-fast);
+  }
+
+  .deck-card__bus:hover { opacity: 0.7; }
+
+  .deck-card__run {
+    font-size: 9px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    color: var(--live);
+    width: 20px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: border-color var(--t-fast), color var(--t-fast);
+  }
+
+  .deck-card__run:hover { border-color: var(--live); }
+  .deck-card__run--stop:hover { border-color: var(--accent); color: var(--accent); }
 </style>

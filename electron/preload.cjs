@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
   v4l2Stop: () => ipcRenderer.invoke('v4l2:stop'),
 
+  // Spout texture sharing (Windows — requires spout-addon + SpoutDX vendor sources)
+  spoutStart: (name) => ipcRenderer.invoke('spout:start', { name }),
+  spoutStop: () => ipcRenderer.invoke('spout:stop'),
+
   // Per-device output loopback (Windows, requires naudiodon-loopback)
   listOutputDevices: () => ipcRenderer.invoke('loopback:list'),
   startLoopback: (deviceId) => ipcRenderer.invoke('loopback:start', { deviceId }),

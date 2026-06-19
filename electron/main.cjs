@@ -44,6 +44,11 @@ let ndiSender = null;
 let ndiTimer = null;
 let outputWin = null;     // tracked below in did-create-window
 
+// ── Spout (optional — Windows only, requires spout-addon + SpoutDX vendor sources) ──
+let spout = null;
+let spoutTimer = null;
+try { spout = require('spout-addon'); } catch { /* non-Windows or addon not built */ }
+
 // ── Per-device output loopback (optional — Windows, requires audify) ──
 let loopbackRt = null;
 
@@ -144,6 +149,41 @@ ipcMain.handle('ndi:stop', async () => {
   if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
   ndiSender?.destroy?.();
   ndiSender = null;
+  return { ok: true };
+});
+
+// ── Spout handlers ────────────────────────────────────────────────────────
+ipcMain.handle('spout:start', async (_, { name }) => {
+  try {
+    if (process.platform !== 'win32') return { ok: false, error: 'Spout est disponible uniquement sur Windows.' };
+    if (!spout) return { ok: false, error: 'spout-addon non disponible — recompilez avec : pnpm run electron:rebuild:spout' };
+    if (spoutTimer) { clearInterval(spoutTimer); spoutTimer = null; }
+    spout.stop();
+
+    const ok = spout.init(name || 'OpenDrop VJ');
+    if (!ok) return { ok: false, error: 'Échec OpenDirectX11 — aucun GPU DirectX 11 disponible.' };
+
+    spoutTimer = setInterval(async () => {
+      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+      if (!win) return;
+      try {
+        const img = await win.webContents.capturePage();
+        const buf = img.toBitmap(); // BGRA top-down, w*4 stride — exact match for SendImage
+        const { width: w, height: h } = img.getSize();
+        if (!w || !h) return;
+        spout.send(buf, w, h);
+      } catch { /* skip frame on error */ }
+    }, 1000 / 30);
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('spout:stop', () => {
+  if (spoutTimer) { clearInterval(spoutTimer); spoutTimer = null; }
+  try { spout?.stop(); } catch {}
   return { ok: true };
 });
 

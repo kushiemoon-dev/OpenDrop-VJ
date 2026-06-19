@@ -161,8 +161,9 @@ test.describe('Fenêtre output', () => {
 	});
 
 	test('ouvre une nouvelle fenêtre /output', async ({ page, context }) => {
-		// La preset drawer couvre le bouton — la fermer d'abord
+		// La preset drawer couvre le bouton — la fermer et attendre qu'elle soit vraiment fermée
 		await page.locator('.preset-browser-toggle').click();
+		await expect(page.locator('.preset-drawer--open')).toHaveCount(0);
 		const [popup] = await Promise.all([
 			context.waitForEvent('page'),
 			page.getByRole('button', { name: /Open output window/i }).click(),
@@ -176,8 +177,9 @@ test.describe('Fenêtre output', () => {
 	});
 
 	test("l'overlay de diagnostic audio est présent sur la page /output", async ({ page, context }) => {
-		// La preset drawer couvre le bouton — la fermer d'abord
+		// La preset drawer couvre le bouton — la fermer et attendre qu'elle soit vraiment fermée
 		await page.locator('.preset-browser-toggle').click();
+		await expect(page.locator('.preset-drawer--open')).toHaveCount(0);
 		const [popup] = await Promise.all([
 			context.waitForEvent('page'),
 			page.getByRole('button', { name: /Open output window/i }).click(),

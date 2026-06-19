@@ -1,0 +1,13 @@
+{
+  "name": "spout-addon",
+  "version": "0.0.1",
+  "description": "N-API wrapper around SpoutDX for Electron (Windows only)",
+  "main": "build/Release/spout_addon.node",
+  "gypfile": true,
+  "dependencies": {
+    "node-addon-api": "^8.0.0"
+  },
+  "scripts": {
+    "install": "node-gyp rebuild || true"
+  }
+}

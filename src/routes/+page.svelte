@@ -214,11 +214,14 @@
 		sync?.sendCrossfader(x);
 	});
 
-	// — VU meter polling + video speed warp ——————————————
+	// — VU meter polling + FPS counter + video speed warp —
 	$effect(() => {
 		if (status !== 'running' || !audio) return;
 		let rafId: number;
-		const tick = () => {
+		let fpsCount = 0;
+		let fpsLast = performance.now();
+		const tick = (t: number) => {
+			// VU meter + video warp
 			const lv = audio!.getLevels();
 			vuLevel = lv.rms;
 			if (videoEnabled && vrWarp) {
@@ -227,10 +230,17 @@
 			} else {
 				videoPlaybackRate = 1;
 			}
+			// FPS counter
+			fpsCount++;
+			if (t - fpsLast >= 500) {
+				fps = Math.round(fpsCount * 1000 / (t - fpsLast));
+				fpsCount = 0;
+				fpsLast = t;
+			}
 			rafId = requestAnimationFrame(tick);
 		};
 		rafId = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(rafId);
+		return () => { cancelAnimationFrame(rafId); fps = 0; };
 	});
 
 	// — Persistance localStorage ——————————————————————————
@@ -285,25 +295,6 @@
 		const settings = getQualitySettings(quality);
 		manager.applyQuality(settings);
 		sync?.sendQuality(quality);
-	});
-
-	// — FPS counter ————————————————————————————————————————
-	$effect(() => {
-		if (status !== 'running') return;
-		let count = 0;
-		let last = performance.now();
-		let rafId: number;
-		const tick = (t: number) => {
-			count++;
-			if (t - last >= 500) {
-				fps = Math.round(count * 1000 / (t - last));
-				count = 0;
-				last = t;
-			}
-			rafId = requestAnimationFrame(tick);
-		};
-		rafId = requestAnimationFrame(tick);
-		return () => { cancelAnimationFrame(rafId); fps = 0; };
 	});
 
 	// — Lifecycle ——————————————————————————————————————————

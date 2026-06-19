@@ -1,7 +1,7 @@
 {
 	"name": "opendrop",
 	"private": true,
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"homepage": "https://opendrop.kushie.dev",
 	"type": "module",
 	"main": "electron/main.cjs",

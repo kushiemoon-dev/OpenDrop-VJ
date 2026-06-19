@@ -25,3 +25,17 @@ export function getQualitySettings(tier: QualityTier): QualitySettings {
 			return { meshWidth: 64, meshHeight: 48, textureRatio: 1, pixelRatio: dpr, outputFXAA: false };
 	}
 }
+
+export type InvisibleMode = 'eco' | 'pause' | 'off';
+
+export interface PerfSettings {
+	targetFps: number;      // FPS cible du rendu (30 | 45 | 60)
+	invisibleMode: InvisibleMode;  // comportement des decks invisibles
+	invisibleFps: number;   // FPS des decks éco (~8)
+}
+
+export const DEFAULT_PERF: PerfSettings = {
+	targetFps: 45,
+	invisibleMode: 'eco',
+	invisibleFps: 8
+};

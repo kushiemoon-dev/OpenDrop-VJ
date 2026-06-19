@@ -168,7 +168,7 @@ e2e/
 | Audio reactivity in output (Linux) | Requires re-picking the device once per session — known issue |
 | Web MIDI | Chromium / Electron only (not Firefox / Safari) |
 | System audio on macOS (browser) | Tab audio only — install BlackHole for full capture |
-| Windows / macOS builds | Not yet distributed — Linux AppImage only for now |
+| Packaged desktop app | Linux AppImage only — Windows / macOS users can use the [web version](https://opendrop.kushie.dev) |
 | Signed installers | Planned |
 | 4-deck compositor | Planned |
 | Spout / v4l2 output | Planned |

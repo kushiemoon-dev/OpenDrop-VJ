@@ -32,7 +32,6 @@ export class AudioEngine {
 	private captureSink: GainNode | null = null;
 	private captureWorkletLoaded = false;
 
-
 	private readonly fftData: Uint8Array<ArrayBuffer>;
 
 	get sourceType(): AudioSourceType {

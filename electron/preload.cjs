@@ -28,4 +28,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('loopback:data', handler);
     return () => ipcRenderer.off('loopback:data', handler);
   },
+
+  // Raw PCM frames streamed from main renderer → output window for audio-reactivity.
+  sendAudioFrame: (data) => ipcRenderer.send('audioframe:post', data),
+  onAudioFrame: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on('audioframe:data', handler);
+    return () => ipcRenderer.off('audioframe:data', handler);
+  },
 });

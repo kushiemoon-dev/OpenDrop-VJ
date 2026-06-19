@@ -27,6 +27,10 @@ export class AudioEngine {
 	// AudioWorklet for native loopback PCM injection.
 	private loopbackNode: AudioWorkletNode | null = null;
 	private workletLoaded = false;
+	// AudioWorklet for capturing the live signal and streaming it to the output window.
+	private captureNode: AudioWorkletNode | null = null;
+	private captureSink: GainNode | null = null;
+	private captureWorkletLoaded = false;
 
 	private readonly fftData: Uint8Array<ArrayBuffer>;
 
@@ -202,6 +206,60 @@ export class AudioEngine {
 		};
 	}
 
+	/**
+	 * Start capturing the live audio signal (from gainNode) and posting Int16 PCM
+	 * chunks to onFrame. Used to stream audio to the output window.
+	 * Idempotent — safe to call multiple times (only one capture node is created).
+	 */
+	async startPcmCapture(onFrame: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void): Promise<void> {
+		if (this.captureNode) return; // already running
+		if (!this.captureWorkletLoaded) {
+			await this.ctx.audioWorklet.addModule('/capture-worklet.js');
+			this.captureWorkletLoaded = true;
+		}
+		const node = new AudioWorkletNode(this.ctx, 'capture-pcm', {
+			numberOfInputs: 1,
+			numberOfOutputs: 1, // required — Chromium skips process() on nodes with no output path
+		});
+		node.port.onmessage = (e) => onFrame(e.data as { sampleRate: number; channels: number; pcm: Int16Array });
+		this.gainNode.connect(node); // tap the same signal fed to the analyser
+		// Route the (silent) output to destination so Chromium keeps process() alive.
+		const sink = this.ctx.createGain();
+		sink.gain.value = 0;
+		node.connect(sink);
+		sink.connect(this.ctx.destination);
+		this.captureNode = node;
+		this.captureSink = sink;
+	}
+
+	/** Stop the PCM capture and release the associated nodes. */
+	stopPcmCapture(): void {
+		if (!this.captureNode) return;
+		try { this.gainNode.disconnect(this.captureNode); } catch { /* already disconnected */ }
+		try { this.captureNode.disconnect(); } catch { /* already disconnected */ }
+		this.captureNode.port.onmessage = null;
+		this.captureNode = null;
+		if (this.captureSink) {
+			try { this.captureSink.disconnect(); } catch { /* already disconnected */ }
+			this.captureSink = null;
+		}
+	}
+
+	/**
+	 * Push a PCM chunk received from the capture-worklet relay (already Int16Array)
+	 * into the loopback AudioWorklet ring buffer. Distinct from pushLoopbackPcm which
+	 * expects a Uint8Array (RtAudio byte buffer) and re-interprets it.
+	 */
+	pushCapturePcm(data: { sampleRate: number; channels: number; pcm: Int16Array }): void {
+		if (!this.loopbackNode) return;
+		// data.pcm is already an Int16Array — copy so we can transfer the buffer.
+		const i16copy = new Int16Array(data.pcm);
+		this.loopbackNode.port.postMessage(
+			{ sampleRate: data.sampleRate, channels: data.channels, pcm: i16copy },
+			[i16copy.buffer],
+		);
+	}
+
 	/** Stop the current audio source and release the stream. */
 	disconnect(): void {
 		this._disconnectCurrent();
@@ -209,6 +267,7 @@ export class AudioEngine {
 	}
 
 	destroy(): void {
+		this.stopPcmCapture();
 		this.disconnect();
 		this.ctx.close();
 	}

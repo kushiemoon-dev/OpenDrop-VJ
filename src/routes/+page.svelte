@@ -47,6 +47,8 @@
 	let currentLoopbackDeviceId = $state(0);
 	let vuLevel = $state(0);
 	let outputOpen = $state(false);
+	let outputWinRef: Window | null = null;
+	let outputCloseTimer: ReturnType<typeof setInterval> | null = null;
 	let sync: MainSync | null = null;
 
 	// — Playlist state ————————————————————————————————————
@@ -340,10 +342,11 @@
 
 	onDestroy(() => {
 		_stopLoopbackIpc();
+		if (outputCloseTimer !== null) clearInterval(outputCloseTimer);
 		playlistA?.destroy();
 		playlistB?.destroy();
 		manager.destroyAll();
-		audio?.destroy();
+		audio?.destroy(); // also calls stopPcmCapture()
 		sync?.destroy();
 		midi?.destroy();
 		beatDetector?.destroy();
@@ -400,6 +403,12 @@
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
+				// Stream live PCM to the output window so it becomes audio-reactive
+				// regardless of source (device / mic / file). Electron-only: the output
+				// window cannot re-capture the same device independently (fragile on Linux).
+				if (isElectron) {
+					audio?.startPcmCapture((f) => window.electronAPI!.sendAudioFrame(f));
+				}
 			});
 
 			beatDetector = new BeatDetector(audio.analyser);
@@ -901,7 +910,7 @@
 	}
 
 	function openOutput() {
-		window.open('/output', 'opendrop-output', 'width=1280,height=720');
+		outputWinRef = window.open('/output', 'opendrop-output', 'width=1280,height=720');
 		outputOpen = true;
 		// Give the window ~800ms to init, then push current state
 		setTimeout(() => {
@@ -910,6 +919,17 @@
 			sync?.sendCrossfader(crossfader);
 			if (currentDeviceId) sync?.sendSource(currentDeviceId);
 		}, 800);
+		// Poll for output window closure to stop PCM capture and release resources.
+		if (outputCloseTimer !== null) clearInterval(outputCloseTimer);
+		outputCloseTimer = setInterval(() => {
+			if (outputWinRef?.closed) {
+				audio?.stopPcmCapture();
+				outputOpen = false;
+				outputWinRef = null;
+				clearInterval(outputCloseTimer!);
+				outputCloseTimer = null;
+			}
+		}, 1500);
 	}
 
 	function onResize() {

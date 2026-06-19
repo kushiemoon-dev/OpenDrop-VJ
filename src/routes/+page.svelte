@@ -29,7 +29,7 @@
 
 	let presetList: PresetMeta[] = $state([]);
 
-	let activeDeck = $state<'A' | 'B'>('A');
+	let activeSlot = $state(0); // 0=A 1=B 2=C 3=D — cible du preset browser
 	let presetA = $state('');
 	let presetB = $state('');
 	let crossfader = $state(0); // 0 = 100% A, 1 = 100% B
@@ -158,8 +158,9 @@
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
 	let overlayDragOver = $state(false);
-	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
+	const activeDeck = $derived<'A' | 'B'>(deckBus[activeSlot] === 'B' ? 'B' : 'A');
+	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
 	let _slotEpoch = $state(0);
 	let preset2 = $state('');
 	let preset3 = $state('');
@@ -572,15 +573,16 @@
 	async function selectPreset(name: string) {
 		const d = await loadPresetData(name);
 		if (!d) return;
-		if (activeDeck === 'A') {
-			presetA = name;
-			manager.loadPreset(0, d, 2.0);
-			sync?.sendPreset('A', name);
-		} else {
-			presetB = name;
-			manager.loadPreset(1, d, 2.0);
-			sync?.sendPreset('B', name);
-		}
+		const slot = activeSlot;
+		if (slot === 0) presetA = name;
+		else if (slot === 1) presetB = name;
+		else if (slot === 2) preset2 = name;
+		else preset3 = name;
+		manager.loadPreset(slot, d, 2.0);
+		_slotEpoch++;
+		const bus = deckBus[slot];
+		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'));
+		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'));
 	}
 
 	function addToPlaylist(deck: 'A' | 'B', name: string) {
@@ -993,7 +995,7 @@
 				break;
 			case 'Tab':
 				e.preventDefault();
-				activeDeck = activeDeck === 'A' ? 'B' : 'A';
+				activeSlot = activeSlot === 0 ? 1 : 0;
 				break;
 			case '[':
 				e.preventDefault();
@@ -1037,14 +1039,13 @@
 	>
 		<!-- Video loop — premier enfant = derrière les decks -->
 		<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-		<!-- Deck canvases — slots 0-1 visibles, slots 2-3 masqués (futurs) -->
+		<!-- Deck canvases — 4 slots, layering additif par bus -->
 		{#each [0, 1, 2, 3] as i}
 			<canvas
 				bind:this={canvases[i]}
 				class="deck-canvas"
 				style:opacity={opacities[i]}
 				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : 'screen'}
-				style:display={i >= 2 ? 'none' : null}
 			></canvas>
 		{/each}
 		<!-- Overlay sprites -->
@@ -1100,22 +1101,20 @@
 		<div class="controls-section">
 			<span class="label">Mixer</span>
 			<div class="deck-cards-row">
-				<DeckCard
-					letter="A"
-					canvas={canvases[0]}
-					presetName={presetA}
-					isActive={activeDeck === 'A'}
-					isLive={crossfader <= 0.5}
-					onSelect={() => { activeDeck = 'A' }}
-				/>
-				<DeckCard
-					letter="B"
-					canvas={canvases[1]}
-					presetName={presetB}
-					isActive={activeDeck === 'B'}
-					isLive={crossfader > 0.5}
-					onSelect={() => { activeDeck = 'B' }}
-				/>
+				{#each (['A', 'B', 'C', 'D'] as const) as letter, i}
+					<DeckCard
+						{letter}
+						canvas={canvases[i]}
+						presetName={presets4[i]}
+						isActive={activeSlot === i}
+						isLive={opacities[i] > 0.5}
+						bus={deckBus[i]}
+						running={isRunning(i)}
+						onSelect={() => { activeSlot = i }}
+						onCycleBus={() => cycleBus(i)}
+						onToggleRun={() => isRunning(i) ? pauseSlot(i) : startSlot(i)}
+					/>
+				{/each}
 			</div>
 			<div class="crossfader-row">
 				<span class="cf-label" class:bright={crossfader < 0.2}>A</span>
@@ -1272,6 +1271,7 @@
 		presets={presetList}
 		isOpen={showPresetBrowser}
 		{activeDeck}
+		targetSlot={activeSlot}
 		{playlistAItems}
 		{playlistBItems}
 		onClose={() => { showPresetBrowser = false }}

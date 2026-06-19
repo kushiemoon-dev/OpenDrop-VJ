@@ -197,8 +197,13 @@
 	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
 
 	// — Sync crossfader to output window ——————————————————
+	// Read crossfader unconditionally before sync?. so Svelte 5 tracks it as a
+	// dependency even when sync is still null on the first $effect run (onMount
+	// is async → sync is assigned late). Without this, ?. short-circuits the
+	// argument evaluation → crossfader is never tracked → effect never re-runs.
 	$effect(() => {
-		sync?.sendCrossfader(crossfader);
+		const x = crossfader;
+		sync?.sendCrossfader(x);
 	});
 
 	// — VU meter polling + video speed warp ——————————————
@@ -249,19 +254,21 @@
 
 	// — Sync overlays vers output ——————————————————————————
 	$effect(() => {
-		sync?.sendOverlays(overlays);
+		const list = overlays; // force tracking (same pattern as crossfader above)
+		sync?.sendOverlays(list);
 	});
 
 	// — Sync vidéo vers output ————————————————————————————
 	$effect(() => {
-		sync?.sendVideo({
+		const payload = { // force tracking of all fields before sync?.
 			enabled: videoEnabled,
 			clip: currentClip,
 			opacity: videoOpacity,
 			playbackRate: videoPlaybackRateStep,
 			flashOn: vrFlash,
 			hueOn: vrHue,
-		});
+		};
+		sync?.sendVideo(payload);
 	});
 
 	// — Appliquer la qualité aux decks + sync output ———————
@@ -394,7 +401,7 @@
 			});
 
 			sync = new MainSync();
-			sync.onOutputReady(() => {
+			sync.onOutputReady(async () => {
 				sync?.sendPreset('A', busPresetA);
 				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
@@ -406,8 +413,14 @@
 				// Stream live PCM to the output window so it becomes audio-reactive
 				// regardless of source (device / mic / file). Electron-only: the output
 				// window cannot re-capture the same device independently (fragile on Linux).
+				// await + catch so a transient worklet failure is visible in the console
+				// and retried on the next hello (startPcmCapture is idempotent).
 				if (isElectron) {
-					audio?.startPcmCapture((f) => window.electronAPI!.sendAudioFrame(f));
+					try {
+						await audio?.startPcmCapture((f) => window.electronAPI!.sendAudioFrame(f));
+					} catch (e) {
+						console.error('[output] startPcmCapture failed', e);
+					}
 				}
 			});
 

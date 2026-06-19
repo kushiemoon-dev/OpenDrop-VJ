@@ -69,6 +69,26 @@ describe('DeckManager', () => {
     expect(() => manager.pause(3)).not.toThrow()
   })
 
+  it('resume() appelle deck.resume() si state === idle', async () => {
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    mockDeckInstance.state = 'idle'
+    mockDeckInstance.resume.mockClear()
+    manager.resume(0)
+    expect(mockDeckInstance.resume).toHaveBeenCalledTimes(1)
+  })
+
+  it('resume() est un no-op si state === running', async () => {
+    await manager.start(0, audioCtx, audioNode, {}, null)
+    mockDeckInstance.state = 'running'
+    mockDeckInstance.resume.mockClear()
+    manager.resume(0)
+    expect(mockDeckInstance.resume).not.toHaveBeenCalled()
+  })
+
+  it('resume() sur slot non initialisé ne plante pas', () => {
+    expect(() => manager.resume(3)).not.toThrow()
+  })
+
   it('isRunning() retourne false sur slot non initialisé', () => {
     expect(manager.isRunning(0)).toBe(false)
   })

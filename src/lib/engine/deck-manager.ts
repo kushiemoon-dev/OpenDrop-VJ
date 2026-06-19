@@ -53,6 +53,11 @@ export class DeckManager {
 		this.slots[slot]?.deck.pause();
 	}
 
+	resume(slot: number): void {
+		const entry = this.slots[slot];
+		if (entry && entry.deck.state === 'idle') entry.deck.resume();
+	}
+
 	isRunning(slot: number): boolean {
 		return this.slots[slot]?.deck.state === 'running';
 	}

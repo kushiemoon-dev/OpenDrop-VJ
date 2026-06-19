@@ -125,7 +125,7 @@
 					deckB?.applyQuality(settings);
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
-					invisibleMode = msg.invisibleMode;
+					invisibleMode = msg.invisibleMode as InvisibleMode;
 					invisibleFps = msg.invisibleFps;
 				} else if (msg.type === 'overlays') {
 					overlays = msg.list;

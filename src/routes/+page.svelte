@@ -165,6 +165,8 @@
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
 	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
+	let pausedSlots = new Set<number>();   // non-réactif: mémoire inter-runs du $effect éco
+	let lastFps = [0, 0, 0, 0];            // non-réactif: anti-churn inter-runs du $effect éco
 
 	// — Overlays ——————————————————————————————————————————
 	let overlays = $state<Overlay[]>([]);
@@ -321,18 +323,24 @@
 		const mode = invisibleMode;
 		const target = targetFps;
 		const eco = invisibleFps;
-		let lastFps = [0, 0, 0, 0];    // tableau local (immutable replacement pattern)
 		for (let i = 0; i < 4; i++) {
 			if (!manager.isRunning(i)) continue;
 			const visible = ops[i] > 0.001;
 			const wantedFps = (visible || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
-			if (wantedFps !== lastFps[i]) {
-				if (mode === 'pause' && !visible) {
+			if (mode === 'pause' && !visible) {
+				if (!pausedSlots.has(i)) {
 					manager.pause(i);
-				} else {
-					manager.setSlotTargetFps(i, wantedFps);
+					pausedSlots = new Set([...pausedSlots, i]);
 				}
-				lastFps = [...lastFps.slice(0, i), wantedFps, ...lastFps.slice(i + 1)];
+			} else {
+				if (pausedSlots.has(i)) {
+					manager.resume(i);
+					pausedSlots = new Set([...pausedSlots].filter(s => s !== i));
+				}
+				if (wantedFps !== lastFps[i]) {
+					manager.setSlotTargetFps(i, wantedFps);
+					lastFps = [...lastFps.slice(0, i), wantedFps, ...lastFps.slice(i + 1)];
+				}
 			}
 		}
 	});

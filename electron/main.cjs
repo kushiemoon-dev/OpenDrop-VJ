@@ -4,6 +4,11 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session } = requ
 const path = require('path');
 const fs = require('fs');
 
+// Allow AudioContext to auto-start in renderer windows (including the output window
+// which opens programmatically via window.open, with no user gesture of its own).
+// Must be set before app is ready.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 // Must be called before app is ready — makes app:// behave like https://
 // (standard origin, secure context, fetch API, dynamic import support)
 protocol.registerSchemesAsPrivileged([{
@@ -50,6 +55,17 @@ ipcMain.on('bc-post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win.webContents.id !== event.sender.id) {
       win.webContents.send('bc-msg', data);
+    }
+  });
+});
+
+// ── Relay raw PCM audio frames from main renderer to output window ──────────
+// Dedicated channel (not bc-post) to keep ~190 KB/s PCM traffic separate from
+// low-rate control messages (preset/crossfader/beat/overlays/video).
+ipcMain.on('audioframe:post', (event, data) => {
+  BrowserWindow.getAllWindows().forEach((win) => {
+    if (win.webContents.id !== event.sender.id) {
+      win.webContents.send('audioframe:data', data);
     }
   });
 });

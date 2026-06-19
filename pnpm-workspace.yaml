@@ -8,6 +8,7 @@ allowBuilds:
   esbuild: true
   electron-winstaller: true
   grandiose: true
+  spout-addon: true
 
 overrides:
   shell-quote: ">=1.8.4"

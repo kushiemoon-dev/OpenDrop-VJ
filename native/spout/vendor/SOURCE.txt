@@ -18,3 +18,4 @@ Do NOT copy SpoutGL*, SpoutReceiver*, or the OpenGL sub-folder.
 
 Build requires: MSVC (via electron-rebuild), Windows SDK (d3d11.lib, dxgi.lib).
 To build: pnpm run electron:rebuild:spout
+Pin commit: cc1931b1149199b03412d2b3be0723d2f2cca171

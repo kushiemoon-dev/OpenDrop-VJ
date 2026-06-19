@@ -22,6 +22,9 @@
 	let ndiError = $state('');
 	let v4l2Active = $state(false);
 	let v4l2Error = $state('');
+	let spoutActive = $state(false);
+	let spoutError = $state('');
+	let platform = $state('');
 
 	// — Diagnostic audio (temporaire) ————————————————————————
 	let dbgRx = $state(0);
@@ -78,6 +81,7 @@
 			// On the first frame, initialize the loopback worklet so Butterchurn reacts
 			// to the same audio signal as the main window — regardless of source type.
 			const eAPI = window.electronAPI;
+			if (eAPI?.getPlatform) platform = await eAPI.getPlatform();
 			if (eAPI?.onAudioFrame) {
 				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
 					dbgRx++;
@@ -210,6 +214,18 @@
 		}
 	}
 
+	async function toggleSpout() {
+		spoutError = '';
+		if (spoutActive) {
+			await eAPI?.spoutStop();
+			spoutActive = false;
+		} else {
+			const res = await eAPI?.spoutStart('OpenDrop VJ');
+			if (res?.ok) spoutActive = true;
+			else spoutError = res?.error ?? 'Spout indisponible.';
+		}
+	}
+
 	async function toggleNdi() {
 		ndiError = '';
 		if (ndiActive) {
@@ -245,12 +261,20 @@
 		<button class="ndi-btn" class:ndi-on={ndiActive} onclick={toggleNdi} title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
 			NDI {ndiActive ? '●' : '○'}
 		</button>
+		{#if platform === 'win32'}
+			<button class="spout-btn" class:spout-on={spoutActive} onclick={toggleSpout} title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
+				SPOUT {spoutActive ? '●' : '○'}
+			</button>
+		{/if}
 	{/if}
 	{#if v4l2Error}
 		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{v4l2Error}</div>
 	{/if}
 	{#if ndiError}
 		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{ndiError}</div>
+	{/if}
+	{#if spoutError}
+		<div class="notice error" style="font-size:11px;padding:0.5rem 1rem;">{spoutError}</div>
 	{/if}
 
 	{#if status === 'initializing'}
@@ -310,7 +334,7 @@
 		pointer-events: none;
 	}
 
-	.ndi-btn, .v4l2-btn {
+	.ndi-btn, .v4l2-btn, .spout-btn {
 		position: absolute;
 		bottom: 12px;
 		z-index: 30;
@@ -335,4 +359,8 @@
 
 	.v4l2-btn:hover { border-color: #00c8ff; color: #00c8ff; }
 	.v4l2-btn.v4l2-on { border-color: #00c8ff; color: #00c8ff; background: rgba(0,200,255,0.12); }
+
+	.spout-btn { right: 148px; }
+	.spout-btn:hover { border-color: #b366ff; color: #b366ff; }
+	.spout-btn.spout-on { border-color: #b366ff; color: #b366ff; background: rgba(179,102,255,0.12); }
 </style>

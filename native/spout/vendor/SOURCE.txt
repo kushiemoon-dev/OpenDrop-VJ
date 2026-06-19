@@ -1,0 +1,20 @@
+SpoutDX vendor sources
+======================
+
+Upstream: https://github.com/leadedge/Spout2
+License:  BSD 2-Clause
+
+Files to vendor from SPOUTSDK/SpoutDX/ (pin a specific commit before building):
+  SpoutDX.h / SpoutDX.cpp
+  SpoutSenderNames.h / SpoutSenderNames.cpp
+  SpoutSharedMemory.h / SpoutSharedMemory.cpp
+  SpoutFrameCount.h / SpoutFrameCount.cpp
+  SpoutUtils.h / SpoutUtils.cpp
+  SpoutCopy.h / SpoutCopy.cpp
+  SpoutDirectX.h / SpoutDirectX.cpp
+
+GL/OpenGL files are NOT needed (DX-only path via SendImage).
+Do NOT copy SpoutGL*, SpoutReceiver*, or the OpenGL sub-folder.
+
+Build requires: MSVC (via electron-rebuild), Windows SDK (d3d11.lib, dxgi.lib).
+To build: pnpm run electron:rebuild:spout

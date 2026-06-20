@@ -7,7 +7,7 @@
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
-	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
+	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
@@ -161,6 +161,13 @@
 	let quality = $state<QualityTier>(DEFAULT_TIER);
 	let fps = $state(0);
 
+	// — Performance decks ——————————————————————————————————
+	let targetFps = $state(DEFAULT_PERF.targetFps);
+	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
+	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
+	let pausedSlots = new Set<number>();   // non-réactif: mémoire inter-runs du $effect éco
+	let lastFps = [0, 0, 0, 0];            // non-réactif: anti-churn inter-runs du $effect éco
+
 	// — Overlays ——————————————————————————————————————————
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
@@ -214,11 +221,14 @@
 		sync?.sendCrossfader(x);
 	});
 
-	// — VU meter polling + video speed warp ——————————————
+	// — VU meter polling + FPS counter + video speed warp —
 	$effect(() => {
 		if (status !== 'running' || !audio) return;
 		let rafId: number;
-		const tick = () => {
+		let fpsCount = 0;
+		let fpsLast = performance.now();
+		const tick = (t: number) => {
+			// VU meter + video warp
 			const lv = audio!.getLevels();
 			vuLevel = lv.rms;
 			if (videoEnabled && vrWarp) {
@@ -227,10 +237,17 @@
 			} else {
 				videoPlaybackRate = 1;
 			}
+			// FPS counter
+			fpsCount++;
+			if (t - fpsLast >= 500) {
+				fps = Math.round(fpsCount * 1000 / (t - fpsLast));
+				fpsCount = 0;
+				fpsLast = t;
+			}
 			rafId = requestAnimationFrame(tick);
 		};
 		rafId = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(rafId);
+		return () => { cancelAnimationFrame(rafId); fps = 0; };
 	});
 
 	// — Persistance localStorage ——————————————————————————
@@ -244,6 +261,8 @@
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-quality', quality);
+		localStorage.setItem('od-target-fps', String(targetFps));
+		localStorage.setItem('od-invisible-mode', invisibleMode);
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
@@ -287,23 +306,43 @@
 		sync?.sendQuality(quality);
 	});
 
-	// — FPS counter ————————————————————————————————————————
+	// — Appliquer le FPS cible aux decks + sync output ————
 	$effect(() => {
 		if (status !== 'running') return;
-		let count = 0;
-		let last = performance.now();
-		let rafId: number;
-		const tick = (t: number) => {
-			count++;
-			if (t - last >= 500) {
-				fps = Math.round(count * 1000 / (t - last));
-				count = 0;
-				last = t;
+		const fps = targetFps;    // lire avant sync?. pour forcer le tracking
+		const mode = invisibleMode;
+		const eco = invisibleFps;
+		manager.setTargetFps(fps);
+		sync?.sendPerf({ targetFps: fps, invisibleMode: mode, invisibleFps: eco });
+	});
+
+	// — Throttle des decks invisibles (éco) ——————————————
+	$effect(() => {
+		if (status !== 'running') return;
+		const ops = opacities;          // lire en premier → tracké
+		const mode = invisibleMode;
+		const target = targetFps;
+		const eco = invisibleFps;
+		for (let i = 0; i < 4; i++) {
+			if (!manager.isRunning(i)) continue;
+			const visible = ops[i] > 0.001;
+			const wantedFps = (visible || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
+			if (mode === 'pause' && !visible) {
+				if (!pausedSlots.has(i)) {
+					manager.pause(i);
+					pausedSlots = new Set([...pausedSlots, i]);
+				}
+			} else {
+				if (pausedSlots.has(i)) {
+					manager.resume(i);
+					pausedSlots = new Set([...pausedSlots].filter(s => s !== i));
+				}
+				if (wantedFps !== lastFps[i]) {
+					manager.setSlotTargetFps(i, wantedFps);
+					lastFps = [...lastFps.slice(0, i), wantedFps, ...lastFps.slice(i + 1)];
+				}
 			}
-			rafId = requestAnimationFrame(tick);
-		};
-		rafId = requestAnimationFrame(tick);
-		return () => { cancelAnimationFrame(rafId); fps = 0; };
+		}
 	});
 
 	// — Lifecycle ——————————————————————————————————————————
@@ -325,6 +364,15 @@
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
+			const savedFps = localStorage.getItem('od-target-fps');
+			if (savedFps) {
+				const v = Number(savedFps);
+				if (v === 30 || v === 45 || v === 60) targetFps = v;
+			}
+			const savedInvisibleMode = localStorage.getItem('od-invisible-mode');
+			if (savedInvisibleMode === 'eco' || savedInvisibleMode === 'pause' || savedInvisibleMode === 'off') {
+				invisibleMode = savedInvisibleMode;
+			}
 			const savedOverlays = localStorage.getItem('od-overlays');
 			if (savedOverlays) overlays = JSON.parse(savedOverlays);
 			const savedVideoEnabled = localStorage.getItem('od-video-enabled');
@@ -414,6 +462,7 @@
 				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
+				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
@@ -1263,6 +1312,16 @@
 				<button class="btn-sm" class:active={quality === 'low'} onclick={() => quality = 'low'} disabled={status !== 'running'}>Low</button>
 				<button class="btn-sm" class:active={quality === 'medium'} onclick={() => quality = 'medium'} disabled={status !== 'running'}>Med</button>
 				<button class="btn-sm" class:active={quality === 'high'} onclick={() => quality = 'high'} disabled={status !== 'running'}>High</button>
+			</div>
+			<div class="btn-row" style="margin-top:6px">
+				<button class="btn-sm" class:active={targetFps === 30} onclick={() => targetFps = 30} disabled={status !== 'running'}>30 fps</button>
+				<button class="btn-sm" class:active={targetFps === 45} onclick={() => targetFps = 45} disabled={status !== 'running'}>45 fps</button>
+				<button class="btn-sm" class:active={targetFps === 60} onclick={() => targetFps = 60} disabled={status !== 'running'}>60 fps</button>
+			</div>
+			<div class="btn-row" style="margin-top:4px">
+				<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => invisibleMode = 'eco'} disabled={status !== 'running'} title="Decks cachés à ~8 fps">Éco</button>
+				<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => invisibleMode = 'pause'} disabled={status !== 'running'} title="Decks cachés pausés">Pause</button>
+				<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => invisibleMode = 'off'} disabled={status !== 'running'} title="Tous les decks à plein régime">Off</button>
 			</div>
 		</div>
 

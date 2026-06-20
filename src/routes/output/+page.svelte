@@ -4,7 +4,7 @@
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { OutputSync } from '$lib/engine/sync.js';
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
-	import { getQualitySettings, DEFAULT_TIER, type QualityTier } from '$lib/engine/quality.js';
+	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
@@ -36,9 +36,35 @@
 	// Set to true once PCM frames from the main window are flowing — prevents the
 	// output from also trying to re-capture the same device independently (fragile).
 	let audioAcquired = $state(false);
+	// — Performance reçue du main ——————————————————————————
+	let targetFps = $state(DEFAULT_PERF.targetFps);
+	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
+	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
 
 	const opacityA = $derived(1 - crossfader);
 	const opacityB = $derived(crossfader);
+
+	// — Throttle des decks invisibles selon le perf mode ——
+	$effect(() => {
+		const oa = opacityA;    // lire avant appels non-réactifs
+		const ob = opacityB;
+		const mode = invisibleMode;
+		const target = targetFps;
+		const eco = invisibleFps;
+
+		const wantA = (oa > 0.001 || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
+		const wantB = (ob > 0.001 || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
+
+		if (mode === 'pause') {
+			// En mode pause, les decks sont gérés via pause/resume — pas setTargetFps
+			// On laisse ça minimal car pause n'est pas le mode par défaut (éco l'est)
+			if (oa <= 0.001) deckA?.setTargetFps(eco);   // throttle lourd au lieu de pause
+			if (ob <= 0.001) deckB?.setTargetFps(eco);   // (Deck.pause() nécessiterait un resume piloté)
+		} else {
+			deckA?.setTargetFps(wantA);
+			deckB?.setTargetFps(wantB);
+		}
+	});
 
 	onMount(async () => {
 		try {
@@ -56,6 +82,9 @@
 
 			deckA.startRenderLoop();
 			deckB.startRenderLoop();
+			// Apply initial FPS cap from perf settings (effect fires before decks are ready)
+			deckA.setTargetFps(targetFps);
+			deckB.setTargetFps(targetFps);
 
 			// Charger les presets par défaut (mêmes indices 0/1 que le main) pour ne jamais
 			// être noir si le handshake de sync tarde ou est absent.
@@ -97,6 +126,10 @@
 					const settings = getQualitySettings(msg.tier as QualityTier);
 					deckA?.applyQuality(settings);
 					deckB?.applyQuality(settings);
+				} else if (msg.type === 'perf') {
+					targetFps = msg.targetFps;
+					invisibleMode = msg.invisibleMode as InvisibleMode;
+					invisibleFps = msg.invisibleFps;
 				} else if (msg.type === 'overlays') {
 					overlays = msg.list;
 				} else if (msg.type === 'video') {

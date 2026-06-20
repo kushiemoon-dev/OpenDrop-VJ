@@ -225,8 +225,8 @@
 	$effect(() => {
 		if (status !== 'running' || !audio) return;
 		let rafId: number;
-		let fpsCount = 0;
 		let fpsLast = performance.now();
+		let lastRenderCount = 0;
 		const tick = (t: number) => {
 			// VU meter + video warp
 			const lv = audio!.getLevels();
@@ -237,11 +237,12 @@
 			} else {
 				videoPlaybackRate = 1;
 			}
-			// FPS counter
-			fpsCount++;
+			// FPS counter — mesure les renders Butterchurn réels (pas les ticks RAF)
 			if (t - fpsLast >= 500) {
-				fps = Math.round(fpsCount * 1000 / (t - fpsLast));
-				fpsCount = 0;
+				const activeSlot = ([0, 1, 2, 3] as const).find(i => manager.isRunning(i)) ?? 0;
+				const current = manager.getRenderCount(activeSlot);
+				fps = Math.round((current - lastRenderCount) * 1000 / (t - fpsLast));
+				lastRenderCount = current;
 				fpsLast = t;
 			}
 			rafId = requestAnimationFrame(tick);

@@ -1,5 +1,6 @@
 import type { Overlay } from '$lib/engine/overlay.js';
 import type { ClipRef } from '$lib/engine/video-store.js';
+import type { InvisibleMode } from '$lib/engine/quality.js';
 
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
@@ -10,6 +11,7 @@ export type SyncMessage =
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat' }
+	| { type: 'perf'; targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }
 	| { type: 'hello' };
 
 const CHANNEL = 'opendrop-output';
@@ -74,6 +76,10 @@ export class MainSync {
 
 	sendBeat() {
 		sendMsg(this.bc, { type: 'beat' });
+	}
+
+	sendPerf(settings: { targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }) {
+		sendMsg(this.bc, { type: 'perf', ...settings });
 	}
 
 	destroy() {

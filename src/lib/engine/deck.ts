@@ -37,6 +37,7 @@ export class Deck {
 	private _state: DeckState = 'idle';
 	private frameInterval = 0;   // ms entre renders (0 = illimité)
 	private lastFrameTime = 0;   // timestamp du dernier viz.render()
+	renderCount = 0;             // total de renders appelés, pour mesure FPS réelle
 
 	readonly canvas: HTMLCanvasElement;
 	readonly id: string;
@@ -95,6 +96,7 @@ export class Deck {
 	 */
 	render(): void {
 		this.viz?.render();
+		this.renderCount++;
 	}
 
 	/**

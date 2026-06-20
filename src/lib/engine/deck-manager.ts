@@ -108,6 +108,10 @@ export class DeckManager {
 		this.slots[slot]?.deck.resize(w, h);
 	}
 
+	getRenderCount(slot: number): number {
+		return this.slots[slot]?.deck.renderCount ?? 0;
+	}
+
 	runningCount(): number {
 		return this.slots.filter((s) => s?.deck.state === 'running').length;
 	}

@@ -2,6 +2,36 @@ import type { Overlay } from '$lib/engine/overlay.js';
 import type { ClipRef } from '$lib/engine/video-store.js';
 import type { InvisibleMode } from '$lib/engine/quality.js';
 
+export interface ColorParams {
+	hueRotate: number;   // 0..1 → 0..360°
+	saturate: number;    // 0..1 → 0..200% (0.5 = 100% = normal)
+	brightness: number;  // 0..1 → 0..200% (0.5 = 100% = normal)
+	contrast: number;    // 0..1 → 0..200% (0.5 = 100% = normal)
+	invert: number;      // 0..1
+}
+
+export const DEFAULT_COLOR_PARAMS: ColorParams = {
+	hueRotate: 0,
+	saturate: 0.5,
+	brightness: 0.5,
+	contrast: 0.5,
+	invert: 0,
+}
+
+export function colorParamsToFilter(p: ColorParams): string {
+	const isDefault =
+		p.hueRotate === 0 && p.saturate === 0.5 && p.brightness === 0.5 &&
+		p.contrast === 0.5 && p.invert === 0;
+	if (isDefault) return 'none';
+	const parts: string[] = [];
+	if (p.hueRotate !== 0) parts.push(`hue-rotate(${Math.round(p.hueRotate * 360)}deg)`);
+	if (p.saturate !== 0.5) parts.push(`saturate(${Math.round(p.saturate * 200)}%)`);
+	if (p.brightness !== 0.5) parts.push(`brightness(${Math.round(p.brightness * 200)}%)`);
+	if (p.contrast !== 0.5) parts.push(`contrast(${Math.round(p.contrast * 200)}%)`);
+	if (p.invert !== 0) parts.push(`invert(${Math.round(p.invert * 100)}%)`);
+	return parts.join(' ');
+}
+
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
 	| { type: 'crossfader'; value: number }
@@ -12,6 +42,7 @@ export type SyncMessage =
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
 	| { type: 'strobe'; on: boolean; rate: number; intensity: number; color: string }
+	| { type: 'color'; deck: 'A' | 'B'; params: ColorParams }
 	| { type: 'perf'; targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }
 	| { type: 'hello' };
 
@@ -81,6 +112,10 @@ export class MainSync {
 
 	sendStrobe(on: boolean, rate: number, intensity: number, color: string) {
 		sendMsg(this.bc, { type: 'strobe', on, rate, intensity, color });
+	}
+
+	sendColor(deck: 'A' | 'B', params: ColorParams) {
+		sendMsg(this.bc, { type: 'color', deck, params });
 	}
 
 	sendPerf(settings: { targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }) {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { MainSync } from '$lib/engine/sync.js';
+	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
@@ -87,6 +87,12 @@
 	let strobeColor = $state('#ffffff');
 	let strobeFlash = $state(false);
 	let _lastStrobeVal = 0;
+
+	// — Color controls per deck (M3) ——————————————————————
+	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
+	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
 
 	// Inverted index: commandId → assigned key string
 	const keyById = $derived(
@@ -224,6 +230,18 @@
 		run() { strobeRate = Math.max(0.25, strobeRate / 2); },
 	});
 
+	// — Câblage commandes M3 (color controls) ——————————————
+	registry.register({ id: 'color-hue-a', label: 'Hue A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, hueRotate: v }; } });
+	registry.register({ id: 'color-sat-a', label: 'Saturation A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, saturate: v }; } });
+	registry.register({ id: 'color-bright-a', label: 'Brightness A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, brightness: v }; } });
+	registry.register({ id: 'color-contrast-a', label: 'Contrast A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, contrast: v }; } });
+	registry.register({ id: 'color-invert-a', label: 'Invert A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, invert: v }; } });
+	registry.register({ id: 'color-hue-b', label: 'Hue B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, hueRotate: v }; } });
+	registry.register({ id: 'color-sat-b', label: 'Saturation B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, saturate: v }; } });
+	registry.register({ id: 'color-bright-b', label: 'Brightness B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, brightness: v }; } });
+	registry.register({ id: 'color-contrast-b', label: 'Contrast B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, contrast: v }; } });
+	registry.register({ id: 'color-invert-b', label: 'Invert B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, invert: v }; } });
+
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
 		getCrossfader: () => crossfader,
@@ -345,6 +363,16 @@
 		const intensity = strobeIntensity;
 		const color = strobeColor;
 		sync?.sendStrobe(on, rate, intensity, color);
+	});
+
+	// — Sync color params vers output ————————————————————
+	$effect(() => {
+		const paramsA = colorParamsA;
+		sync?.sendColor('A', paramsA);
+	});
+	$effect(() => {
+		const paramsB = colorParamsB;
+		sync?.sendColor('B', paramsB);
 	});
 
 	// — Appliquer la qualité aux decks + sync output ———————
@@ -1165,6 +1193,7 @@
 				class="deck-canvas"
 				style:opacity={opacities[i]}
 				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : 'screen'}
+				style:filter={deckBus[i] === 'A' ? colorFilterA : deckBus[i] === 'B' ? colorFilterB : undefined}
 			></canvas>
 		{/each}
 		<!-- Overlay sprites -->
@@ -1526,6 +1555,36 @@
 							<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
 						</div>
 					{/if}
+				</div>
+			{/each}
+		</div>
+
+		<!-- Color controls -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Color A</span>
+				<button class="btn-sm" onclick={() => { colorParamsA = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+			</div>
+			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label" style="width:48px">{label}</span>
+					<input type="range" {min} {max} step="0.01" value={colorParamsA[key]}
+						oninput={(e) => { colorParamsA = { ...colorParamsA, [key]: +e.currentTarget.value }; }}
+						style="flex:1" />
+					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsA[key] * scale)}{unit}</span>
+				</div>
+			{/each}
+			<div class="pl-header" style="margin-top:6px">
+				<span class="label">Color B</span>
+				<button class="btn-sm" onclick={() => { colorParamsB = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+			</div>
+			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label" style="width:48px">{label}</span>
+					<input type="range" {min} {max} step="0.01" value={colorParamsB[key]}
+						oninput={(e) => { colorParamsB = { ...colorParamsB, [key]: +e.currentTarget.value }; }}
+						style="flex:1" />
+					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsB[key] * scale)}{unit}</span>
 				</div>
 			{/each}
 		</div>

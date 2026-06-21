@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Deck } from '$lib/engine/deck.js';
+	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { OutputSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
@@ -10,17 +10,31 @@
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import type { ClipRef } from '$lib/engine/video-store.js';
 
-	let canvasA: HTMLCanvasElement | undefined = $state();
-	let canvasB: HTMLCanvasElement | undefined = $state();
-	let crossfader = $state(0);
+	let canvas0: HTMLCanvasElement | undefined = $state();
+	let canvas1: HTMLCanvasElement | undefined = $state();
+	let canvas2: HTMLCanvasElement | undefined = $state();
+	let canvas3: HTMLCanvasElement | undefined = $state();
+
+	// Opacités par slot — remplace crossfader + opacityA/B
+	let slotOpacities = $state<[number, number, number, number]>([1, 0, 0, 0]);
+	// Couleurs par slot
+	let slotColors = $state<[ColorParams, ColorParams, ColorParams, ColorParams]>([
+		{ ...DEFAULT_COLOR_PARAMS },
+		{ ...DEFAULT_COLOR_PARAMS },
+		{ ...DEFAULT_COLOR_PARAMS },
+		{ ...DEFAULT_COLOR_PARAMS },
+	]);
+	const slotFilters = $derived([
+		colorParamsToFilter(slotColors[0]),
+		colorParamsToFilter(slotColors[1]),
+		colorParamsToFilter(slotColors[2]),
+		colorParamsToFilter(slotColors[3]),
+	]);
+
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
-	// — Color controls ————————————————————————————————————
-	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
-	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
-	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
-	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
+
 	// — Strobe ———————————————————————————————————————————
 	let strobeOn = $state(false);
 	let strobeRate = $state(1);
@@ -58,8 +72,10 @@
 	function _strobeStop() {
 		if (_strobeRafId !== null) { cancelAnimationFrame(_strobeRafId); _strobeRafId = null; }
 	}
+
 	let status = $state<'initializing' | 'ready' | 'error'>('initializing');
 	let errorMsg = $state('');
+
 	// — Video loops ———————————————————————————————————————
 	let videoEnabled = $state(false);
 	let videoClip = $state<ClipRef | null>(null);
@@ -68,76 +84,57 @@
 	let vrFlash = $state(true);
 	let vrHue = $state(false);
 
-	let deckA: Deck | null = null;
-	let deckB: Deck | null = null;
+	let manager: DeckManager | null = null;
 	let audio: AudioEngine | null = null;
 	let sync: OutputSync | null = null;
 	let helloTimer: ReturnType<typeof setInterval> | null = null;
 	let loopbackUnlisten: (() => void) | null = null;
 	let audioFrameUnlisten: (() => void) | null = null;
-	// Set to true once PCM frames from the main window are flowing — prevents the
-	// output from also trying to re-capture the same device independently (fragile).
 	let audioAcquired = $state(false);
+
 	// — Performance reçue du main ——————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
 	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
 
-	const opacityA = $derived(1 - crossfader);
-	const opacityB = $derived(crossfader);
-
-	// — Throttle des decks invisibles selon le perf mode ——
+	// Throttle des slots invisibles selon le perf mode
 	$effect(() => {
-		const oa = opacityA;    // lire avant appels non-réactifs
-		const ob = opacityB;
+		const ops = slotOpacities;
 		const mode = invisibleMode;
 		const target = targetFps;
 		const eco = invisibleFps;
-
-		const wantA = (oa > 0.001 || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
-		const wantB = (ob > 0.001 || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
-
-		if (mode === 'pause') {
-			// En mode pause, les decks sont gérés via pause/resume — pas setTargetFps
-			// On laisse ça minimal car pause n'est pas le mode par défaut (éco l'est)
-			if (oa <= 0.001) deckA?.setTargetFps(eco);   // throttle lourd au lieu de pause
-			if (ob <= 0.001) deckB?.setTargetFps(eco);   // (Deck.pause() nécessiterait un resume piloté)
-		} else {
-			deckA?.setTargetFps(wantA);
-			deckB?.setTargetFps(wantB);
+		if (!manager) return;
+		for (let i = 0; i < 4; i++) {
+			const visible = ops[i] > 0.001 || mode === 'off';
+			const fps = visible ? target : (mode === 'eco' ? eco : 0);
+			manager.setSlotTargetFps(i, fps);
 		}
 	});
 
 	onMount(async () => {
 		try {
-			// Minimal AudioContext — no source, just needed by Butterchurn
 			audio = new AudioEngine();
 
-			const w = canvasA!.clientWidth || window.innerWidth;
-			const h = canvasA!.clientHeight || window.innerHeight;
+			manager = new DeckManager();
+			manager.attachCanvas(0, canvas0!);
+			manager.attachCanvas(1, canvas1!);
+			manager.attachCanvas(2, canvas2!);
+			manager.attachCanvas(3, canvas3!);
 
-			deckA = new Deck(canvasA!, 'out-a');
-			deckB = new Deck(canvasB!, 'out-b');
 			const q = getQualitySettings(DEFAULT_TIER);
-			await deckA.init(audio.ctx, { width: w, height: h, ...q });
-			await deckB.init(audio.ctx, { width: w, height: h, ...q });
 
-			deckA.startRenderLoop();
-			deckB.startRenderLoop();
-			// Apply initial FPS cap from perf settings (effect fires before decks are ready)
-			deckA.setTargetFps(targetFps);
-			deckB.setTargetFps(targetFps);
+			// Démarrer slots 0 et 1 par défaut (équivalent A/B compat)
+			await manager.start(0, audio.ctx, audio.analyser, q, null);
+			await manager.start(1, audio.ctx, audio.analyser, q, null);
+			manager.setTargetFps(targetFps);
 
-			// Charger les presets par défaut (mêmes indices 0/1 que le main) pour ne jamais
-			// être noir si le handshake de sync tarde ou est absent.
+			// Charger les presets par défaut pour éviter l'écran noir au démarrage
 			await initPresets();
 			const list = buildPresetList();
-			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) deckA.loadPreset(d, 0.0); }
-			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) deckB.loadPreset(d, 0.0); }
+			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) manager.loadPreset(0, d, 0.0); }
+			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) manager.loadPreset(1, d, 0.0); }
 
-			// Subscribe to PCM frames streamed from the main renderer (Electron-only).
-			// On the first frame, initialize the loopback worklet so Butterchurn reacts
-			// to the same audio signal as the main window — regardless of source type.
+			// PCM frames streamés depuis le renderer principal (Electron-only)
 			const eAPI = window.electronAPI;
 			if (eAPI?.onAudioFrame) {
 				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
@@ -145,8 +142,7 @@
 						audioAcquired = true;
 						await audio!.resume();
 						await audio!.connectLoopbackPcm();
-						deckA?.connectAudio(audio!.analyser);
-						deckB?.connectAudio(audio!.analyser);
+						manager?.connectAudio(audio!.analyser);
 					}
 					audio!.pushCapturePcm(frame);
 				});
@@ -156,18 +152,30 @@
 			let gotState = false;
 			sync.listen(async (msg) => {
 				if (msg.type === 'preset') {
+					// Compat backward : deck A → slot 0, deck B → slot 1
+					gotState = true;
+					const slot = msg.deck === 'A' ? 0 : 1;
+					const preset = await loadPresetData(msg.name);
+					if (!preset) return;
+					await ensureSlot(slot, q);
+					manager?.loadPreset(slot, preset, 2.0);
+				} else if (msg.type === 'preset-slot') {
 					gotState = true;
 					const preset = await loadPresetData(msg.name);
 					if (!preset) return;
-					if (msg.deck === 'A') deckA?.loadPreset(preset, 2.0);
-					else deckB?.loadPreset(preset, 2.0);
+					await ensureSlot(msg.slot, q);
+					manager?.loadPreset(msg.slot, preset, 2.0);
 				} else if (msg.type === 'crossfader') {
+					// Compat backward : crossfader → opacités slot 0/1
 					gotState = true;
-					crossfader = msg.value;
+					const cf = msg.value;
+					slotOpacities = [1 - cf, cf, slotOpacities[2], slotOpacities[3]];
+				} else if (msg.type === 'deckbus') {
+					gotState = true;
+					slotOpacities = msg.opacities;
 				} else if (msg.type === 'quality') {
 					const settings = getQualitySettings(msg.tier as QualityTier);
-					deckA?.applyQuality(settings);
-					deckB?.applyQuality(settings);
+					manager?.applyQuality(settings);
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;
@@ -186,13 +194,14 @@
 					beat = true;
 					if (beatTimer !== null) clearTimeout(beatTimer);
 					beatTimer = setTimeout(() => { beat = false; beatTimer = null; }, 80);
-					// Re-sync strobe phase to beat
 					_strobeBpm = msg.bpm;
 					_strobePhase = 0;
 					_lastStrobeVal = 0;
 				} else if (msg.type === 'color') {
-					if (msg.deck === 'A') colorParamsA = msg.params;
-					else colorParamsB = msg.params;
+					const slot = msg.deck === 'A' ? 0 : 1;
+					const next: [ColorParams, ColorParams, ColorParams, ColorParams] = [...slotColors];
+					next[slot] = msg.params;
+					slotColors = next;
 				} else if (msg.type === 'strobe') {
 					strobeOn = msg.on;
 					strobeRate = msg.rate;
@@ -200,43 +209,32 @@
 					strobeColor = msg.color;
 					if (msg.on) _strobeStart(); else _strobeStop();
 				} else if (msg.type === 'source') {
-					// If PCM frames are already flowing from the main window, skip the
-					// independent re-capture (fragile on Linux — same device may be exclusive).
 					if (audioAcquired) return;
 					loopbackUnlisten?.();
 					loopbackUnlisten = null;
 					try {
 						await audio!.resume();
 						await audio!.connectDevice(msg.deviceId);
-						deckA?.connectAudio(audio!.analyser);
-						deckB?.connectAudio(audio!.analyser);
-					} catch {
-						// device capture failed — audio stays silent
-					}
+						manager?.connectAudio(audio!.analyser);
+					} catch { /* device capture failed */ }
 				} else if (msg.type === 'loopback') {
-					// Same guard — PCM streaming takes priority over IPC loopback.
 					if (audioAcquired) return;
 					loopbackUnlisten?.();
 					loopbackUnlisten = null;
 					try {
 						await audio!.resume();
 						await audio!.connectLoopbackPcm();
-						deckA?.connectAudio(audio!.analyser);
-						deckB?.connectAudio(audio!.analyser);
+						manager?.connectAudio(audio!.analyser);
 						const eAPI = window.electronAPI;
 						if (eAPI) {
 							loopbackUnlisten = eAPI.onLoopbackData((data) => {
 								audio?.pushLoopbackPcm(data);
 							});
 						}
-					} catch {
-						// loopback may not be available
-					}
+					} catch { /* loopback may not be available */ }
 				}
 			});
 
-			// Émettre hello après listen() pour ne rater aucune réponse.
-			// Retry jusqu'à réception du premier état du main (~12 × 700 ms ≈ 8 s max).
 			sync.sendHello();
 			let tries = 0;
 			helloTimer = setInterval(() => {
@@ -251,32 +249,40 @@
 		}
 	});
 
+	async function ensureSlot(slot: number, q: ReturnType<typeof getQualitySettings>) {
+		if (!manager || !audio) return;
+		if (!manager.isRunning(slot)) {
+			await manager.start(slot, audio.ctx, audio.analyser, q, null);
+		}
+	}
+
 	onDestroy(() => {
 		loopbackUnlisten?.();
 		audioFrameUnlisten?.();
 		if (beatTimer !== null) clearTimeout(beatTimer);
 		if (helloTimer !== null) clearInterval(helloTimer);
 		_strobeStop();
-		deckA?.destroy();
-		deckB?.destroy();
+		manager?.destroyAll();
 		audio?.destroy();
 		sync?.destroy();
 	});
 
 	function onResize() {
-		if (!canvasA || !canvasB) return;
-		deckA?.resize(canvasA.clientWidth, canvasA.clientHeight);
-		deckB?.resize(canvasB.clientWidth, canvasB.clientHeight);
+		if (!canvas0) return;
+		const w = canvas0.clientWidth || window.innerWidth;
+		const h = canvas0.clientHeight || window.innerHeight;
+		for (let i = 0; i < 4; i++) manager?.resize(i, w, h);
 	}
-
 </script>
 
 <svelte:window onresize={onResize} />
 
 <div class="output">
 	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{colorFilterA}"></canvas>
-	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}; filter:{colorFilterB}"></canvas>
+	<canvas bind:this={canvas0} class="layer" style="opacity:{slotOpacities[0]}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{slotFilters[0]}"></canvas>
+	<canvas bind:this={canvas1} class="layer layer-blend" style="opacity:{slotOpacities[1]}; filter:{slotFilters[1]}"></canvas>
+	<canvas bind:this={canvas2} class="layer layer-blend" style="opacity:{slotOpacities[2]}; filter:{slotFilters[2]}"></canvas>
+	<canvas bind:this={canvas3} class="layer layer-blend" style="opacity:{slotOpacities[3]}; filter:{slotFilters[3]}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
@@ -309,7 +315,7 @@
 		height: 100%;
 		display: block;
 	}
-	.layer-b { mix-blend-mode: screen; }
+	.layer-blend { mix-blend-mode: screen; }
 
 	.notice {
 		position: absolute;

@@ -10,7 +10,6 @@
 		favColor: number
 		inA: boolean
 		inB: boolean
-		isSelected: boolean
 		onLoad: () => void
 		onSetFavColor: (color: number) => void
 		onAddA: () => void
@@ -19,7 +18,7 @@
 		onHidden: () => void
 	}
 
-	let { preset, slug, thumbUrl, favColor, inA, inB, isSelected, onLoad, onSetFavColor, onAddA, onAddB, onVisible, onHidden }: Props = $props()
+	let { preset, slug, thumbUrl, favColor, inA, inB, onLoad, onSetFavColor, onAddA, onAddB, onVisible, onHidden }: Props = $props()
 
 	onMount(() => onVisible())
 	onDestroy(() => onHidden())
@@ -27,7 +26,6 @@
 
 <div
 	class="ptile"
-	class:ptile--selected={isSelected}
 	role="button"
 	tabindex="0"
 	onclick={onLoad}
@@ -89,11 +87,6 @@
 	.ptile:hover {
 		border-color: var(--accent);
 		transform: translateY(-1px);
-	}
-
-	.ptile--selected {
-		border-color: var(--accent);
-		box-shadow: 0 0 10px var(--accent-glow);
 	}
 
 	.ptile__thumb {

@@ -125,7 +125,7 @@ export class MainSync {
 	}
 
 	sendColor(deck: 'A' | 'B', params: ColorParams) {
-		sendMsg(this.bc, { type: 'color', deck, params });
+		sendMsg(this.bc, { type: 'color', deck, params: { ...params } });
 	}
 
 	sendPerf(settings: { targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }) {

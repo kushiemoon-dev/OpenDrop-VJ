@@ -44,4 +44,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('audioframe:data', handler);
     return () => ipcRenderer.off('audioframe:data', handler);
   },
+
+  // OSC UDP remote control (requires UDP port to be open on LAN)
+  startOsc: (port) => ipcRenderer.invoke('osc:start', { port }),
+  stopOsc: () => ipcRenderer.invoke('osc:stop'),
+  onOscMsg: (cb) => {
+    const handler = (_, cmdId, value01) => cb(cmdId, value01);
+    ipcRenderer.on('osc:msg', handler);
+    return () => ipcRenderer.off('osc:msg', handler);
+  },
+
+  // WebSocket remote control — phone/tablet touch UI at /remote
+  startRemote: () => ipcRenderer.invoke('remote:start'),
+  stopRemote: () => ipcRenderer.invoke('remote:stop'),
+  onRemoteCmd: (cb) => {
+    const handler = (_, cmd, value) => cb(cmd, value);
+    ipcRenderer.on('remote:cmd', handler);
+    return () => ipcRenderer.off('remote:cmd', handler);
+  },
 });

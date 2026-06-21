@@ -110,6 +110,16 @@
 	let showStreamPanel = $state(false);
 	let ndiActive = $state(false);
 	let ndiError = $state('');
+	// OSC
+	let oscActive = $state(false);
+	let oscPort = $state(7000);
+	let oscError = $state('');
+	let oscUnlisten: (() => void) | null = null;
+	// Remote control WS
+	let remoteActive = $state(false);
+	let remoteUrl = $state('');
+	let remoteError = $state('');
+	let remoteUnlisten: (() => void) | null = null;
 	let v4l2Active = $state(false);
 	let v4l2Error = $state('');
 	let spoutActive = $state(false);
@@ -476,6 +486,16 @@
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
+		// Listeners OSC + remote (Electron-only, dispatche dans le registry)
+		if (isElectron) {
+			oscUnlisten = window.electronAPI?.onOscMsg?.((cmdId, value01) => {
+				registry.dispatch(cmdId as CommandId, value01, commandCtx);
+			}) ?? null;
+			remoteUnlisten = window.electronAPI?.onRemoteCmd?.((cmd, value) => {
+				registry.dispatch(cmd as CommandId, value, commandCtx);
+			}) ?? null;
+		}
+
 		await initPresets();
 		await initVideoLoops();
 		presetList = buildPresetList();
@@ -494,6 +514,10 @@
 		midi?.destroy();
 		beatDetector?.destroy();
 		clock.stop();
+		oscUnlisten?.();
+		remoteUnlisten?.();
+		if (oscActive) window.electronAPI?.stopOsc?.();
+		if (remoteActive) window.electronAPI?.stopRemote?.();
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -1199,6 +1223,37 @@
 		}
 	}
 
+	async function toggleOsc() {
+		oscError = '';
+		const eAPI = window.electronAPI;
+		if (oscActive) {
+			await eAPI?.stopOsc?.();
+			oscActive = false;
+		} else {
+			const res = await eAPI?.startOsc?.(oscPort);
+			if (res?.ok) oscActive = true;
+			else oscError = res?.error ?? 'Erreur OSC.';
+		}
+	}
+
+	async function toggleRemote() {
+		remoteError = '';
+		const eAPI = window.electronAPI;
+		if (remoteActive) {
+			await eAPI?.stopRemote?.();
+			remoteActive = false;
+			remoteUrl = '';
+		} else {
+			const res = await eAPI?.startRemote?.();
+			if (res?.ok) {
+				remoteActive = true;
+				remoteUrl = `https://opendrop.kushie.dev/remote?host=${res.ip}&port=${res.port}&token=${res.token}`;
+			} else {
+				remoteError = res?.error ?? 'Erreur Remote.';
+			}
+		}
+	}
+
 	async function startSlot(slot: number) {
 		if (!audio || status !== 'running') return;
 		const q = getQualitySettings(quality);
@@ -1664,6 +1719,49 @@
 				</div>
 			{/each}
 		</div>
+
+		<!-- OSC remote (Electron only) -->
+		{#if isElectron}
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">OSC</span>
+				<button class="btn-sm" class:active={oscActive} onclick={toggleOsc}>
+					{oscActive ? 'Stop' : 'Start'}
+				</button>
+			</div>
+			{#if oscActive}
+				<span class="source-badge">Écoute UDP :{oscPort}</span>
+				<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
+			{:else}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Port</span>
+					<input type="number" min="1024" max="65535" bind:value={oscPort}
+						style="width:70px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
+				</div>
+			{/if}
+			{#if oscError}<div style="font-size:10px;color:#f87;margin-top:4px">{oscError}</div>{/if}
+		</div>
+
+		<!-- Web remote (Electron only) -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Remote</span>
+				<button class="btn-sm" class:active={remoteActive} onclick={toggleRemote}>
+					{remoteActive ? 'Stop' : 'Démarrer'}
+				</button>
+			</div>
+			{#if remoteActive && remoteUrl}
+				<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
+				<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:#7af;display:block;margin-top:4px">
+					Ouvrir sur cet appareil ↗
+				</a>
+			{/if}
+			{#if !remoteActive}
+				<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
+			{/if}
+			{#if remoteError}<div style="font-size:10px;color:#f87;margin-top:4px">{remoteError}</div>{/if}
+		</div>
+		{/if}
 
 	</aside>
 	<PresetBrowser

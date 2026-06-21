@@ -25,7 +25,8 @@
 	"dependencies": {
 		"@lucide/svelte": "^0.577.0",
 		"butterchurn": "^2.6.7",
-		"butterchurn-presets": "^2.4.7"
+		"butterchurn-presets": "^2.4.7",
+		"ws": "^8.21.0"
 	},
 	"optionalDependencies": {
 		"audify": "^1.10.1",
@@ -41,6 +42,7 @@
 		"@testing-library/jest-dom": "^6.6.3",
 		"@testing-library/svelte": "^5.3.1",
 		"@types/node": "^25.9.3",
+		"@types/ws": "^8.18.1",
 		"@vitest/coverage-v8": "^3.2.6",
 		"concurrently": "^10.0.3",
 		"electron": "^42.4.1",

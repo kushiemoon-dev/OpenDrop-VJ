@@ -27,6 +27,12 @@ declare global {
 			onLoopbackData: (cb: (data: { sampleRate: number; channels: number; pcm: Uint8Array }) => void) => () => void;
 			sendAudioFrame: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void;
 			onAudioFrame: (cb: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void) => () => void;
+			startOsc: (port: number) => Promise<{ ok: boolean; port?: number; error?: string }>;
+			stopOsc: () => Promise<{ ok: boolean }>;
+			onOscMsg: (cb: (cmdId: string, value01: number) => void) => () => void;
+			startRemote: () => Promise<{ ok: boolean; port?: number; ip?: string; token?: string; error?: string }>;
+			stopRemote: () => Promise<{ ok: boolean }>;
+			onRemoteCmd: (cb: (cmd: string, value: number) => void) => () => void;
 		};
 	}
 }

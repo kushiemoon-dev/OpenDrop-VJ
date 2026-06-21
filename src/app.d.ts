@@ -33,6 +33,9 @@ declare global {
 			startRemote: () => Promise<{ ok: boolean; port?: number; ip?: string; token?: string; error?: string }>;
 			stopRemote: () => Promise<{ ok: boolean }>;
 			onRemoteCmd: (cb: (cmd: string, value: number) => void) => () => void;
+			listScreens: () => Promise<Array<{ id: number; label: string; isPrimary: boolean; bounds: { x: number; y: number; width: number; height: number } }>>;
+			openOutputOnDisplay: (displayId: number | null) => Promise<{ ok: boolean; error?: string }>;
+			onOutputWindowClosed: (cb: () => void) => () => void;
 		};
 	}
 }

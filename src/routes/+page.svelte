@@ -54,6 +54,11 @@
 	let outputWinRef: Window | null = null;
 	let outputCloseTimer: ReturnType<typeof setInterval> | null = null;
 	let sync: MainSync | null = null;
+	// Screen targeting (Electron)
+	type DisplayInfo = { id: number; label: string; isPrimary: boolean; bounds: { x: number; y: number; width: number; height: number } };
+	let displays = $state<DisplayInfo[]>([]);
+	let selectedDisplayId = $state<number | null>(null);
+	let outputWindowClosedUnlisten: (() => void) | null = null;
 
 	// — Playlist state ————————————————————————————————————
 	let playlistIntervalSec = $state(10);
@@ -486,7 +491,7 @@
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
-		// Listeners OSC + remote (Electron-only, dispatche dans le registry)
+		// Listeners OSC + remote + screen (Electron-only)
 		if (isElectron) {
 			oscUnlisten = window.electronAPI?.onOscMsg?.((cmdId, value01) => {
 				registry.dispatch(cmdId as CommandId, value01, commandCtx);
@@ -494,6 +499,17 @@
 			remoteUnlisten = window.electronAPI?.onRemoteCmd?.((cmd, value) => {
 				registry.dispatch(cmd as CommandId, value, commandCtx);
 			}) ?? null;
+			outputWindowClosedUnlisten = window.electronAPI?.onOutputWindowClosed?.(() => {
+				outputOpen = false;
+				audio?.stopPcmCapture();
+			}) ?? null;
+			// Charger la liste des écrans
+			try {
+				const list = await window.electronAPI!.listScreens();
+				displays = list;
+				const secondary = list.find(d => !d.isPrimary);
+				selectedDisplayId = secondary?.id ?? list[0]?.id ?? null;
+			} catch {}
 		}
 
 		await initPresets();
@@ -516,6 +532,7 @@
 		clock.stop();
 		oscUnlisten?.();
 		remoteUnlisten?.();
+		outputWindowClosedUnlisten?.();
 		if (oscActive) window.electronAPI?.stopOsc?.();
 		if (remoteActive) window.electronAPI?.stopRemote?.();
 	});
@@ -1174,6 +1191,26 @@
 		}, 1500);
 	}
 
+	async function openOutputFullscreen() {
+		if (!isElectron) {
+			// Web fallback: fullscreen the visualizer area
+			const el = document.querySelector('.visualizer-wrap') as HTMLElement | null;
+			el?.requestFullscreen?.();
+			return;
+		}
+		const res = await window.electronAPI!.openOutputOnDisplay(selectedDisplayId);
+		if (res?.ok) {
+			outputOpen = true;
+			// Push current state after the window loads
+			setTimeout(() => {
+				sync?.sendPreset('A', busPresetA);
+				sync?.sendPreset('B', busPresetB);
+				sync?.sendCrossfader(crossfader);
+				if (currentDeviceId) sync?.sendSource(currentDeviceId);
+			}, 800);
+		}
+	}
+
 	function onResize() {
 		if (status !== 'running') return;
 		for (let i = 0; i < 4; i++) {
@@ -1522,6 +1559,27 @@
 					</button>
 				{/if}
 			</div>
+			<!-- Screen targeting: dropdown + fullscreen button -->
+			{#if isElectron && displays.length > 0}
+				<div class="midi-row" style="gap:6px;align-items:center;margin-top:6px">
+					<select
+						style="flex:1;font-size:10px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;padding:3px 4px"
+						value={selectedDisplayId}
+						onchange={(e) => { selectedDisplayId = Number(e.currentTarget.value); }}
+					>
+						{#each displays as d}
+							<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
+						{/each}
+					</select>
+					<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
+						⛶ Fullscreen
+					</button>
+				</div>
+			{:else if !isElectron}
+				<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
+					⛶ Fullscreen
+				</button>
+			{/if}
 			{#if outputOpen && !isElectron}
 				<span class="label" style="color:#7af">Output window open — use as OBS Browser Source</span>
 			{/if}

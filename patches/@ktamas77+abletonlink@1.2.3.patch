@@ -1,0 +1,25 @@
+diff --git a/binding.gyp b/binding.gyp
+--- a/binding.gyp
++++ b/binding.gyp
+@@ -11,10 +11,9 @@
+       "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],
+       "cflags!": [ "-fno-exceptions" ],
+       "cflags_cc!": [ "-fno-exceptions" ],
+-      "cflags_cc": [ "-std=c++14" ],
+-      "defines": [
++      "cflags_cc": [ "-std=c++17" ],
++      "defines": [
+         "NAPI_DISABLE_CPP_EXCEPTIONS",
+-        "LINK_PLATFORM_MACOSX=1",
+         "ASIO_STANDALONE=1"
+       ],
+       "conditions": [
+@@ -44,7 +43,7 @@
+           ]
+         }],
+         ["OS=='linux'", {
+-          "cflags_cc": [ "-std=c++14", "-pthread" ],
++          "cflags_cc": [ "-std=c++17", "-pthread" ],
+           "ldflags": [ "-pthread" ],
+           "defines": [ "LINK_PLATFORM_LINUX=1" ]
+         }]

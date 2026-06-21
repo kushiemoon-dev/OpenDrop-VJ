@@ -69,6 +69,19 @@ export class Clock {
 		this._lastTs = null;
 	}
 
+	/**
+	 * Force BPM and phase from an external source (e.g. Ableton Link).
+	 * Emits a beat event if phase wrapped backward since the last call.
+	 * @param bpm    Current tempo in BPM.
+	 * @param phase01 Phase within a beat cycle, 0..1.
+	 */
+	syncExternal(bpm: number, phase01: number): void {
+		this._bpm = Math.max(0, Math.min(300, bpm));
+		const prev = this._phase01;
+		this._phase01 = phase01;
+		if (phase01 < prev - 0.5) this._emitBeat();
+	}
+
 	/** Step the clock manually by dt seconds — for unit testing without RAF. */
 	_stepForTest(dtSeconds: number): void {
 		if (this._bpm > 0) {

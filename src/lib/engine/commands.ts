@@ -18,10 +18,7 @@ export type CommandId =
 	// M3 — Color controls (5 params × 2 decks)
 	| 'color-hue-a' | 'color-sat-a' | 'color-bright-a' | 'color-contrast-a' | 'color-invert-a'
 	| 'color-hue-b' | 'color-sat-b' | 'color-bright-b' | 'color-contrast-b' | 'color-invert-b'
-	// M7 — Output / fullscreen
-	| 'output-fullscreen'
-	// Video
-	| 'video-prev' | 'video-next' | 'video-toggle';
+	;
 
 export interface CommandContext {
 	getCrossfader(): number;
@@ -203,12 +200,6 @@ const DEFAULT_COMMANDS: Command[] = [
 	{ id: 'color-bright-b', label: 'Brightness B', kind: 'range', run() {} },
 	{ id: 'color-contrast-b', label: 'Contrast B', kind: 'range', run() {} },
 	{ id: 'color-invert-b', label: 'Invert B', kind: 'range', run() {} },
-	// M7 stubs
-	{ id: 'output-fullscreen', label: 'Output fullscreen', kind: 'trigger', run() {} },
-	// Video stubs (wired when video engine is active)
-	{ id: 'video-prev', label: 'Video ◀', kind: 'trigger', run() {} },
-	{ id: 'video-next', label: 'Video ▶', kind: 'trigger', run() {} },
-	{ id: 'video-toggle', label: 'Video ON/OFF', kind: 'trigger', run() {} },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

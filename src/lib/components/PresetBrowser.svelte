@@ -219,7 +219,6 @@
               favColor={favColors[p.name] ?? 0}
               inA={playlistAItems.includes(p.name)}
               inB={playlistBItems.includes(p.name)}
-              isSelected={false}
               onLoad={() => { selectedName = p.name; onLoadPreset(p.name); }}
               onSetFavColor={(c) => setFavColor(p.name, c)}
               onAddA={() => onAddToPlaylist('A', p.name)}

@@ -18,7 +18,6 @@
     presetList: PresetMeta[]
     playlistAItems: string[]
     playlistBItems: string[]
-    status: 'idle' | 'running' | 'error'
     layout: 'stage' | 'mixer'
     onStartSlot: (slot: number) => void
     onPauseSlot: (slot: number) => void
@@ -42,7 +41,7 @@
 
   let {
     canvases, presets4, deckBus, runningCount, isRunning, selectedSlot,
-    crossfader, presetList, playlistAItems, playlistBItems, status, layout,
+    crossfader, presetList, playlistAItems, playlistBItems, layout,
     onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange,
     onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,

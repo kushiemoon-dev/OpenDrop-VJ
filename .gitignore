@@ -42,3 +42,6 @@ playwright-report
 
 # Sources manuelles non committées (fichiers bruts avant transcodage)
 /video-sources/manual
+
+# Local planning workspace (scratch, non committable)
+.planning/

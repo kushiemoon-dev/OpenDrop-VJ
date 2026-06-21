@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { OutputSync } from '$lib/engine/sync.js';
+	import { OutputSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
@@ -15,7 +15,49 @@
 	let crossfader = $state(0);
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
+	// — Color controls ————————————————————————————————————
+	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
+	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
+	// — Strobe ———————————————————————————————————————————
+	let strobeOn = $state(false);
+	let strobeRate = $state(1);
+	let strobeIntensity = $state(0.8);
+	let strobeColor = $state('#ffffff');
+	let strobeFlash = $state(false);
+	let _lastStrobeVal = 0;
+	let _strobeBpm = 0;
+	let _strobePhase = 0;
+	let _strobeRafId: number | null = null;
+	let _strobeLastTs: number | null = null;
+
+	function _strobeStart() {
+		if (_strobeRafId !== null) return;
+		_strobeLastTs = null;
+		const tick = (ts: number) => {
+			if (_strobeLastTs !== null && _strobeBpm > 0) {
+				const dt = Math.min((ts - _strobeLastTs) / 1000, 0.1);
+				_strobePhase += dt * _strobeBpm / 60;
+				_strobePhase %= 1;
+				const p = (_strobePhase * strobeRate) % 1;
+				const val = p < 0.5 ? 1 : 0;
+				if (val === 1 && _lastStrobeVal === 0) {
+					strobeFlash = true;
+					setTimeout(() => { strobeFlash = false; }, 50);
+				}
+				_lastStrobeVal = val;
+			}
+			_strobeLastTs = ts;
+			_strobeRafId = requestAnimationFrame(tick);
+		};
+		_strobeRafId = requestAnimationFrame(tick);
+	}
+
+	function _strobeStop() {
+		if (_strobeRafId !== null) { cancelAnimationFrame(_strobeRafId); _strobeRafId = null; }
+	}
 	let status = $state<'initializing' | 'ready' | 'error'>('initializing');
 	let errorMsg = $state('');
 	// — Video loops ———————————————————————————————————————
@@ -144,6 +186,19 @@
 					beat = true;
 					if (beatTimer !== null) clearTimeout(beatTimer);
 					beatTimer = setTimeout(() => { beat = false; beatTimer = null; }, 80);
+					// Re-sync strobe phase to beat
+					_strobeBpm = msg.bpm;
+					_strobePhase = 0;
+					_lastStrobeVal = 0;
+				} else if (msg.type === 'color') {
+					if (msg.deck === 'A') colorParamsA = msg.params;
+					else colorParamsB = msg.params;
+				} else if (msg.type === 'strobe') {
+					strobeOn = msg.on;
+					strobeRate = msg.rate;
+					strobeIntensity = msg.intensity;
+					strobeColor = msg.color;
+					if (msg.on) _strobeStart(); else _strobeStop();
 				} else if (msg.type === 'source') {
 					// If PCM frames are already flowing from the main window, skip the
 					// independent re-capture (fragile on Linux — same device may be exclusive).
@@ -201,6 +256,7 @@
 		audioFrameUnlisten?.();
 		if (beatTimer !== null) clearTimeout(beatTimer);
 		if (helloTimer !== null) clearInterval(helloTimer);
+		_strobeStop();
 		deckA?.destroy();
 		deckB?.destroy();
 		audio?.destroy();
@@ -219,9 +275,12 @@
 
 <div class="output">
 	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
-	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
+	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{colorFilterA}"></canvas>
+	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}; filter:{colorFilterB}"></canvas>
 	<OverlayLayer {overlays} {beat} />
+	{#if strobeOn && strobeFlash}
+		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
+	{/if}
 
 	{#if status === 'initializing'}
 		<div class="notice">Initializing…</div>
@@ -265,4 +324,5 @@
 	}
 
 	.notice.error { color: #f87; }
+	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
 </style>

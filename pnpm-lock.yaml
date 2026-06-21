@@ -26,6 +26,9 @@ importers:
       butterchurn-presets:
         specifier: ^2.4.7
         version: 2.4.7
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
       '@electron/rebuild':
         specifier: ^4.0.4
@@ -51,17 +54,20 @@ importers:
       '@types/node':
         specifier: ^25.9.3
         version: 25.9.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitest/coverage-v8':
-        specifier: ^3.0.0
+        specifier: ^3.2.6
         version: 3.2.6(vitest@3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0))
       concurrently:
         specifier: ^10.0.3
         version: 10.0.3
       electron:
-        specifier: ^42.4.0
-        version: 42.4.0
+        specifier: ^42.4.1
+        version: 42.4.1
       electron-builder:
-        specifier: ^26.0.0
+        specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)
       jsdom:
         specifier: ^29.0.0
@@ -79,7 +85,7 @@ importers:
         specifier: ^8.0.16
         version: 8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)
       vitest:
-        specifier: ^3.0.0
+        specifier: ^3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)
       wait-on:
         specifier: ^8.0.5
@@ -869,6 +875,9 @@ packages:
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@vitest/coverage-v8@3.2.6':
     resolution: {integrity: sha512-LsAdmUapA0qSN306d8+zOyawM0hFm2m2Hg9IwVNIKBm+qJV8cijiq2c+gxKZcB1HCfIWAy+0qEZDCUQA58A1cw==}
     peerDependencies:
@@ -1340,8 +1349,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@42.4.0:
-    resolution: {integrity: sha512-OXXqh9LD9KxXPv2Fe25EfU9N9AvWTuV6V81sfhQaNvTAXCd9ONA+Q4OWvMe+CmYD6xIwjFxGGtG/ZphDYYC5OQ==}
+  electron@42.4.1:
+    resolution: {integrity: sha512-8CYHJP5O4wFO+ycoJR98yy907MmPeo+vWXrzjxmGGgRNKqv8pOjjm+wphO0CCgQJnBU7+QUPSJS4QXhbKrO50w==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -2693,6 +2702,18 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -3382,6 +3403,10 @@ snapshots:
 
   '@types/trusted-types@2.0.7': {}
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 25.9.3
+
   '@vitest/coverage-v8@3.2.6(vitest@3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0))':
     dependencies:
       '@ampproject/remapping': 2.3.0
@@ -3975,7 +4000,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@42.4.0:
+  electron@42.4.1:
     dependencies:
       '@electron-internal/extract-zip': 1.0.3
       '@electron/get': 5.0.0
@@ -5393,6 +5418,8 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
+
+  ws@8.21.0: {}
 
   xml-name-validator@5.0.0: {}
 

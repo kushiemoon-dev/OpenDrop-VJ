@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { MainSync } from '$lib/engine/sync.js';
+	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
+	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
+	import { loadKeymap, saveKeymap, resetKeymap, formatKey, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
+	import { Clock } from '$lib/engine/clock.js';
+	import { LfoEngine, defaultSlot } from '$lib/engine/lfo.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
@@ -50,6 +54,11 @@
 	let outputWinRef: Window | null = null;
 	let outputCloseTimer: ReturnType<typeof setInterval> | null = null;
 	let sync: MainSync | null = null;
+	// Screen targeting (Electron)
+	type DisplayInfo = { id: number; label: string; isPrimary: boolean; bounds: { x: number; y: number; width: number; height: number } };
+	let displays = $state<DisplayInfo[]>([]);
+	let selectedDisplayId = $state<number | null>(null);
+	let outputWindowClosedUnlisten: (() => void) | null = null;
 
 	// — Playlist state ————————————————————————————————————
 	let playlistIntervalSec = $state(10);
@@ -62,38 +71,41 @@
 	let playlistBItems = $state<string[]>([]);
 
 	// — MIDI ——————————————————————————————————————————————
-	type MidiAction =
-		| 'crossfader'
-		| 'preset-prev-a' | 'preset-next-a'
-		| 'preset-prev-b' | 'preset-next-b'
-		| 'playlist-toggle-a' | 'playlist-toggle-b'
-		| 'playlist-prev-a' | 'playlist-next-a'
-		| 'playlist-prev-b' | 'playlist-next-b';
-
-	const MIDI_ACTIONS: MidiAction[] = [
-		'crossfader',
-		'preset-prev-a', 'preset-next-a',
-		'preset-prev-b', 'preset-next-b',
-		'playlist-toggle-a', 'playlist-toggle-b',
-		'playlist-prev-a', 'playlist-next-a',
-		'playlist-prev-b', 'playlist-next-b',
-	];
-
-	const MIDI_LABELS: Record<MidiAction, string> = {
-		'crossfader': 'Crossfader',
-		'preset-prev-a': '◀ Preset A', 'preset-next-a': '▶ Preset A',
-		'preset-prev-b': '◀ Preset B', 'preset-next-b': '▶ Preset B',
-		'playlist-toggle-a': '⏯ Playlist A', 'playlist-toggle-b': '⏯ Playlist B',
-		'playlist-prev-a': '⏮ Playlist A', 'playlist-next-a': '⏭ Playlist A',
-		'playlist-prev-b': '⏮ Playlist B', 'playlist-next-b': '⏭ Playlist B',
-	};
+	const registry = createDefaultRegistry();
 
 	const midiSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
 	let midi: MidiEngine | null = null;
 	let midiConnected = $state(false);
 	let midiDeviceNames = $state<string[]>([]);
-	let midiMappings = $state<Partial<Record<MidiAction, MidiTriggerKey>>>({});
-	let learningAction = $state<MidiAction | null>(null);
+	let midiMappings = $state<Partial<Record<CommandId, MidiTriggerKey>>>({});
+	let learningAction = $state<CommandId | null>(null);
+	let keymap = $state<KeyBinding>({ ...DEFAULT_KEYMAP });
+	let learningKey = $state<CommandId | null>(null);
+
+	// — Clock + LFO + Strobe ———————————————————————————————
+	const clock = new Clock();
+	const lfoEngine = new LfoEngine();
+	let midiClockBpm = $state(0);   // BPM détecté via MIDI clock IN (0 = inactif)
+	let strobeOn = $state(false);
+	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
+	let strobeRate = $state(1);
+	let strobeIntensity = $state(0.8);
+	let strobeColor = $state('#ffffff');
+	let strobeFlash = $state(false);
+	let _lastStrobeVal = 0;
+
+	// — Color controls per deck (M3) ——————————————————————
+	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
+	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
+
+	// Inverted index: commandId → assigned key string
+	const keyById = $derived(
+		new Map<CommandId, string>(
+			(Object.entries(keymap) as [string, CommandId][]).map(([k, v]) => [v, k])
+		)
+	);
 
 	// — Electron ——————————————————————————————————————————
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
@@ -103,6 +115,16 @@
 	let showStreamPanel = $state(false);
 	let ndiActive = $state(false);
 	let ndiError = $state('');
+	// OSC
+	let oscActive = $state(false);
+	let oscPort = $state(7000);
+	let oscError = $state('');
+	let oscUnlisten: (() => void) | null = null;
+	// Remote control WS
+	let remoteActive = $state(false);
+	let remoteUrl = $state('');
+	let remoteError = $state('');
+	let remoteUnlisten: (() => void) | null = null;
 	let v4l2Active = $state(false);
 	let v4l2Error = $state('');
 	let spoutActive = $state(false);
@@ -151,7 +173,6 @@
 	// — Tap tempo ——————————————————————————————————————————
 	let tapTimes: number[] = [];
 	let manualBpm = $state(0);
-	let metronomeId: ReturnType<typeof setInterval> | null = null;
 
 	// — Lock deck ——————————————————————————————————————————
 	let lockA = $state(false);
@@ -211,6 +232,57 @@
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
 
+	// — Câblage commandes M2 (strobe/LFO) dans le registre ——
+	registry.register({
+		id: 'strobe-toggle', label: 'Strobe ON/OFF', kind: 'trigger',
+		run() { strobeOn = !strobeOn; },
+	});
+	registry.register({
+		id: 'lfo-rate-up', label: 'LFO Rate +', kind: 'trigger',
+		run() { strobeRate = Math.min(4, strobeRate * 2); },
+	});
+	registry.register({
+		id: 'lfo-rate-down', label: 'LFO Rate −', kind: 'trigger',
+		run() { strobeRate = Math.max(0.25, strobeRate / 2); },
+	});
+
+	// — Câblage commandes M3 (color controls) ——————————————
+	registry.register({ id: 'color-hue-a', label: 'Hue A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, hueRotate: v }; } });
+	registry.register({ id: 'color-sat-a', label: 'Saturation A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, saturate: v }; } });
+	registry.register({ id: 'color-bright-a', label: 'Brightness A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, brightness: v }; } });
+	registry.register({ id: 'color-contrast-a', label: 'Contrast A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, contrast: v }; } });
+	registry.register({ id: 'color-invert-a', label: 'Invert A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, invert: v }; } });
+	registry.register({ id: 'color-hue-b', label: 'Hue B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, hueRotate: v }; } });
+	registry.register({ id: 'color-sat-b', label: 'Saturation B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, saturate: v }; } });
+	registry.register({ id: 'color-bright-b', label: 'Brightness B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, brightness: v }; } });
+	registry.register({ id: 'color-contrast-b', label: 'Contrast B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, contrast: v }; } });
+	registry.register({ id: 'color-invert-b', label: 'Invert B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, invert: v }; } });
+
+	// — Command context (injected into registry.dispatch) ——
+	const commandCtx: CommandContext = {
+		getCrossfader: () => crossfader,
+		setCrossfader: (v) => { crossfader = v; },
+		getActiveDeck: () => activeDeck,
+		switchActiveDeck: () => { activeSlot = activeSlot === 0 ? 1 : 0; },
+		navigatePreset(deck, direction) {
+			if (presetList.length === 0) return;
+			if (deck === 'A') {
+				const idx = direction === 1
+					? (presetIdxA + 1) % presetList.length
+					: ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
+				selectPresetForDeck('A', presetList[idx].name);
+			} else {
+				const idx = direction === 1
+					? (presetIdxB + 1) % presetList.length
+					: ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
+				selectPresetForDeck('B', presetList[idx].name);
+			}
+		},
+		togglePlaylist,
+		playlistNext,
+		playlistPrev,
+	};
+
 	// — Sync crossfader to output window ——————————————————
 	// Read crossfader unconditionally before sync?. so Svelte 5 tracks it as a
 	// dependency even when sync is still null on the first $effect run (onMount
@@ -261,6 +333,7 @@
 		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
+		localStorage.setItem('od-keymap', JSON.stringify(keymap));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-target-fps', String(targetFps));
 		localStorage.setItem('od-invisible-mode', invisibleMode);
@@ -297,6 +370,25 @@
 			hueOn: vrHue,
 		};
 		sync?.sendVideo(payload);
+	});
+
+	// — Sync strobe vers output ———————————————————————————
+	$effect(() => {
+		const on = strobeOn;
+		const rate = strobeRate;
+		const intensity = strobeIntensity;
+		const color = strobeColor;
+		sync?.sendStrobe(on, rate, intensity, color);
+	});
+
+	// — Sync color params vers output ————————————————————
+	$effect(() => {
+		const paramsA = colorParamsA;
+		sync?.sendColor('A', paramsA);
+	});
+	$effect(() => {
+		const paramsB = colorParamsB;
+		sync?.sendColor('B', paramsB);
 	});
 
 	// — Appliquer la qualité aux decks + sync output ———————
@@ -363,6 +455,8 @@
 			if (savedMode) playlistMode = savedMode as PlaylistMode;
 			const savedMidi = localStorage.getItem('od-midi-mappings');
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
+			const savedKeymap = localStorage.getItem('od-keymap');
+			if (savedKeymap) try { keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedFps = localStorage.getItem('od-target-fps');
@@ -397,6 +491,27 @@
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
+		// Listeners OSC + remote + screen (Electron-only)
+		if (isElectron) {
+			oscUnlisten = window.electronAPI?.onOscMsg?.((cmdId, value01) => {
+				registry.dispatch(cmdId as CommandId, value01, commandCtx);
+			}) ?? null;
+			remoteUnlisten = window.electronAPI?.onRemoteCmd?.((cmd, value) => {
+				registry.dispatch(cmd as CommandId, value, commandCtx);
+			}) ?? null;
+			outputWindowClosedUnlisten = window.electronAPI?.onOutputWindowClosed?.(() => {
+				outputOpen = false;
+				audio?.stopPcmCapture();
+			}) ?? null;
+			// Charger la liste des écrans
+			try {
+				const list = await window.electronAPI!.listScreens();
+				displays = list;
+				const secondary = list.find(d => !d.isPrimary);
+				selectedDisplayId = secondary?.id ?? list[0]?.id ?? null;
+			} catch {}
+		}
+
 		await initPresets();
 		await initVideoLoops();
 		presetList = buildPresetList();
@@ -414,7 +529,12 @@
 		sync?.destroy();
 		midi?.destroy();
 		beatDetector?.destroy();
-		if (metronomeId !== null) clearInterval(metronomeId);
+		clock.stop();
+		oscUnlisten?.();
+		remoteUnlisten?.();
+		outputWindowClosedUnlisten?.();
+		if (oscActive) window.electronAPI?.stopOsc?.();
+		if (remoteActive) window.electronAPI?.stopRemote?.();
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -485,8 +605,26 @@
 			beatDetector = new BeatDetector(audio.analyser);
 			beatDetector.start(() => {
 				detectedBpm = beatDetector?.bpm ?? 0;
-				if (!manualBpm) onBeat();
+				if (!manualBpm) clock.pulse(detectedBpm);
 			});
+			clock.onBeat(onBeat);
+			clock.onTick((phase) => {
+				// Route LFO values to registry commands
+				for (const { target, value01 } of lfoEngine.tick(phase)) {
+					if (target) registry.dispatch(target, value01, commandCtx);
+				}
+				// Strobe: detect rising edge of a square LFO at strobeRate
+				if (strobeOn) {
+					const p = (phase * strobeRate) % 1;
+					const val = p < 0.5 ? 1 : 0;
+					if (val === 1 && _lastStrobeVal === 0) {
+						strobeFlash = true;
+						setTimeout(() => { strobeFlash = false; }, 50);
+					}
+					_lastStrobeVal = val;
+				}
+			});
+			clock.start();
 
 			status = 'running';
 		} catch (e) {
@@ -690,7 +828,7 @@
 		// Pulse overlay beat-reactive
 		beat = true;
 		setTimeout(() => { beat = false; }, 80);
-		sync?.sendBeat();
+		sync?.sendBeat(clock.bpm || detectedBpm);
 
 		if (videoEnabled && vrCut && videoAdvance !== 'manual' && allClips.length > 1) {
 			videoBeatCount = (videoBeatCount + 1) % videoBeatsPerCut;
@@ -836,14 +974,14 @@
 		const bpm = Math.round(60000 / avg);
 		if (bpm < 40 || bpm > 300) return;
 		manualBpm = bpm;
-		if (metronomeId !== null) clearInterval(metronomeId);
-		metronomeId = setInterval(onBeat, avg);
+		clock.setBpm(bpm);
+		clock.pulse();
 	}
 
 	function clearManualBpm() {
 		manualBpm = 0;
 		tapTimes = [];
-		if (metronomeId !== null) { clearInterval(metronomeId); metronomeId = null; }
+		clock.setBpm(0);
 	}
 
 	async function toggleMidi() {
@@ -853,6 +991,7 @@
 			midiConnected = false;
 			midiDeviceNames = [];
 			learningAction = null;
+			midiClockBpm = 0;
 			return;
 		}
 		try {
@@ -860,22 +999,75 @@
 			await midi.connect();
 			midiConnected = true;
 			midiDeviceNames = midi.deviceNames;
+
+			// Soft-takeover: Set<key> de contrôles déjà en phase avec la valeur app
+			const takenOver = new Set<MidiTriggerKey>();
+
 			midi.onMessage((msg) => {
 				const key = triggerKey(msg);
+
 				if (learningAction !== null) {
-					// Mode apprentissage : enregistre le trigger
-					if (msg.type === 'note_off') return; // ignore note-off pendant learn
+					if (msg.type === 'note_off') return;
 					midiMappings = { ...midiMappings, [learningAction]: key };
+					takenOver.add(key); // immédiatement en phase après learn
 					learningAction = null;
 					return;
 				}
-				// Dispatcher
-				for (const [action, mapped] of Object.entries(midiMappings) as [MidiAction, MidiTriggerKey][]) {
+
+				for (const [action, mapped] of Object.entries(midiMappings) as [CommandId, MidiTriggerKey][]) {
 					if (mapped !== key) continue;
-					if (msg.type === 'note_off') break; // actions déclenchées sur note_on ou cc
-					applyMidiAction(action as MidiAction, msg.value);
+					if (msg.type === 'note_off') break;
+
+					// Normaliser : 14-bit sur 0..16383, sinon 7-bit sur 0..127
+					const value01 = msg.is14bit ? msg.value / 16383 : msg.value / 127;
+
+					// Soft-takeover uniquement pour les commandes range
+					const cmd = registry.get(action);
+					if (cmd?.kind === 'range' && !takenOver.has(key)) {
+						const current = getCommandCurrentValue(action);
+						if (current !== null && Math.abs(value01 - current) > 0.08) break;
+						takenOver.add(key);
+					}
+
+					if (status === 'running') registry.dispatch(action, value01, commandCtx);
 					break;
 				}
+			});
+
+			// MIDI clock IN → alimente la Clock (24 pulses par quarter note)
+			let _clockPulses = 0;
+			let _clockTsRing: number[] = [];
+			let _clockTimer: ReturnType<typeof setTimeout> | null = null;
+
+			midi.onClock(() => {
+				const now = performance.now();
+				_clockPulses++;
+				_clockTsRing.push(now);
+				if (_clockTsRing.length > 49) _clockTsRing.shift();
+
+				// Mise à jour BPM toutes les 6 pulses (≈4× par beat à 120 BPM)
+				if (_clockPulses % 6 === 0 && _clockTsRing.length >= 7) {
+					const recent = _clockTsRing.slice(-7);
+					const intervals = recent.slice(1).map((t, i) => t - recent[i]);
+					const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+					const bpm = Math.round(60000 / (avg * 24) * 10) / 10;
+					if (bpm >= 40 && bpm <= 300) {
+						midiClockBpm = bpm;
+						clock.setBpm(bpm);
+					}
+				}
+
+				// Beat sur chaque quarter note (24 pulses)
+				if (_clockPulses % 24 === 0) clock.pulse();
+
+				// Timeout d'inactivité : MIDI clock arrêté depuis 2s
+				if (_clockTimer !== null) clearTimeout(_clockTimer);
+				_clockTimer = setTimeout(() => {
+					midiClockBpm = 0;
+					_clockPulses = 0;
+					_clockTsRing = [];
+					_clockTimer = null;
+				}, 2000);
 			});
 		} catch (e) {
 			midiConnected = false;
@@ -883,51 +1075,46 @@
 		}
 	}
 
-	function startLearn(action: MidiAction) {
+	function startLearn(action: CommandId) {
 		learningAction = learningAction === action ? null : action;
 	}
 
-	function clearMapping(action: MidiAction) {
+	function clearMapping(action: CommandId) {
 		const { [action]: _, ...rest } = midiMappings;
-		midiMappings = rest as Partial<Record<MidiAction, MidiTriggerKey>>;
+		midiMappings = rest as Partial<Record<CommandId, MidiTriggerKey>>;
 	}
 
-	function applyMidiAction(action: MidiAction, value: number) {
+	function clearKeyBinding(cmdId: CommandId) {
+		const key = keyById.get(cmdId);
+		if (!key) return;
+		const { [key]: _, ...rest } = keymap;
+		keymap = rest as KeyBinding;
+	}
+
+	function doResetKeymap() {
+		keymap = resetKeymap();
+	}
+
+	function applyMidiAction(action: CommandId, value: number) {
 		if (status !== 'running') return;
-		switch (action) {
-			case 'crossfader':
-				crossfader = value / 127;
-				break;
-			case 'preset-prev-a': {
-				if (presetList.length === 0) break;
-				const idx = ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
-				selectPresetForDeck('A', presetList[idx].name);
-				break;
-			}
-			case 'preset-next-a': {
-				if (presetList.length === 0) break;
-				const idx = (presetIdxA + 1) % presetList.length;
-				selectPresetForDeck('A', presetList[idx].name);
-				break;
-			}
-			case 'preset-prev-b': {
-				if (presetList.length === 0) break;
-				const idx = ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
-				selectPresetForDeck('B', presetList[idx].name);
-				break;
-			}
-			case 'preset-next-b': {
-				if (presetList.length === 0) break;
-				const idx = (presetIdxB + 1) % presetList.length;
-				selectPresetForDeck('B', presetList[idx].name);
-				break;
-			}
-			case 'playlist-toggle-a': togglePlaylist('A'); break;
-			case 'playlist-toggle-b': togglePlaylist('B'); break;
-			case 'playlist-prev-a': playlistPrev('A'); break;
-			case 'playlist-next-a': playlistNext('A'); break;
-			case 'playlist-prev-b': playlistPrev('B'); break;
-			case 'playlist-next-b': playlistNext('B'); break;
+		registry.dispatch(action, value / 127, commandCtx);
+	}
+
+	/** Lire la valeur courante (0..1) d'une commande range, pour le soft-takeover. */
+	function getCommandCurrentValue(id: CommandId): number | null {
+		switch (id) {
+			case 'crossfader': return crossfader;
+			case 'color-hue-a': return colorParamsA.hueRotate;
+			case 'color-sat-a': return colorParamsA.saturate;
+			case 'color-bright-a': return colorParamsA.brightness;
+			case 'color-contrast-a': return colorParamsA.contrast;
+			case 'color-invert-a': return colorParamsA.invert;
+			case 'color-hue-b': return colorParamsB.hueRotate;
+			case 'color-sat-b': return colorParamsB.saturate;
+			case 'color-bright-b': return colorParamsB.brightness;
+			case 'color-contrast-b': return colorParamsB.contrast;
+			case 'color-invert-b': return colorParamsB.invert;
+			default: return null;
 		}
 	}
 
@@ -1004,6 +1191,26 @@
 		}, 1500);
 	}
 
+	async function openOutputFullscreen() {
+		if (!isElectron) {
+			// Web fallback: fullscreen the visualizer area
+			const el = document.querySelector('.visualizer-wrap') as HTMLElement | null;
+			el?.requestFullscreen?.();
+			return;
+		}
+		const res = await window.electronAPI!.openOutputOnDisplay(selectedDisplayId);
+		if (res?.ok) {
+			outputOpen = true;
+			// Push current state after the window loads
+			setTimeout(() => {
+				sync?.sendPreset('A', busPresetA);
+				sync?.sendPreset('B', busPresetB);
+				sync?.sendCrossfader(crossfader);
+				if (currentDeviceId) sync?.sendSource(currentDeviceId);
+			}, 800);
+		}
+	}
+
 	function onResize() {
 		if (status !== 'running') return;
 		for (let i = 0; i < 4; i++) {
@@ -1053,6 +1260,37 @@
 		}
 	}
 
+	async function toggleOsc() {
+		oscError = '';
+		const eAPI = window.electronAPI;
+		if (oscActive) {
+			await eAPI?.stopOsc?.();
+			oscActive = false;
+		} else {
+			const res = await eAPI?.startOsc?.(oscPort);
+			if (res?.ok) oscActive = true;
+			else oscError = res?.error ?? 'Erreur OSC.';
+		}
+	}
+
+	async function toggleRemote() {
+		remoteError = '';
+		const eAPI = window.electronAPI;
+		if (remoteActive) {
+			await eAPI?.stopRemote?.();
+			remoteActive = false;
+			remoteUrl = '';
+		} else {
+			const res = await eAPI?.startRemote?.();
+			if (res?.ok) {
+				remoteActive = true;
+				remoteUrl = `https://opendrop.kushie.dev/remote?host=${res.ip}&port=${res.port}&token=${res.token}`;
+			} else {
+				remoteError = res?.error ?? 'Erreur Remote.';
+			}
+		}
+	}
+
 	async function startSlot(slot: number) {
 		if (!audio || status !== 'running') return;
 		const q = getQualitySettings(quality);
@@ -1078,46 +1316,22 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		// Ignorer si on tape dans un champ texte
 		const tag = (e.target as HTMLElement).tagName;
 		if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-		switch (e.key) {
-			case 'ArrowLeft':
-				e.preventDefault();
-				crossfader = Math.max(0, parseFloat((crossfader - 0.05).toFixed(2)));
-				break;
-			case 'ArrowRight':
-				e.preventDefault();
-				crossfader = Math.min(1, parseFloat((crossfader + 0.05).toFixed(2)));
-				break;
-			case 'Tab':
-				e.preventDefault();
-				activeSlot = activeSlot === 0 ? 1 : 0;
-				break;
-			case '[':
-				e.preventDefault();
-				applyMidiAction(activeDeck === 'A' ? 'preset-prev-a' : 'preset-prev-b', 127);
-				break;
-			case ']':
-				e.preventDefault();
-				applyMidiAction(activeDeck === 'A' ? 'preset-next-a' : 'preset-next-b', 127);
-				break;
-			case ' ':
-				e.preventDefault();
-				togglePlaylist(activeDeck);
-				break;
-			case 'n':
-			case 'N':
-				e.preventDefault();
-				playlistNext(activeDeck);
-				break;
-			case 'p':
-			case 'P':
-				e.preventDefault();
-				playlistPrev(activeDeck);
-				break;
+		if (learningKey !== null) {
+			if (e.key === 'Escape') { learningKey = null; e.preventDefault(); return; }
+			keymap = { ...keymap, [e.key]: learningKey };
+			learningKey = null;
+			e.preventDefault();
+			return;
 		}
+
+		const action = keymap[e.key];
+		if (!action) return;
+		e.preventDefault();
+		if (status !== 'running') return;
+		registry.dispatch(action, 1, commandCtx);
 	}
 </script>
 
@@ -1144,10 +1358,15 @@
 				class="deck-canvas"
 				style:opacity={opacities[i]}
 				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : 'screen'}
+				style:filter={deckBus[i] === 'A' ? colorFilterA : deckBus[i] === 'B' ? colorFilterB : undefined}
 			></canvas>
 		{/each}
 		<!-- Overlay sprites -->
 		<OverlayLayer {overlays} {beat} />
+		<!-- Strobe flash — top z-index, pointer-events none -->
+		{#if strobeOn && strobeFlash}
+			<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
+		{/if}
 
 		{#if status === 'idle'}
 			<div class="overlay">
@@ -1340,6 +1559,27 @@
 					</button>
 				{/if}
 			</div>
+			<!-- Screen targeting: dropdown + fullscreen button -->
+			{#if isElectron && displays.length > 0}
+				<div class="midi-row" style="gap:6px;align-items:center;margin-top:6px">
+					<select
+						style="flex:1;font-size:10px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;padding:3px 4px"
+						value={selectedDisplayId}
+						onchange={(e) => { selectedDisplayId = Number(e.currentTarget.value); }}
+					>
+						{#each displays as d}
+							<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
+						{/each}
+					</select>
+					<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
+						⛶ Fullscreen
+					</button>
+				</div>
+			{:else if !isElectron}
+				<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
+					⛶ Fullscreen
+				</button>
+			{/if}
 			{#if outputOpen && !isElectron}
 				<span class="label" style="color:#7af">Output window open — use as OBS Browser Source</span>
 			{/if}
@@ -1382,29 +1622,204 @@
 			</div>
 			{#if midiConnected}
 				<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
+				{#if midiClockBpm > 0}
+					<span class="source-badge" style="color:#4f4">♩ MIDI Clock {midiClockBpm} BPM</span>
+				{/if}
 				{#if learningAction !== null}
 					<span style="font-size:11px;color:#fa7">Bouge un knob/bouton sur ton contrôleur…</span>
 				{/if}
 				<div class="midi-list">
-					{#each MIDI_ACTIONS as action}
-						{@const mapped = midiMappings[action]}
+					{#each registry.all() as cmd}
+						{@const mapped = midiMappings[cmd.id]}
 						<div class="midi-row">
-							<span class="midi-label">{MIDI_LABELS[action]}</span>
-							<span class="midi-binding" class:midi-learning={learningAction === action}>
+							<span class="midi-label">{cmd.label}</span>
+							<span class="midi-binding" class:midi-learning={learningAction === cmd.id}>
 								{mapped ? formatTrigger(mapped) : '—'}
 							</span>
-							<button class="btn-sm pl-btn" class:active={learningAction === action}
-								onclick={() => startLearn(action)}>
-								{learningAction === action ? '…' : 'Learn'}
+							<button class="btn-sm pl-btn" class:active={learningAction === cmd.id}
+								onclick={() => startLearn(cmd.id)}>
+								{learningAction === cmd.id ? '…' : 'Learn'}
 							</button>
 							{#if mapped}
-								<button class="pl-remove" onclick={() => clearMapping(action)}>×</button>
+								<button class="pl-remove" onclick={() => clearMapping(cmd.id)}>×</button>
 							{/if}
 						</div>
 					{/each}
 				</div>
 			{/if}
 		</div>
+
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Clavier</span>
+				<button class="btn-sm" onclick={doResetKeymap}>Reset</button>
+			</div>
+			{#if learningKey !== null}
+				<span style="font-size:11px;color:#fa7">Appuie sur la touche à assigner… (Esc = annuler)</span>
+			{/if}
+			<div class="midi-list">
+				{#each registry.all() as cmd}
+					{@const assignedKey = keyById.get(cmd.id)}
+					<div class="midi-row">
+						<span class="midi-label">{cmd.label}</span>
+						<span class="midi-binding" class:midi-learning={learningKey === cmd.id}>
+							{assignedKey ? formatKey(assignedKey) : '—'}
+						</span>
+						<button class="btn-sm pl-btn" class:active={learningKey === cmd.id}
+							onclick={() => { learningKey = learningKey === cmd.id ? null : cmd.id; }}>
+							{learningKey === cmd.id ? '…' : 'Learn'}
+						</button>
+						{#if assignedKey}
+							<button class="pl-remove" onclick={() => clearKeyBinding(cmd.id)}>×</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</div>
+
+		<!-- Strobe -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Strobe</span>
+				<button class="btn-sm" class:active={strobeOn} onclick={() => { strobeOn = !strobeOn; }}>
+					{strobeOn ? 'ON' : 'OFF'}
+				</button>
+			</div>
+			{#if strobeOn}
+				<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+					<span class="midi-label">Rate</span>
+					{#each [0.25, 0.5, 1, 2, 4] as r}
+						<button class="btn-sm" class:active={strobeRate === r}
+							onclick={() => { strobeRate = r; }}>
+							{r < 1 ? `1/${Math.round(1/r)}` : `${r}×`}
+						</button>
+					{/each}
+				</div>
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Intensité</span>
+					<input type="range" min="0" max="1" step="0.05" bind:value={strobeIntensity} style="flex:1" />
+					<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
+				</div>
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Couleur</span>
+					<input type="color" bind:value={strobeColor} style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />
+				</div>
+			{/if}
+		</div>
+
+		<!-- LFO -->
+		<div class="controls-section">
+			<div class="pl-header"><span class="label">LFO</span></div>
+			{#each lfoEngine.slots as slot, i}
+				<div style="margin-bottom:6px;font-size:11px">
+					<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+						<input type="checkbox" bind:checked={slot.enabled} />
+						<span class="midi-label">LFO {i+1}</span>
+						{#each (['sine','saw','square','sh'] as const) as shape}
+							<button class="btn-sm" class:active={slot.shape === shape}
+								onclick={() => { slot.shape = shape; }}>
+								{shape}
+							</button>
+						{/each}
+					</div>
+					{#if slot.enabled}
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
+							<span class="midi-label">Cible</span>
+							<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
+								value={slot.target ?? ''}
+								onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>
+								<option value="">—</option>
+								{#each registry.all().filter(c => c.kind === 'range') as cmd}
+									<option value={cmd.id}>{cmd.label}</option>
+								{/each}
+							</select>
+						</div>
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+							<span class="midi-label">Rate</span>
+							<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
+							<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
+						</div>
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+							<span class="midi-label">Amount</span>
+							<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
+		<!-- Color controls -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Color A</span>
+				<button class="btn-sm" onclick={() => { colorParamsA = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+			</div>
+			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label" style="width:48px">{label}</span>
+					<input type="range" {min} {max} step="0.01" value={colorParamsA[key]}
+						oninput={(e) => { colorParamsA = { ...colorParamsA, [key]: +e.currentTarget.value }; }}
+						style="flex:1" />
+					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsA[key] * scale)}{unit}</span>
+				</div>
+			{/each}
+			<div class="pl-header" style="margin-top:6px">
+				<span class="label">Color B</span>
+				<button class="btn-sm" onclick={() => { colorParamsB = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+			</div>
+			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label" style="width:48px">{label}</span>
+					<input type="range" {min} {max} step="0.01" value={colorParamsB[key]}
+						oninput={(e) => { colorParamsB = { ...colorParamsB, [key]: +e.currentTarget.value }; }}
+						style="flex:1" />
+					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsB[key] * scale)}{unit}</span>
+				</div>
+			{/each}
+		</div>
+
+		<!-- OSC remote (Electron only) -->
+		{#if isElectron}
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">OSC</span>
+				<button class="btn-sm" class:active={oscActive} onclick={toggleOsc}>
+					{oscActive ? 'Stop' : 'Start'}
+				</button>
+			</div>
+			{#if oscActive}
+				<span class="source-badge">Écoute UDP :{oscPort}</span>
+				<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
+			{:else}
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Port</span>
+					<input type="number" min="1024" max="65535" bind:value={oscPort}
+						style="width:70px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
+				</div>
+			{/if}
+			{#if oscError}<div style="font-size:10px;color:#f87;margin-top:4px">{oscError}</div>{/if}
+		</div>
+
+		<!-- Web remote (Electron only) -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Remote</span>
+				<button class="btn-sm" class:active={remoteActive} onclick={toggleRemote}>
+					{remoteActive ? 'Stop' : 'Démarrer'}
+				</button>
+			</div>
+			{#if remoteActive && remoteUrl}
+				<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
+				<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:#7af;display:block;margin-top:4px">
+					Ouvrir sur cet appareil ↗
+				</a>
+			{/if}
+			{#if !remoteActive}
+				<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
+			{/if}
+			{#if remoteError}<div style="font-size:10px;color:#f87;margin-top:4px">{remoteError}</div>{/if}
+		</div>
+		{/if}
 
 	</aside>
 	<PresetBrowser
@@ -1524,6 +1939,7 @@
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
+	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 

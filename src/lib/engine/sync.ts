@@ -10,7 +10,8 @@ export type SyncMessage =
 	| { type: 'quality'; tier: string }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
-	| { type: 'beat' }
+	| { type: 'beat'; bpm: number }
+	| { type: 'strobe'; on: boolean; rate: number; intensity: number; color: string }
 	| { type: 'perf'; targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }
 	| { type: 'hello' };
 
@@ -74,8 +75,12 @@ export class MainSync {
 		sendMsg(this.bc, { type: 'video', ...state });
 	}
 
-	sendBeat() {
-		sendMsg(this.bc, { type: 'beat' });
+	sendBeat(bpm: number) {
+		sendMsg(this.bc, { type: 'beat', bpm });
+	}
+
+	sendStrobe(on: boolean, rate: number, intensity: number, color: string) {
+		sendMsg(this.bc, { type: 'strobe', on, rate, intensity, color });
 	}
 
 	sendPerf(settings: { targetFps: number; invisibleMode: InvisibleMode; invisibleFps: number }) {

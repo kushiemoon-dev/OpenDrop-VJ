@@ -34,7 +34,9 @@ export function colorParamsToFilter(p: ColorParams): string {
 
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string }
+	| { type: 'preset-slot'; slot: number; name: string }
 	| { type: 'crossfader'; value: number }
+	| { type: 'deckbus'; opacities: [number, number, number, number] }
 	| { type: 'source'; deviceId: string }
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
@@ -80,6 +82,14 @@ export class MainSync {
 
 	sendPreset(deck: 'A' | 'B', name: string) {
 		sendMsg(this.bc, { type: 'preset', deck, name });
+	}
+
+	sendPresetSlot(slot: number, name: string) {
+		sendMsg(this.bc, { type: 'preset-slot', slot, name });
+	}
+
+	sendDeckBus(opacities: [number, number, number, number]) {
+		sendMsg(this.bc, { type: 'deckbus', opacities });
 	}
 
 	sendCrossfader(value: number) {

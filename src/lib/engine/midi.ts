@@ -63,9 +63,7 @@ export class MidiEngine {
 
 	get deviceNames(): string[] {
 		if (!this.access) return [];
-		const names: string[] = [];
-		this.access.inputs.forEach((i) => names.push(i.name || i.id));
-		return names;
+		return Array.from(this.access.inputs.values(), i => i.name || i.id);
 	}
 
 	private _handle(e: MIDIMessageEvent) {

@@ -80,6 +80,7 @@
 	// — Clock + LFO + Strobe ———————————————————————————————
 	const clock = new Clock();
 	const lfoEngine = new LfoEngine();
+	let midiClockBpm = $state(0);   // BPM détecté via MIDI clock IN (0 = inactif)
 	let strobeOn = $state(false);
 	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
 	let strobeRate = $state(1);
@@ -949,6 +950,7 @@
 			midiConnected = false;
 			midiDeviceNames = [];
 			learningAction = null;
+			midiClockBpm = 0;
 			return;
 		}
 		try {
@@ -956,22 +958,75 @@
 			await midi.connect();
 			midiConnected = true;
 			midiDeviceNames = midi.deviceNames;
+
+			// Soft-takeover: Set<key> de contrôles déjà en phase avec la valeur app
+			const takenOver = new Set<MidiTriggerKey>();
+
 			midi.onMessage((msg) => {
 				const key = triggerKey(msg);
+
 				if (learningAction !== null) {
-					// Mode apprentissage : enregistre le trigger
-					if (msg.type === 'note_off') return; // ignore note-off pendant learn
+					if (msg.type === 'note_off') return;
 					midiMappings = { ...midiMappings, [learningAction]: key };
+					takenOver.add(key); // immédiatement en phase après learn
 					learningAction = null;
 					return;
 				}
-				// Dispatcher
+
 				for (const [action, mapped] of Object.entries(midiMappings) as [CommandId, MidiTriggerKey][]) {
 					if (mapped !== key) continue;
-					if (msg.type === 'note_off') break; // actions déclenchées sur note_on ou cc
-					applyMidiAction(action, msg.value);
+					if (msg.type === 'note_off') break;
+
+					// Normaliser : 14-bit sur 0..16383, sinon 7-bit sur 0..127
+					const value01 = msg.is14bit ? msg.value / 16383 : msg.value / 127;
+
+					// Soft-takeover uniquement pour les commandes range
+					const cmd = registry.get(action);
+					if (cmd?.kind === 'range' && !takenOver.has(key)) {
+						const current = getCommandCurrentValue(action);
+						if (current !== null && Math.abs(value01 - current) > 0.08) break;
+						takenOver.add(key);
+					}
+
+					if (status === 'running') registry.dispatch(action, value01, commandCtx);
 					break;
 				}
+			});
+
+			// MIDI clock IN → alimente la Clock (24 pulses par quarter note)
+			let _clockPulses = 0;
+			let _clockTsRing: number[] = [];
+			let _clockTimer: ReturnType<typeof setTimeout> | null = null;
+
+			midi.onClock(() => {
+				const now = performance.now();
+				_clockPulses++;
+				_clockTsRing.push(now);
+				if (_clockTsRing.length > 49) _clockTsRing.shift();
+
+				// Mise à jour BPM toutes les 6 pulses (≈4× par beat à 120 BPM)
+				if (_clockPulses % 6 === 0 && _clockTsRing.length >= 7) {
+					const recent = _clockTsRing.slice(-7);
+					const intervals = recent.slice(1).map((t, i) => t - recent[i]);
+					const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+					const bpm = Math.round(60000 / (avg * 24) * 10) / 10;
+					if (bpm >= 40 && bpm <= 300) {
+						midiClockBpm = bpm;
+						clock.setBpm(bpm);
+					}
+				}
+
+				// Beat sur chaque quarter note (24 pulses)
+				if (_clockPulses % 24 === 0) clock.pulse();
+
+				// Timeout d'inactivité : MIDI clock arrêté depuis 2s
+				if (_clockTimer !== null) clearTimeout(_clockTimer);
+				_clockTimer = setTimeout(() => {
+					midiClockBpm = 0;
+					_clockPulses = 0;
+					_clockTsRing = [];
+					_clockTimer = null;
+				}, 2000);
 			});
 		} catch (e) {
 			midiConnected = false;
@@ -1002,6 +1057,24 @@
 	function applyMidiAction(action: CommandId, value: number) {
 		if (status !== 'running') return;
 		registry.dispatch(action, value / 127, commandCtx);
+	}
+
+	/** Lire la valeur courante (0..1) d'une commande range, pour le soft-takeover. */
+	function getCommandCurrentValue(id: CommandId): number | null {
+		switch (id) {
+			case 'crossfader': return crossfader;
+			case 'color-hue-a': return colorParamsA.hueRotate;
+			case 'color-sat-a': return colorParamsA.saturate;
+			case 'color-bright-a': return colorParamsA.brightness;
+			case 'color-contrast-a': return colorParamsA.contrast;
+			case 'color-invert-a': return colorParamsA.invert;
+			case 'color-hue-b': return colorParamsB.hueRotate;
+			case 'color-sat-b': return colorParamsB.saturate;
+			case 'color-bright-b': return colorParamsB.brightness;
+			case 'color-contrast-b': return colorParamsB.contrast;
+			case 'color-invert-b': return colorParamsB.invert;
+			default: return null;
+		}
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
@@ -1436,6 +1509,9 @@
 			</div>
 			{#if midiConnected}
 				<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
+				{#if midiClockBpm > 0}
+					<span class="source-badge" style="color:#4f4">♩ MIDI Clock {midiClockBpm} BPM</span>
+				{/if}
 				{#if learningAction !== null}
 					<span style="font-size:11px;color:#fa7">Bouge un knob/bouton sur ton contrôleur…</span>
 				{/if}

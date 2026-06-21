@@ -63,6 +63,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('remote:cmd', handler);
   },
 
+  // Ableton Link (optional — requires @ktamas77/abletonlink addon)
+  startLink: (bpm) => ipcRenderer.invoke('link:start', { bpm }),
+  stopLink: () => ipcRenderer.invoke('link:stop'),
+  setLinkTempo: (bpm) => ipcRenderer.invoke('link:set-tempo', { bpm }),
+  onLinkState: (cb) => {
+    const handler = (_, state) => cb(state);
+    ipcRenderer.on('link:state', handler);
+    return () => ipcRenderer.off('link:state', handler);
+  },
+
   // Screen targeting — open output fullscreen on a specific display
   listScreens: () => ipcRenderer.invoke('screen:list'),
   openOutputOnDisplay: (displayId) => ipcRenderer.invoke('output:open-on-display', displayId),

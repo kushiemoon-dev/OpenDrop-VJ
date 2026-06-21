@@ -2,8 +2,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
   import type { PresetMeta } from '$lib/presets/index.js'
-  import MixerDeckCard from './MixerDeckCard.svelte'
-  import MixerCrossfader from './MixerCrossfader.svelte'
+  import DeckCard from './DeckCard.svelte'
   import PresetBrowser from './PresetBrowser.svelte'
   import LayoutToggle from './LayoutToggle.svelte'
 
@@ -70,17 +69,17 @@
     <!-- Grille des 4 decks -->
     <div class="mixer__decks">
       {#each [0, 1, 2, 3] as i}
-        <MixerDeckCard
-          slot={i}
+        <DeckCard
+          letter="DECK {i + 1}"
           canvas={canvases[i]}
           presetName={presets4[i]}
-          running={isRunning(i)}
+          isActive={selectedSlot === i}
+          isLive={isRunning(i)}
           bus={deckBus[i]}
-          isSelected={selectedSlot === i}
-          onStart={() => onStartSlot(i)}
-          onStop={() => onPauseSlot(i)}
+          running={isRunning(i)}
           onSelect={() => onSelectSlot(i)}
           onCycleBus={() => onCycleBus(i)}
+          onToggleRun={() => { isRunning(i) ? onPauseSlot(i) : onStartSlot(i) }}
         />
       {/each}
     </div>
@@ -106,7 +105,15 @@
 
     <div class="controls-section">
       <span class="label">Crossfader</span>
-      <MixerCrossfader value={crossfader} onchange={onCrossfaderChange} />
+      <div class="xcf">
+        <div class="xcf__labels">
+          <span class="xcf__side xcf__side--a" style:opacity={0.4 + (1 - crossfader) * 0.6}>A <span class="xcf__pct">{Math.round((1 - crossfader) * 100)}%</span></span>
+          <span class="xcf__side xcf__side--b" style:opacity={0.4 + crossfader * 0.6}><span class="xcf__pct">{Math.round(crossfader * 100)}%</span> B</span>
+        </div>
+        <input class="xcf__slider" type="range" min="0" max="1" step="0.01" value={crossfader}
+          oninput={(e) => onCrossfaderChange(Number(e.currentTarget.value))} />
+        <div class="xcf__curve">Linear</div>
+      </div>
     </div>
 
     {@render videoSection()}
@@ -220,5 +227,11 @@
     font-weight: 600;
   }
 
-
+  .xcf { display: flex; flex-direction: column; gap: 4px; }
+  .xcf__labels { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; }
+  .xcf__side--a { color: var(--accent); }
+  .xcf__side--b { color: var(--live); }
+  .xcf__pct { font-size: 9px; font-weight: 400; opacity: 0.7; }
+  .xcf__slider { width: 100%; accent-color: var(--accent); cursor: pointer; }
+  .xcf__curve { font-size: 8px; color: var(--text-muted); text-align: center; letter-spacing: 0.06em; text-transform: uppercase; }
 </style>

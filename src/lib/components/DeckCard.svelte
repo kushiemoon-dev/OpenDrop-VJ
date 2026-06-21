@@ -1,6 +1,6 @@
 <script lang="ts">
   interface Props {
-    letter: 'A' | 'B' | 'C' | 'D'
+    letter: string
     canvas: HTMLCanvasElement | undefined
     presetName: string
     isActive: boolean

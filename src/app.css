@@ -17,6 +17,14 @@
   --text-muted:     #44447a;
   --live:           #00e096;
 
+  /* Palette étendue (effets / états) */
+  --cyan:        #00e5ff;   --cyan-dim:   rgba(0, 229, 255, 0.10);
+  --violet:      #b44fff;   --violet-dim: rgba(180, 79, 255, 0.10);
+  --warn:        #ff8c00;
+  --error:       #ff7a7a;
+  --ok:          #4ade80;
+  --info:        #77aaff;
+
   /* Spacing (base 4 px) */
   --sp-1: 4px;
   --sp-2: 8px;

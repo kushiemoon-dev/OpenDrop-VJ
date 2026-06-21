@@ -98,6 +98,12 @@
 	// — Color controls per deck (M3) ——————————————————————
 	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
 	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+
+	type ColorCmd = [sfx: string, field: keyof ColorParams, lbl: string];
+	const COLOR_CMDS: ColorCmd[] = [
+		['hue','hueRotate','Hue'],['sat','saturate','Saturation'],
+		['bright','brightness','Brightness'],['contrast','contrast','Contrast'],['invert','invert','Invert'],
+	];
 	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
 	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
 
@@ -253,16 +259,11 @@
 	});
 
 	// — Câblage commandes M3 (color controls) ——————————————
-	registry.register({ id: 'color-hue-a', label: 'Hue A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, hueRotate: v }; } });
-	registry.register({ id: 'color-sat-a', label: 'Saturation A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, saturate: v }; } });
-	registry.register({ id: 'color-bright-a', label: 'Brightness A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, brightness: v }; } });
-	registry.register({ id: 'color-contrast-a', label: 'Contrast A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, contrast: v }; } });
-	registry.register({ id: 'color-invert-a', label: 'Invert A', kind: 'range', run(v) { colorParamsA = { ...colorParamsA, invert: v }; } });
-	registry.register({ id: 'color-hue-b', label: 'Hue B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, hueRotate: v }; } });
-	registry.register({ id: 'color-sat-b', label: 'Saturation B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, saturate: v }; } });
-	registry.register({ id: 'color-bright-b', label: 'Brightness B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, brightness: v }; } });
-	registry.register({ id: 'color-contrast-b', label: 'Contrast B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, contrast: v }; } });
-	registry.register({ id: 'color-invert-b', label: 'Invert B', kind: 'range', run(v) { colorParamsB = { ...colorParamsB, invert: v }; } });
+	for (const [sfx, field, lbl] of COLOR_CMDS)
+		for (const deck of ['a', 'b'] as const)
+			registry.register({ id: `color-${sfx}-${deck}` as CommandId, label: `${lbl} ${deck.toUpperCase()}`, kind: 'range',
+				run(v) { if (deck === 'a') colorParamsA = {...colorParamsA, [field]: v}; else colorParamsB = {...colorParamsB, [field]: v}; },
+			});
 
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
@@ -1115,20 +1116,11 @@
 
 	/** Lire la valeur courante (0..1) d'une commande range, pour le soft-takeover. */
 	function getCommandCurrentValue(id: CommandId): number | null {
-		switch (id) {
-			case 'crossfader': return crossfader;
-			case 'color-hue-a': return colorParamsA.hueRotate;
-			case 'color-sat-a': return colorParamsA.saturate;
-			case 'color-bright-a': return colorParamsA.brightness;
-			case 'color-contrast-a': return colorParamsA.contrast;
-			case 'color-invert-a': return colorParamsA.invert;
-			case 'color-hue-b': return colorParamsB.hueRotate;
-			case 'color-sat-b': return colorParamsB.saturate;
-			case 'color-bright-b': return colorParamsB.brightness;
-			case 'color-contrast-b': return colorParamsB.contrast;
-			case 'color-invert-b': return colorParamsB.invert;
-			default: return null;
-		}
+		if (id === 'crossfader') return crossfader;
+		const m = id.match(/^color-(\w+)-([ab])$/);
+		if (!m) return null;
+		const e = COLOR_CMDS.find(([s]) => s === m[1]);
+		return e ? (m[2] === 'a' ? colorParamsA : colorParamsB)[e[1]] : null;
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
@@ -1647,34 +1639,25 @@
 		{/each}
 	</div>
 {/snippet}
+{#snippet colorDeck(label: string, params: ColorParams, onUpdate: (p: ColorParams) => void, mt?: string)}
+	<div class="pl-header" style={mt}>
+		<span class="label">Color {label}</span>
+		<button class="btn-sm" onclick={() => onUpdate({ ...DEFAULT_COLOR_PARAMS })}>↺</button>
+	</div>
+	{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [lbl, key, min, max, unit, scale]}
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">{lbl}</span>
+			<input type="range" {min} {max} step="0.01" value={params[key]}
+				oninput={(e) => { onUpdate({ ...params, [key]: +e.currentTarget.value }); }}
+				style="flex:1" />
+			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(params[key] * scale)}{unit}</span>
+		</div>
+	{/each}
+{/snippet}
 {#snippet colorSection()}
 	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Color A</span>
-			<button class="btn-sm" onclick={() => { colorParamsA = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
-		</div>
-		{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label" style="width:48px">{label}</span>
-				<input type="range" {min} {max} step="0.01" value={colorParamsA[key]}
-					oninput={(e) => { colorParamsA = { ...colorParamsA, [key]: +e.currentTarget.value }; }}
-					style="flex:1" />
-				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsA[key] * scale)}{unit}</span>
-			</div>
-		{/each}
-		<div class="pl-header" style="margin-top:6px">
-			<span class="label">Color B</span>
-			<button class="btn-sm" onclick={() => { colorParamsB = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
-		</div>
-		{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label" style="width:48px">{label}</span>
-				<input type="range" {min} {max} step="0.01" value={colorParamsB[key]}
-					oninput={(e) => { colorParamsB = { ...colorParamsB, [key]: +e.currentTarget.value }; }}
-					style="flex:1" />
-				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsB[key] * scale)}{unit}</span>
-			</div>
-		{/each}
+		{@render colorDeck('A', colorParamsA, (p) => { colorParamsA = p; })}
+		{@render colorDeck('B', colorParamsB, (p) => { colorParamsB = p; }, 'margin-top:6px')}
 	</div>
 {/snippet}
 {#snippet electronSection()}

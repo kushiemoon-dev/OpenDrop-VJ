@@ -125,6 +125,11 @@
 	let remoteUrl = $state('');
 	let remoteError = $state('');
 	let remoteUnlisten: (() => void) | null = null;
+	// Ableton Link
+	let linkActive = $state(false);
+	let linkPeers = $state(0);
+	let linkError = $state('');
+	let linkUnlisten: (() => void) | null = null;
 	let v4l2Active = $state(false);
 	let v4l2Error = $state('');
 	let spoutActive = $state(false);
@@ -491,13 +496,18 @@
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
-		// Listeners OSC + remote + screen (Electron-only)
+		// Listeners OSC + remote + Link + screen (Electron-only)
 		if (isElectron) {
 			oscUnlisten = window.electronAPI?.onOscMsg?.((cmdId, value01) => {
 				registry.dispatch(cmdId as CommandId, value01, commandCtx);
 			}) ?? null;
 			remoteUnlisten = window.electronAPI?.onRemoteCmd?.((cmd, value) => {
 				registry.dispatch(cmd as CommandId, value, commandCtx);
+			}) ?? null;
+			linkUnlisten = window.electronAPI?.onLinkState?.((state) => {
+				// phase de Link est sur quantum=4 → normaliser en 0..1
+				clock.syncExternal(state.tempo, state.phase / 4.0);
+				linkPeers = state.peers;
 			}) ?? null;
 			outputWindowClosedUnlisten = window.electronAPI?.onOutputWindowClosed?.(() => {
 				outputOpen = false;
@@ -532,9 +542,11 @@
 		clock.stop();
 		oscUnlisten?.();
 		remoteUnlisten?.();
+		linkUnlisten?.();
 		outputWindowClosedUnlisten?.();
 		if (oscActive) window.electronAPI?.stopOsc?.();
 		if (remoteActive) window.electronAPI?.stopRemote?.();
+		if (linkActive) window.electronAPI?.stopLink?.();
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -1291,6 +1303,24 @@
 		}
 	}
 
+	async function toggleLink() {
+		linkError = '';
+		const eAPI = window.electronAPI;
+		if (linkActive) {
+			await eAPI?.stopLink?.();
+			linkActive = false;
+			linkPeers = 0;
+		} else {
+			const res = await eAPI?.startLink?.(manualBpm || clock.bpm || 120);
+			if (res?.ok) {
+				linkActive = true;
+				if (res.tempo) clock.setBpm(res.tempo);
+			} else {
+				linkError = res?.error ?? 'Ableton Link non disponible.';
+			}
+		}
+	}
+
 	async function startSlot(slot: number) {
 		if (!audio || status !== 'running') return;
 		const q = getQualitySettings(quality);
@@ -1818,6 +1848,22 @@
 				<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
 			{/if}
 			{#if remoteError}<div style="font-size:10px;color:#f87;margin-top:4px">{remoteError}</div>{/if}
+		</div>
+
+		<!-- Ableton Link (Electron only) -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Ableton Link</span>
+				<button class="btn-sm" class:active={linkActive} onclick={toggleLink}>
+					{linkActive ? 'Stop' : 'Démarrer'}
+				</button>
+			</div>
+			{#if linkActive}
+				<span class="source-badge">{linkPeers} pair{linkPeers !== 1 ? 's' : ''} connecté{linkPeers !== 1 ? 's' : ''}</span>
+			{:else}
+				<span style="font-size:10px;color:#666">Synchronise le tempo avec Ableton Live et autres apps Link sur le réseau local.</span>
+			{/if}
+			{#if linkError}<div style="font-size:10px;color:#f87;margin-top:4px">{linkError}</div>{/if}
 		</div>
 		{/if}
 

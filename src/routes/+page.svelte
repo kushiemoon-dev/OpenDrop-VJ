@@ -8,6 +8,8 @@
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
 	import { loadKeymap, saveKeymap, resetKeymap, formatKey, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
+	import { Clock } from '$lib/engine/clock.js';
+	import { LfoEngine, defaultSlot } from '$lib/engine/lfo.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
@@ -74,6 +76,18 @@
 	let learningAction = $state<CommandId | null>(null);
 	let keymap = $state<KeyBinding>({ ...DEFAULT_KEYMAP });
 	let learningKey = $state<CommandId | null>(null);
+
+	// — Clock + LFO + Strobe ———————————————————————————————
+	const clock = new Clock();
+	const lfoEngine = new LfoEngine();
+	let strobeOn = $state(false);
+	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
+	let strobeRate = $state(1);
+	let strobeIntensity = $state(0.8);
+	let strobeColor = $state('#ffffff');
+	let strobeFlash = $state(false);
+	let _lastStrobeVal = 0;
+
 	// Inverted index: commandId → assigned key string
 	const keyById = $derived(
 		new Map<CommandId, string>(
@@ -137,7 +151,6 @@
 	// — Tap tempo ——————————————————————————————————————————
 	let tapTimes: number[] = [];
 	let manualBpm = $state(0);
-	let metronomeId: ReturnType<typeof setInterval> | null = null;
 
 	// — Lock deck ——————————————————————————————————————————
 	let lockA = $state(false);
@@ -196,6 +209,20 @@
 	);
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
+
+	// — Câblage commandes M2 (strobe/LFO) dans le registre ——
+	registry.register({
+		id: 'strobe-toggle', label: 'Strobe ON/OFF', kind: 'trigger',
+		run() { strobeOn = !strobeOn; },
+	});
+	registry.register({
+		id: 'lfo-rate-up', label: 'LFO Rate +', kind: 'trigger',
+		run() { strobeRate = Math.min(4, strobeRate * 2); },
+	});
+	registry.register({
+		id: 'lfo-rate-down', label: 'LFO Rate −', kind: 'trigger',
+		run() { strobeRate = Math.max(0.25, strobeRate / 2); },
+	});
 
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
@@ -309,6 +336,15 @@
 			hueOn: vrHue,
 		};
 		sync?.sendVideo(payload);
+	});
+
+	// — Sync strobe vers output ———————————————————————————
+	$effect(() => {
+		const on = strobeOn;
+		const rate = strobeRate;
+		const intensity = strobeIntensity;
+		const color = strobeColor;
+		sync?.sendStrobe(on, rate, intensity, color);
 	});
 
 	// — Appliquer la qualité aux decks + sync output ———————
@@ -428,7 +464,7 @@
 		sync?.destroy();
 		midi?.destroy();
 		beatDetector?.destroy();
-		if (metronomeId !== null) clearInterval(metronomeId);
+		clock.stop();
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -499,8 +535,26 @@
 			beatDetector = new BeatDetector(audio.analyser);
 			beatDetector.start(() => {
 				detectedBpm = beatDetector?.bpm ?? 0;
-				if (!manualBpm) onBeat();
+				if (!manualBpm) clock.pulse(detectedBpm);
 			});
+			clock.onBeat(onBeat);
+			clock.onTick((phase) => {
+				// Route LFO values to registry commands
+				for (const { target, value01 } of lfoEngine.tick(phase)) {
+					if (target) registry.dispatch(target, value01, commandCtx);
+				}
+				// Strobe: detect rising edge of a square LFO at strobeRate
+				if (strobeOn) {
+					const p = (phase * strobeRate) % 1;
+					const val = p < 0.5 ? 1 : 0;
+					if (val === 1 && _lastStrobeVal === 0) {
+						strobeFlash = true;
+						setTimeout(() => { strobeFlash = false; }, 50);
+					}
+					_lastStrobeVal = val;
+				}
+			});
+			clock.start();
 
 			status = 'running';
 		} catch (e) {
@@ -704,7 +758,7 @@
 		// Pulse overlay beat-reactive
 		beat = true;
 		setTimeout(() => { beat = false; }, 80);
-		sync?.sendBeat();
+		sync?.sendBeat(clock.bpm || detectedBpm);
 
 		if (videoEnabled && vrCut && videoAdvance !== 'manual' && allClips.length > 1) {
 			videoBeatCount = (videoBeatCount + 1) % videoBeatsPerCut;
@@ -850,14 +904,14 @@
 		const bpm = Math.round(60000 / avg);
 		if (bpm < 40 || bpm > 300) return;
 		manualBpm = bpm;
-		if (metronomeId !== null) clearInterval(metronomeId);
-		metronomeId = setInterval(onBeat, avg);
+		clock.setBpm(bpm);
+		clock.pulse();
 	}
 
 	function clearManualBpm() {
 		manualBpm = 0;
 		tapTimes = [];
-		if (metronomeId !== null) { clearInterval(metronomeId); metronomeId = null; }
+		clock.setBpm(0);
 	}
 
 	async function toggleMidi() {
@@ -1115,6 +1169,10 @@
 		{/each}
 		<!-- Overlay sprites -->
 		<OverlayLayer {overlays} {beat} />
+		<!-- Strobe flash — top z-index, pointer-events none -->
+		{#if strobeOn && strobeFlash}
+			<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
+		{/if}
 
 		{#if status === 'idle'}
 			<div class="overlay">
@@ -1401,6 +1459,77 @@
 			</div>
 		</div>
 
+		<!-- Strobe -->
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Strobe</span>
+				<button class="btn-sm" class:active={strobeOn} onclick={() => { strobeOn = !strobeOn; }}>
+					{strobeOn ? 'ON' : 'OFF'}
+				</button>
+			</div>
+			{#if strobeOn}
+				<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+					<span class="midi-label">Rate</span>
+					{#each [0.25, 0.5, 1, 2, 4] as r}
+						<button class="btn-sm" class:active={strobeRate === r}
+							onclick={() => { strobeRate = r; }}>
+							{r < 1 ? `1/${Math.round(1/r)}` : `${r}×`}
+						</button>
+					{/each}
+				</div>
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Intensité</span>
+					<input type="range" min="0" max="1" step="0.05" bind:value={strobeIntensity} style="flex:1" />
+					<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
+				</div>
+				<div class="midi-row" style="gap:6px;align-items:center">
+					<span class="midi-label">Couleur</span>
+					<input type="color" bind:value={strobeColor} style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />
+				</div>
+			{/if}
+		</div>
+
+		<!-- LFO -->
+		<div class="controls-section">
+			<div class="pl-header"><span class="label">LFO</span></div>
+			{#each lfoEngine.slots as slot, i}
+				<div style="margin-bottom:6px;font-size:11px">
+					<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+						<input type="checkbox" bind:checked={slot.enabled} />
+						<span class="midi-label">LFO {i+1}</span>
+						{#each (['sine','saw','square','sh'] as const) as shape}
+							<button class="btn-sm" class:active={slot.shape === shape}
+								onclick={() => { slot.shape = shape; }}>
+								{shape}
+							</button>
+						{/each}
+					</div>
+					{#if slot.enabled}
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
+							<span class="midi-label">Cible</span>
+							<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
+								value={slot.target ?? ''}
+								onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>
+								<option value="">—</option>
+								{#each registry.all().filter(c => c.kind === 'range') as cmd}
+									<option value={cmd.id}>{cmd.label}</option>
+								{/each}
+							</select>
+						</div>
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+							<span class="midi-label">Rate</span>
+							<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
+							<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
+						</div>
+						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+							<span class="midi-label">Amount</span>
+							<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+
 	</aside>
 	<PresetBrowser
 		presets={presetList}
@@ -1519,6 +1648,7 @@
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
+	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 

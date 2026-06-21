@@ -9,6 +9,7 @@ allowBuilds:
   electron-winstaller: true
   grandiose: true
   spout-addon: true
+  '@ktamas77/abletonlink': true
 
 overrides:
   shell-quote: ">=1.8.4"
@@ -18,3 +19,4 @@ overrides:
 
 patchedDependencies:
   grandiose@0.0.4: patches/grandiose@0.0.4.patch
+  '@ktamas77/abletonlink@1.2.3': patches/@ktamas77+abletonlink@1.2.3.patch

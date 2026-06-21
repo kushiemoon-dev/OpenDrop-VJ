@@ -249,6 +249,52 @@ ipcMain.handle('output:open-on-display', async (event, displayId) => {
   return { ok: true };
 });
 
+// ── Ableton Link (optional — requires @ktamas77/abletonlink) ──────────────
+let linkInst = null;
+let linkTimer = null;
+
+ipcMain.handle('link:start', async (_, { bpm }) => {
+  try {
+    if (!linkInst) {
+      const { AbletonLink } = require('@ktamas77/abletonlink');
+      linkInst = new AbletonLink(bpm || 120);
+    }
+    linkInst.enable(true);
+    linkInst.enableStartStopSync(true);
+    linkInst.setTempoCallback((tempo) => {
+      BrowserWindow.getAllWindows().forEach(w => {
+        if (!w.isDestroyed()) w.webContents.send('link:tempo', tempo);
+      });
+    });
+    if (linkTimer) clearInterval(linkTimer);
+    linkTimer = setInterval(() => {
+      if (!linkInst || !linkInst.isEnabled()) return;
+      const tempo = linkInst.getTempo();
+      const beat = linkInst.getBeat();
+      const phase = linkInst.getPhase(4.0);
+      const peers = linkInst.getNumPeers();
+      BrowserWindow.getAllWindows().forEach(w => {
+        if (!w.isDestroyed()) w.webContents.send('link:state', { tempo, beat, phase, peers });
+      });
+    }, 50);
+    return { ok: true, tempo: linkInst.getTempo() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('link:stop', async () => {
+  if (linkTimer) { clearInterval(linkTimer); linkTimer = null; }
+  if (linkInst) { try { linkInst.enable(false); } catch {} }
+  return { ok: true };
+});
+
+ipcMain.handle('link:set-tempo', async (_, { bpm }) => {
+  if (!linkInst) return { ok: false, error: 'Link not started' };
+  try { linkInst.setTempo(bpm); return { ok: true }; }
+  catch (err) { return { ok: false, error: err.message }; }
+});
+
 // ── Relay BroadcastChannel messages between renderer processes ─────────────
 ipcMain.on('bc-post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {
@@ -628,5 +674,7 @@ app.on('window-all-closed', () => {
   if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
   if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
   if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
+  if (linkTimer) { clearInterval(linkTimer); linkTimer = null; }
+  if (linkInst) { try { linkInst.enable(false); } catch {} linkInst = null; }
   if (process.platform !== 'darwin') app.quit();
 });

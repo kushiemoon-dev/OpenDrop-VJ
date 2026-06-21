@@ -6,6 +6,8 @@
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
+	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
+	import { loadKeymap, saveKeymap, resetKeymap, formatKey, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
@@ -62,38 +64,22 @@
 	let playlistBItems = $state<string[]>([]);
 
 	// — MIDI ——————————————————————————————————————————————
-	type MidiAction =
-		| 'crossfader'
-		| 'preset-prev-a' | 'preset-next-a'
-		| 'preset-prev-b' | 'preset-next-b'
-		| 'playlist-toggle-a' | 'playlist-toggle-b'
-		| 'playlist-prev-a' | 'playlist-next-a'
-		| 'playlist-prev-b' | 'playlist-next-b';
-
-	const MIDI_ACTIONS: MidiAction[] = [
-		'crossfader',
-		'preset-prev-a', 'preset-next-a',
-		'preset-prev-b', 'preset-next-b',
-		'playlist-toggle-a', 'playlist-toggle-b',
-		'playlist-prev-a', 'playlist-next-a',
-		'playlist-prev-b', 'playlist-next-b',
-	];
-
-	const MIDI_LABELS: Record<MidiAction, string> = {
-		'crossfader': 'Crossfader',
-		'preset-prev-a': '◀ Preset A', 'preset-next-a': '▶ Preset A',
-		'preset-prev-b': '◀ Preset B', 'preset-next-b': '▶ Preset B',
-		'playlist-toggle-a': '⏯ Playlist A', 'playlist-toggle-b': '⏯ Playlist B',
-		'playlist-prev-a': '⏮ Playlist A', 'playlist-next-a': '⏭ Playlist A',
-		'playlist-prev-b': '⏮ Playlist B', 'playlist-next-b': '⏭ Playlist B',
-	};
+	const registry = createDefaultRegistry();
 
 	const midiSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
 	let midi: MidiEngine | null = null;
 	let midiConnected = $state(false);
 	let midiDeviceNames = $state<string[]>([]);
-	let midiMappings = $state<Partial<Record<MidiAction, MidiTriggerKey>>>({});
-	let learningAction = $state<MidiAction | null>(null);
+	let midiMappings = $state<Partial<Record<CommandId, MidiTriggerKey>>>({});
+	let learningAction = $state<CommandId | null>(null);
+	let keymap = $state<KeyBinding>({ ...DEFAULT_KEYMAP });
+	let learningKey = $state<CommandId | null>(null);
+	// Inverted index: commandId → assigned key string
+	const keyById = $derived(
+		new Map<CommandId, string>(
+			(Object.entries(keymap) as [string, CommandId][]).map(([k, v]) => [v, k])
+		)
+	);
 
 	// — Electron ——————————————————————————————————————————
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
@@ -211,6 +197,31 @@
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
 
+	// — Command context (injected into registry.dispatch) ——
+	const commandCtx: CommandContext = {
+		getCrossfader: () => crossfader,
+		setCrossfader: (v) => { crossfader = v; },
+		getActiveDeck: () => activeDeck,
+		switchActiveDeck: () => { activeSlot = activeSlot === 0 ? 1 : 0; },
+		navigatePreset(deck, direction) {
+			if (presetList.length === 0) return;
+			if (deck === 'A') {
+				const idx = direction === 1
+					? (presetIdxA + 1) % presetList.length
+					: ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
+				selectPresetForDeck('A', presetList[idx].name);
+			} else {
+				const idx = direction === 1
+					? (presetIdxB + 1) % presetList.length
+					: ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
+				selectPresetForDeck('B', presetList[idx].name);
+			}
+		},
+		togglePlaylist,
+		playlistNext,
+		playlistPrev,
+	};
+
 	// — Sync crossfader to output window ——————————————————
 	// Read crossfader unconditionally before sync?. so Svelte 5 tracks it as a
 	// dependency even when sync is still null on the first $effect run (onMount
@@ -261,6 +272,7 @@
 		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
+		localStorage.setItem('od-keymap', JSON.stringify(keymap));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-target-fps', String(targetFps));
 		localStorage.setItem('od-invisible-mode', invisibleMode);
@@ -363,6 +375,8 @@
 			if (savedMode) playlistMode = savedMode as PlaylistMode;
 			const savedMidi = localStorage.getItem('od-midi-mappings');
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
+			const savedKeymap = localStorage.getItem('od-keymap');
+			if (savedKeymap) try { keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedFps = localStorage.getItem('od-target-fps');
@@ -870,10 +884,10 @@
 					return;
 				}
 				// Dispatcher
-				for (const [action, mapped] of Object.entries(midiMappings) as [MidiAction, MidiTriggerKey][]) {
+				for (const [action, mapped] of Object.entries(midiMappings) as [CommandId, MidiTriggerKey][]) {
 					if (mapped !== key) continue;
 					if (msg.type === 'note_off') break; // actions déclenchées sur note_on ou cc
-					applyMidiAction(action as MidiAction, msg.value);
+					applyMidiAction(action, msg.value);
 					break;
 				}
 			});
@@ -883,52 +897,29 @@
 		}
 	}
 
-	function startLearn(action: MidiAction) {
+	function startLearn(action: CommandId) {
 		learningAction = learningAction === action ? null : action;
 	}
 
-	function clearMapping(action: MidiAction) {
+	function clearMapping(action: CommandId) {
 		const { [action]: _, ...rest } = midiMappings;
-		midiMappings = rest as Partial<Record<MidiAction, MidiTriggerKey>>;
+		midiMappings = rest as Partial<Record<CommandId, MidiTriggerKey>>;
 	}
 
-	function applyMidiAction(action: MidiAction, value: number) {
+	function clearKeyBinding(cmdId: CommandId) {
+		const key = keyById.get(cmdId);
+		if (!key) return;
+		const { [key]: _, ...rest } = keymap;
+		keymap = rest as KeyBinding;
+	}
+
+	function doResetKeymap() {
+		keymap = resetKeymap();
+	}
+
+	function applyMidiAction(action: CommandId, value: number) {
 		if (status !== 'running') return;
-		switch (action) {
-			case 'crossfader':
-				crossfader = value / 127;
-				break;
-			case 'preset-prev-a': {
-				if (presetList.length === 0) break;
-				const idx = ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
-				selectPresetForDeck('A', presetList[idx].name);
-				break;
-			}
-			case 'preset-next-a': {
-				if (presetList.length === 0) break;
-				const idx = (presetIdxA + 1) % presetList.length;
-				selectPresetForDeck('A', presetList[idx].name);
-				break;
-			}
-			case 'preset-prev-b': {
-				if (presetList.length === 0) break;
-				const idx = ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
-				selectPresetForDeck('B', presetList[idx].name);
-				break;
-			}
-			case 'preset-next-b': {
-				if (presetList.length === 0) break;
-				const idx = (presetIdxB + 1) % presetList.length;
-				selectPresetForDeck('B', presetList[idx].name);
-				break;
-			}
-			case 'playlist-toggle-a': togglePlaylist('A'); break;
-			case 'playlist-toggle-b': togglePlaylist('B'); break;
-			case 'playlist-prev-a': playlistPrev('A'); break;
-			case 'playlist-next-a': playlistNext('A'); break;
-			case 'playlist-prev-b': playlistPrev('B'); break;
-			case 'playlist-next-b': playlistNext('B'); break;
-		}
+		registry.dispatch(action, value / 127, commandCtx);
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
@@ -1078,46 +1069,22 @@
 	}
 
 	function onKeydown(e: KeyboardEvent) {
-		// Ignorer si on tape dans un champ texte
 		const tag = (e.target as HTMLElement).tagName;
 		if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
-		switch (e.key) {
-			case 'ArrowLeft':
-				e.preventDefault();
-				crossfader = Math.max(0, parseFloat((crossfader - 0.05).toFixed(2)));
-				break;
-			case 'ArrowRight':
-				e.preventDefault();
-				crossfader = Math.min(1, parseFloat((crossfader + 0.05).toFixed(2)));
-				break;
-			case 'Tab':
-				e.preventDefault();
-				activeSlot = activeSlot === 0 ? 1 : 0;
-				break;
-			case '[':
-				e.preventDefault();
-				applyMidiAction(activeDeck === 'A' ? 'preset-prev-a' : 'preset-prev-b', 127);
-				break;
-			case ']':
-				e.preventDefault();
-				applyMidiAction(activeDeck === 'A' ? 'preset-next-a' : 'preset-next-b', 127);
-				break;
-			case ' ':
-				e.preventDefault();
-				togglePlaylist(activeDeck);
-				break;
-			case 'n':
-			case 'N':
-				e.preventDefault();
-				playlistNext(activeDeck);
-				break;
-			case 'p':
-			case 'P':
-				e.preventDefault();
-				playlistPrev(activeDeck);
-				break;
+		if (learningKey !== null) {
+			if (e.key === 'Escape') { learningKey = null; e.preventDefault(); return; }
+			keymap = { ...keymap, [e.key]: learningKey };
+			learningKey = null;
+			e.preventDefault();
+			return;
 		}
+
+		const action = keymap[e.key];
+		if (!action) return;
+		e.preventDefault();
+		if (status !== 'running') return;
+		registry.dispatch(action, 1, commandCtx);
 	}
 </script>
 
@@ -1386,24 +1353,52 @@
 					<span style="font-size:11px;color:#fa7">Bouge un knob/bouton sur ton contrôleur…</span>
 				{/if}
 				<div class="midi-list">
-					{#each MIDI_ACTIONS as action}
-						{@const mapped = midiMappings[action]}
+					{#each registry.all() as cmd}
+						{@const mapped = midiMappings[cmd.id]}
 						<div class="midi-row">
-							<span class="midi-label">{MIDI_LABELS[action]}</span>
-							<span class="midi-binding" class:midi-learning={learningAction === action}>
+							<span class="midi-label">{cmd.label}</span>
+							<span class="midi-binding" class:midi-learning={learningAction === cmd.id}>
 								{mapped ? formatTrigger(mapped) : '—'}
 							</span>
-							<button class="btn-sm pl-btn" class:active={learningAction === action}
-								onclick={() => startLearn(action)}>
-								{learningAction === action ? '…' : 'Learn'}
+							<button class="btn-sm pl-btn" class:active={learningAction === cmd.id}
+								onclick={() => startLearn(cmd.id)}>
+								{learningAction === cmd.id ? '…' : 'Learn'}
 							</button>
 							{#if mapped}
-								<button class="pl-remove" onclick={() => clearMapping(action)}>×</button>
+								<button class="pl-remove" onclick={() => clearMapping(cmd.id)}>×</button>
 							{/if}
 						</div>
 					{/each}
 				</div>
 			{/if}
+		</div>
+
+		<div class="controls-section">
+			<div class="pl-header">
+				<span class="label">Clavier</span>
+				<button class="btn-sm" onclick={doResetKeymap}>Reset</button>
+			</div>
+			{#if learningKey !== null}
+				<span style="font-size:11px;color:#fa7">Appuie sur la touche à assigner… (Esc = annuler)</span>
+			{/if}
+			<div class="midi-list">
+				{#each registry.all() as cmd}
+					{@const assignedKey = keyById.get(cmd.id)}
+					<div class="midi-row">
+						<span class="midi-label">{cmd.label}</span>
+						<span class="midi-binding" class:midi-learning={learningKey === cmd.id}>
+							{assignedKey ? formatKey(assignedKey) : '—'}
+						</span>
+						<button class="btn-sm pl-btn" class:active={learningKey === cmd.id}
+							onclick={() => { learningKey = learningKey === cmd.id ? null : cmd.id; }}>
+							{learningKey === cmd.id ? '…' : 'Learn'}
+						</button>
+						{#if assignedKey}
+							<button class="pl-remove" onclick={() => clearKeyBinding(cmd.id)}>×</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 
 	</aside>

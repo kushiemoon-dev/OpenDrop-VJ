@@ -1953,7 +1953,6 @@
     {presetList}
     {playlistAItems}
     {playlistBItems}
-    {status}
     {layout}
     onStartSlot={startSlot}
     onPauseSlot={pauseSlot}

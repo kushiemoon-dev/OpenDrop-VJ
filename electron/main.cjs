@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session } = requ
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const dgram = require('dgram');
 
 // Allow AudioContext to auto-start in renderer windows (including the output window
 // which opens programmatically via window.open, with no user gesture of its own).
@@ -81,6 +82,118 @@ function findV4l2Device() {
 const isDev = !app.isPackaged;
 const DEV_URL = 'http://localhost:1420';
 const BUILD_DIR = path.join(__dirname, '../build');
+
+// ── OSC UDP server (optional, Electron-only) ───────────────────────────────
+let oscServer = null;
+
+// Minimal OSC packet parser: reads null-terminated address string, then
+// a single float32 argument (if present). Returns [address, value01] or null.
+function parseOscPacket(buf) {
+  if (buf.length < 4) return null;
+  // Find end of null-padded address
+  let addrEnd = buf.indexOf(0);
+  if (addrEnd < 0) return null;
+  const address = buf.toString('ascii', 0, addrEnd);
+  // Advance past null-padding to 4-byte boundary
+  let offset = Math.ceil((addrEnd + 1) / 4) * 4;
+  // Skip type tag string if present (starts with ',')
+  if (offset < buf.length && buf[offset] === 0x2c) {
+    const ttEnd = buf.indexOf(0, offset + 1);
+    if (ttEnd >= 0) offset = Math.ceil((ttEnd + 1) / 4) * 4;
+  }
+  // Read first float32 argument if enough bytes remain
+  let value01 = 0;
+  if (offset + 4 <= buf.length) {
+    value01 = buf.readFloatBE(offset);
+    value01 = Math.max(0, Math.min(1, value01));
+  }
+  return [address, value01];
+}
+
+ipcMain.handle('osc:start', async (_event, { port }) => {
+  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
+  return new Promise((resolve) => {
+    const sock = dgram.createSocket('udp4');
+    sock.on('error', (err) => {
+      oscServer = null;
+      resolve({ ok: false, error: err.message });
+    });
+    sock.on('message', (buf) => {
+      const parsed = parseOscPacket(buf);
+      if (!parsed) return;
+      const [address, value01] = parsed;
+      if (!address.startsWith('/opendrop/')) return;
+      const cmdId = address.slice('/opendrop/'.length);
+      if (!cmdId) return;
+      BrowserWindow.getAllWindows().forEach((w) => {
+        if (!w.isDestroyed()) w.webContents.send('osc:msg', cmdId, value01);
+      });
+    });
+    sock.bind(port, () => {
+      oscServer = sock;
+      resolve({ ok: true, port });
+    });
+  });
+});
+
+ipcMain.handle('osc:stop', async () => {
+  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
+  return { ok: true };
+});
+
+// ── WebSocket remote control server (optional, Electron-only) ─────────────
+const crypto = require('crypto');
+const { WebSocketServer } = require('ws');
+const os = require('os');
+
+let wsServer = null;
+let wsToken = null;
+
+function getLanIp() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return '127.0.0.1';
+}
+
+ipcMain.handle('remote:start', async () => {
+  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
+  wsToken = crypto.randomBytes(12).toString('hex');
+  return new Promise((resolve) => {
+    const wss = new WebSocketServer({ port: 0 }); // OS picks a free port
+    wss.on('error', (err) => {
+      wsServer = null;
+      resolve({ ok: false, error: err.message });
+    });
+    wss.on('listening', () => {
+      wsServer = wss;
+      const { port } = wss.address();
+      resolve({ ok: true, port, ip: getLanIp(), token: wsToken });
+    });
+    wss.on('connection', (ws) => {
+      ws.on('message', (data) => {
+        let msg;
+        try { msg = JSON.parse(data.toString()); } catch { return; }
+        if (!msg || msg.token !== wsToken) return;
+        const cmd = typeof msg.cmd === 'string' ? msg.cmd : '';
+        const value = typeof msg.value === 'number' ? Math.max(0, Math.min(1, msg.value)) : 0;
+        if (!cmd) return;
+        BrowserWindow.getAllWindows().forEach((w) => {
+          if (!w.isDestroyed()) w.webContents.send('remote:cmd', cmd, value);
+        });
+      });
+    });
+  });
+});
+
+ipcMain.handle('remote:stop', async () => {
+  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
+  wsToken = null;
+  return { ok: true };
+});
 
 // ── Relay BroadcastChannel messages between renderer processes ─────────────
 ipcMain.on('bc-post', (event, data) => {
@@ -459,5 +572,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
   if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
+  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
+  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
   if (process.platform !== 'darwin') app.quit();
 });

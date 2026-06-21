@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -192,6 +192,60 @@ ipcMain.handle('remote:start', async () => {
 ipcMain.handle('remote:stop', async () => {
   if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
   wsToken = null;
+  return { ok: true };
+});
+
+// ── Screen targeting ──────────────────────────────────────────────────────
+ipcMain.handle('screen:list', () => {
+  const primary = screen.getPrimaryDisplay();
+  return screen.getAllDisplays().map((d, i) => ({
+    id: d.id,
+    label: `Display ${i + 1}${d.id === primary.id ? ' (Primary)' : ''}`,
+    bounds: d.bounds,
+    isPrimary: d.id === primary.id,
+  }));
+});
+
+ipcMain.handle('output:open-on-display', async (event, displayId) => {
+  const displays = screen.getAllDisplays();
+  const primary = screen.getPrimaryDisplay();
+  const target = displayId != null
+    ? (displays.find(d => d.id === displayId) ?? primary)
+    : primary;
+
+  if (outputWin && !outputWin.isDestroyed()) {
+    outputWin.close();
+    outputWin = null;
+  }
+
+  const { x, y, width, height } = target.bounds;
+  const child = new BrowserWindow({
+    x, y, width, height,
+    fullscreen: true,
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+    title: 'OpenDrop — Output',
+  });
+
+  if (isDev) {
+    child.loadURL(DEV_URL + '/output');
+  } else {
+    child.loadURL('app://localhost/output');
+  }
+
+  outputWin = child;
+  child.on('closed', () => {
+    if (outputWin === child) outputWin = null;
+    // Notify all remaining windows so they can update their UI state
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) w.webContents.send('output:window-closed');
+    });
+  });
+
   return { ok: true };
 });
 

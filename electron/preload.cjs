@@ -62,4 +62,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('remote:cmd', handler);
     return () => ipcRenderer.off('remote:cmd', handler);
   },
+
+  // Screen targeting — open output fullscreen on a specific display
+  listScreens: () => ipcRenderer.invoke('screen:list'),
+  openOutputOnDisplay: (displayId) => ipcRenderer.invoke('output:open-on-display', displayId),
+  onOutputWindowClosed: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('output:window-closed', handler);
+    return () => ipcRenderer.off('output:window-closed', handler);
+  },
 });

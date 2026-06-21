@@ -85,6 +85,7 @@
 	// — Clock + LFO + Strobe ———————————————————————————————
 	const clock = new Clock();
 	const lfoEngine = new LfoEngine();
+	const lfoSlots = $state(lfoEngine.slots);
 	let midiClockBpm = $state(0);   // BPM détecté via MIDI clock IN (0 = inactif)
 	let strobeOn = $state(false);
 	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
@@ -1740,7 +1741,7 @@
 		<!-- LFO -->
 		<div class="controls-section">
 			<div class="pl-header"><span class="label">LFO</span></div>
-			{#each lfoEngine.slots as slot, i}
+			{#each lfoSlots as slot, i}
 				<div style="margin-bottom:6px;font-size:11px">
 					<div class="midi-row" style="gap:4px;flex-wrap:wrap">
 						<input type="checkbox" bind:checked={slot.enabled} />

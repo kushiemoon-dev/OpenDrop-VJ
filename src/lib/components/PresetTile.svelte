@@ -1,24 +1,25 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
 	import type { PresetMeta } from '$lib/presets/index.js'
+	import { FAV_COLORS } from '$lib/presets/favorites.js'
 
 	interface Props {
 		preset: PresetMeta
 		slug: string
 		thumbUrl?: string
-		isFav: boolean
+		favColor: number
 		inA: boolean
 		inB: boolean
 		isSelected: boolean
 		onLoad: () => void
-		onToggleFav: () => void
+		onSetFavColor: (color: number) => void
 		onAddA: () => void
 		onAddB: () => void
 		onVisible: () => void
 		onHidden: () => void
 	}
 
-	let { preset, slug, thumbUrl, isFav, inA, inB, isSelected, onLoad, onToggleFav, onAddA, onAddB, onVisible, onHidden }: Props = $props()
+	let { preset, slug, thumbUrl, favColor, inA, inB, isSelected, onLoad, onSetFavColor, onAddA, onAddB, onVisible, onHidden }: Props = $props()
 
 	onMount(() => onVisible())
 	onDestroy(() => onHidden())
@@ -45,16 +46,17 @@
 	<!-- Nom tronqué -->
 	<div class="ptile__name" title={preset.name}>{preset.name.split('/').pop() ?? preset.name}</div>
 
-	<!-- Étoile favori (coin haut-droit, stopPropagation) -->
+	<!-- Swatch favori (coin haut-droit) — clic cycle 0→1→2→3→4→5→0 -->
 	<button
 		class="ptile__fav"
-		class:ptile__fav--on={isFav}
+		class:ptile__fav--on={favColor > 0}
+		style:color={FAV_COLORS[favColor] || undefined}
 		onclick={(e) => {
 			e.stopPropagation()
-			onToggleFav()
+			onSetFavColor((favColor + 1) % 6)
 		}}
 		type="button"
-		aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+		aria-label={favColor > 0 ? 'Changer couleur favori' : 'Ajouter aux favoris'}
 	>
 		★
 	</button>

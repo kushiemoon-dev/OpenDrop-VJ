@@ -3,6 +3,7 @@
   import PresetTile from './PresetTile.svelte'
   import { computeGrid, type GridWindow } from '$lib/presets/grid-virtual.js'
   import { thumbUrls, requestThumb, releaseThumb } from '$lib/presets/thumbnailer.svelte.js'
+  import { loadFavColors, saveFavColors, FAV_COLORS } from '$lib/presets/favorites.js'
 
   interface Props {
     presets: PresetMeta[]
@@ -33,7 +34,8 @@
   // ── Recherche ──────────────────────────────────────────────────────────────
   let searchQuery: string = $state('')
   let debouncedQuery: string = $state('')
-  let activeTag: string = $state('')   // '' | '★'
+  // 0 = tous, -1 = tous favoris (n'importe quelle couleur), 1-5 = couleur spécifique
+  let activeColorFilter: number = $state(0)
 
   $effect(() => {
     const q = searchQuery
@@ -41,28 +43,41 @@
     return () => clearTimeout(timer)
   })
 
-  // ── Favoris (localStorage) ──────────────────────────────────────────────────
-  const FAV_KEY = 'od-favorites'
+  // ── Favoris couleur (localStorage) ──────────────────────────────────────────
+  let favColors: Record<string, number> = $state(loadFavColors())
 
-  function loadFavorites(): string[] {
-    try { return JSON.parse(localStorage.getItem(FAV_KEY) ?? '[]') }
-    catch { return [] }
+  function setFavColor(name: string, color: number) {
+    const next = { ...favColors }
+    if (color === 0) delete next[name]
+    else next[name] = color
+    favColors = next
+    saveFavColors(next)
   }
 
-  let favorites: string[] = $state(loadFavorites())
+  // ── Notes preset (localStorage) ─────────────────────────────────────────────
+  const NOTE_KEY = 'od-preset-notes'
+  function loadNotes(): Record<string, string> {
+    try { return JSON.parse(localStorage.getItem(NOTE_KEY) ?? '{}') }
+    catch { return {} }
+  }
 
-  function toggleFavorite(name: string) {
-    favorites = favorites.includes(name)
-      ? favorites.filter((f) => f !== name)
-      : [...favorites, name]
-    localStorage.setItem(FAV_KEY, JSON.stringify(favorites))
+  let notes: Record<string, string> = $state(loadNotes())
+  let selectedName: string = $state('')
+
+  function setNote(name: string, text: string) {
+    const next = { ...notes }
+    if (text) next[name] = text
+    else delete next[name]
+    notes = next
+    localStorage.setItem(NOTE_KEY, JSON.stringify(next))
   }
 
   // ── Filtrage ───────────────────────────────────────────────────────────────
   let filteredPresets: PresetMeta[] = $derived(
     (() => {
       let list = debouncedQuery ? searchPresets(presets, debouncedQuery) : presets
-      if (activeTag === '★') list = list.filter((p) => favorites.includes(p.name))
+      if (activeColorFilter === -1) list = list.filter((p) => (favColors[p.name] ?? 0) > 0)
+      else if (activeColorFilter >= 1) list = list.filter((p) => favColors[p.name] === activeColorFilter)
       return list
     })()
   )
@@ -138,17 +153,39 @@
     <div class="preset-drawer__filters">
       <button
         class="tag-chip"
-        class:tag-active={activeTag === ''}
-        onclick={() => { activeTag = '' }}
+        class:tag-active={activeColorFilter === 0}
+        onclick={() => { activeColorFilter = 0 }}
         type="button"
       >Tous</button>
       <button
         class="tag-chip"
-        class:tag-active={activeTag === '★'}
-        onclick={() => { activeTag = activeTag === '★' ? '' : '★' }}
+        class:tag-active={activeColorFilter === -1}
+        onclick={() => { activeColorFilter = activeColorFilter === -1 ? 0 : -1 }}
         type="button"
-      >★ Favoris</button>
+      >★</button>
+      {#each [1, 2, 3, 4, 5] as c}
+        <button
+          class="tag-chip fav-chip"
+          class:tag-active={activeColorFilter === c}
+          style:background={activeColorFilter === c ? FAV_COLORS[c] + '33' : undefined}
+          style:border-color={activeColorFilter === c ? FAV_COLORS[c] : undefined}
+          onclick={() => { activeColorFilter = activeColorFilter === c ? 0 : c }}
+          type="button"
+          aria-label={`Filtrer couleur ${c}`}
+        ><span class="fav-dot" style:background={FAV_COLORS[c]}></span></button>
+      {/each}
     </div>
+
+    {#if selectedName}
+      <input
+        class="note-input"
+        type="text"
+        placeholder="Note…"
+        value={notes[selectedName] ?? ''}
+        oninput={(e) => setNote(selectedName, e.currentTarget.value)}
+        title={selectedName}
+      />
+    {/if}
 
     <input
       class="search-input"
@@ -175,17 +212,16 @@
         >
           {#each filteredPresets.slice(gridWindow.vStart, gridWindow.vEnd) as p (slugMap.get(p.name) ?? p.name)}
             {@const slug = slugMap.get(p.name) ?? p.name}
-            {@const isFav = favorites.includes(p.name)}
             <PresetTile
               preset={p}
               {slug}
               thumbUrl={thumbUrls.get(slug)}
-              {isFav}
+              favColor={favColors[p.name] ?? 0}
               inA={playlistAItems.includes(p.name)}
               inB={playlistBItems.includes(p.name)}
               isSelected={false}
-              onLoad={() => onLoadPreset(p.name)}
-              onToggleFav={() => toggleFavorite(p.name)}
+              onLoad={() => { selectedName = p.name; onLoadPreset(p.name); }}
+              onSetFavColor={(c) => setFavColor(p.name, c)}
               onAddA={() => onAddToPlaylist('A', p.name)}
               onAddB={() => onAddToPlaylist('B', p.name)}
               onVisible={() => requestThumb(slug, p.name)}
@@ -205,19 +241,20 @@
       <li style="height:{vStart * PRESET_ROW_H}px" aria-hidden="true"></li>
 
       {#each filteredPresets.slice(vStart, vEnd) as p (p.name)}
-        {@const isFav = favorites.includes(p.name)}
+        {@const fc = favColors[p.name] ?? 0}
         <li class="preset-row">
           <button
             class="fav-btn"
-            class:fav-on={isFav}
-            onclick={() => toggleFavorite(p.name)}
+            class:fav-on={fc > 0}
+            style:color={FAV_COLORS[fc] || undefined}
+            onclick={() => setFavColor(p.name, (fc + 1) % 6)}
             type="button"
-            aria-label={isFav ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+            aria-label={fc > 0 ? 'Changer couleur favori' : 'Ajouter aux favoris'}
           >★</button>
 
           <button
             class="preset-item"
-            onclick={() => onLoadPreset(p.name)}
+            onclick={() => { selectedName = p.name; onLoadPreset(p.name); }}
             type="button"
             title={p.name}
           >{p.name}</button>
@@ -305,6 +342,22 @@
 
   .tag-chip:hover { border-color: #ff2d78; color: #ff2d78; }
   .tag-active { border-color: #ff2d78; color: #ff2d78; background: #1a0a22; }
+
+  .fav-chip { padding: 2px 5px; }
+  .fav-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+
+  .note-input {
+    flex: 1;
+    min-width: 0;
+    background: #0e0e26;
+    border: 1px solid #1e1e48;
+    border-radius: 3px;
+    color: #ccccee;
+    font-size: 10px;
+    padding: 2px 6px;
+    outline: none;
+  }
+  .note-input:focus { border-color: #ff2d78; }
 
   .search-input {
     flex: 1;

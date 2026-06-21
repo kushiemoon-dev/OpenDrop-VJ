@@ -27,6 +27,10 @@ declare global {
 			onLoopbackData: (cb: (data: { sampleRate: number; channels: number; pcm: Uint8Array }) => void) => () => void;
 			sendAudioFrame: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void;
 			onAudioFrame: (cb: (data: { sampleRate: number; channels: number; pcm: Int16Array }) => void) => () => void;
+			startLink: (bpm: number) => Promise<{ ok: boolean; tempo?: number; error?: string }>;
+			stopLink: () => Promise<{ ok: boolean }>;
+			setLinkTempo: (bpm: number) => Promise<{ ok: boolean; error?: string }>;
+			onLinkState: (cb: (state: { tempo: number; beat: number; phase: number; peers: number }) => void) => () => void;
 			startOsc: (port: number) => Promise<{ ok: boolean; port?: number; error?: string }>;
 			stopOsc: () => Promise<{ ok: boolean }>;
 			onOscMsg: (cb: (cmdId: string, value01: number) => void) => () => void;

@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { Deck } from '$lib/engine/deck.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { OutputSync } from '$lib/engine/sync.js';
+	import { OutputSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
@@ -15,6 +15,11 @@
 	let crossfader = $state(0);
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
+	// — Color controls ————————————————————————————————————
+	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
+	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
+	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
 	// — Strobe ———————————————————————————————————————————
 	let strobeOn = $state(false);
@@ -185,6 +190,9 @@
 					_strobeBpm = msg.bpm;
 					_strobePhase = 0;
 					_lastStrobeVal = 0;
+				} else if (msg.type === 'color') {
+					if (msg.deck === 'A') colorParamsA = msg.params;
+					else colorParamsB = msg.params;
 				} else if (msg.type === 'strobe') {
 					strobeOn = msg.on;
 					strobeRate = msg.rate;
@@ -267,8 +275,8 @@
 
 <div class="output">
 	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
-	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}"></canvas>
+	<canvas bind:this={canvasA} class="layer" style="opacity:{opacityA}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{colorFilterA}"></canvas>
+	<canvas bind:this={canvasB} class="layer layer-b" style="opacity:{opacityB}; filter:{colorFilterB}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>

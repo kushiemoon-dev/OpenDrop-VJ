@@ -15,9 +15,9 @@ export type CommandId =
 	// M2 — Strobe / LFO (wired in M2, declared here for keymap/MIDI pre-mapping)
 	| 'strobe-toggle'
 	| 'lfo-rate-up' | 'lfo-rate-down'
-	// M3 — Color controls
-	| 'color-hue-a' | 'color-sat-a' | 'color-bright-a'
-	| 'color-hue-b' | 'color-sat-b' | 'color-bright-b'
+	// M3 — Color controls (5 params × 2 decks)
+	| 'color-hue-a' | 'color-sat-a' | 'color-bright-a' | 'color-contrast-a' | 'color-invert-a'
+	| 'color-hue-b' | 'color-sat-b' | 'color-bright-b' | 'color-contrast-b' | 'color-invert-b'
 	// M7 — Output / fullscreen
 	| 'output-fullscreen'
 	// Video
@@ -192,13 +192,17 @@ const DEFAULT_COMMANDS: Command[] = [
 	{ id: 'strobe-toggle', label: 'Strobe ON/OFF', kind: 'trigger', run() {} },
 	{ id: 'lfo-rate-up', label: 'LFO Rate +', kind: 'trigger', run() {} },
 	{ id: 'lfo-rate-down', label: 'LFO Rate −', kind: 'trigger', run() {} },
-	// M3 stubs
+	// M3 stubs — wired in M3 via registry.register() in +page.svelte
 	{ id: 'color-hue-a', label: 'Hue A', kind: 'range', run() {} },
 	{ id: 'color-sat-a', label: 'Saturation A', kind: 'range', run() {} },
 	{ id: 'color-bright-a', label: 'Brightness A', kind: 'range', run() {} },
+	{ id: 'color-contrast-a', label: 'Contrast A', kind: 'range', run() {} },
+	{ id: 'color-invert-a', label: 'Invert A', kind: 'range', run() {} },
 	{ id: 'color-hue-b', label: 'Hue B', kind: 'range', run() {} },
 	{ id: 'color-sat-b', label: 'Saturation B', kind: 'range', run() {} },
 	{ id: 'color-bright-b', label: 'Brightness B', kind: 'range', run() {} },
+	{ id: 'color-contrast-b', label: 'Contrast B', kind: 'range', run() {} },
+	{ id: 'color-invert-b', label: 'Invert B', kind: 'range', run() {} },
 	// M7 stubs
 	{ id: 'output-fullscreen', label: 'Output fullscreen', kind: 'trigger', run() {} },
 	// Video stubs (wired when video engine is active)

@@ -27,18 +27,27 @@
     onCrossfaderChange: (v: number) => void
     onLoadPreset: (name: string) => void
     onAddToPlaylist: (deck: 'A' | 'B', name: string) => void
-    onOpenOutput: () => void
     onLayoutToggle: (l: 'stage' | 'mixer') => void
     audioSection: Snippet
     videoSection: Snippet
+    qualiteSection: Snippet
+    outputSection: Snippet
+    midiSection: Snippet
+    clavierSection: Snippet
+    strobeSection: Snippet
+    lfoSection: Snippet
+    colorSection: Snippet
+    electronSection: Snippet
   }
 
   let {
     canvases, presets4, deckBus, runningCount, isRunning, selectedSlot,
     crossfader, presetList, playlistAItems, playlistBItems, status, layout,
     onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange,
-    onLoadPreset, onAddToPlaylist, onOpenOutput, onLayoutToggle,
+    onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,
+    qualiteSection, outputSection, midiSection, clavierSection,
+    strobeSection, lfoSection, colorSection, electronSection,
   }: Props = $props()
 
   // Le deck actif détermine le "deck cible" du PresetBrowser en mode mixer.
@@ -102,16 +111,14 @@
     </div>
 
     {@render videoSection()}
-
-    <div class="controls-section">
-      <button
-        class="btn-output"
-        onclick={onOpenOutput}
-        disabled={status !== 'running'}
-      >
-        ⎋ Open output window
-      </button>
-    </div>
+    {@render qualiteSection()}
+    {@render colorSection()}
+    {@render strobeSection()}
+    {@render lfoSection()}
+    {@render outputSection()}
+    {@render midiSection()}
+    {@render clavierSection()}
+    {@render electronSection()}
   </aside>
 </div>
 
@@ -146,7 +153,7 @@
     font-size: 14px;
     font-weight: 800;
     letter-spacing: 0.1em;
-    background: linear-gradient(135deg, #ff2d78 0%, #00e5ff 100%);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -214,24 +221,5 @@
     font-weight: 600;
   }
 
-  .btn-output {
-    width: 100%;
-    background: linear-gradient(135deg, rgba(0,229,255,0.08), rgba(180,79,255,0.08));
-    color: #00e5ff;
-    border: 1px solid #004455;
-    border-radius: 6px;
-    padding: 0.45rem;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    letter-spacing: 0.03em;
-    transition: all 0.15s;
-  }
 
-  .btn-output:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(0,229,255,0.14), rgba(180,79,255,0.14));
-    border-color: #00e5ff;
-  }
-
-  .btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
 </style>

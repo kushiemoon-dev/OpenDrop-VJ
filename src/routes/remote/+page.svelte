@@ -154,7 +154,7 @@
 		width: 100%; height: 100%;
 		background: #0a0a0a;
 		color: #e0e0e0;
-		font-family: system-ui, -apple-system, sans-serif;
+		font-family: 'Inter', system-ui, -apple-system, sans-serif;
 		font-size: 16px;
 		-webkit-tap-highlight-color: transparent;
 		touch-action: manipulation;
@@ -182,9 +182,9 @@
 		border-radius: 10px;
 		font-weight: 600;
 	}
-	.badge.ok { background: #1a3a1a; color: #4ade80; }
+	.badge.ok { background: #1a3a1a; color: var(--ok); }
 	.badge.off { background: #2a1a1a; color: #888; }
-	.badge.connecting { background: #2a2a1a; color: #fbbf24; }
+	.badge.connecting { background: #2a2a1a; color: var(--warn); }
 
 	.btn-sm {
 		font-size: 11px;
@@ -202,7 +202,7 @@
 		background: #2a0a0a;
 		border: 1px solid #5a1a1a;
 		border-radius: 8px;
-		color: #f87171;
+		color: var(--error);
 		font-size: 14px;
 		line-height: 1.4;
 	}
@@ -268,7 +268,7 @@
 		width: 36px;
 		height: 36px;
 		border-radius: 50%;
-		background: #fff;
+		background: var(--accent);
 		cursor: pointer;
 	}
 

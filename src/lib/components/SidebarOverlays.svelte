@@ -71,13 +71,13 @@
 <style>
 	.controls-section {
 		padding: 0.7rem 0.75rem;
-		border-bottom: 1px solid #131330;
+		border-bottom: 1px solid var(--border-subtle);
 		display: flex; flex-direction: column; gap: 0.4rem;
 	}
 
 	.label {
 		font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
-		color: #444470; font-weight: 600;
+		color: var(--text-muted); font-weight: 600;
 	}
 
 	.hint { margin: 0.2rem 0; font-size: 11px; color: #aaaacc; line-height: 1.5; }
@@ -85,8 +85,8 @@
 	.pl-header { display: flex; align-items: center; justify-content: space-between; }
 
 	.btn-sm {
-		background: #0e0e26; color: #7777aa;
-		border: 1px solid #1e1e48; border-radius: 5px;
+		background: var(--bg-base); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: 5px;
 		padding: 0.25rem 0.6rem; font-size: 12px; cursor: pointer;
 		transition: all 0.12s;
 	}
@@ -94,7 +94,7 @@
 	.btn-sm:hover:not(:disabled) { background: #141436; color: #ddddf5; border-color: #3a3a6a; }
 
 	.btn-sm.active {
-		background: #1a0822; border-color: #ff2d78; color: #ff2d78;
+		background: #1a0822; border-color: var(--accent); color: var(--accent);
 		box-shadow: 0 0 8px rgba(255,45,120,0.25);
 	}
 
@@ -108,7 +108,7 @@
 		transition: color 0.1s;
 	}
 
-	.pl-remove:hover { color: #ff2d78; }
+	.pl-remove:hover { color: var(--accent); }
 
 	/* Overlay panel */
 	.overlay-list {
@@ -123,7 +123,7 @@
 	}
 
 	.overlay-item {
-		background: #0a0a1e;
+		background: var(--bg-surface);
 		border: 1px solid #161640;
 		border-radius: 5px;
 		overflow: hidden;
@@ -140,7 +140,7 @@
 		flex: 1;
 		background: none;
 		border: none;
-		color: #6666aa;
+		color: var(--text-secondary);
 		font-size: 11px;
 		cursor: pointer;
 		text-align: left;
@@ -150,7 +150,7 @@
 		padding: 2px 0;
 		transition: color 0.1s;
 	}
-	.overlay-name:hover { color: #b44fff; }
+	.overlay-name:hover { color: var(--violet); }
 
 	.overlay-controls {
 		display: flex;
@@ -167,25 +167,25 @@
 		justify-content: space-between;
 		gap: 6px;
 		font-size: 10px;
-		color: #44447a;
+		color: var(--text-muted);
 	}
 
 	.ov-label input[type="range"] {
 		flex: 1;
 		height: 3px;
-		accent-color: #b44fff;
+		accent-color: var(--violet);
 		cursor: pointer;
 	}
 
 	.ov-select {
 		flex: 1;
-		background: #0e0e26;
-		color: #7777aa;
-		border: 1px solid #1e1e48;
+		background: var(--bg-base);
+		color: var(--text-secondary);
+		border: 1px solid var(--border);
 		border-radius: 4px;
 		font-size: 10px;
 		padding: 1px 3px;
 		cursor: pointer;
 	}
-	.ov-select:focus { outline: none; border-color: #b44fff; }
+	.ov-select:focus { outline: none; border-color: var(--violet); }
 </style>

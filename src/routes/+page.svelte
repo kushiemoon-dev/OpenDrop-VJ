@@ -1370,6 +1370,368 @@
 <audio bind:this={audioEl} style="display:none" crossorigin="anonymous"></audio>
 
 <main>
+{#snippet audioSection()}
+  <SidebarAudio
+    {sourceLabel}
+    {status}
+    {effectiveOS}
+    {vuLevel}
+    {sourceError}
+    {showSystemAudioHelp}
+    {showDevicePicker}
+    {audioDevices}
+    {outputDevices}
+    {loopbackSupported}
+    audioElHasSrc={!!audioEl?.src}
+    onConnectMic={connectMic}
+    onOpenDevicePicker={openDevicePicker}
+    onCaptureSystemAudio={captureSystemAudio}
+    onConnectFile={connectFile}
+    {onFileChange}
+    onConnectDevice={connectDevice}
+    onConnectLoopback={connectLoopback}
+    onDismissSystemAudioHelp={() => { showSystemAudioHelp = false }}
+    onDismissDevicePicker={() => { showDevicePicker = false }}
+  />
+{/snippet}
+{#snippet videoSection()}
+  <SidebarVideo
+    {videoEnabled}
+    {videoOpacity}
+    {videoAdvance}
+    {videoBeatsPerCut}
+    {vrCut}
+    {vrFlash}
+    {vrWarp}
+    {vrHue}
+    {currentClipIndex}
+    {allClips}
+    onToggleVideo={() => { videoEnabled = !videoEnabled }}
+    onOpacityChange={(v) => { videoOpacity = v }}
+    onAdvanceChange={(v) => { videoAdvance = v }}
+    onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
+    onToggleVrCut={() => { vrCut = !vrCut }}
+    onToggleVrFlash={() => { vrFlash = !vrFlash }}
+    onToggleVrWarp={() => { vrWarp = !vrWarp }}
+    onToggleVrHue={() => { vrHue = !vrHue }}
+    onSelectClip={(i) => { currentClipIndex = i }}
+    onRemoveClip={(i) => removeVideoClip(i)}
+    onAddVideo={onVideoFilePick}
+  />
+{/snippet}
+{#snippet qualiteSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Qualité rendu</span>
+			{#if status === 'running' && fps > 0}
+				<span class="label" style="color:var(--info)">{fps} fps</span>
+			{/if}
+		</div>
+		<div class="btn-row">
+			<button class="btn-sm" class:active={quality === 'low'} onclick={() => quality = 'low'} disabled={status !== 'running'}>Low</button>
+			<button class="btn-sm" class:active={quality === 'medium'} onclick={() => quality = 'medium'} disabled={status !== 'running'}>Med</button>
+			<button class="btn-sm" class:active={quality === 'high'} onclick={() => quality = 'high'} disabled={status !== 'running'}>High</button>
+		</div>
+		<div class="btn-row" style="margin-top:6px">
+			<button class="btn-sm" class:active={targetFps === 30} onclick={() => targetFps = 30} disabled={status !== 'running'}>30 fps</button>
+			<button class="btn-sm" class:active={targetFps === 45} onclick={() => targetFps = 45} disabled={status !== 'running'}>45 fps</button>
+			<button class="btn-sm" class:active={targetFps === 60} onclick={() => targetFps = 60} disabled={status !== 'running'}>60 fps</button>
+		</div>
+		<div class="btn-row" style="margin-top:4px">
+			<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => invisibleMode = 'eco'} disabled={status !== 'running'} title="Decks cachés à ~8 fps">Éco</button>
+			<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => invisibleMode = 'pause'} disabled={status !== 'running'} title="Decks cachés pausés">Pause</button>
+			<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => invisibleMode = 'off'} disabled={status !== 'running'} title="Tous les decks à plein régime">Off</button>
+		</div>
+	</div>
+{/snippet}
+{#snippet outputSection()}
+	<div class="controls-section">
+		<div class="output-row">
+			<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
+				⎋ Open output window
+			</button>
+			{#if isElectron && outputOpen}
+				<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive}
+					onclick={() => showStreamPanel = !showStreamPanel}
+					title="Stream output">
+					⏏ Stream {ndiActive || v4l2Active || spoutActive ? '●' : '○'}
+				</button>
+			{/if}
+		</div>
+		{#if isElectron && displays.length > 0}
+			<div class="midi-row" style="gap:6px;align-items:center;margin-top:6px">
+				<select
+					style="flex:1;font-size:10px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;padding:3px 4px"
+					value={selectedDisplayId}
+					onchange={(e) => { selectedDisplayId = Number(e.currentTarget.value); }}
+				>
+					{#each displays as d}
+						<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
+					{/each}
+				</select>
+				<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
+					⛶ Fullscreen
+				</button>
+			</div>
+		{:else if !isElectron}
+			<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
+				⛶ Fullscreen
+			</button>
+		{/if}
+		{#if outputOpen && !isElectron}
+			<span class="label" style="color:var(--info)">Output window open — use as OBS Browser Source</span>
+		{/if}
+		{#if showStreamPanel && isElectron}
+			<div class="stream-panel">
+				{#if platform === 'linux'}
+					<button class="stream-btn" class:stream-btn--on={v4l2Active} onclick={toggleV4l2}
+						title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
+						V4L2 {v4l2Active ? '●' : '○'}
+					</button>
+				{/if}
+				<button class="stream-btn stream-btn--ndi" class:stream-btn--on={ndiActive} onclick={toggleNdi}
+					title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
+					NDI {ndiActive ? '●' : '○'}
+				</button>
+				{#if platform === 'win32'}
+					<button class="stream-btn stream-btn--spout" class:stream-btn--on={spoutActive} onclick={toggleSpout}
+						title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
+						SPOUT {spoutActive ? '●' : '○'}
+					</button>
+				{/if}
+				{#if v4l2Error}<div class="stream-error">{v4l2Error}</div>{/if}
+				{#if ndiError}<div class="stream-error">{ndiError}</div>{/if}
+				{#if spoutError}<div class="stream-error">{spoutError}</div>{/if}
+			</div>
+		{/if}
+	</div>
+{/snippet}
+{#snippet midiSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">MIDI</span>
+			{#if midiSupported}
+				<button class="btn-sm" class:active={midiConnected} onclick={toggleMidi}>
+					{midiConnected ? 'Déconnecter' : 'Connecter'}
+				</button>
+			{:else}
+				<span style="font-size:10px;color:var(--error)">Chromium only</span>
+			{/if}
+		</div>
+		{#if midiConnected}
+			<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
+			{#if midiClockBpm > 0}
+				<span class="source-badge" style="color:var(--ok)">♩ MIDI Clock {midiClockBpm} BPM</span>
+			{/if}
+			{#if learningAction !== null}
+				<span style="font-size:11px;color:var(--warn)">Bouge un knob/bouton sur ton contrôleur…</span>
+			{/if}
+			<div class="midi-list">
+				{#each registry.all() as cmd}
+					{@const mapped = midiMappings[cmd.id]}
+					<div class="midi-row">
+						<span class="midi-label">{cmd.label}</span>
+						<span class="midi-binding" class:midi-learning={learningAction === cmd.id}>
+							{mapped ? formatTrigger(mapped) : '—'}
+						</span>
+						<button class="btn-sm pl-btn" class:active={learningAction === cmd.id}
+							onclick={() => startLearn(cmd.id)}>
+							{learningAction === cmd.id ? '…' : 'Learn'}
+						</button>
+						{#if mapped}
+							<button class="pl-remove" onclick={() => clearMapping(cmd.id)}>×</button>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
+{/snippet}
+{#snippet clavierSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Clavier</span>
+			<button class="btn-sm" onclick={doResetKeymap}>Reset</button>
+		</div>
+		{#if learningKey !== null}
+			<span style="font-size:11px;color:var(--warn)">Appuie sur la touche à assigner… (Esc = annuler)</span>
+		{/if}
+		<div class="midi-list">
+			{#each registry.all() as cmd}
+				{@const assignedKey = keyById.get(cmd.id)}
+				<div class="midi-row">
+					<span class="midi-label">{cmd.label}</span>
+					<span class="midi-binding" class:midi-learning={learningKey === cmd.id}>
+						{assignedKey ? formatKey(assignedKey) : '—'}
+					</span>
+					<button class="btn-sm pl-btn" class:active={learningKey === cmd.id}
+						onclick={() => { learningKey = learningKey === cmd.id ? null : cmd.id; }}>
+						{learningKey === cmd.id ? '…' : 'Learn'}
+					</button>
+					{#if assignedKey}
+						<button class="pl-remove" onclick={() => clearKeyBinding(cmd.id)}>×</button>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	</div>
+{/snippet}
+{#snippet strobeSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Strobe</span>
+			<button class="btn-sm" class:active={strobeOn} onclick={() => { strobeOn = !strobeOn; }}>
+				{strobeOn ? 'ON' : 'OFF'}
+			</button>
+		</div>
+		{#if strobeOn}
+			<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+				<span class="midi-label">Rate</span>
+				{#each [0.25, 0.5, 1, 2, 4] as r}
+					<button class="btn-sm" class:active={strobeRate === r}
+						onclick={() => { strobeRate = r; }}>
+						{r < 1 ? `1/${Math.round(1/r)}` : `${r}×`}
+					</button>
+				{/each}
+			</div>
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label">Intensité</span>
+				<input type="range" min="0" max="1" step="0.05" bind:value={strobeIntensity} style="flex:1" />
+				<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
+			</div>
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label">Couleur</span>
+				<input type="color" bind:value={strobeColor} style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />
+			</div>
+		{/if}
+	</div>
+{/snippet}
+{#snippet lfoSection()}
+	<div class="controls-section">
+		<div class="pl-header"><span class="label">LFO</span></div>
+		{#each lfoSlots as slot, i}
+			<div style="margin-bottom:6px;font-size:11px">
+				<div class="midi-row" style="gap:4px;flex-wrap:wrap">
+					<input type="checkbox" bind:checked={slot.enabled} />
+					<span class="midi-label">LFO {i+1}</span>
+					{#each (['sine','saw','square','sh'] as const) as shape}
+						<button class="btn-sm" class:active={slot.shape === shape}
+							onclick={() => { slot.shape = shape; }}>
+							{shape}
+						</button>
+					{/each}
+				</div>
+				{#if slot.enabled}
+					<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
+						<span class="midi-label">Cible</span>
+						<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
+							value={slot.target ?? ''}
+							onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>
+							<option value="">—</option>
+							{#each registry.all().filter(c => c.kind === 'range') as cmd}
+								<option value={cmd.id}>{cmd.label}</option>
+							{/each}
+						</select>
+					</div>
+					<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+						<span class="midi-label">Rate</span>
+						<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
+						<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
+					</div>
+					<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
+						<span class="midi-label">Amount</span>
+						<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
+					</div>
+				{/if}
+			</div>
+		{/each}
+	</div>
+{/snippet}
+{#snippet colorSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Color A</span>
+			<button class="btn-sm" onclick={() => { colorParamsA = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+		</div>
+		{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label" style="width:48px">{label}</span>
+				<input type="range" {min} {max} step="0.01" value={colorParamsA[key]}
+					oninput={(e) => { colorParamsA = { ...colorParamsA, [key]: +e.currentTarget.value }; }}
+					style="flex:1" />
+				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsA[key] * scale)}{unit}</span>
+			</div>
+		{/each}
+		<div class="pl-header" style="margin-top:6px">
+			<span class="label">Color B</span>
+			<button class="btn-sm" onclick={() => { colorParamsB = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
+		</div>
+		{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label" style="width:48px">{label}</span>
+				<input type="range" {min} {max} step="0.01" value={colorParamsB[key]}
+					oninput={(e) => { colorParamsB = { ...colorParamsB, [key]: +e.currentTarget.value }; }}
+					style="flex:1" />
+				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsB[key] * scale)}{unit}</span>
+			</div>
+		{/each}
+	</div>
+{/snippet}
+{#snippet electronSection()}
+	{#if isElectron}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">OSC</span>
+			<button class="btn-sm" class:active={oscActive} onclick={toggleOsc}>
+				{oscActive ? 'Stop' : 'Start'}
+			</button>
+		</div>
+		{#if oscActive}
+			<span class="source-badge">Écoute UDP :{oscPort}</span>
+			<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
+		{:else}
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label">Port</span>
+				<input type="number" min="1024" max="65535" bind:value={oscPort}
+					style="width:70px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
+			</div>
+		{/if}
+		{#if oscError}<div style="font-size:10px;color:var(--error);margin-top:4px">{oscError}</div>{/if}
+	</div>
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Remote</span>
+			<button class="btn-sm" class:active={remoteActive} onclick={toggleRemote}>
+				{remoteActive ? 'Stop' : 'Démarrer'}
+			</button>
+		</div>
+		{#if remoteActive && remoteUrl}
+			<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
+			<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:var(--info);display:block;margin-top:4px">
+				Ouvrir sur cet appareil ↗
+			</a>
+		{/if}
+		{#if !remoteActive}
+			<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
+		{/if}
+		{#if remoteError}<div style="font-size:10px;color:var(--error);margin-top:4px">{remoteError}</div>{/if}
+	</div>
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Ableton Link</span>
+			<button class="btn-sm" class:active={linkActive} onclick={toggleLink}>
+				{linkActive ? 'Stop' : 'Démarrer'}
+			</button>
+		</div>
+		{#if linkActive}
+			<span class="source-badge">{linkPeers} pair{linkPeers !== 1 ? 's' : ''} connecté{linkPeers !== 1 ? 's' : ''}</span>
+		{:else}
+			<span style="font-size:10px;color:#666">Synchronise le tempo avec Ableton Live et autres apps Link sur le réseau local.</span>
+		{/if}
+		{#if linkError}<div style="font-size:10px;color:var(--error);margin-top:4px">{linkError}</div>{/if}
+	</div>
+	{/if}
+{/snippet}
 {#if layout === 'stage'}
 	<div
 		class="visualizer-wrap"
@@ -1551,322 +1913,21 @@
 			onAddVideo={onVideoFilePick}
 		/>
 
-		<!-- Qualité rendu -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Qualité rendu</span>
-				{#if status === 'running' && fps > 0}
-					<span class="label" style="color:#7af">{fps} fps</span>
-				{/if}
-			</div>
-			<div class="btn-row">
-				<button class="btn-sm" class:active={quality === 'low'} onclick={() => quality = 'low'} disabled={status !== 'running'}>Low</button>
-				<button class="btn-sm" class:active={quality === 'medium'} onclick={() => quality = 'medium'} disabled={status !== 'running'}>Med</button>
-				<button class="btn-sm" class:active={quality === 'high'} onclick={() => quality = 'high'} disabled={status !== 'running'}>High</button>
-			</div>
-			<div class="btn-row" style="margin-top:6px">
-				<button class="btn-sm" class:active={targetFps === 30} onclick={() => targetFps = 30} disabled={status !== 'running'}>30 fps</button>
-				<button class="btn-sm" class:active={targetFps === 45} onclick={() => targetFps = 45} disabled={status !== 'running'}>45 fps</button>
-				<button class="btn-sm" class:active={targetFps === 60} onclick={() => targetFps = 60} disabled={status !== 'running'}>60 fps</button>
-			</div>
-			<div class="btn-row" style="margin-top:4px">
-				<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => invisibleMode = 'eco'} disabled={status !== 'running'} title="Decks cachés à ~8 fps">Éco</button>
-				<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => invisibleMode = 'pause'} disabled={status !== 'running'} title="Decks cachés pausés">Pause</button>
-				<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => invisibleMode = 'off'} disabled={status !== 'running'} title="Tous les decks à plein régime">Off</button>
-			</div>
-		</div>
+		{@render qualiteSection()}
 
-		<!-- Output -->
-		<div class="controls-section">
-			<div class="output-row">
-				<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
-					⎋ Open output window
-				</button>
-				{#if isElectron && outputOpen}
-					<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive}
-						onclick={() => showStreamPanel = !showStreamPanel}
-						title="Stream output">
-						⏏ Stream {ndiActive || v4l2Active || spoutActive ? '●' : '○'}
-					</button>
-				{/if}
-			</div>
-			<!-- Screen targeting: dropdown + fullscreen button -->
-			{#if isElectron && displays.length > 0}
-				<div class="midi-row" style="gap:6px;align-items:center;margin-top:6px">
-					<select
-						style="flex:1;font-size:10px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;padding:3px 4px"
-						value={selectedDisplayId}
-						onchange={(e) => { selectedDisplayId = Number(e.currentTarget.value); }}
-					>
-						{#each displays as d}
-							<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
-						{/each}
-					</select>
-					<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
-						⛶ Fullscreen
-					</button>
-				</div>
-			{:else if !isElectron}
-				<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
-					⛶ Fullscreen
-				</button>
-			{/if}
-			{#if outputOpen && !isElectron}
-				<span class="label" style="color:#7af">Output window open — use as OBS Browser Source</span>
-			{/if}
-			{#if showStreamPanel && isElectron}
-				<div class="stream-panel">
-					{#if platform === 'linux'}
-						<button class="stream-btn" class:stream-btn--on={v4l2Active} onclick={toggleV4l2}
-							title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
-							V4L2 {v4l2Active ? '●' : '○'}
-						</button>
-					{/if}
-					<button class="stream-btn stream-btn--ndi" class:stream-btn--on={ndiActive} onclick={toggleNdi}
-						title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
-						NDI {ndiActive ? '●' : '○'}
-					</button>
-					{#if platform === 'win32'}
-						<button class="stream-btn stream-btn--spout" class:stream-btn--on={spoutActive} onclick={toggleSpout}
-							title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
-							SPOUT {spoutActive ? '●' : '○'}
-						</button>
-					{/if}
-					{#if v4l2Error}<div class="stream-error">{v4l2Error}</div>{/if}
-					{#if ndiError}<div class="stream-error">{ndiError}</div>{/if}
-					{#if spoutError}<div class="stream-error">{spoutError}</div>{/if}
-				</div>
-			{/if}
-		</div>
+		{@render outputSection()}
 
-		<!-- MIDI -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">MIDI</span>
-				{#if midiSupported}
-					<button class="btn-sm" class:active={midiConnected} onclick={toggleMidi}>
-						{midiConnected ? 'Déconnecter' : 'Connecter'}
-					</button>
-				{:else}
-					<span style="font-size:10px;color:#f87">Chromium only</span>
-				{/if}
-			</div>
-			{#if midiConnected}
-				<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
-				{#if midiClockBpm > 0}
-					<span class="source-badge" style="color:#4f4">♩ MIDI Clock {midiClockBpm} BPM</span>
-				{/if}
-				{#if learningAction !== null}
-					<span style="font-size:11px;color:#fa7">Bouge un knob/bouton sur ton contrôleur…</span>
-				{/if}
-				<div class="midi-list">
-					{#each registry.all() as cmd}
-						{@const mapped = midiMappings[cmd.id]}
-						<div class="midi-row">
-							<span class="midi-label">{cmd.label}</span>
-							<span class="midi-binding" class:midi-learning={learningAction === cmd.id}>
-								{mapped ? formatTrigger(mapped) : '—'}
-							</span>
-							<button class="btn-sm pl-btn" class:active={learningAction === cmd.id}
-								onclick={() => startLearn(cmd.id)}>
-								{learningAction === cmd.id ? '…' : 'Learn'}
-							</button>
-							{#if mapped}
-								<button class="pl-remove" onclick={() => clearMapping(cmd.id)}>×</button>
-							{/if}
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
+		{@render midiSection()}
 
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Clavier</span>
-				<button class="btn-sm" onclick={doResetKeymap}>Reset</button>
-			</div>
-			{#if learningKey !== null}
-				<span style="font-size:11px;color:#fa7">Appuie sur la touche à assigner… (Esc = annuler)</span>
-			{/if}
-			<div class="midi-list">
-				{#each registry.all() as cmd}
-					{@const assignedKey = keyById.get(cmd.id)}
-					<div class="midi-row">
-						<span class="midi-label">{cmd.label}</span>
-						<span class="midi-binding" class:midi-learning={learningKey === cmd.id}>
-							{assignedKey ? formatKey(assignedKey) : '—'}
-						</span>
-						<button class="btn-sm pl-btn" class:active={learningKey === cmd.id}
-							onclick={() => { learningKey = learningKey === cmd.id ? null : cmd.id; }}>
-							{learningKey === cmd.id ? '…' : 'Learn'}
-						</button>
-						{#if assignedKey}
-							<button class="pl-remove" onclick={() => clearKeyBinding(cmd.id)}>×</button>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		</div>
+		{@render clavierSection()}
 
-		<!-- Strobe -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Strobe</span>
-				<button class="btn-sm" class:active={strobeOn} onclick={() => { strobeOn = !strobeOn; }}>
-					{strobeOn ? 'ON' : 'OFF'}
-				</button>
-			</div>
-			{#if strobeOn}
-				<div class="midi-row" style="gap:4px;flex-wrap:wrap">
-					<span class="midi-label">Rate</span>
-					{#each [0.25, 0.5, 1, 2, 4] as r}
-						<button class="btn-sm" class:active={strobeRate === r}
-							onclick={() => { strobeRate = r; }}>
-							{r < 1 ? `1/${Math.round(1/r)}` : `${r}×`}
-						</button>
-					{/each}
-				</div>
-				<div class="midi-row" style="gap:6px;align-items:center">
-					<span class="midi-label">Intensité</span>
-					<input type="range" min="0" max="1" step="0.05" bind:value={strobeIntensity} style="flex:1" />
-					<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
-				</div>
-				<div class="midi-row" style="gap:6px;align-items:center">
-					<span class="midi-label">Couleur</span>
-					<input type="color" bind:value={strobeColor} style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />
-				</div>
-			{/if}
-		</div>
+		{@render strobeSection()}
 
-		<!-- LFO -->
-		<div class="controls-section">
-			<div class="pl-header"><span class="label">LFO</span></div>
-			{#each lfoSlots as slot, i}
-				<div style="margin-bottom:6px;font-size:11px">
-					<div class="midi-row" style="gap:4px;flex-wrap:wrap">
-						<input type="checkbox" bind:checked={slot.enabled} />
-						<span class="midi-label">LFO {i+1}</span>
-						{#each (['sine','saw','square','sh'] as const) as shape}
-							<button class="btn-sm" class:active={slot.shape === shape}
-								onclick={() => { slot.shape = shape; }}>
-								{shape}
-							</button>
-						{/each}
-					</div>
-					{#if slot.enabled}
-						<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
-							<span class="midi-label">Cible</span>
-							<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
-								value={slot.target ?? ''}
-								onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>
-								<option value="">—</option>
-								{#each registry.all().filter(c => c.kind === 'range') as cmd}
-									<option value={cmd.id}>{cmd.label}</option>
-								{/each}
-							</select>
-						</div>
-						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
-							<span class="midi-label">Rate</span>
-							<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
-							<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
-						</div>
-						<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
-							<span class="midi-label">Amount</span>
-							<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
-						</div>
-					{/if}
-				</div>
-			{/each}
-		</div>
+		{@render lfoSection()}
 
-		<!-- Color controls -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Color A</span>
-				<button class="btn-sm" onclick={() => { colorParamsA = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
-			</div>
-			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
-				<div class="midi-row" style="gap:6px;align-items:center">
-					<span class="midi-label" style="width:48px">{label}</span>
-					<input type="range" {min} {max} step="0.01" value={colorParamsA[key]}
-						oninput={(e) => { colorParamsA = { ...colorParamsA, [key]: +e.currentTarget.value }; }}
-						style="flex:1" />
-					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsA[key] * scale)}{unit}</span>
-				</div>
-			{/each}
-			<div class="pl-header" style="margin-top:6px">
-				<span class="label">Color B</span>
-				<button class="btn-sm" onclick={() => { colorParamsB = { ...DEFAULT_COLOR_PARAMS }; }}>↺</button>
-			</div>
-			{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [label, key, min, max, unit, scale]}
-				<div class="midi-row" style="gap:6px;align-items:center">
-					<span class="midi-label" style="width:48px">{label}</span>
-					<input type="range" {min} {max} step="0.01" value={colorParamsB[key]}
-						oninput={(e) => { colorParamsB = { ...colorParamsB, [key]: +e.currentTarget.value }; }}
-						style="flex:1" />
-					<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(colorParamsB[key] * scale)}{unit}</span>
-				</div>
-			{/each}
-		</div>
+		{@render colorSection()}
 
-		<!-- OSC remote (Electron only) -->
-		{#if isElectron}
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">OSC</span>
-				<button class="btn-sm" class:active={oscActive} onclick={toggleOsc}>
-					{oscActive ? 'Stop' : 'Start'}
-				</button>
-			</div>
-			{#if oscActive}
-				<span class="source-badge">Écoute UDP :{oscPort}</span>
-				<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
-			{:else}
-				<div class="midi-row" style="gap:6px;align-items:center">
-					<span class="midi-label">Port</span>
-					<input type="number" min="1024" max="65535" bind:value={oscPort}
-						style="width:70px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
-				</div>
-			{/if}
-			{#if oscError}<div style="font-size:10px;color:#f87;margin-top:4px">{oscError}</div>{/if}
-		</div>
-
-		<!-- Web remote (Electron only) -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Remote</span>
-				<button class="btn-sm" class:active={remoteActive} onclick={toggleRemote}>
-					{remoteActive ? 'Stop' : 'Démarrer'}
-				</button>
-			</div>
-			{#if remoteActive && remoteUrl}
-				<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
-				<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:#7af;display:block;margin-top:4px">
-					Ouvrir sur cet appareil ↗
-				</a>
-			{/if}
-			{#if !remoteActive}
-				<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
-			{/if}
-			{#if remoteError}<div style="font-size:10px;color:#f87;margin-top:4px">{remoteError}</div>{/if}
-		</div>
-
-		<!-- Ableton Link (Electron only) -->
-		<div class="controls-section">
-			<div class="pl-header">
-				<span class="label">Ableton Link</span>
-				<button class="btn-sm" class:active={linkActive} onclick={toggleLink}>
-					{linkActive ? 'Stop' : 'Démarrer'}
-				</button>
-			</div>
-			{#if linkActive}
-				<span class="source-badge">{linkPeers} pair{linkPeers !== 1 ? 's' : ''} connecté{linkPeers !== 1 ? 's' : ''}</span>
-			{:else}
-				<span style="font-size:10px;color:#666">Synchronise le tempo avec Ableton Live et autres apps Link sur le réseau local.</span>
-			{/if}
-			{#if linkError}<div style="font-size:10px;color:#f87;margin-top:4px">{linkError}</div>{/if}
-		</div>
-		{/if}
+		{@render electronSection()}
 
 	</aside>
 	<PresetBrowser
@@ -1881,55 +1942,6 @@
 		onAddToPlaylist={addToPlaylist}
 	/>
 {:else}
-  {#snippet audioSection()}
-    <SidebarAudio
-      {sourceLabel}
-      {status}
-      {effectiveOS}
-      {vuLevel}
-      {sourceError}
-      {showSystemAudioHelp}
-      {showDevicePicker}
-      {audioDevices}
-      {outputDevices}
-      {loopbackSupported}
-      audioElHasSrc={!!audioEl?.src}
-      onConnectMic={connectMic}
-      onOpenDevicePicker={openDevicePicker}
-      onCaptureSystemAudio={captureSystemAudio}
-      onConnectFile={connectFile}
-      {onFileChange}
-      onConnectDevice={connectDevice}
-      onConnectLoopback={connectLoopback}
-      onDismissSystemAudioHelp={() => { showSystemAudioHelp = false }}
-      onDismissDevicePicker={() => { showDevicePicker = false }}
-    />
-  {/snippet}
-  {#snippet videoSection()}
-    <SidebarVideo
-      {videoEnabled}
-      {videoOpacity}
-      {videoAdvance}
-      {videoBeatsPerCut}
-      {vrCut}
-      {vrFlash}
-      {vrWarp}
-      {vrHue}
-      {currentClipIndex}
-      {allClips}
-      onToggleVideo={() => { videoEnabled = !videoEnabled }}
-      onOpacityChange={(v) => { videoOpacity = v }}
-      onAdvanceChange={(v) => { videoAdvance = v }}
-      onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
-      onToggleVrCut={() => { vrCut = !vrCut }}
-      onToggleVrFlash={() => { vrFlash = !vrFlash }}
-      onToggleVrWarp={() => { vrWarp = !vrWarp }}
-      onToggleVrHue={() => { vrHue = !vrHue }}
-      onSelectClip={(i) => { currentClipIndex = i }}
-      onRemoveClip={(i) => removeVideoClip(i)}
-      onAddVideo={onVideoFilePick}
-    />
-  {/snippet}
   <MixerLayout
     {canvases}
     {presets4}
@@ -1950,10 +1962,17 @@
     onCrossfaderChange={(v) => { crossfader = v }}
     onLoadPreset={selectPreset}
     onAddToPlaylist={addToPlaylist}
-    onOpenOutput={openOutput}
     onLayoutToggle={(l) => { layout = l }}
     {audioSection}
     {videoSection}
+    {qualiteSection}
+    {outputSection}
+    {midiSection}
+    {clavierSection}
+    {strobeSection}
+    {lfoSection}
+    {colorSection}
+    {electronSection}
   />
 {/if}
 </main>
@@ -1965,9 +1984,6 @@
 		padding: 0;
 	}
 
-	/* ── City Pop Tokyo Night ── */
-	:global(*, *::before, *::after) { box-sizing: border-box; margin: 0; padding: 0; }
-
 	:global(html, body) {
 		width: 100%; height: 100%;
 		background: #07071a;
@@ -1978,10 +1994,10 @@
 	}
 
 	/* Scrollbars */
-	:global(::-webkit-scrollbar) { width: 4px; }
+	:global(::-webkit-scrollbar) { width: 6px; }
 	:global(::-webkit-scrollbar-track) { background: transparent; }
-	:global(::-webkit-scrollbar-thumb) { background: #2a2a5a; border-radius: 2px; }
-	:global(::-webkit-scrollbar-thumb:hover) { background: #ff2d78; }
+	:global(::-webkit-scrollbar-thumb) { background: #2a2a5a; border-radius: 3px; }
+	:global(::-webkit-scrollbar-thumb:hover) { background: var(--accent); }
 
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
@@ -2003,7 +2019,7 @@
 
 	.logo {
 		font-size: 3rem; font-weight: 800; letter-spacing: 0.15em;
-		background: linear-gradient(135deg, #ff2d78 0%, #00e5ff 100%);
+		background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 100%);
 		-webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 		filter: drop-shadow(0 0 24px rgba(255, 45, 120, 0.6));
 	}
@@ -2023,6 +2039,10 @@
 		);
 	}
 
+	@media (max-width: 1100px) {
+		.controls { width: 240px; }
+	}
+
 	.controls-section {
 		padding: var(--sp-3);
 		border-bottom: 1px solid var(--border-subtle);
@@ -2036,7 +2056,7 @@
 
 	.btn-row { display: flex; gap: 0.4rem; }
 
-	.source-badge { font-size: 11px; color: #00e5ff; }
+	.source-badge { font-size: 11px; color: var(--cyan); }
 
 
 	/* ── Mixer ── */
@@ -2061,7 +2081,7 @@
 
 	/* ── Buttons ── */
 	.btn-primary {
-		background: linear-gradient(135deg, #ff2d78, #b44fff);
+		background: linear-gradient(135deg, var(--accent), var(--violet));
 		color: #fff; border: none; border-radius: 8px;
 		padding: 0.65rem 2.2rem; font-size: 1rem; font-weight: 700;
 		cursor: pointer; letter-spacing: 0.05em;
@@ -2080,7 +2100,7 @@
 		transition: all 0.1s;
 	}
 
-	.btn-secondary:hover { border-color: #ff2d78; color: #fff; }
+	.btn-secondary:hover { border-color: var(--accent); color: #fff; }
 
 	.btn-sm {
 		background: var(--bg-elevated); color: var(--text-secondary);
@@ -2125,7 +2145,7 @@
 		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 	}
 
-	.midi-binding.midi-learning { color: #ff8c00; animation: blink 0.6s step-end infinite; }
+	.midi-binding.midi-learning { color: var(--warn); animation: blink 0.6s step-end infinite; }
 
 	@keyframes blink { 50% { opacity: 0; } }
 
@@ -2133,7 +2153,7 @@
 	.btn-output {
 		width: 100%;
 		background: linear-gradient(135deg, rgba(0,229,255,0.08), rgba(180,79,255,0.08));
-		color: #00e5ff; border: 1px solid #004455;
+		color: var(--cyan); border: 1px solid #004455;
 		border-radius: 6px; padding: 0.45rem; font-size: 12px; font-weight: 600;
 		cursor: pointer; letter-spacing: 0.03em;
 		transition: all 0.15s;
@@ -2143,7 +2163,7 @@
 	.btn-output:hover:not(:disabled) {
 		background: linear-gradient(135deg, rgba(0,229,255,0.14), rgba(180,79,255,0.14));
 		box-shadow: 0 0 20px rgba(0,229,255,0.25);
-		border-color: #00e5ff;
+		border-color: var(--cyan);
 	}
 
 	.btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
@@ -2156,18 +2176,17 @@
 
 	.btn-stream {
 		background: transparent;
-		border: 1px solid #333;
+		border: 1px solid var(--border);
 		border-radius: 6px;
-		color: #555;
+		color: var(--text-muted);
 		font-size: 11px;
-		font-family: 'Courier New', monospace;
 		font-weight: 700;
 		padding: 4px 8px;
 		cursor: pointer;
 		transition: all 0.15s;
 	}
 	.btn-stream:hover { border-color: #aaa; color: #aaa; }
-	.btn-stream.stream-active { border-color: #7af; color: #7af; }
+	.btn-stream.stream-active { border-color: var(--info); color: var(--info); }
 
 	.stream-panel {
 		margin-top: 6px;
@@ -2179,11 +2198,10 @@
 
 	.stream-btn {
 		background: rgba(0,0,0,0.4);
-		border: 1px solid #333;
+		border: 1px solid var(--border);
 		border-radius: 6px;
-		color: #555;
+		color: var(--text-muted);
 		font-size: 11px;
-		font-family: 'Courier New', monospace;
 		font-weight: 700;
 		letter-spacing: 0.05em;
 		padding: 4px 10px;
@@ -2192,17 +2210,16 @@
 	}
 	.stream-btn:hover { border-color: #aaa; color: #aaa; }
 	.stream-btn--on { border-color: currentColor; }
-	.stream-btn--ndi { color: #555; }
-	.stream-btn--ndi:hover, .stream-btn--ndi.stream-btn--on { border-color: #ff6600; color: #ff6600; background: rgba(255,102,0,0.1); }
-	.stream-btn--spout { color: #555; }
-	.stream-btn--spout:hover, .stream-btn--spout.stream-btn--on { border-color: #b366ff; color: #b366ff; background: rgba(179,102,255,0.1); }
-	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout) { border-color: #00c8ff; color: #00c8ff; background: rgba(0,200,255,0.1); }
+	.stream-btn--ndi { color: var(--text-muted); }
+	.stream-btn--ndi:hover, .stream-btn--ndi.stream-btn--on { border-color: var(--warn); color: var(--warn); background: var(--warn-dim, rgba(255,140,0,0.1)); }
+	.stream-btn--spout { color: var(--text-muted); }
+	.stream-btn--spout:hover, .stream-btn--spout.stream-btn--on { border-color: var(--violet); color: var(--violet); background: var(--violet-dim); }
+	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout) { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
 
 	.stream-error {
 		width: 100%;
 		font-size: 10px;
-		color: #f87;
-		font-family: 'Courier New', monospace;
+		color: var(--error);
 	}
 
 	/* Visualizer drag-over */
@@ -2210,7 +2227,7 @@
 		content: '';
 		position: absolute;
 		inset: 0;
-		border: 2px dashed #b44fff;
+		border: 2px dashed var(--violet);
 		border-radius: 6px;
 		pointer-events: none;
 		z-index: 20;

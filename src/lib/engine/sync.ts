@@ -33,13 +33,14 @@ export function colorParamsToFilter(p: ColorParams): string {
 }
 
 export type SyncMessage =
-	| { type: 'preset'; deck: 'A' | 'B'; name: string }
-	| { type: 'preset-slot'; slot: number; name: string }
+	| { type: 'preset'; deck: 'A' | 'B'; name: string; blend?: number }
+	| { type: 'preset-slot'; slot: number; name: string; blend?: number }
 	| { type: 'crossfader'; value: number }
 	| { type: 'deckbus'; opacities: [number, number, number, number] }
 	| { type: 'source'; deviceId: string }
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
+	| { type: 'blendmode'; mode: string }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
@@ -80,12 +81,12 @@ export class MainSync {
 
 	onOutputReady(cb: () => void) { this.readyCb = cb; }
 
-	sendPreset(deck: 'A' | 'B', name: string) {
-		sendMsg(this.bc, { type: 'preset', deck, name });
+	sendPreset(deck: 'A' | 'B', name: string, blend?: number) {
+		sendMsg(this.bc, { type: 'preset', deck, name, blend });
 	}
 
-	sendPresetSlot(slot: number, name: string) {
-		sendMsg(this.bc, { type: 'preset-slot', slot, name });
+	sendPresetSlot(slot: number, name: string, blend?: number) {
+		sendMsg(this.bc, { type: 'preset-slot', slot, name, blend });
 	}
 
 	sendDeckBus(opacities: [number, number, number, number]) {
@@ -106,6 +107,10 @@ export class MainSync {
 
 	sendQuality(tier: string) {
 		sendMsg(this.bc, { type: 'quality', tier });
+	}
+
+	sendBlendMode(mode: string) {
+		sendMsg(this.bc, { type: 'blendmode', mode });
 	}
 
 	sendOverlays(list: Overlay[]) {

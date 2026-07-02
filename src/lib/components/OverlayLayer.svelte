@@ -21,34 +21,92 @@
 			}
 		}
 	});
+
+	// spin/drift = animations CSS pures (pas de RAF).
+	// ponytail: amplitude/vitesse approximées pour un rendu VJ convaincant,
+	// pas une simulation physique — suffisant tant que non mesuré insuffisant.
+	function spinStyle(spin: number): string {
+		if (!spin) return '';
+		const dur = 360 / Math.abs(spin);
+		return `animation: od-spin ${dur}s linear infinite ${spin < 0 ? 'reverse' : 'normal'};`;
+	}
+
+	function driftStyle(driftX: number, driftY: number): string {
+		if (!driftX && !driftY) return '';
+		const speed = Math.max(Math.abs(driftX), Math.abs(driftY), 0.05);
+		const dur = 1 / speed;
+		return `--drift-x: ${(driftX * 60).toFixed(0)}px; --drift-y: ${(driftY * 60).toFixed(0)}px; animation: od-drift ${dur}s ease-in-out infinite alternate;`;
+	}
 </script>
 
 {#each overlays as ov (ov.id)}
 	{#if srcs[ov.id]}
 		{@const pulse = beat && ov.beatReactive}
-		<img
-			src={srcs[ov.id]}
-			alt={ov.name}
-			class="overlay-img"
-			class:beat-pulse={pulse}
-			style="
-				left: {ov.x * 100}%;
-				top: {ov.y * 100}%;
-				transform: translate(-50%, -50%) scale({pulse ? ov.scale * ov.beatScale : ov.scale}) rotate({ov.rotation}deg);
-				opacity: {ov.opacity};
-				mix-blend-mode: {ov.blendMode};
-			"
-		/>
+		<div class="overlay-anchor" style="left:{ov.x * 100}%; top:{ov.y * 100}%; {spinStyle(ov.spin)}">
+			<div class="overlay-drift" style={driftStyle(ov.driftX, ov.driftY)}>
+				{#if ov.video}
+					<video
+						src={srcs[ov.id]}
+						class="overlay-media"
+						class:beat-pulse={pulse}
+						autoplay
+						loop
+						muted
+						playsinline
+						style="
+							transform: translate(-50%, -50%) scale({pulse ? ov.scale * ov.beatScale : ov.scale}) rotate({ov.rotation}deg);
+							opacity: {ov.opacity};
+							mix-blend-mode: {ov.blendMode};
+						"
+					></video>
+				{:else}
+					<img
+						src={srcs[ov.id]}
+						alt={ov.name}
+						class="overlay-media"
+						class:beat-pulse={pulse}
+						style="
+							transform: translate(-50%, -50%) scale({pulse ? ov.scale * ov.beatScale : ov.scale}) rotate({ov.rotation}deg);
+							opacity: {ov.opacity};
+							mix-blend-mode: {ov.blendMode};
+						"
+					/>
+				{/if}
+			</div>
+		</div>
 	{/if}
 {/each}
 
 <style>
-	.overlay-img {
+	.overlay-anchor {
+		position: absolute;
+		transform-origin: 0 0;
+	}
+
+	.overlay-drift {
+		position: relative;
+		transform-origin: 0 0;
+	}
+
+	.overlay-media {
 		position: absolute;
 		pointer-events: none;
-		max-width: 80%;
-		max-height: 80%;
+		/* vw/vh plutôt que % : le containing block ici est le wrapper spin/drift
+		   (taille 0, nécessaire pour que la rotation pivote autour du point d'ancrage),
+		   pas le visualizer — % résoudrait à 0. Les 2 usages (stage, output) sont plein écran. */
+		max-width: 80vw;
+		max-height: 80vh;
 		transition: transform 80ms ease-out;
 		user-select: none;
+	}
+
+	@keyframes od-spin {
+		from { transform: rotate(0deg); }
+		to { transform: rotate(360deg); }
+	}
+
+	@keyframes od-drift {
+		from { transform: translate(0, 0); }
+		to { transform: translate(var(--drift-x, 0), var(--drift-y, 0)); }
 	}
 </style>

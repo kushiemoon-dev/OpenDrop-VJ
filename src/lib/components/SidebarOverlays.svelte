@@ -19,9 +19,9 @@
 <div class="controls-section">
 	<div class="pl-header">
 		<span class="label">Overlays ({overlays.length})</span>
-		<label class="btn-sm file-label" title="Ajouter une image">
-			+ Image
-			<input type="file" accept="image/*" multiple onchange={onAddOverlays} style="display:none" />
+		<label class="btn-sm file-label" title="Ajouter une image ou une vidéo (sprite)">
+			+ Sprite
+			<input type="file" accept="image/*,video/*" multiple onchange={onAddOverlays} style="display:none" />
 		</label>
 	</div>
 	{#if overlays.length === 0}
@@ -53,6 +53,15 @@
 						</label>
 						<label class="ov-label">Rotation
 							<input type="range" min="-180" max="180" step="1" value={ov.rotation} oninput={(e) => onUpdateOverlay(ov.id, { rotation: +(e.target as HTMLInputElement).value })} />
+						</label>
+						<label class="ov-label">Spin
+							<input type="range" min="-180" max="180" step="1" value={ov.spin} oninput={(e) => onUpdateOverlay(ov.id, { spin: +(e.target as HTMLInputElement).value })} />
+						</label>
+						<label class="ov-label">Drift X
+							<input type="range" min="-1" max="1" step="0.05" value={ov.driftX} oninput={(e) => onUpdateOverlay(ov.id, { driftX: +(e.target as HTMLInputElement).value })} />
+						</label>
+						<label class="ov-label">Drift Y
+							<input type="range" min="-1" max="1" step="0.05" value={ov.driftY} oninput={(e) => onUpdateOverlay(ov.id, { driftY: +(e.target as HTMLInputElement).value })} />
 						</label>
 						<label class="ov-label">Blend
 							<select class="ov-select" value={ov.blendMode} onchange={(e) => onUpdateOverlay(ov.id, { blendMode: (e.target as HTMLSelectElement).value })}>

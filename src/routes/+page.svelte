@@ -37,6 +37,7 @@
 	let presetA = $state('');
 	let presetB = $state('');
 	let crossfader = $state(0); // 0 = 100% A, 1 = 100% B
+	let transitionTime = $state(2.0); // secondes de fondu preset (0 = hard cut)
 
 	let sourceLabel = $state('none');
 	let currentDeviceId = $state('');
@@ -194,6 +195,9 @@
 	let quality = $state<QualityTier>(DEFAULT_TIER);
 	let fps = $state(0);
 
+	// — Blend mode decks ——————————————————————————————————
+	let deckBlendMode = $state('screen');
+
 	// — Performance decks ——————————————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
@@ -347,6 +351,8 @@
 		localStorage.setItem('od-overlays', JSON.stringify(overlays));
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
+		localStorage.setItem('od-transition', String(transitionTime));
+		localStorage.setItem('od-blendmode', deckBlendMode);
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -377,6 +383,12 @@
 			hueOn: vrHue,
 		};
 		sync?.sendVideo(payload);
+	});
+
+	// — Sync blend mode vers output ————————————————————————
+	$effect(() => {
+		const mode = deckBlendMode;
+		sync?.sendBlendMode(mode);
 	});
 
 	// — Sync strobe vers output ———————————————————————————
@@ -466,6 +478,10 @@
 			if (savedKeymap) try { keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
+			const savedTransition = localStorage.getItem('od-transition');
+			if (savedTransition) transitionTime = Number(savedTransition);
+			const savedBlendMode = localStorage.getItem('od-blendmode');
+			if (savedBlendMode) deckBlendMode = savedBlendMode;
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {
 				const v = Number(savedFps);
@@ -580,14 +596,14 @@
 
 			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetA = name;
-				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, 2.0);
-				sync?.sendPreset('A', name);
+				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, transitionTime);
+				sync?.sendPreset('A', name, transitionTime);
 				playlistAPlaying = playlistA?.playing ?? false;
 			});
 			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
 				presetB = name;
-				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, 2.0);
-				sync?.sendPreset('B', name);
+				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, transitionTime);
+				sync?.sendPreset('B', name, transitionTime);
 				playlistBPlaying = playlistB?.playing ?? false;
 			});
 
@@ -597,6 +613,7 @@
 				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
+				sync?.sendBlendMode(deckBlendMode);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
@@ -787,11 +804,11 @@
 		else if (slot === 1) presetB = name;
 		else if (slot === 2) preset2 = name;
 		else preset3 = name;
-		manager.loadPreset(slot, d, 2.0);
+		manager.loadPreset(slot, d, transitionTime);
 		_slotEpoch++;
 		const bus = deckBus[slot];
-		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'));
-		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'));
+		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'), transitionTime);
+		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'), transitionTime);
 	}
 
 	function addToPlaylist(deck: 'A' | 'B', name: string) {
@@ -882,7 +899,7 @@
 			const reader = new FileReader();
 			reader.onload = async () => {
 				const dataUrl = reader.result as string;
-				const ov = makeOverlay(file.name.replace(/\.[^.]+$/, ''));
+				const ov = makeOverlay(file.name.replace(/\.[^.]+$/, ''), { video: file.type.startsWith('video/') });
 				await saveAsset(ov.id, dataUrl);
 				overlays = [...overlays, ov];
 				resolve();
@@ -1128,12 +1145,12 @@
 		if (!d) return;
 		if (deck === 'A') {
 			presetA = name;
-			manager.loadPreset(0, d, 2.0);
-			sync?.sendPreset('A', name);
+			manager.loadPreset(0, d, transitionTime);
+			sync?.sendPreset('A', name, transitionTime);
 		} else {
 			presetB = name;
-			manager.loadPreset(1, d, 2.0);
-			sync?.sendPreset('B', name);
+			manager.loadPreset(1, d, transitionTime);
+			sync?.sendPreset('B', name, transitionTime);
 		}
 	}
 
@@ -1733,7 +1750,7 @@
 				bind:this={canvases[i]}
 				class="deck-canvas"
 				style:opacity={opacities[i]}
-				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : 'screen'}
+				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : deckBlendMode}
 				style:filter={deckBus[i] === 'A' ? colorFilterA : deckBus[i] === 'B' ? colorFilterB : undefined}
 			></canvas>
 		{/each}
@@ -1813,6 +1830,24 @@
 				<span class="cf-label" class:bright={crossfader < 0.2}>A</span>
 				<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={crossfader} />
 				<span class="cf-label" class:bright={crossfader > 0.8}>B</span>
+			</div>
+			<div class="transition-row">
+				<span class="transition-label">Fondu</span>
+				<input class="transition-slider" type="range" min="0" max="5" step="0.1" bind:value={transitionTime} title="Durée de transition preset (s)" />
+				<span class="transition-value">{transitionTime.toFixed(1)}s</span>
+				<button class="btn-sm" onclick={() => { transitionTime = 0 }} title="Coupe nette">Hard Cut</button>
+			</div>
+			<div class="blendmode-row">
+				<span class="transition-label">Mix</span>
+				<select class="blendmode-select" bind:value={deckBlendMode}>
+					<option value="screen">Screen (additif)</option>
+					<option value="plus-lighter">Plus Lighter</option>
+					<option value="multiply">Multiply</option>
+					<option value="overlay">Overlay</option>
+					<option value="lighten">Lighten</option>
+					<option value="hard-light">Hard Light</option>
+					<option value="difference">Difference</option>
+				</select>
 			</div>
 			<button
 				class="btn-sm preset-browser-toggle"
@@ -1933,6 +1968,8 @@
     {isRunning}
     selectedSlot={mixerSelectedSlot}
     {crossfader}
+    {transitionTime}
+    {deckBlendMode}
     {presetList}
     {playlistAItems}
     {playlistBItems}
@@ -1942,6 +1979,8 @@
     onSelectSlot={(s) => { mixerSelectedSlot = s }}
     onCycleBus={cycleBus}
     onCrossfaderChange={(v) => { crossfader = v }}
+    onTransitionChange={(v) => { transitionTime = v }}
+    onBlendModeChange={(mode) => { deckBlendMode = mode }}
     onLoadPreset={selectPreset}
     onAddToPlaylist={addToPlaylist}
     onLayoutToggle={(l) => { layout = l }}
@@ -2060,6 +2099,18 @@
 	.cf-label.bright { color: var(--accent); text-shadow: 0 0 8px var(--accent-glow); }
 
 	.crossfader { flex: 1; accent-color: var(--accent); cursor: pointer; }
+
+	.transition-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+	.transition-label { font-size: 10px; color: var(--text-muted); }
+	.transition-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
+	.transition-value { font-size: 10px; color: var(--text-muted); width: 28px; text-align: right; }
+
+	.blendmode-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+	.blendmode-select {
+		flex: 1; background: var(--bg-elevated); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
+		padding: 0.25rem 0.4rem; font-size: 11px; cursor: pointer;
+	}
 
 	/* ── Buttons ── */
 	.btn-primary {

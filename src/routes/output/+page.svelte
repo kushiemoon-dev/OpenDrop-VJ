@@ -17,6 +17,7 @@
 
 	// Opacités par slot — remplace crossfader + opacityA/B
 	let slotOpacities = $state<[number, number, number, number]>([1, 0, 0, 0]);
+	let deckBlendMode = $state('screen');
 	// Couleurs par slot
 	let slotColors = $state<[ColorParams, ColorParams, ColorParams, ColorParams]>([
 		{ ...DEFAULT_COLOR_PARAMS },
@@ -158,13 +159,13 @@
 					const preset = await loadPresetData(msg.name);
 					if (!preset) return;
 					await ensureSlot(slot, q);
-					manager?.loadPreset(slot, preset, 2.0);
+					manager?.loadPreset(slot, preset, msg.blend ?? 2.0);
 				} else if (msg.type === 'preset-slot') {
 					gotState = true;
 					const preset = await loadPresetData(msg.name);
 					if (!preset) return;
 					await ensureSlot(msg.slot, q);
-					manager?.loadPreset(msg.slot, preset, 2.0);
+					manager?.loadPreset(msg.slot, preset, msg.blend ?? 2.0);
 				} else if (msg.type === 'crossfader') {
 					// Compat backward : crossfader → opacités slot 0/1
 					gotState = true;
@@ -176,6 +177,8 @@
 				} else if (msg.type === 'quality') {
 					const settings = getQualitySettings(msg.tier as QualityTier);
 					manager?.applyQuality(settings);
+				} else if (msg.type === 'blendmode') {
+					deckBlendMode = msg.mode;
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;
@@ -280,9 +283,9 @@
 <div class="output">
 	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
 	<canvas bind:this={canvas0} class="layer" style="opacity:{slotOpacities[0]}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{slotFilters[0]}"></canvas>
-	<canvas bind:this={canvas1} class="layer layer-blend" style="opacity:{slotOpacities[1]}; filter:{slotFilters[1]}"></canvas>
-	<canvas bind:this={canvas2} class="layer layer-blend" style="opacity:{slotOpacities[2]}; filter:{slotFilters[2]}"></canvas>
-	<canvas bind:this={canvas3} class="layer layer-blend" style="opacity:{slotOpacities[3]}; filter:{slotFilters[3]}"></canvas>
+	<canvas bind:this={canvas1} class="layer" style="opacity:{slotOpacities[1]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[1]}"></canvas>
+	<canvas bind:this={canvas2} class="layer" style="opacity:{slotOpacities[2]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[2]}"></canvas>
+	<canvas bind:this={canvas3} class="layer" style="opacity:{slotOpacities[3]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[3]}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
@@ -315,7 +318,6 @@
 		height: 100%;
 		display: block;
 	}
-	.layer-blend { mix-blend-mode: screen; }
 
 	.notice {
 		position: absolute;

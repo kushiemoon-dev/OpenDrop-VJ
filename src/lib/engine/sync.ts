@@ -32,6 +32,28 @@ export function colorParamsToFilter(p: ColorParams): string {
 	return parts.join(' ');
 }
 
+export type BlendMode = 'normal' | 'additive' | 'screen' | 'multiply';
+
+export interface SlotComposite {
+	blend: BlendMode;
+	lumaKey: boolean;
+	lumaBlack: number;   // 0..1
+	lumaWhite: number;   // 0..1
+	colorKey: boolean;
+	colorHue: number;    // 0..1 → 0..360°
+	colorTol: number;    // 0..1
+}
+
+export const DEFAULT_SLOT_COMPOSITE: SlotComposite = {
+	blend: 'normal',
+	lumaKey: false,
+	lumaBlack: 0,
+	lumaWhite: 1,
+	colorKey: false,
+	colorHue: 0,
+	colorTol: 0,
+};
+
 export type SyncMessage =
 	| { type: 'preset'; deck: 'A' | 'B'; name: string; blend?: number }
 	| { type: 'preset-slot'; slot: number; name: string; blend?: number }
@@ -41,6 +63,7 @@ export type SyncMessage =
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
 	| { type: 'blendmode'; mode: string }
+	| { type: 'composite'; slot: number; config: SlotComposite }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
@@ -111,6 +134,10 @@ export class MainSync {
 
 	sendBlendMode(mode: string) {
 		sendMsg(this.bc, { type: 'blendmode', mode });
+	}
+
+	sendComposite(slot: number, config: SlotComposite) {
+		sendMsg(this.bc, { type: 'composite', slot, config: { ...config } });
 	}
 
 	sendOverlays(list: Overlay[]) {

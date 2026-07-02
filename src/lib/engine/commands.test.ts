@@ -95,6 +95,21 @@ describe('createDefaultRegistry — commandes de base', () => {
 	});
 });
 
+describe('createDefaultRegistry — commandes de compositing (1.1)', () => {
+	const reg = createDefaultRegistry();
+
+	it('contient les 20 commandes composite/lumakey/colorkey pour les 4 slots', () => {
+		const prefixes = ['composite-blend', 'lumakey-black', 'lumakey-white', 'colorkey-hue', 'colorkey-tolerance'] as const;
+		for (const prefix of prefixes) {
+			for (const slot of [0, 1, 2, 3] as const) {
+				const id = `${prefix}-${slot}` as const;
+				expect(reg.get(id), `missing: ${id}`).toBeDefined();
+				expect(reg.get(id)?.kind).toBe('range');
+			}
+		}
+	});
+});
+
 describe('createDefaultRegistry — active-deck shortcuts', () => {
 	const reg = createDefaultRegistry();
 

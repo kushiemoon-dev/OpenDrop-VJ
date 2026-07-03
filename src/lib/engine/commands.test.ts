@@ -181,3 +181,18 @@ describe('createDefaultRegistry — active-deck shortcuts', () => {
 		expect(ctx.playlistPrev).toHaveBeenCalledWith('A');
 	});
 });
+
+describe('createDefaultRegistry — time param sliders (1.4)', () => {
+	const reg = createDefaultRegistry();
+
+	it('contient les 32 commandes time-* pour les 4 slots', () => {
+		const prefixes = ['time-speed', 'time-zoom', 'time-rot', 'time-warp', 'time-dx', 'time-dy', 'time-stretch', 'time-wave'] as const;
+		for (const prefix of prefixes) {
+			for (const slot of [0, 1, 2, 3] as const) {
+				const id = `${prefix}-${slot}` as const;
+				expect(reg.get(id), `missing: ${id}`).toBeDefined();
+				expect(reg.get(id)?.kind).toBe('range');
+			}
+		}
+	});
+});

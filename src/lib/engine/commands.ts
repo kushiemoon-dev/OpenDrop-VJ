@@ -27,6 +27,15 @@ export type CommandId =
 	// 1.3 — Snapshot recall triggers (8 fixed slots)
 	| 'recall-snapshot-0' | 'recall-snapshot-1' | 'recall-snapshot-2' | 'recall-snapshot-3'
 	| 'recall-snapshot-4' | 'recall-snapshot-5' | 'recall-snapshot-6' | 'recall-snapshot-7'
+	// 1.4 — Time param multipliers (8 params × 4 slots)
+	| 'time-speed-0' | 'time-speed-1' | 'time-speed-2' | 'time-speed-3'
+	| 'time-zoom-0' | 'time-zoom-1' | 'time-zoom-2' | 'time-zoom-3'
+	| 'time-rot-0' | 'time-rot-1' | 'time-rot-2' | 'time-rot-3'
+	| 'time-warp-0' | 'time-warp-1' | 'time-warp-2' | 'time-warp-3'
+	| 'time-dx-0' | 'time-dx-1' | 'time-dx-2' | 'time-dx-3'
+	| 'time-dy-0' | 'time-dy-1' | 'time-dy-2' | 'time-dy-3'
+	| 'time-stretch-0' | 'time-stretch-1' | 'time-stretch-2' | 'time-stretch-3'
+	| 'time-wave-0' | 'time-wave-1' | 'time-wave-2' | 'time-wave-3'
 	;
 
 export interface CommandContext {
@@ -239,6 +248,39 @@ const DEFAULT_COMMANDS: Command[] = [
 	{ id: 'recall-snapshot-5', label: 'Recall Snapshot 5', kind: 'trigger', run() {} },
 	{ id: 'recall-snapshot-6', label: 'Recall Snapshot 6', kind: 'trigger', run() {} },
 	{ id: 'recall-snapshot-7', label: 'Recall Snapshot 7', kind: 'trigger', run() {} },
+	// 1.4 stubs — wired in +page.svelte (writes DeckTimeParams + the global Butterchurn reads)
+	{ id: 'time-speed-0', label: 'Speed 0', kind: 'range', run() {} },
+	{ id: 'time-speed-1', label: 'Speed 1', kind: 'range', run() {} },
+	{ id: 'time-speed-2', label: 'Speed 2', kind: 'range', run() {} },
+	{ id: 'time-speed-3', label: 'Speed 3', kind: 'range', run() {} },
+	{ id: 'time-zoom-0', label: 'Zoom 0', kind: 'range', run() {} },
+	{ id: 'time-zoom-1', label: 'Zoom 1', kind: 'range', run() {} },
+	{ id: 'time-zoom-2', label: 'Zoom 2', kind: 'range', run() {} },
+	{ id: 'time-zoom-3', label: 'Zoom 3', kind: 'range', run() {} },
+	{ id: 'time-rot-0', label: 'Rotation 0', kind: 'range', run() {} },
+	{ id: 'time-rot-1', label: 'Rotation 1', kind: 'range', run() {} },
+	{ id: 'time-rot-2', label: 'Rotation 2', kind: 'range', run() {} },
+	{ id: 'time-rot-3', label: 'Rotation 3', kind: 'range', run() {} },
+	{ id: 'time-warp-0', label: 'Wrap 0', kind: 'range', run() {} },
+	{ id: 'time-warp-1', label: 'Wrap 1', kind: 'range', run() {} },
+	{ id: 'time-warp-2', label: 'Wrap 2', kind: 'range', run() {} },
+	{ id: 'time-warp-3', label: 'Wrap 3', kind: 'range', run() {} },
+	{ id: 'time-dx-0', label: 'Horizontal 0', kind: 'range', run() {} },
+	{ id: 'time-dx-1', label: 'Horizontal 1', kind: 'range', run() {} },
+	{ id: 'time-dx-2', label: 'Horizontal 2', kind: 'range', run() {} },
+	{ id: 'time-dx-3', label: 'Horizontal 3', kind: 'range', run() {} },
+	{ id: 'time-dy-0', label: 'Vertical 0', kind: 'range', run() {} },
+	{ id: 'time-dy-1', label: 'Vertical 1', kind: 'range', run() {} },
+	{ id: 'time-dy-2', label: 'Vertical 2', kind: 'range', run() {} },
+	{ id: 'time-dy-3', label: 'Vertical 3', kind: 'range', run() {} },
+	{ id: 'time-stretch-0', label: 'Stretch 0', kind: 'range', run() {} },
+	{ id: 'time-stretch-1', label: 'Stretch 1', kind: 'range', run() {} },
+	{ id: 'time-stretch-2', label: 'Stretch 2', kind: 'range', run() {} },
+	{ id: 'time-stretch-3', label: 'Stretch 3', kind: 'range', run() {} },
+	{ id: 'time-wave-0', label: 'Wave 0', kind: 'range', run() {} },
+	{ id: 'time-wave-1', label: 'Wave 1', kind: 'range', run() {} },
+	{ id: 'time-wave-2', label: 'Wave 2', kind: 'range', run() {} },
+	{ id: 'time-wave-3', label: 'Wave 3', kind: 'range', run() {} },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

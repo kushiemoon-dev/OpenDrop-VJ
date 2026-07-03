@@ -3,6 +3,7 @@
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
+	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
@@ -211,6 +212,26 @@
 		slotComposites = next;
 	}
 
+	// — Snapshots / macros (1.3) ————————————————————————————
+	let snapshots = $state<(Snapshot | null)[]>(new Array(8).fill(null));
+	let snapshotRecallDuration = $state(2); // secondes, global, partagé par tous les slots
+	const snapshotEngine = new SnapshotEngine();
+	function saveSnapshot(slot: number) {
+		const values: Partial<Record<CommandId, number>> = {};
+		for (const id of LOOK_COMMAND_IDS) {
+			const v = getCommandCurrentValue(id);
+			if (v !== null) values[id] = v;
+		}
+		snapshots[slot] = { name: snapshots[slot]?.name ?? `Slot ${slot}`, values };
+	}
+	function renameSnapshot(slot: number, name: string) {
+		const s = snapshots[slot];
+		if (s) snapshots[slot] = { ...s, name };
+	}
+	function clearSnapshot(slot: number) {
+		snapshots[slot] = null;
+	}
+
 	// — Performance decks ——————————————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
@@ -294,6 +315,13 @@
 		['lumakey-white', 'Luma White', (c, v) => ({ ...c, lumaWhite: v }), (c) => c.lumaWhite],
 		['colorkey-hue', 'Key Hue', (c, v) => ({ ...c, colorHue: v }), (c) => c.colorHue],
 		['colorkey-tolerance', 'Key Tolerance', (c, v) => ({ ...c, colorTol: v }), (c) => c.colorTol],
+	];
+	// Les 30 commandes "look" qu'un snapshot capture/rappelle — dérivé de COLOR_CMDS/
+	// COMPOSITE_CMDS pour rester synchronisé si ces tableaux évoluent. Le crossfader
+	// n'apparaît dans aucun des deux, donc il est exclu par construction.
+	const LOOK_COMMAND_IDS: CommandId[] = [
+		...COLOR_CMDS.flatMap(([sfx]) => (['a', 'b'] as const).map((d) => `color-${sfx}-${d}` as CommandId)),
+		...COMPOSITE_CMDS.flatMap(([prefix]) => ([0, 1, 2, 3] as const).map((s) => `${prefix}-${s}` as CommandId)),
 	];
 	for (const [prefix, lbl, apply] of COMPOSITE_CMDS)
 		for (const slot of [0, 1, 2, 3] as const)
@@ -385,6 +413,8 @@
 		localStorage.setItem('od-layout', layout);
 		localStorage.setItem('od-transition', String(transitionTime));
 		localStorage.setItem('od-composite', JSON.stringify(slotComposites));
+		localStorage.setItem('od-snapshots', JSON.stringify(snapshots));
+		localStorage.setItem('od-snapshot-duration', String(snapshotRecallDuration));
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -549,6 +579,26 @@
 					const migrated = migrateBlendModeString(savedBlendMode);
 					slotComposites = slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof slotComposites;
 				}
+			}
+			const savedSnapshots = localStorage.getItem('od-snapshots');
+			if (savedSnapshots) {
+				try {
+					const parsed = JSON.parse(savedSnapshots);
+					if (Array.isArray(parsed)) {
+						const arr: (Snapshot | null)[] = new Array(8).fill(null);
+						for (let i = 0; i < 8; i++) {
+							const s = parsed[i];
+							if (s && typeof s.name === 'string' && s.values && typeof s.values === 'object')
+								arr[i] = { name: s.name, values: s.values };
+						}
+						snapshots = arr;
+					}
+				} catch { /* ignore corrupt od-snapshots */ }
+			}
+			const savedSnapDuration = localStorage.getItem('od-snapshot-duration');
+			if (savedSnapDuration) {
+				const v = Number(savedSnapDuration);
+				if (v >= 0.1 && v <= 10) snapshotRecallDuration = v;
 			}
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {

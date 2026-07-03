@@ -1,4 +1,5 @@
 import { Deck, type DeckOptions } from './deck.js';
+import { injectTimeParams } from './time-params.js';
 
 type SlotEntry = { deck: Deck; canvas: HTMLCanvasElement } | null;
 
@@ -43,7 +44,7 @@ export class DeckManager {
 		const h = canvas.clientHeight || 720;
 		await deck.init(audioCtx, { width: w, height: h, ...quality });
 		deck.connectAudio(audioNode);
-		if (presetData) deck.loadPreset(presetData, 0.0);
+		if (presetData) deck.loadPreset(injectTimeParams(presetData, slot), 0.0);
 		deck.startRenderLoop();
 		deck.setTargetFps(this._targetFps);
 		this.slots[slot] = { deck, canvas };
@@ -63,7 +64,7 @@ export class DeckManager {
 	}
 
 	loadPreset(slot: number, data: object, blend = 2.0): void {
-		this.slots[slot]?.deck.loadPreset(data, blend);
+		this.slots[slot]?.deck.loadPreset(injectTimeParams(data, slot), blend);
 	}
 
 	/** Re-route l'audio vers TOUS les slots initialisés (ex: switch source/loopback). */

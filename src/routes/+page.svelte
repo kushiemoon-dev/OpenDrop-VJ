@@ -515,6 +515,13 @@
 		for (let i = 0; i < 4; i++) sync.sendComposite(i, composites[i]);
 	});
 
+	// — Sync time params vers output, par slot —
+	$effect(() => {
+		const params = timeParams;
+		if (!sync) return;
+		for (let i = 0; i < 4; i++) sync.sendTime(i, params[i]);
+	});
+
 	// Pousse opacité + config de compositing vers le Compositor local (Stage).
 	$effect(() => {
 		const ops = opacities;
@@ -820,6 +827,7 @@
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
 				for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
+				for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
@@ -1355,6 +1363,11 @@
 		if (compositeMatch) {
 			const e = COMPOSITE_CMDS.find(([prefix]) => prefix === compositeMatch[1]);
 			return e ? e[3](slotComposites[Number(compositeMatch[2])]) : null;
+		}
+		const timeMatch = id.match(/^(time-speed|time-zoom|time-rot|time-warp|time-dx|time-dy|time-stretch|time-wave)-([0-3])$/);
+		if (timeMatch) {
+			const e = TIME_CMDS.find(([prefix]) => prefix === timeMatch[1]);
+			return e ? timeParams[Number(timeMatch[2])][e[2]] / 2 : null;
 		}
 		return null;
 	}

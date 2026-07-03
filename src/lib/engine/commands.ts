@@ -24,6 +24,9 @@ export type CommandId =
 	| 'lumakey-white-0' | 'lumakey-white-1' | 'lumakey-white-2' | 'lumakey-white-3'
 	| 'colorkey-hue-0' | 'colorkey-hue-1' | 'colorkey-hue-2' | 'colorkey-hue-3'
 	| 'colorkey-tolerance-0' | 'colorkey-tolerance-1' | 'colorkey-tolerance-2' | 'colorkey-tolerance-3'
+	// 1.3 — Snapshot recall triggers (8 fixed slots)
+	| 'recall-snapshot-0' | 'recall-snapshot-1' | 'recall-snapshot-2' | 'recall-snapshot-3'
+	| 'recall-snapshot-4' | 'recall-snapshot-5' | 'recall-snapshot-6' | 'recall-snapshot-7'
 	;
 
 export interface CommandContext {
@@ -227,6 +230,15 @@ const DEFAULT_COMMANDS: Command[] = [
 	{ id: 'colorkey-tolerance-1', label: 'Key Tolerance 1', kind: 'range', run() {} },
 	{ id: 'colorkey-tolerance-2', label: 'Key Tolerance 2', kind: 'range', run() {} },
 	{ id: 'colorkey-tolerance-3', label: 'Key Tolerance 3', kind: 'range', run() {} },
+	// 1.3 stubs — wired in +page.svelte (recall snapshot N via SnapshotEngine)
+	{ id: 'recall-snapshot-0', label: 'Recall Snapshot 0', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-1', label: 'Recall Snapshot 1', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-2', label: 'Recall Snapshot 2', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-3', label: 'Recall Snapshot 3', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-4', label: 'Recall Snapshot 4', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-5', label: 'Recall Snapshot 5', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-6', label: 'Recall Snapshot 6', kind: 'trigger', run() {} },
+	{ id: 'recall-snapshot-7', label: 'Recall Snapshot 7', kind: 'trigger', run() {} },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

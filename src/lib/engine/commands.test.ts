@@ -110,6 +110,18 @@ describe('createDefaultRegistry — commandes de compositing (1.1)', () => {
 	});
 });
 
+describe('createDefaultRegistry — recall snapshots (1.3)', () => {
+	const reg = createDefaultRegistry();
+
+	it('contient les 8 triggers recall-snapshot-0..7', () => {
+		for (const slot of [0, 1, 2, 3, 4, 5, 6, 7] as const) {
+			const id = `recall-snapshot-${slot}` as const;
+			expect(reg.get(id), `missing: ${id}`).toBeDefined();
+			expect(reg.get(id)?.kind).toBe('trigger');
+		}
+	});
+});
+
 describe('createDefaultRegistry — active-deck shortcuts', () => {
 	const reg = createDefaultRegistry();
 

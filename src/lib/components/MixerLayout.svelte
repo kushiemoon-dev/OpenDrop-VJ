@@ -15,7 +15,6 @@
     selectedSlot: number
     crossfader: number
     transitionTime: number
-    deckBlendMode: string
     presetList: PresetMeta[]
     playlistAItems: string[]
     playlistBItems: string[]
@@ -26,7 +25,6 @@
     onCycleBus: (slot: number) => void
     onCrossfaderChange: (v: number) => void
     onTransitionChange: (v: number) => void
-    onBlendModeChange: (mode: string) => void
     onLoadPreset: (name: string) => void
     onAddToPlaylist: (deck: 'A' | 'B', name: string) => void
     onLayoutToggle: (l: 'stage' | 'mixer') => void
@@ -45,8 +43,8 @@
 
   let {
     canvases, presets4, deckBus, runningCount, isRunning, selectedSlot,
-    crossfader, transitionTime, deckBlendMode, presetList, playlistAItems, playlistBItems, layout,
-    onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange, onTransitionChange, onBlendModeChange,
+    crossfader, transitionTime, presetList, playlistAItems, playlistBItems, layout,
+    onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange, onTransitionChange,
     onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,
     qualiteSection, outputSection, midiSection, clavierSection,
@@ -125,19 +123,6 @@
           oninput={(e) => onTransitionChange(Number(e.currentTarget.value))} title="Durée de transition preset (s)" />
         <span class="transition-value">{transitionTime.toFixed(1)}s</span>
         <button class="btn-sm" onclick={() => onTransitionChange(0)} title="Coupe nette">Hard Cut</button>
-      </div>
-      <div class="blendmode-row">
-        <span class="transition-label">Mix</span>
-        <select class="blendmode-select" value={deckBlendMode}
-          onchange={(e) => onBlendModeChange(e.currentTarget.value)}>
-          <option value="screen">Screen (additif)</option>
-          <option value="plus-lighter">Plus Lighter</option>
-          <option value="multiply">Multiply</option>
-          <option value="overlay">Overlay</option>
-          <option value="lighten">Lighten</option>
-          <option value="hard-light">Hard Light</option>
-          <option value="difference">Difference</option>
-        </select>
       </div>
     </div>
 
@@ -265,13 +250,6 @@
   .transition-label { font-size: 10px; color: var(--text-muted); }
   .transition-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
   .transition-value { font-size: 10px; color: var(--text-muted); width: 28px; text-align: right; }
-
-  .blendmode-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; }
-  .blendmode-select {
-    flex: 1; background: var(--bg-elevated); color: var(--text-secondary);
-    border: 1px solid var(--border); border-radius: var(--r-sm);
-    padding: 0.25rem 0.4rem; font-size: 11px; cursor: pointer;
-  }
 
   .btn-sm {
     background: var(--bg-elevated); color: var(--text-secondary);

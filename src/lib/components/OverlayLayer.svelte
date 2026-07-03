@@ -40,10 +40,23 @@
 </script>
 
 {#each overlays as ov (ov.id)}
-	{#if srcs[ov.id]}
-		{@const pulse = beat && ov.beatReactive}
-		<div class="overlay-anchor" style="left:{ov.x * 100}%; top:{ov.y * 100}%; {spinStyle(ov.spin)}">
-			<div class="overlay-drift" style={driftStyle(ov.driftX, ov.driftY)}>
+	{@const pulse = beat && ov.beatReactive}
+	<div class="overlay-anchor" style="left:{ov.x * 100}%; top:{ov.y * 100}%; {spinStyle(ov.spin)}">
+		<div class="overlay-drift" style={driftStyle(ov.driftX, ov.driftY)}>
+			{#if ov.kind === 'text'}
+				<div
+					class="overlay-text"
+					class:beat-pulse={pulse}
+					style="
+						transform: translate(-50%, -50%) scale({pulse ? ov.scale * ov.beatScale : ov.scale});
+						font-size: {ov.fontSize}vh;
+						font-family: var(--od-font-{ov.fontFamily});
+						color: {ov.color};
+						opacity: {ov.opacity};
+						mix-blend-mode: {ov.blendMode};
+					"
+				>{ov.text}</div>
+			{:else if srcs[ov.id]}
 				{#if ov.video}
 					<video
 						src={srcs[ov.id]}
@@ -72,9 +85,9 @@
 						"
 					/>
 				{/if}
-			</div>
+			{/if}
 		</div>
-	{/if}
+	</div>
 {/each}
 
 <style>
@@ -98,6 +111,24 @@
 		max-height: 80vh;
 		transition: transform 80ms ease-out;
 		user-select: none;
+	}
+
+	.overlay-text {
+		position: absolute;
+		pointer-events: none;
+		white-space: pre-wrap;
+		text-align: center;
+		max-width: 90vw;
+		transform-origin: 0 0;
+		transition: transform 80ms ease-out;
+		user-select: none;
+		font-weight: 700;
+		text-shadow: 0 0.15vh 0.4vh rgba(0, 0, 0, 0.85), 0 0 1vh rgba(0, 0, 0, 0.6);
+		--od-font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+		--od-font-serif: Georgia, 'Times New Roman', serif;
+		--od-font-mono: 'Courier New', Consolas, monospace;
+		--od-font-impact: Impact, 'Arial Black', sans-serif;
+		--od-font-comic: 'Comic Sans MS', 'Comic Sans', cursive;
 	}
 
 	@keyframes od-spin {

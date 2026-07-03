@@ -139,7 +139,7 @@
 					onchange={(e) => onBeatTriggerAChange({ offset: clampOffset(+(e.target as HTMLInputElement).value, beatTriggerA.beatsPerChange) })} />
 				<button class="btn-sm" class:active={beatTriggerA.mode === 'volume-peak'}
 					onclick={() => onBeatTriggerAChange({ mode: beatTriggerA.mode === 'beat' ? 'volume-peak' : 'beat' })}
-					title="Basculer déclenchement Beat / Volume">{beatTriggerA.mode === 'beat' ? '♩' : '🔊'}</button>
+					title="Toggle Beat / Volume trigger">{beatTriggerA.mode === 'beat' ? '♩' : '🔊'}</button>
 				{#if beatTriggerA.mode === 'volume-peak'}
 					<input class="bt-range" type="range" min="0" max="1" step="0.01"
 						value={beatTriggerA.sensitivity}
@@ -161,7 +161,7 @@
 					onchange={(e) => onBeatTriggerBChange({ offset: clampOffset(+(e.target as HTMLInputElement).value, beatTriggerB.beatsPerChange) })} />
 				<button class="btn-sm" class:active={beatTriggerB.mode === 'volume-peak'}
 					onclick={() => onBeatTriggerBChange({ mode: beatTriggerB.mode === 'beat' ? 'volume-peak' : 'beat' })}
-					title="Basculer déclenchement Beat / Volume">{beatTriggerB.mode === 'beat' ? '♩' : '🔊'}</button>
+					title="Toggle Beat / Volume trigger">{beatTriggerB.mode === 'beat' ? '♩' : '🔊'}</button>
 				{#if beatTriggerB.mode === 'volume-peak'}
 					<input class="bt-range" type="range" min="0" max="1" step="0.01"
 						value={beatTriggerB.sensitivity}

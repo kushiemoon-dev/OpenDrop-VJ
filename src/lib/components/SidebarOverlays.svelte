@@ -4,28 +4,39 @@
 	interface Props {
 		overlays: Overlay[];
 		onAddOverlays: (e: Event) => void;
+		onAddText: () => string;
 		onRemoveOverlay: (id: string) => void;
 		onUpdateOverlay: (id: string, patch: Partial<Overlay>) => void;
 	}
 
-	let { overlays, onAddOverlays, onRemoveOverlay, onUpdateOverlay }: Props = $props();
+	let { overlays, onAddOverlays, onAddText, onRemoveOverlay, onUpdateOverlay }: Props = $props();
 
 	let expandedOverlayId = $state<string | null>(null);
 
 	const BLEND_MODES = ['screen', 'normal', 'plus-lighter', 'multiply', 'overlay', 'hard-light'];
+	const FONT_FAMILIES = [
+		['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono'], ['impact', 'Impact'], ['comic', 'Comic'],
+	] as const;
+
+	function handleAddText() {
+		expandedOverlayId = onAddText();
+	}
 </script>
 
 <!-- Overlays -->
 <div class="controls-section">
 	<div class="pl-header">
 		<span class="label">Overlays ({overlays.length})</span>
-		<label class="btn-sm file-label" title="Ajouter une image ou une vidéo (sprite)">
-			+ Sprite
-			<input type="file" accept="image/*,video/*" multiple onchange={onAddOverlays} style="display:none" />
-		</label>
+		<div style="display:flex; gap:4px">
+			<button class="btn-sm" onclick={handleAddText} title="Ajouter un overlay texte">+ Texte</button>
+			<label class="btn-sm file-label" title="Ajouter une image ou une vidéo (sprite)">
+				+ Sprite
+				<input type="file" accept="image/*,video/*" multiple onchange={onAddOverlays} style="display:none" />
+			</label>
+		</div>
 	</div>
 	{#if overlays.length === 0}
-		<p class="hint">Glisse une image sur le visualizer ou clique + Image</p>
+		<p class="hint">Glisse une image sur le visualizer, ou clique + Sprite / + Texte</p>
 	{/if}
 	<ul class="overlay-list">
 		{#each overlays as ov (ov.id)}
@@ -39,6 +50,24 @@
 				</div>
 				{#if expandedOverlayId === ov.id}
 					<div class="overlay-controls">
+						{#if ov.kind === 'text'}
+							<label class="ov-label ov-label--stack">Contenu
+								<textarea class="ov-textarea" rows="2" value={ov.text} oninput={(e) => onUpdateOverlay(ov.id, { text: (e.target as HTMLTextAreaElement).value })}></textarea>
+							</label>
+							<label class="ov-label">Police
+								<select class="ov-select" value={ov.fontFamily} onchange={(e) => onUpdateOverlay(ov.id, { fontFamily: (e.target as HTMLSelectElement).value as Overlay['fontFamily'] })}>
+									{#each FONT_FAMILIES as [value, label]}
+										<option {value}>{label}</option>
+									{/each}
+								</select>
+							</label>
+							<label class="ov-label">Couleur
+								<input type="color" class="ov-color" value={ov.color} oninput={(e) => onUpdateOverlay(ov.id, { color: (e.target as HTMLInputElement).value })} />
+							</label>
+							<label class="ov-label">Taille
+								<input type="range" min="2" max="20" step="0.5" value={ov.fontSize} oninput={(e) => onUpdateOverlay(ov.id, { fontSize: +(e.target as HTMLInputElement).value })} />
+							</label>
+						{/if}
 						<label class="ov-label">Opacity
 							<input type="range" min="0" max="1" step="0.01" value={ov.opacity} oninput={(e) => onUpdateOverlay(ov.id, { opacity: +(e.target as HTMLInputElement).value })} />
 						</label>
@@ -51,9 +80,11 @@
 						<label class="ov-label">Y
 							<input type="range" min="0" max="1" step="0.01" value={ov.y} oninput={(e) => onUpdateOverlay(ov.id, { y: +(e.target as HTMLInputElement).value })} />
 						</label>
-						<label class="ov-label">Rotation
-							<input type="range" min="-180" max="180" step="1" value={ov.rotation} oninput={(e) => onUpdateOverlay(ov.id, { rotation: +(e.target as HTMLInputElement).value })} />
-						</label>
+						{#if ov.kind !== 'text'}
+							<label class="ov-label">Rotation
+								<input type="range" min="-180" max="180" step="1" value={ov.rotation} oninput={(e) => onUpdateOverlay(ov.id, { rotation: +(e.target as HTMLInputElement).value })} />
+							</label>
+						{/if}
 						<label class="ov-label">Spin
 							<input type="range" min="-180" max="180" step="1" value={ov.spin} oninput={(e) => onUpdateOverlay(ov.id, { spin: +(e.target as HTMLInputElement).value })} />
 						</label>
@@ -179,10 +210,38 @@
 		color: var(--text-muted);
 	}
 
+	.ov-label--stack {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 2px;
+	}
+
 	.ov-label input[type="range"] {
 		flex: 1;
 		height: 3px;
 		accent-color: var(--violet);
+		cursor: pointer;
+	}
+
+	.ov-textarea {
+		background: var(--bg-base);
+		color: var(--text-secondary);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		font-size: 11px;
+		padding: 3px 5px;
+		resize: vertical;
+		font-family: inherit;
+	}
+	.ov-textarea:focus { outline: none; border-color: var(--violet); }
+
+	.ov-color {
+		width: 28px;
+		height: 18px;
+		padding: 0;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: none;
 		cursor: pointer;
 	}
 

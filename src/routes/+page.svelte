@@ -4,6 +4,7 @@
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
+	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
@@ -212,6 +213,19 @@
 		slotComposites = next;
 	}
 
+	// — Time param sliders per deck (1.4) ————————————————————
+	let timeParams = $state<[DeckTimeParams, DeckTimeParams, DeckTimeParams, DeckTimeParams]>([
+		defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams(),
+	]);
+	function updateTimeParams(slot: number, patch: Partial<DeckTimeParams>) {
+		const next = [...timeParams] as typeof timeParams;
+		next[slot] = { ...next[slot], ...patch };
+		timeParams = next;
+		// Write-through: this is what Butterchurn's injected preset code actually
+		// reads every frame — the $state above is only for the UI to bind to.
+		Object.assign(getGlobalTimeParams()[slot], patch);
+	}
+
 	// — Snapshots / macros (1.3) ————————————————————————————
 	let snapshots = $state<(Snapshot | null)[]>(new Array(8).fill(null));
 	let snapshotRecallDuration = $state(2); // secondes, global, partagé par tous les slots
@@ -329,6 +343,25 @@
 				run(v) { updateComposite(slot, apply(slotComposites[slot], v)); },
 			});
 
+	// — Câblage commandes 1.4 (time param sliders) ——————————
+	// v (0..1) est mappé sur la plage d'affichage 0..2 des sliders (v*2).
+	type TimeCmd = [prefix: string, label: string, field: keyof DeckTimeParams];
+	const TIME_CMDS: TimeCmd[] = [
+		['time-speed', 'Speed', 'speedMult'],
+		['time-zoom', 'Zoom', 'zoomMult'],
+		['time-rot', 'Rotation', 'rotMult'],
+		['time-warp', 'Wrap', 'warpMult'],
+		['time-dx', 'Horizontal', 'dxMult'],
+		['time-dy', 'Vertical', 'dyMult'],
+		['time-stretch', 'Stretch', 'stretchMult'],
+		['time-wave', 'Wave', 'waveMult'],
+	];
+	for (const [prefix, lbl, field] of TIME_CMDS)
+		for (const slot of [0, 1, 2, 3] as const)
+			registry.register({ id: `${prefix}-${slot}` as CommandId, label: `${lbl} ${slot}`, kind: 'range',
+				run(v) { updateTimeParams(slot, { [field]: v * 2 } as Partial<DeckTimeParams>); },
+			});
+
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
 		getCrossfader: () => crossfader,
@@ -442,6 +475,7 @@
 		localStorage.setItem('od-composite', JSON.stringify(slotComposites));
 		localStorage.setItem('od-snapshots', JSON.stringify(snapshots));
 		localStorage.setItem('od-snapshot-duration', String(snapshotRecallDuration));
+		localStorage.setItem('od-time-params', JSON.stringify(timeParams));
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -626,6 +660,16 @@
 			if (savedSnapDuration) {
 				const v = Number(savedSnapDuration);
 				if (v >= 0.1 && v <= 10) snapshotRecallDuration = v;
+			}
+			const savedTimeParams = localStorage.getItem('od-time-params');
+			if (savedTimeParams) {
+				try {
+					const parsed = JSON.parse(savedTimeParams);
+					if (Array.isArray(parsed) && parsed.length === 4) {
+						timeParams = parsed.map((p) => ({ ...defaultTimeParams(), ...p })) as typeof timeParams;
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
+					}
+				} catch { /* ignore corrupt od-time-params */ }
 			}
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {

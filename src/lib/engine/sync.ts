@@ -136,6 +136,8 @@ export class MainSync {
 	}
 
 	sendOverlays(list: Overlay[]) {
+		// Shallow copy is load-bearing: a raw Svelte 5 $state-proxied array/object
+		// throws DataCloneError on postMessage. Don't simplify back to `{ list }`.
 		sendMsg(this.bc, { type: 'overlays', list: list.map((o) => ({ ...o })) });
 	}
 

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
+	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
+	import { Compositor, migrateBlendModeString } from '$lib/engine/compositor.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
@@ -28,6 +29,8 @@
 
 	// — State —————————————————————————————————————————————
 	let canvases = $state<(HTMLCanvasElement | undefined)[]>([undefined, undefined, undefined, undefined]);
+	let compositorCanvas: HTMLCanvasElement | undefined = $state();
+	let compositor: Compositor | null = null;
 	const manager = new DeckManager();
 	let audio: AudioEngine | null = null;
 
@@ -197,6 +200,13 @@
 
 	// — Blend mode decks ——————————————————————————————————
 	let deckBlendMode = $state('screen');
+	// Compositing par slot (blend + lumaKey + colorKey) — remplace deckBlendMode (1.1)
+	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+	]);
 
 	// — Performance decks ——————————————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
@@ -353,6 +363,7 @@
 		localStorage.setItem('od-layout', layout);
 		localStorage.setItem('od-transition', String(transitionTime));
 		localStorage.setItem('od-blendmode', deckBlendMode);
+		localStorage.setItem('od-composite', JSON.stringify(slotComposites));
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -389,6 +400,21 @@
 	$effect(() => {
 		const mode = deckBlendMode;
 		sync?.sendBlendMode(mode);
+	});
+
+	// — Sync compositing (blend + lumaKey + colorKey) vers output, par slot —
+	$effect(() => {
+		const composites = slotComposites;
+		if (!sync) return;
+		for (let i = 0; i < 4; i++) sync.sendComposite(i, composites[i]);
+	});
+
+	// Pousse opacité + config de compositing vers le Compositor local (Stage).
+	$effect(() => {
+		const ops = opacities;
+		const composites = slotComposites;
+		if (!compositor) return;
+		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i], composites[i]);
 	});
 
 	// — Sync strobe vers output ———————————————————————————
@@ -482,6 +508,19 @@
 			if (savedTransition) transitionTime = Number(savedTransition);
 			const savedBlendMode = localStorage.getItem('od-blendmode');
 			if (savedBlendMode) deckBlendMode = savedBlendMode;
+			const savedComposite = localStorage.getItem('od-composite');
+			if (savedComposite) {
+				try {
+					const parsed = JSON.parse(savedComposite);
+					if (Array.isArray(parsed) && parsed.length === 4) {
+						slotComposites = parsed.map((c) => ({ ...DEFAULT_SLOT_COMPOSITE, ...c })) as typeof slotComposites;
+					}
+				} catch { /* ignore corrupt od-composite */ }
+			} else if (savedBlendMode) {
+				// Migration one-shot depuis l'ancien mode global CSS.
+				const migrated = migrateBlendModeString(savedBlendMode);
+				slotComposites = slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof slotComposites;
+			}
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {
 				const v = Number(savedFps);
@@ -553,6 +592,7 @@
 		playlistA?.destroy();
 		playlistB?.destroy();
 		manager.destroyAll();
+		compositor?.destroy();
 		audio?.destroy(); // also calls stopPcmCapture()
 		sync?.destroy();
 		midi?.destroy();
@@ -589,6 +629,17 @@
 
 			const q = getQualitySettings(quality);
 
+			compositor = new Compositor(compositorCanvas!);
+			for (let i = 0; i < 4; i++) {
+				const c = canvases[i];
+				if (c) compositor.attachSource(i, c);
+			}
+			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
+			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
+			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
+			for (let i = 0; i < 4; i++) compositor.setLayer(i, opacities[i], slotComposites[i]);
+			compositor.start();
+
 			const d0 = presetA ? await loadPresetData(presetA) : null;
 			const d1 = presetB ? await loadPresetData(presetB) : null;
 			await manager.start(0, audio.ctx, audio.gainNode, q, d0);
@@ -614,6 +665,7 @@
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
 				sync?.sendBlendMode(deckBlendMode);
+				for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
@@ -1239,6 +1291,9 @@
 			const c = canvases[i];
 			if (c) manager.resize(i, c.clientWidth, c.clientHeight);
 		}
+		if (compositorCanvas) {
+			compositor?.resize(compositorCanvas.clientWidth, compositorCanvas.clientHeight, getQualitySettings(quality).pixelRatio);
+		}
 	}
 
 	async function toggleNdi() {
@@ -1744,16 +1799,12 @@
 	>
 		<!-- Video loop — premier enfant = derrière les decks -->
 		<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-		<!-- Deck canvases — 4 slots, layering additif par bus -->
+		<!-- Deck canvases — 4 slots, texture sources pour le Compositor (cachés) -->
 		{#each [0, 1, 2, 3] as i}
-			<canvas
-				bind:this={canvases[i]}
-				class="deck-canvas"
-				style:opacity={opacities[i]}
-				style:mix-blend-mode={i === 0 && !videoEnabled ? 'normal' : deckBlendMode}
-				style:filter={deckBus[i] === 'A' ? colorFilterA : deckBus[i] === 'B' ? colorFilterB : undefined}
-			></canvas>
+			<canvas bind:this={canvases[i]} class="deck-src"></canvas>
 		{/each}
+		<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
+		<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
 		<!-- Overlay sprites -->
 		<OverlayLayer {overlays} {beat} />
 		<!-- Strobe flash — top z-index, pointer-events none -->
@@ -2026,6 +2077,9 @@
 	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+	/* Texture sources for the Compositor — real, sized, DOM-attached (Butterchurn +
+	   DeckCard captureStream need them) but not shown; .deck-canvas above is visible. */
+	.deck-src { position: absolute; inset: 0; width: 100%; height: 100%; display: block; visibility: hidden; }
 
 	/* Overlay start screen */
 	.overlay {

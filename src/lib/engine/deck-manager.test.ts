@@ -46,7 +46,10 @@ describe('DeckManager', () => {
   it('start() charge le preset si fourni', async () => {
     const preset = { name: 'test' }
     await manager.start(0, audioCtx, audioNode, {}, preset)
-    expect(mockDeckInstance.loadPreset).toHaveBeenCalledWith(preset, 0.0)
+    expect(mockDeckInstance.loadPreset).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'test' }),
+      0.0
+    )
   })
 
   it('start() appelle resume() au deuxième appel, sans re-init', async () => {

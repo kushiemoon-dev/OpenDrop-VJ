@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { PlaylistMode } from '$lib/engine/playlist.js';
+	import type { BeatTriggerConfig } from '$lib/engine/beat-trigger.js';
+	import { clampBeatsPerChange, clampOffset } from '$lib/engine/beat-trigger.js';
 
 	interface Props {
 		playlistMode: PlaylistMode;
@@ -8,6 +10,8 @@
 		beatSyncB: boolean;
 		autoXfade: boolean;
 		beatsPerChange: number;
+		beatTriggerA: BeatTriggerConfig;
+		beatTriggerB: BeatTriggerConfig;
 		detectedBpm: number;
 		manualBpm: number;
 		playlistAItems: string[];
@@ -22,6 +26,8 @@
 		onModeChange: (m: PlaylistMode) => void;
 		onIntervalChange: (s: number) => void;
 		onBeatsPerChangeChange: (n: number) => void;
+		onBeatTriggerAChange: (patch: Partial<BeatTriggerConfig>) => void;
+		onBeatTriggerBChange: (patch: Partial<BeatTriggerConfig>) => void;
 		onTapTempo: () => void;
 		onClearManualBpm: () => void;
 		onToggleBeatSyncA: () => void;
@@ -46,6 +52,8 @@
 		beatSyncB,
 		autoXfade,
 		beatsPerChange,
+		beatTriggerA,
+		beatTriggerB,
 		detectedBpm,
 		manualBpm,
 		playlistAItems,
@@ -60,6 +68,8 @@
 		onModeChange,
 		onIntervalChange,
 		onBeatsPerChangeChange,
+		onBeatTriggerAChange,
+		onBeatTriggerBChange,
 		onTapTempo,
 		onClearManualBpm,
 		onToggleBeatSyncA,
@@ -115,6 +125,50 @@
 			<button class="btn-sm pl-btn" class:active={beatSyncB} onclick={onToggleBeatSyncB} title="Beat-sync Deck B">B</button>
 			<button class="btn-sm pl-btn" class:active={autoXfade} onclick={onToggleAutoXfade} title="Auto-cut crossfader on beat">⇄</button>
 		</div>
+		{#if beatSyncA}
+			<div class="beat-trigger-row">
+				<span class="bt-label">A</span>
+				<button class="btn-sm" onclick={() => onBeatTriggerAChange({ beatsPerChange: clampBeatsPerChange(beatTriggerA.beatsPerChange / 2) })}>÷2</button>
+				<input class="bt-num" type="number" min="1" max="64"
+					value={beatTriggerA.beatsPerChange}
+					onchange={(e) => onBeatTriggerAChange({ beatsPerChange: clampBeatsPerChange(+(e.target as HTMLInputElement).value) })} />
+				<button class="btn-sm" onclick={() => onBeatTriggerAChange({ beatsPerChange: clampBeatsPerChange(beatTriggerA.beatsPerChange * 2) })}>×2</button>
+				<span class="bt-sep">off</span>
+				<input class="bt-num" type="number" min="0" max={beatTriggerA.beatsPerChange - 1}
+					value={beatTriggerA.offset}
+					onchange={(e) => onBeatTriggerAChange({ offset: clampOffset(+(e.target as HTMLInputElement).value, beatTriggerA.beatsPerChange) })} />
+				<button class="btn-sm" class:active={beatTriggerA.mode === 'volume-peak'}
+					onclick={() => onBeatTriggerAChange({ mode: beatTriggerA.mode === 'beat' ? 'volume-peak' : 'beat' })}
+					title="Basculer déclenchement Beat / Volume">{beatTriggerA.mode === 'beat' ? '♩' : '🔊'}</button>
+				{#if beatTriggerA.mode === 'volume-peak'}
+					<input class="bt-range" type="range" min="0" max="1" step="0.01"
+						value={beatTriggerA.sensitivity}
+						oninput={(e) => onBeatTriggerAChange({ sensitivity: +(e.target as HTMLInputElement).value })} />
+				{/if}
+			</div>
+		{/if}
+		{#if beatSyncB}
+			<div class="beat-trigger-row">
+				<span class="bt-label">B</span>
+				<button class="btn-sm" onclick={() => onBeatTriggerBChange({ beatsPerChange: clampBeatsPerChange(beatTriggerB.beatsPerChange / 2) })}>÷2</button>
+				<input class="bt-num" type="number" min="1" max="64"
+					value={beatTriggerB.beatsPerChange}
+					onchange={(e) => onBeatTriggerBChange({ beatsPerChange: clampBeatsPerChange(+(e.target as HTMLInputElement).value) })} />
+				<button class="btn-sm" onclick={() => onBeatTriggerBChange({ beatsPerChange: clampBeatsPerChange(beatTriggerB.beatsPerChange * 2) })}>×2</button>
+				<span class="bt-sep">off</span>
+				<input class="bt-num" type="number" min="0" max={beatTriggerB.beatsPerChange - 1}
+					value={beatTriggerB.offset}
+					onchange={(e) => onBeatTriggerBChange({ offset: clampOffset(+(e.target as HTMLInputElement).value, beatTriggerB.beatsPerChange) })} />
+				<button class="btn-sm" class:active={beatTriggerB.mode === 'volume-peak'}
+					onclick={() => onBeatTriggerBChange({ mode: beatTriggerB.mode === 'beat' ? 'volume-peak' : 'beat' })}
+					title="Basculer déclenchement Beat / Volume">{beatTriggerB.mode === 'beat' ? '♩' : '🔊'}</button>
+				{#if beatTriggerB.mode === 'volume-peak'}
+					<input class="bt-range" type="range" min="0" max="1" step="0.01"
+						value={beatTriggerB.sensitivity}
+						oninput={(e) => onBeatTriggerBChange({ sensitivity: +(e.target as HTMLInputElement).value })} />
+				{/if}
+			</div>
+		{/if}
 	{/if}
 
 	<!-- Deck A playlist -->
@@ -291,4 +345,26 @@
 	}
 
 	.beats-select:focus { outline: none; border-color: var(--violet); }
+
+	.beat-trigger-row {
+		display: flex; align-items: center; gap: 0.3rem;
+		padding: 0.25rem 0.5rem;
+		background: #050514; border: 1px solid #101034;
+		border-radius: 6px;
+	}
+
+	.bt-label {
+		font-size: 11px; font-weight: 800; width: 12px;
+		color: var(--accent); text-shadow: 0 0 6px rgba(255,45,120,0.5);
+	}
+
+	.bt-sep { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+
+	.bt-num {
+		background: var(--bg-base); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: 5px;
+		padding: 0.15rem 0.25rem; font-size: 11px; width: 36px;
+	}
+
+	.bt-range { flex: 1; min-width: 40px; accent-color: var(--violet); cursor: pointer; }
 </style>

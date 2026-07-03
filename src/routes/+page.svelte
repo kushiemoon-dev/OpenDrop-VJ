@@ -1913,6 +1913,31 @@
 		{@render compositeDeck(mixerSelectedSlot)}
 	</div>
 {/snippet}
+{#snippet snapshotSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Snapshots</span>
+		</div>
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">Durée</span>
+			<input type="range" min="0.1" max="10" step="0.1" value={snapshotRecallDuration}
+				oninput={(e) => { snapshotRecallDuration = +e.currentTarget.value; }} style="flex:1" />
+			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{snapshotRecallDuration.toFixed(1)}s</span>
+		</div>
+		{#each [0, 1, 2, 3, 4, 5, 6, 7] as slot}
+			{@const snap = snapshots[slot]}
+			<div class="midi-row" style="gap:4px;align-items:center">
+				<input class="snap-name" type="text" value={snap?.name ?? ''} placeholder="—"
+					disabled={!snap}
+					oninput={(e) => renameSnapshot(slot, e.currentTarget.value)}
+					style="flex:1;min-width:0;font-size:11px" />
+				<button class="btn-sm" onclick={() => saveSnapshot(slot)} title="Capturer l'état courant">Save</button>
+				<button class="btn-sm" disabled={!snap} onclick={() => recallSnapshot(slot)} title="Rappeler ce snapshot">▶</button>
+				<button class="pl-remove" disabled={!snap} onclick={() => clearSnapshot(slot)} title="Vider">×</button>
+			</div>
+		{/each}
+	</div>
+{/snippet}
 {#snippet electronSection()}
 	{#if isElectron}
 	<div class="controls-section">
@@ -2213,6 +2238,7 @@
     {lfoSection}
     {colorSection}
     {compositeSection}
+    {snapshotSection}
     {electronSection}
   />
 {/if}
@@ -2384,6 +2410,16 @@
 	}
 
 	.pl-remove:hover { color: var(--accent); }
+	.pl-remove:disabled { opacity: 0.3; cursor: not-allowed; }
+	.pl-remove:disabled:hover { color: var(--text-muted); }
+
+	.snap-name {
+		background: var(--bg-elevated); color: var(--text-primary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
+		padding: 0.2rem 0.4rem;
+	}
+	.snap-name:focus { outline: none; border-color: var(--accent); }
+	.snap-name:disabled { color: var(--text-muted); cursor: not-allowed; }
 
 	/* MIDI */
 	.midi-list {

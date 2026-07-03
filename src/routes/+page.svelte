@@ -6,6 +6,11 @@
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
+	import {
+		type BeatTriggerConfig, defaultBeatTriggerConfig, shouldTriggerOnBeat,
+		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
+		clampBeatsPerChange, clampOffset,
+	} from '$lib/engine/beat-trigger.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
@@ -183,8 +188,23 @@
 	let beatSyncA = $state(false);
 	let beatSyncB = $state(false);
 	let beatsPerChange = $state(8);
-	let beatCountA = 0;
-	let beatCountB = 0;
+	let beatTriggerA = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
+	let beatTriggerB = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
+	let volumePeakStateA: VolumePeakState = defaultVolumePeakState();
+	let volumePeakStateB: VolumePeakState = defaultVolumePeakState();
+
+	function updateBeatTriggerA(patch: Partial<BeatTriggerConfig>) {
+		const next = { ...beatTriggerA, ...patch };
+		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
+		next.offset = clampOffset(next.offset, next.beatsPerChange);
+		beatTriggerA = next;
+	}
+	function updateBeatTriggerB(patch: Partial<BeatTriggerConfig>) {
+		const next = { ...beatTriggerB, ...patch };
+		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
+		next.offset = clampOffset(next.offset, next.beatsPerChange);
+		beatTriggerB = next;
+	}
 	let autoXfade = $state(false);
 	let autoXfadeCount = 0;
 
@@ -434,6 +454,22 @@
 			// VU meter + video warp
 			const lv = audio!.getLevels();
 			vuLevel = lv.rms;
+			if (beatSyncA && !lockA && beatTriggerA.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateA, beatTriggerA.sensitivity, t);
+				volumePeakStateA = next;
+				if (triggered) {
+					if (playlistAItems.length > 0) playlistA?.next();
+					else applyMidiAction('preset-next-a', 127);
+				}
+			}
+			if (beatSyncB && !lockB && beatTriggerB.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateB, beatTriggerB.sensitivity, t);
+				volumePeakStateB = next;
+				if (triggered) {
+					if (playlistBItems.length > 0) playlistB?.next();
+					else applyMidiAction('preset-next-b', 127);
+				}
+			}
 			if (videoEnabled && vrWarp) {
 				const target = 0.6 + lv.bass * 1.4;
 				videoPlaybackRate += (target - videoPlaybackRate) * 0.15;
@@ -463,6 +499,8 @@
 		localStorage.setItem('od-pl-b', JSON.stringify(playlistBItems));
 		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
 		localStorage.setItem('od-pl-mode', playlistMode);
+		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatTriggerA));
+		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatTriggerB));
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-keymap', JSON.stringify(keymap));
 		localStorage.setItem('od-quality', quality);
@@ -624,6 +662,14 @@
 			if (savedInterval) playlistIntervalSec = Number(savedInterval);
 			const savedMode = localStorage.getItem('od-pl-mode');
 			if (savedMode) playlistMode = savedMode as PlaylistMode;
+			const savedTriggerA = localStorage.getItem('od-beat-trigger-a');
+			if (savedTriggerA) {
+				try { beatTriggerA = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerA) }; } catch { /* ignore corrupt od-beat-trigger-a */ }
+			}
+			const savedTriggerB = localStorage.getItem('od-beat-trigger-b');
+			if (savedTriggerB) {
+				try { beatTriggerB = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerB) }; } catch { /* ignore corrupt od-beat-trigger-b */ }
+			}
 			const savedMidi = localStorage.getItem('od-midi-mappings');
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);
 			const savedKeymap = localStorage.getItem('od-keymap');
@@ -1091,19 +1137,13 @@
 				sync?.sendCrossfader(crossfader);
 			}
 		}
-		if (beatSyncA && !lockA) {
-			beatCountA = (beatCountA + 1) % beatsPerChange;
-			if (beatCountA === 0) {
-				if (playlistAItems.length > 0) playlistA?.next();
-				else applyMidiAction('preset-next-a', 127);
-			}
+		if (beatSyncA && !lockA && shouldTriggerOnBeat(clock.beatCount, beatTriggerA)) {
+			if (playlistAItems.length > 0) playlistA?.next();
+			else applyMidiAction('preset-next-a', 127);
 		}
-		if (beatSyncB && !lockB) {
-			beatCountB = (beatCountB + 1) % beatsPerChange;
-			if (beatCountB === 0) {
-				if (playlistBItems.length > 0) playlistB?.next();
-				else applyMidiAction('preset-next-b', 127);
-			}
+		if (beatSyncB && !lockB && shouldTriggerOnBeat(clock.beatCount, beatTriggerB)) {
+			if (playlistBItems.length > 0) playlistB?.next();
+			else applyMidiAction('preset-next-b', 127);
 		}
 	}
 
@@ -1206,11 +1246,9 @@
 	function toggleBeatSync(deck: 'A' | 'B') {
 		if (deck === 'A') {
 			beatSyncA = !beatSyncA;
-			beatCountA = 0;
 			playlistA?.setInterval(beatSyncA ? Infinity : playlistIntervalSec * 1000);
 		} else {
 			beatSyncB = !beatSyncB;
-			beatCountB = 0;
 			playlistB?.setInterval(beatSyncB ? Infinity : playlistIntervalSec * 1000);
 		}
 	}

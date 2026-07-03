@@ -417,6 +417,19 @@
 		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i], composites[i]);
 	});
 
+	// Pousse les params couleur vers le Compositor — par bus assigné (même
+	// mapping que l'ancien style:filter par-canvas : off → neutre).
+	$effect(() => {
+		const bus = deckBus;
+		const paramsA = colorParamsA;
+		const paramsB = colorParamsB;
+		if (!compositor) return;
+		for (let i = 0; i < 4; i++) {
+			const color = bus[i] === 'A' ? paramsA : bus[i] === 'B' ? paramsB : DEFAULT_COLOR_PARAMS;
+			compositor.setColor(i, color);
+		}
+	});
+
 	// — Sync strobe vers output ———————————————————————————
 	$effect(() => {
 		const on = strobeOn;
@@ -637,7 +650,11 @@
 			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
 			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
 			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
-			for (let i = 0; i < 4; i++) compositor.setLayer(i, opacities[i], slotComposites[i]);
+			for (let i = 0; i < 4; i++) {
+				compositor.setLayer(i, opacities[i], slotComposites[i]);
+				const color = deckBus[i] === 'A' ? colorParamsA : deckBus[i] === 'B' ? colorParamsB : DEFAULT_COLOR_PARAMS;
+				compositor.setColor(i, color);
+			}
 			compositor.start();
 
 			const d0 = presetA ? await loadPresetData(presetA) : null;

@@ -132,6 +132,13 @@
 		}
 	});
 
+	// Pousse les params couleur (hue/sat/bright/contrast/invert) vers le Compositor.
+	$effect(() => {
+		const colors = slotColors;
+		if (!compositor) return;
+		for (let i = 0; i < 4; i++) compositor.setColor(i, colors[i]);
+	});
+
 	onMount(async () => {
 		try {
 			audio = new AudioEngine();
@@ -152,7 +159,10 @@
 			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
 			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
 			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
-			for (let i = 0; i < 4; i++) compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
+			for (let i = 0; i < 4; i++) {
+				compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
+				compositor.setColor(i, slotColors[i]);
+			}
 			compositor.start();
 
 			// Démarrer slots 0 et 1 par défaut (équivalent A/B compat)

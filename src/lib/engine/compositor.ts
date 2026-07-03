@@ -69,6 +69,15 @@ export function blendModeFromValue01(v: number): BlendMode {
 }
 
 /**
+ * Inverse of blendModeFromValue01 — the bucket center for a mode, used so
+ * MIDI soft-takeover has a "current value" to compare an incoming CC against.
+ */
+export function blendModeToValue01(mode: BlendMode): number {
+	const idx = BLEND_MODES.indexOf(mode);
+	return (idx + 0.5) / BLEND_MODES.length;
+}
+
+/**
  * One-shot migration from the old global CSS `mix-blend-mode` string
  * (od-blendmode) to the new BlendMode enum. Modes with no equivalent
  * collapse to 'normal'.

@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
-	import { Compositor, migrateBlendModeString } from '$lib/engine/compositor.js';
+	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
@@ -207,6 +207,11 @@
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
 	]);
+	function updateComposite(slot: number, patch: Partial<SlotComposite>) {
+		const next = [...slotComposites] as typeof slotComposites;
+		next[slot] = { ...next[slot], ...patch };
+		slotComposites = next;
+	}
 
 	// — Performance decks ——————————————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
@@ -277,6 +282,25 @@
 		for (const deck of ['a', 'b'] as const)
 			registry.register({ id: `color-${sfx}-${deck}` as CommandId, label: `${lbl} ${deck.toUpperCase()}`, kind: 'range',
 				run(v) { if (deck === 'a') colorParamsA = {...colorParamsA, [field]: v}; else colorParamsB = {...colorParamsB, [field]: v}; },
+			});
+
+	// — Câblage commandes 1.1 (compositing: blend + lumaKey + colorKey, 4 slots) —
+	type CompositeCmd = [
+		prefix: string, label: string,
+		apply: (cfg: SlotComposite, v: number) => SlotComposite,
+		read: (cfg: SlotComposite) => number,
+	];
+	const COMPOSITE_CMDS: CompositeCmd[] = [
+		['composite-blend', 'Blend', (c, v) => ({ ...c, blend: blendModeFromValue01(v) }), (c) => blendModeToValue01(c.blend)],
+		['lumakey-black', 'Luma Black', (c, v) => ({ ...c, lumaBlack: v }), (c) => c.lumaBlack],
+		['lumakey-white', 'Luma White', (c, v) => ({ ...c, lumaWhite: v }), (c) => c.lumaWhite],
+		['colorkey-hue', 'Key Hue', (c, v) => ({ ...c, colorHue: v }), (c) => c.colorHue],
+		['colorkey-tolerance', 'Key Tolerance', (c, v) => ({ ...c, colorTol: v }), (c) => c.colorTol],
+	];
+	for (const [prefix, lbl, apply] of COMPOSITE_CMDS)
+		for (const slot of [0, 1, 2, 3] as const)
+			registry.register({ id: `${prefix}-${slot}` as CommandId, label: `${lbl} ${slot}`, kind: 'range',
+				run(v) { updateComposite(slot, apply(slotComposites[slot], v)); },
 			});
 
 	// — Command context (injected into registry.dispatch) ——
@@ -1203,10 +1227,17 @@
 	/** Lire la valeur courante (0..1) d'une commande range, pour le soft-takeover. */
 	function getCommandCurrentValue(id: CommandId): number | null {
 		if (id === 'crossfader') return crossfader;
-		const m = id.match(/^color-(\w+)-([ab])$/);
-		if (!m) return null;
-		const e = COLOR_CMDS.find(([s]) => s === m[1]);
-		return e ? (m[2] === 'a' ? colorParamsA : colorParamsB)[e[1]] : null;
+		const colorMatch = id.match(/^color-(\w+)-([ab])$/);
+		if (colorMatch) {
+			const e = COLOR_CMDS.find(([s]) => s === colorMatch[1]);
+			return e ? (colorMatch[2] === 'a' ? colorParamsA : colorParamsB)[e[1]] : null;
+		}
+		const compositeMatch = id.match(/^(composite-blend|lumakey-black|lumakey-white|colorkey-hue|colorkey-tolerance)-([0-3])$/);
+		if (compositeMatch) {
+			const e = COMPOSITE_CMDS.find(([prefix]) => prefix === compositeMatch[1]);
+			return e ? e[3](slotComposites[Number(compositeMatch[2])]) : null;
+		}
+		return null;
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
@@ -1749,6 +1780,64 @@
 		{@render colorDeck('B', colorParamsB, (p) => { colorParamsB = p; }, 'margin-top:6px')}
 	</div>
 {/snippet}
+{#snippet compositeDeck(slot: number)}
+	{@const cfg = slotComposites[slot]}
+	<div class="midi-row" style="gap:6px;align-items:center">
+		<span class="midi-label" style="width:48px">Blend</span>
+		<select class="blendmode-select" style="flex:1" value={cfg.blend}
+			onchange={(e) => updateComposite(slot, { blend: e.currentTarget.value as SlotComposite['blend'] })}>
+			<option value="normal">Normal</option>
+			<option value="additive">Additive</option>
+			<option value="screen">Screen</option>
+			<option value="multiply">Multiply</option>
+		</select>
+	</div>
+	<div class="midi-row" style="gap:6px;align-items:center">
+		<label class="midi-label" style="width:auto;display:flex;align-items:center;gap:4px;cursor:pointer">
+			<input type="checkbox" checked={cfg.lumaKey} onchange={(e) => updateComposite(slot, { lumaKey: e.currentTarget.checked })} />
+			Luma Key
+		</label>
+	</div>
+	{#if cfg.lumaKey}
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">Black</span>
+			<input type="range" min="0" max="1" step="0.01" value={cfg.lumaBlack}
+				oninput={(e) => updateComposite(slot, { lumaBlack: +e.currentTarget.value })} style="flex:1" />
+		</div>
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">White</span>
+			<input type="range" min="0" max="1" step="0.01" value={cfg.lumaWhite}
+				oninput={(e) => updateComposite(slot, { lumaWhite: +e.currentTarget.value })} style="flex:1" />
+		</div>
+	{/if}
+	<div class="midi-row" style="gap:6px;align-items:center">
+		<label class="midi-label" style="width:auto;display:flex;align-items:center;gap:4px;cursor:pointer">
+			<input type="checkbox" checked={cfg.colorKey} onchange={(e) => updateComposite(slot, { colorKey: e.currentTarget.checked })} />
+			Color Key
+		</label>
+	</div>
+	{#if cfg.colorKey}
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">Hue</span>
+			<input type="range" min="0" max="1" step="0.01" value={cfg.colorHue}
+				oninput={(e) => updateComposite(slot, { colorHue: +e.currentTarget.value })} style="flex:1" />
+		</div>
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<span class="midi-label" style="width:48px">Tol</span>
+			<input type="range" min="0" max="1" step="0.01" value={cfg.colorTol}
+				oninput={(e) => updateComposite(slot, { colorTol: +e.currentTarget.value })} style="flex:1" />
+		</div>
+	{/if}
+{/snippet}
+{#snippet compositeSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Composite (slot {mixerSelectedSlot})</span>
+			<button class="btn-sm" onclick={() => updateComposite(mixerSelectedSlot, { ...DEFAULT_SLOT_COMPOSITE })}>↺</button>
+		</div>
+		{@render compositeDeck(mixerSelectedSlot)}
+	</div>
+{/snippet}
 {#snippet electronSection()}
 	{#if isElectron}
 	<div class="controls-section">
@@ -2061,6 +2150,7 @@
     {strobeSection}
     {lfoSection}
     {colorSection}
+    {compositeSection}
     {electronSection}
   />
 {/if}

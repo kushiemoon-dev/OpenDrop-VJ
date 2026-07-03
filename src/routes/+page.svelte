@@ -2224,6 +2224,8 @@
 			{beatSyncB}
 			{autoXfade}
 			{beatsPerChange}
+			{beatTriggerA}
+			{beatTriggerB}
 			{detectedBpm}
 			{manualBpm}
 			{playlistAItems}
@@ -2238,6 +2240,8 @@
 			onModeChange={(m) => { playlistMode = m }}
 			onIntervalChange={(s) => { playlistIntervalSec = s }}
 			onBeatsPerChangeChange={(n) => { beatsPerChange = n }}
+			onBeatTriggerAChange={updateBeatTriggerA}
+			onBeatTriggerBChange={updateBeatTriggerB}
 			onTapTempo={tapTempo}
 			onClearManualBpm={clearManualBpm}
 			onToggleBeatSyncA={() => toggleBeatSync('A')}

@@ -9,10 +9,15 @@ export interface Overlay {
 	blendMode: string;   // CSS mix-blend-mode
 	beatReactive: boolean;
 	beatScale: number;   // multiplicateur d'échelle sur le beat (ex: 1.2)
-	video: boolean;      // true = asset vidéo (rendu <video> au lieu de <img>)
+	video: boolean;      // true = asset vidéo (rendu <video> au lieu de <img>) — ignoré si kind='text'
 	spin: number;        // deg/s, 0 = pas de rotation continue
 	driftX: number;      // fraction largeur/s, dérive horizontale
 	driftY: number;      // fraction hauteur/s, dérive verticale
+	kind: 'media' | 'text';        // 'media' = image/vidéo (défaut), 'text' = overlay texte
+	text: string;                  // contenu du texte (vide pour kind='media')
+	fontFamily: 'sans' | 'serif' | 'mono' | 'impact' | 'comic';
+	fontSize: number;              // vh — indépendant de la résolution, multiplié par `scale`
+	color: string;                 // couleur du texte, hex
 }
 
 export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overlay {
@@ -31,6 +36,11 @@ export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overl
 		spin: 0,
 		driftX: 0,
 		driftY: 0,
+		kind: 'media',
+		text: '',
+		fontFamily: 'sans',
+		fontSize: 8,
+		color: '#ffffff',
 		...partial
 	};
 }

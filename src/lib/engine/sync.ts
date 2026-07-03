@@ -136,7 +136,7 @@ export class MainSync {
 	}
 
 	sendOverlays(list: Overlay[]) {
-		sendMsg(this.bc, { type: 'overlays', list });
+		sendMsg(this.bc, { type: 'overlays', list: list.map((o) => ({ ...o })) });
 	}
 
 	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {

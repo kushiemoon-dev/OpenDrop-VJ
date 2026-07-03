@@ -10,8 +10,8 @@
  * framebuffer ping-pong.
  */
 
-import type { BlendMode, SlotComposite } from './sync.js';
-import { DEFAULT_SLOT_COMPOSITE } from './sync.js';
+import type { BlendMode, SlotComposite, ColorParams } from './sync.js';
+import { DEFAULT_SLOT_COMPOSITE, DEFAULT_COLOR_PARAMS } from './sync.js';
 
 export type { BlendMode };
 
@@ -103,9 +103,14 @@ void main() {
 }`;
 
 // LumaKey (black/white threshold smoothstep) + ColorKey (hue distance + tolerance)
-// compute an alpha mask; multiply mode needs a different RGB formula than the
-// other three (which all share the same premultiplied C*A output — only their
-// GPU blendFunc differs, set by the caller via blendStateFor).
+// compute an alpha mask from the RAW deck pixel — keying always targets what's
+// actually in the preset, unaffected by the color-correction below (otherwise a
+// chroma key + a hue-rotate would fight each other in a confusing way). Color
+// params (hue/sat/bright/contrast/invert) are the same 5 ops the old CSS `filter`
+// applied, in the same order, folded here so they still work once the source
+// canvases are hidden behind the compositor. Multiply mode needs a different RGB
+// formula than the other three (which share the same premultiplied C*A output —
+// only their GPU blendFunc differs, set by the caller via blendStateFor).
 const FRAGMENT_SRC = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
@@ -117,6 +122,11 @@ uniform float uLumaWhite;
 uniform bool uColorOn;
 uniform float uKeyHue;
 uniform float uKeyTol;
+uniform float uHueRotateDeg;
+uniform float uSaturateMul;
+uniform float uBrightnessMul;
+uniform float uContrastMul;
+uniform float uInvertAmount;
 in vec2 vUV;
 out vec4 fragColor;
 
@@ -139,20 +149,47 @@ float hueDist(float a, float b) {
 	return min(d, 1.0 - d);
 }
 
+vec3 rgb2hsv(vec3 c) {
+	vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+	vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+	vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+	float d = q.x - min(q.w, q.y);
+	float e = 1.0e-10;
+	return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+	vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+	vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+	return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+vec3 applyColorParams(vec3 c) {
+	vec3 hsv = rgb2hsv(c);
+	hsv.x = fract(hsv.x + uHueRotateDeg / 360.0);
+	c = hsv2rgb(hsv);
+	c = mix(vec3(luma(c)), c, uSaturateMul);
+	c = c * uBrightnessMul;
+	c = (c - 0.5) * uContrastMul + 0.5;
+	c = mix(c, 1.0 - c, uInvertAmount);
+	return c;
+}
+
 void main() {
-	vec3 C = texture(uTex, vUV).rgb;
+	vec3 raw = texture(uTex, vUV).rgb;
 
 	float mask = 1.0;
 	if (uLumaOn) {
-		float l = luma(C);
+		float l = luma(raw);
 		mask *= smoothstep(uLumaBlack - 0.02, uLumaBlack + 0.02, l);
 		mask *= 1.0 - smoothstep(uLumaWhite - 0.02, uLumaWhite + 0.02, l);
 	}
 	if (uColorOn) {
-		float dh = hueDist(rgb2hue(C), uKeyHue);
+		float dh = hueDist(rgb2hue(raw), uKeyHue);
 		mask *= smoothstep(uKeyTol, uKeyTol + 0.05, dh);
 	}
 
+	vec3 C = clamp(applyColorParams(raw), 0.0, 1.0);
 	float A = clamp(uOpacity * mask, 0.0, 1.0);
 	vec3 outRGB = uMultiply ? mix(vec3(1.0), C, A) : C * A;
 	fragColor = vec4(outRGB, A);
@@ -168,12 +205,18 @@ interface Uniforms {
 	uColorOn: WebGLUniformLocation | null;
 	uKeyHue: WebGLUniformLocation | null;
 	uKeyTol: WebGLUniformLocation | null;
+	uHueRotateDeg: WebGLUniformLocation | null;
+	uSaturateMul: WebGLUniformLocation | null;
+	uBrightnessMul: WebGLUniformLocation | null;
+	uContrastMul: WebGLUniformLocation | null;
+	uInvertAmount: WebGLUniformLocation | null;
 }
 
 interface Layer {
 	source: HTMLCanvasElement | null;
 	opacity: number;
 	config: SlotComposite;
+	color: ColorParams;
 }
 
 const SLOT_COUNT = 4;
@@ -188,6 +231,7 @@ export class Compositor {
 		source: null,
 		opacity: 0,
 		config: DEFAULT_SLOT_COMPOSITE,
+		color: DEFAULT_COLOR_PARAMS,
 	}));
 	private rafId: number | null = null;
 
@@ -211,6 +255,11 @@ export class Compositor {
 	setLayer(slot: number, opacity: number, config: SlotComposite): void {
 		this.layers[slot].opacity = opacity;
 		this.layers[slot].config = config;
+	}
+
+	/** Update a slot's color params (hue/sat/bright/contrast/invert) — same 5 ops the old CSS filter applied. */
+	setColor(slot: number, color: ColorParams): void {
+		this.layers[slot].color = color;
 	}
 
 	/** Resize the drawing buffer. CSS sizing (100% via stylesheet) handles display scaling. */
@@ -288,6 +337,11 @@ export class Compositor {
 			uColorOn: loc('uColorOn'),
 			uKeyHue: loc('uKeyHue'),
 			uKeyTol: loc('uKeyTol'),
+			uHueRotateDeg: loc('uHueRotateDeg'),
+			uSaturateMul: loc('uSaturateMul'),
+			uBrightnessMul: loc('uBrightnessMul'),
+			uContrastMul: loc('uContrastMul'),
+			uInvertAmount: loc('uInvertAmount'),
 		};
 	}
 
@@ -342,6 +396,13 @@ export class Compositor {
 			gl.uniform1i(this.uniforms.uColorOn, layer.config.colorKey ? 1 : 0);
 			gl.uniform1f(this.uniforms.uKeyHue, layer.config.colorHue);
 			gl.uniform1f(this.uniforms.uKeyTol, layer.config.colorTol);
+			// ColorParams fields are 0..1 with 0.5 = neutral (100%) for sat/bright/contrast —
+			// same mapping colorParamsToFilter() uses for the CSS filter string equivalent.
+			gl.uniform1f(this.uniforms.uHueRotateDeg, layer.color.hueRotate * 360);
+			gl.uniform1f(this.uniforms.uSaturateMul, layer.color.saturate * 2);
+			gl.uniform1f(this.uniforms.uBrightnessMul, layer.color.brightness * 2);
+			gl.uniform1f(this.uniforms.uContrastMul, layer.color.contrast * 2);
+			gl.uniform1f(this.uniforms.uInvertAmount, layer.color.invert);
 
 			gl.drawArrays(gl.TRIANGLES, 0, 6);
 		}

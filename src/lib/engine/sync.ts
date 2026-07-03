@@ -62,7 +62,6 @@ export type SyncMessage =
 	| { type: 'source'; deviceId: string }
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
-	| { type: 'blendmode'; mode: string }
 	| { type: 'composite'; slot: number; config: SlotComposite }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
@@ -130,10 +129,6 @@ export class MainSync {
 
 	sendQuality(tier: string) {
 		sendMsg(this.bc, { type: 'quality', tier });
-	}
-
-	sendBlendMode(mode: string) {
-		sendMsg(this.bc, { type: 'blendmode', mode });
 	}
 
 	sendComposite(slot: number, config: SlotComposite) {

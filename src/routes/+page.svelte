@@ -1982,6 +1982,23 @@
 		{/each}
 	</div>
 {/snippet}
+{#snippet timeSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Time (slot {mixerSelectedSlot})</span>
+			<button class="btn-sm" onclick={() => updateTimeParams(mixerSelectedSlot, defaultTimeParams())}>↺</button>
+		</div>
+		{#each ([['Speed', 'speedMult'], ['Zoom', 'zoomMult'], ['Rotation', 'rotMult'], ['Wrap', 'warpMult'], ['Horizontal', 'dxMult'], ['Vertical', 'dyMult'], ['Stretch', 'stretchMult'], ['Wave', 'waveMult']] as const) as [lbl, field]}
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label" style="width:48px">{lbl}</span>
+				<input type="range" min="0" max="2" step="0.01" value={timeParams[mixerSelectedSlot][field]}
+					oninput={(e) => updateTimeParams(mixerSelectedSlot, { [field]: +e.currentTarget.value } as Partial<DeckTimeParams>)}
+					style="flex:1" />
+				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{timeParams[mixerSelectedSlot][field].toFixed(2)}</span>
+			</div>
+		{/each}
+	</div>
+{/snippet}
 {#snippet electronSection()}
 	{#if isElectron}
 	<div class="controls-section">
@@ -2283,6 +2300,7 @@
     {colorSection}
     {compositeSection}
     {snapshotSection}
+    {timeSection}
     {electronSection}
   />
 {/if}

@@ -119,6 +119,8 @@
 		white-space: pre-wrap;
 		text-align: center;
 		max-width: 90vw;
+		max-height: 80vh;
+		overflow: hidden;
 		transform-origin: 0 0;
 		transition: transform 80ms ease-out;
 		user-select: none;

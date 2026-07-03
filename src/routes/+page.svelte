@@ -198,9 +198,7 @@
 	let quality = $state<QualityTier>(DEFAULT_TIER);
 	let fps = $state(0);
 
-	// — Blend mode decks ——————————————————————————————————
-	let deckBlendMode = $state('screen');
-	// Compositing par slot (blend + lumaKey + colorKey) — remplace deckBlendMode (1.1)
+	// — Compositing par slot (blend + lumaKey + colorKey) ——————
 	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
@@ -386,7 +384,6 @@
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
 		localStorage.setItem('od-transition', String(transitionTime));
-		localStorage.setItem('od-blendmode', deckBlendMode);
 		localStorage.setItem('od-composite', JSON.stringify(slotComposites));
 	});
 
@@ -418,12 +415,6 @@
 			hueOn: vrHue,
 		};
 		sync?.sendVideo(payload);
-	});
-
-	// — Sync blend mode vers output ————————————————————————
-	$effect(() => {
-		const mode = deckBlendMode;
-		sync?.sendBlendMode(mode);
 	});
 
 	// — Sync compositing (blend + lumaKey + colorKey) vers output, par slot —
@@ -543,8 +534,6 @@
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedTransition = localStorage.getItem('od-transition');
 			if (savedTransition) transitionTime = Number(savedTransition);
-			const savedBlendMode = localStorage.getItem('od-blendmode');
-			if (savedBlendMode) deckBlendMode = savedBlendMode;
 			const savedComposite = localStorage.getItem('od-composite');
 			if (savedComposite) {
 				try {
@@ -553,10 +542,13 @@
 						slotComposites = parsed.map((c) => ({ ...DEFAULT_SLOT_COMPOSITE, ...c })) as typeof slotComposites;
 					}
 				} catch { /* ignore corrupt od-composite */ }
-			} else if (savedBlendMode) {
-				// Migration one-shot depuis l'ancien mode global CSS.
-				const migrated = migrateBlendModeString(savedBlendMode);
-				slotComposites = slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof slotComposites;
+			} else {
+				// Migration one-shot depuis l'ancien mode global CSS (od-blendmode).
+				const savedBlendMode = localStorage.getItem('od-blendmode');
+				if (savedBlendMode) {
+					const migrated = migrateBlendModeString(savedBlendMode);
+					slotComposites = slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof slotComposites;
+				}
 			}
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {
@@ -705,7 +697,6 @@
 				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
 				sync?.sendQuality(quality);
-				sync?.sendBlendMode(deckBlendMode);
 				for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
@@ -1994,18 +1985,6 @@
 				<span class="transition-value">{transitionTime.toFixed(1)}s</span>
 				<button class="btn-sm" onclick={() => { transitionTime = 0 }} title="Coupe nette">Hard Cut</button>
 			</div>
-			<div class="blendmode-row">
-				<span class="transition-label">Mix</span>
-				<select class="blendmode-select" bind:value={deckBlendMode}>
-					<option value="screen">Screen (additif)</option>
-					<option value="plus-lighter">Plus Lighter</option>
-					<option value="multiply">Multiply</option>
-					<option value="overlay">Overlay</option>
-					<option value="lighten">Lighten</option>
-					<option value="hard-light">Hard Light</option>
-					<option value="difference">Difference</option>
-				</select>
-			</div>
 			<button
 				class="btn-sm preset-browser-toggle"
 				class:active={showPresetBrowser}
@@ -2126,7 +2105,6 @@
     selectedSlot={mixerSelectedSlot}
     {crossfader}
     {transitionTime}
-    {deckBlendMode}
     {presetList}
     {playlistAItems}
     {playlistBItems}
@@ -2137,7 +2115,6 @@
     onCycleBus={cycleBus}
     onCrossfaderChange={(v) => { crossfader = v }}
     onTransitionChange={(v) => { transitionTime = v }}
-    onBlendModeChange={(mode) => { deckBlendMode = mode }}
     onLoadPreset={selectPreset}
     onAddToPlaylist={addToPlaylist}
     onLayoutToggle={(l) => { layout = l }}
@@ -2266,7 +2243,6 @@
 	.transition-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
 	.transition-value { font-size: 10px; color: var(--text-muted); width: 28px; text-align: right; }
 
-	.blendmode-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
 	.blendmode-select {
 		flex: 1; background: var(--bg-elevated); color: var(--text-secondary);
 		border: 1px solid var(--border); border-radius: var(--r-sm);

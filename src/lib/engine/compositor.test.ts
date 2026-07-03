@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { blendStateFor, blendModeFromValue01, migrateBlendModeString, GLBlend } from './compositor.js';
+import { blendStateFor, blendModeFromValue01, blendModeToValue01, migrateBlendModeString, GLBlend } from './compositor.js';
 
 describe('blendStateFor', () => {
 	it('normal → over classique (SRC_ALPHA coverage constant)', () => {
@@ -48,6 +48,21 @@ describe('blendModeFromValue01', () => {
 	it('0.75 → multiply', () => { expect(blendModeFromValue01(0.75)).toBe('multiply'); });
 	it('1 → multiply (clampé)', () => { expect(blendModeFromValue01(1)).toBe('multiply'); });
 	it('valeur hors bornes négative → normal (clampé)', () => { expect(blendModeFromValue01(-0.5)).toBe('normal'); });
+});
+
+describe('blendModeToValue01', () => {
+	it('renvoie le centre de bucket pour chaque mode', () => {
+		expect(blendModeToValue01('normal')).toBeCloseTo(0.125);
+		expect(blendModeToValue01('additive')).toBeCloseTo(0.375);
+		expect(blendModeToValue01('screen')).toBeCloseTo(0.625);
+		expect(blendModeToValue01('multiply')).toBeCloseTo(0.875);
+	});
+
+	it('round-trip avec blendModeFromValue01', () => {
+		for (const m of ['normal', 'additive', 'screen', 'multiply'] as const) {
+			expect(blendModeFromValue01(blendModeToValue01(m))).toBe(m);
+		}
+	});
 });
 
 describe('migrateBlendModeString', () => {

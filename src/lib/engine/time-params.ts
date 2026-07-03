@@ -64,3 +64,9 @@ export function getGlobalTimeParams(): DeckTimeParams[] {
 	}
 	return w.__odDeckParams;
 }
+
+// Eager init at module load, in whichever window (control or output) imports this
+// module — both do, transitively, via deck-manager.ts. Ensures the compiled preset
+// code's window.__odDeckParams[slot] reference is never undefined, even before the
+// first slider touch or localStorage restore.
+if (typeof window !== 'undefined') getGlobalTimeParams();

@@ -10,6 +10,7 @@
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import type { ClipRef } from '$lib/engine/video-store.js';
+	import { getGlobalTimeParams } from '$lib/engine/time-params.js';
 
 	let canvas0: HTMLCanvasElement | undefined = $state();
 	let canvas1: HTMLCanvasElement | undefined = $state();
@@ -221,6 +222,8 @@
 					const next: [SlotComposite, SlotComposite, SlotComposite, SlotComposite] = [...slotComposites];
 					next[msg.slot] = msg.config;
 					slotComposites = next;
+				} else if (msg.type === 'time') {
+					Object.assign(getGlobalTimeParams()[msg.slot], msg.params);
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;

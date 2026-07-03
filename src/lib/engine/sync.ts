@@ -1,6 +1,7 @@
 import type { Overlay } from '$lib/engine/overlay.js';
 import type { ClipRef } from '$lib/engine/video-store.js';
 import type { InvisibleMode } from '$lib/engine/quality.js';
+import type { DeckTimeParams } from '$lib/engine/time-params.js';
 
 export interface ColorParams {
 	hueRotate: number;   // 0..1 → 0..360°
@@ -63,6 +64,7 @@ export type SyncMessage =
 	| { type: 'loopback'; deviceId: number }
 	| { type: 'quality'; tier: string }
 	| { type: 'composite'; slot: number; config: SlotComposite }
+	| { type: 'time'; slot: number; params: DeckTimeParams }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
@@ -133,6 +135,10 @@ export class MainSync {
 
 	sendComposite(slot: number, config: SlotComposite) {
 		sendMsg(this.bc, { type: 'composite', slot, config: { ...config } });
+	}
+
+	sendTime(slot: number, params: DeckTimeParams) {
+		sendMsg(this.bc, { type: 'time', slot, params: { ...params } });
 	}
 
 	sendOverlays(list: Overlay[]) {

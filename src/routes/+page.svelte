@@ -664,11 +664,21 @@
 			if (savedMode) playlistMode = savedMode as PlaylistMode;
 			const savedTriggerA = localStorage.getItem('od-beat-trigger-a');
 			if (savedTriggerA) {
-				try { beatTriggerA = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerA) }; } catch { /* ignore corrupt od-beat-trigger-a */ }
+				try {
+					const raw = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerA) };
+					raw.beatsPerChange = clampBeatsPerChange(raw.beatsPerChange);
+					raw.offset = clampOffset(raw.offset, raw.beatsPerChange);
+					beatTriggerA = raw;
+				} catch { /* ignore corrupt od-beat-trigger-a */ }
 			}
 			const savedTriggerB = localStorage.getItem('od-beat-trigger-b');
 			if (savedTriggerB) {
-				try { beatTriggerB = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerB) }; } catch { /* ignore corrupt od-beat-trigger-b */ }
+				try {
+					const raw = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerB) };
+					raw.beatsPerChange = clampBeatsPerChange(raw.beatsPerChange);
+					raw.offset = clampOffset(raw.offset, raw.beatsPerChange);
+					beatTriggerB = raw;
+				} catch { /* ignore corrupt od-beat-trigger-b */ }
 			}
 			const savedMidi = localStorage.getItem('od-midi-mappings');
 			if (savedMidi) midiMappings = JSON.parse(savedMidi);

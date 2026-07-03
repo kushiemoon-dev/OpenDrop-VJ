@@ -2,7 +2,8 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { AudioEngine } from '$lib/engine/audio.js';
-	import { OutputSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter } from '$lib/engine/sync.js';
+	import { OutputSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
+	import { Compositor } from '$lib/engine/compositor.js';
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
@@ -14,10 +15,19 @@
 	let canvas1: HTMLCanvasElement | undefined = $state();
 	let canvas2: HTMLCanvasElement | undefined = $state();
 	let canvas3: HTMLCanvasElement | undefined = $state();
+	let compositorCanvas: HTMLCanvasElement | undefined = $state();
+	let compositor: Compositor | null = null;
 
 	// Opacités par slot — remplace crossfader + opacityA/B
 	let slotOpacities = $state<[number, number, number, number]>([1, 0, 0, 0]);
 	let deckBlendMode = $state('screen');
+	// Compositing par slot (blend + lumaKey + colorKey) — remplace deckBlendMode
+	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+		{ ...DEFAULT_SLOT_COMPOSITE },
+	]);
 	// Couleurs par slot
 	let slotColors = $state<[ColorParams, ColorParams, ColorParams, ColorParams]>([
 		{ ...DEFAULT_COLOR_PARAMS },
@@ -112,6 +122,16 @@
 		}
 	});
 
+	// Pousse opacité + config de compositing vers le Compositor à chaque changement.
+	$effect(() => {
+		const ops = slotOpacities;
+		const composites = slotComposites;
+		if (!compositor) return;
+		for (let i = 0; i < 4; i++) {
+			compositor.setLayer(i, ops[i], composites[i]);
+		}
+	});
+
 	onMount(async () => {
 		try {
 			audio = new AudioEngine();
@@ -123,6 +143,17 @@
 			manager.attachCanvas(3, canvas3!);
 
 			const q = getQualitySettings(DEFAULT_TIER);
+
+			compositor = new Compositor(compositorCanvas!);
+			compositor.attachSource(0, canvas0!);
+			compositor.attachSource(1, canvas1!);
+			compositor.attachSource(2, canvas2!);
+			compositor.attachSource(3, canvas3!);
+			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
+			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
+			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
+			for (let i = 0; i < 4; i++) compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
+			compositor.start();
 
 			// Démarrer slots 0 et 1 par défaut (équivalent A/B compat)
 			await manager.start(0, audio.ctx, audio.analyser, q, null);
@@ -179,6 +210,10 @@
 					manager?.applyQuality(settings);
 				} else if (msg.type === 'blendmode') {
 					deckBlendMode = msg.mode;
+				} else if (msg.type === 'composite') {
+					const next: [SlotComposite, SlotComposite, SlotComposite, SlotComposite] = [...slotComposites];
+					next[msg.slot] = msg.config;
+					slotComposites = next;
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;
@@ -266,6 +301,7 @@
 		if (helloTimer !== null) clearInterval(helloTimer);
 		_strobeStop();
 		manager?.destroyAll();
+		compositor?.destroy();
 		audio?.destroy();
 		sync?.destroy();
 	});
@@ -275,6 +311,7 @@
 		const w = canvas0.clientWidth || window.innerWidth;
 		const h = canvas0.clientHeight || window.innerHeight;
 		for (let i = 0; i < 4; i++) manager?.resize(i, w, h);
+		compositor?.resize(w, h, getQualitySettings(DEFAULT_TIER).pixelRatio);
 	}
 </script>
 
@@ -282,10 +319,11 @@
 
 <div class="output">
 	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-	<canvas bind:this={canvas0} class="layer" style="opacity:{slotOpacities[0]}; mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}; filter:{slotFilters[0]}"></canvas>
-	<canvas bind:this={canvas1} class="layer" style="opacity:{slotOpacities[1]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[1]}"></canvas>
-	<canvas bind:this={canvas2} class="layer" style="opacity:{slotOpacities[2]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[2]}"></canvas>
-	<canvas bind:this={canvas3} class="layer" style="opacity:{slotOpacities[3]}; mix-blend-mode:{deckBlendMode}; filter:{slotFilters[3]}"></canvas>
+	<canvas bind:this={canvas0} class="deck-src"></canvas>
+	<canvas bind:this={canvas1} class="deck-src"></canvas>
+	<canvas bind:this={canvas2} class="deck-src"></canvas>
+	<canvas bind:this={canvas3} class="deck-src"></canvas>
+	<canvas bind:this={compositorCanvas} class="layer" style="mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
 	<OverlayLayer {overlays} {beat} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
@@ -317,6 +355,18 @@
 		width: 100%;
 		height: 100%;
 		display: block;
+	}
+
+	/* Deck canvases feed the Compositor as texture sources — kept real and
+	   sized (Butterchurn + DeckCard captureStream need them) but not shown
+	   directly; the compositor canvas above is what's actually visible. */
+	.deck-src {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		display: block;
+		visibility: hidden;
 	}
 
 	.notice {

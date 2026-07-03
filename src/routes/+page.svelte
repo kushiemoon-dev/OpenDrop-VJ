@@ -999,6 +999,12 @@
 		(e.target as HTMLInputElement).value = '';
 	}
 
+	function addTextOverlay(): string {
+		const ov = makeOverlay('Texte', { kind: 'text', text: 'Texte' });
+		overlays = [...overlays, ov];
+		return ov.id;
+	}
+
 	function onVisualizerDragOver(e: DragEvent) {
 		if (!e.dataTransfer?.types.includes('Files')) return;
 		e.preventDefault();
@@ -2038,6 +2044,7 @@
 		<SidebarOverlays
 			{overlays}
 			onAddOverlays={onOverlayFilePick}
+			onAddText={addTextOverlay}
 			onRemoveOverlay={(id) => removeOverlay(id)}
 			onUpdateOverlay={(id, patch) => updateOverlay(id, patch)}
 		/>

@@ -354,6 +354,33 @@
 		playlistPrev,
 	};
 
+	// — Câblage commandes 1.3 (recall snapshots) ——————————————
+	for (const slot of [0, 1, 2, 3, 4, 5, 6, 7] as const) {
+		registry.register({
+			id: `recall-snapshot-${slot}` as CommandId,
+			label: `Recall Snapshot ${slot}`,
+			kind: 'trigger',
+			run() {
+				const snap = snapshots[slot];
+				if (!snap) return; // slot vide → inerte, pas de rappel
+				// Relu en direct (jamais mis en cache) : un redémarrage mid-rappel doit
+				// toujours partir de l'état visuel réel du moment, pas d'une valeur périmée.
+				const start: Partial<Record<CommandId, number>> = {};
+				for (const id of LOOK_COMMAND_IDS) {
+					const v = getCommandCurrentValue(id);
+					if (v !== null) start[id] = v;
+				}
+				snapshotEngine.recall(start, snap.values, snapshotRecallDuration * 1000, (values) => {
+					for (const key in values)
+						registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
+				});
+			},
+		});
+	}
+	function recallSnapshot(slot: number) {
+		registry.dispatch(`recall-snapshot-${slot}` as CommandId, 1, commandCtx);
+	}
+
 	// — Sync crossfader to output window ——————————————————
 	// Read crossfader unconditionally before sync?. so Svelte 5 tracks it as a
 	// dependency even when sync is still null on the first $effect run (onMount
@@ -672,6 +699,7 @@
 		playlistB?.destroy();
 		manager.destroyAll();
 		compositor?.destroy();
+		snapshotEngine.cancel();
 		audio?.destroy(); // also calls stopPcmCapture()
 		sync?.destroy();
 		midi?.destroy();

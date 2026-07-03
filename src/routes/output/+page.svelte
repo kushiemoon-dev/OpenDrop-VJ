@@ -20,8 +20,7 @@
 
 	// Opacités par slot — remplace crossfader + opacityA/B
 	let slotOpacities = $state<[number, number, number, number]>([1, 0, 0, 0]);
-	let deckBlendMode = $state('screen');
-	// Compositing par slot (blend + lumaKey + colorKey) — remplace deckBlendMode
+	// Compositing par slot (blend + lumaKey + colorKey)
 	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
@@ -218,8 +217,6 @@
 				} else if (msg.type === 'quality') {
 					const settings = getQualitySettings(msg.tier as QualityTier);
 					manager?.applyQuality(settings);
-				} else if (msg.type === 'blendmode') {
-					deckBlendMode = msg.mode;
 				} else if (msg.type === 'composite') {
 					const next: [SlotComposite, SlotComposite, SlotComposite, SlotComposite] = [...slotComposites];
 					next[msg.slot] = msg.config;

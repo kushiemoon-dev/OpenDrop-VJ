@@ -66,6 +66,7 @@ export type SyncMessage =
 	| { type: 'composite'; slot: number; config: SlotComposite }
 	| { type: 'time'; slot: number; params: DeckTimeParams }
 	| { type: 'overlays'; list: Overlay[] }
+	| { type: 'overlay-queue-index'; index: number }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
 	| { type: 'strobe'; on: boolean; rate: number; intensity: number; color: string }
@@ -145,6 +146,10 @@ export class MainSync {
 		// Shallow copy is load-bearing: a raw Svelte 5 $state-proxied array/object
 		// throws DataCloneError on postMessage. Don't simplify back to `{ list }`.
 		sendMsg(this.bc, { type: 'overlays', list: list.map((o) => ({ ...o })) });
+	}
+
+	sendOverlayQueueIndex(index: number) {
+		sendMsg(this.bc, { type: 'overlay-queue-index', index });
 	}
 
 	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {

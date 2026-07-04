@@ -11,6 +11,7 @@
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
 		clampBeatsPerChange, clampOffset,
 	} from '$lib/engine/beat-trigger.js';
+	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
@@ -277,6 +278,29 @@
 	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
 	let overlayDragOver = $state(false);
+	let overlayQueueEnabled = $state(false);
+	let overlayQueueIndex = $state(0);
+	let overlayQueueTrigger = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
+	let overlayQueueMode = $state<PlaylistMode>('sequential');
+	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
+
+	function toggleOverlayQueue() {
+		overlayQueueEnabled = !overlayQueueEnabled;
+	}
+
+	function updateOverlayQueueTrigger(patch: Partial<BeatTriggerConfig>) {
+		const next = { ...overlayQueueTrigger, ...patch };
+		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
+		next.offset = clampOffset(next.offset, next.beatsPerChange);
+		overlayQueueTrigger = next;
+	}
+
+	function advanceOverlayQueue(direction: 1 | -1) {
+		const queued = pickQueuedOverlays(overlays);
+		overlayQueueIndex = direction === 1
+			? advanceQueueIndex(overlayQueueIndex, queued.length, overlayQueueMode)
+			: retreatQueueIndex(overlayQueueIndex, queued.length);
+	}
 	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
 	const activeDeck = $derived<'A' | 'B'>(deckBus[activeSlot] === 'B' ? 'B' : 'A');
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
@@ -405,6 +429,7 @@
 		togglePlaylist,
 		playlistNext,
 		playlistPrev,
+		advanceOverlayQueue,
 	};
 
 	// — Câblage commandes 1.3 (recall snapshots) ——————————————
@@ -470,6 +495,11 @@
 					else applyMidiAction('preset-next-b', 127);
 				}
 			}
+			if (overlayQueueEnabled && overlayQueueTrigger.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, overlayQueueVolumeState, overlayQueueTrigger.sensitivity, t);
+				overlayQueueVolumeState = next;
+				if (triggered) advanceOverlayQueue(1);
+			}
 			if (videoEnabled && vrWarp) {
 				const target = 0.6 + lv.bass * 1.4;
 				videoPlaybackRate += (target - videoPlaybackRate) * 0.15;
@@ -501,6 +531,9 @@
 		localStorage.setItem('od-pl-mode', playlistMode);
 		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatTriggerA));
 		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatTriggerB));
+		localStorage.setItem('od-overlay-queue', JSON.stringify({
+			enabled: overlayQueueEnabled, trigger: overlayQueueTrigger, mode: overlayQueueMode,
+		}));
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-keymap', JSON.stringify(keymap));
 		localStorage.setItem('od-quality', quality);
@@ -750,6 +783,18 @@
 			}
 			const savedOverlays = localStorage.getItem('od-overlays');
 			if (savedOverlays) overlays = JSON.parse(savedOverlays);
+			const savedOverlayQueue = localStorage.getItem('od-overlay-queue');
+			if (savedOverlayQueue) {
+				try {
+					const parsed = JSON.parse(savedOverlayQueue);
+					overlayQueueEnabled = !!parsed.enabled;
+					const rawTrigger = { ...defaultBeatTriggerConfig(), ...parsed.trigger };
+					rawTrigger.beatsPerChange = clampBeatsPerChange(rawTrigger.beatsPerChange);
+					rawTrigger.offset = clampOffset(rawTrigger.offset, rawTrigger.beatsPerChange);
+					overlayQueueTrigger = rawTrigger;
+					if (parsed.mode === 'sequential' || parsed.mode === 'shuffle') overlayQueueMode = parsed.mode;
+				} catch { /* ignore corrupt od-overlay-queue */ }
+			}
 			const savedVideoEnabled = localStorage.getItem('od-video-enabled');
 			if (savedVideoEnabled) videoEnabled = savedVideoEnabled === 'true';
 			const savedVideoOpacity = localStorage.getItem('od-video-opacity');
@@ -1160,6 +1205,9 @@
 			if (playlistBItems.length > 0) playlistB?.next();
 			else applyMidiAction('preset-next-b', 127);
 		}
+		if (overlayQueueEnabled && shouldTriggerOnBeat(clock.beatCount, overlayQueueTrigger)) {
+			advanceOverlayQueue(1);
+		}
 	}
 
 	// — Overlay helpers ————————————————————————————————————
@@ -1230,6 +1278,7 @@
 	async function removeOverlay(id: string) {
 		await deleteAsset(id);
 		overlays = overlays.filter(o => o.id !== id);
+		overlayQueueIndex = clampQueueIndex(overlayQueueIndex, pickQueuedOverlays(overlays).length);
 	}
 
 	function updateOverlay(id: string, patch: Partial<Overlay>) {

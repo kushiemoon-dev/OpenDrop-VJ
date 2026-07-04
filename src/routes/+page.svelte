@@ -590,6 +590,11 @@
 		sync?.sendStrobe(on, rate, intensity, color);
 	});
 
+	// — Feedback LED MIDI (états persistants) ——————————————
+	$effect(() => {
+		pushLedStates();
+	});
+
 	// — Sync color params vers output ————————————————————
 	$effect(() => {
 		const paramsA = colorParamsA;
@@ -1298,6 +1303,8 @@
 			await midi.connect();
 			midiConnected = true;
 			midiDeviceNames = midi.deviceNames;
+			midi.onOutputReconnect(() => pushLedStates());
+			pushLedStates(); // état initial des LED au moment de la connexion
 
 			// Soft-takeover: Set<key> de contrôles déjà en phase avec la valeur app
 			const takenOver = new Set<MidiTriggerKey>();
@@ -1328,7 +1335,17 @@
 						takenOver.add(key);
 					}
 
-					if (status === 'running') registry.dispatch(action, value01, commandCtx);
+					if (status === 'running') {
+						registry.dispatch(action, value01, commandCtx);
+						// Flash de confirmation — exclu pour les commandes à état persistant
+						// (strobe-toggle, playlist-toggle-*) : sans cette garde, le setTimeout
+						// ci-dessous écraserait à tort l'état que pushLedStates() vient de
+						// mettre à jour au même tick (voir Global Constraints).
+						if (cmd?.kind === 'trigger' && getCommandLedState(action) === null) {
+							midi?.sendFeedback(key, true);
+							setTimeout(() => midi?.sendFeedback(key, false), 120);
+						}
+					}
 					break;
 				}
 			});
@@ -1418,6 +1435,30 @@
 			return e ? timeParams[Number(timeMatch[2])][e[2]] / 2 : null;
 		}
 		return null;
+	}
+
+	function getCommandLedState(id: CommandId): boolean | null {
+		if (id === 'strobe-toggle') return strobeOn;
+		if (id === 'playlist-toggle-a') return playlistAPlaying;
+		if (id === 'playlist-toggle-b') return playlistBPlaying;
+		return null;
+	}
+
+	// Lit strobeOn/playlistAPlaying/playlistBPlaying/midiMappings AVANT de vérifier `midi`
+	// (variable non-réactive) — sinon un $effect qui appelle cette fonction ne suivrait
+	// jamais ces $state s'il tournait une première fois avant la connexion MIDI (le même
+	// gotcha Svelte 5 documenté pour l'optional chaining dans un $effect).
+	function pushLedStates() {
+		const strobe = strobeOn;
+		const plA = playlistAPlaying;
+		const plB = playlistBPlaying;
+		const kStrobe = midiMappings['strobe-toggle'];
+		const kA = midiMappings['playlist-toggle-a'];
+		const kB = midiMappings['playlist-toggle-b'];
+		if (!midi) return;
+		if (kStrobe) midi.sendFeedback(kStrobe, strobe);
+		if (kA) midi.sendFeedback(kA, plA);
+		if (kB) midi.sendFeedback(kB, plB);
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {

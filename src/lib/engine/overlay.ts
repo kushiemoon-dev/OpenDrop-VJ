@@ -18,6 +18,7 @@ export interface Overlay {
 	fontFamily: 'sans' | 'serif' | 'mono' | 'impact' | 'comic';
 	fontSize: number;              // vh — indépendant de la résolution, multiplié par `scale`
 	color: string;                 // couleur du texte, hex
+	inQueue: boolean;              // fait partie de la rotation auto-cyclante (queue overlay)
 }
 
 export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overlay {
@@ -41,6 +42,7 @@ export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overl
 		fontFamily: 'sans',
 		fontSize: 8,
 		color: '#ffffff',
+		inQueue: false,
 		...partial
 	};
 }

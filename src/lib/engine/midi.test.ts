@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { triggerKey, formatTrigger, type MidiMessage } from './midi.js';
+import { triggerKey, formatTrigger, parseTriggerKey, findMatchingOutputId, type MidiMessage } from './midi.js';
 
 const DEV = 'dev0';
 
@@ -61,5 +61,53 @@ describe('normalisation 14-bit vs 7-bit', () => {
 
 	it('7-bit max (127) → 1.0', () => {
 		expect(127 / 127).toBe(1);
+	});
+});
+
+describe('parseTriggerKey', () => {
+	it('parse une clé note', () => {
+		expect(parseTriggerKey('dev0:note:2:60')).toEqual({ deviceId: 'dev0', kind: 'note', channel: 2, number: 60 });
+	});
+
+	it('parse une clé cc', () => {
+		expect(parseTriggerKey('dev0:cc:1:7')).toEqual({ deviceId: 'dev0', kind: 'cc', channel: 1, number: 7 });
+	});
+
+	it('parse pitchbend (pas de champ number)', () => {
+		expect(parseTriggerKey('dev0:pb:1')).toEqual({ deviceId: 'dev0', kind: 'pb', channel: 1 });
+	});
+
+	it('rejette le format legacy 3-parties (pas de deviceId)', () => {
+		expect(parseTriggerKey('cc:1:7')).toBeNull();
+		expect(parseTriggerKey('note:3:60')).toBeNull();
+	});
+
+	it('rejette une clé invalide', () => {
+		expect(parseTriggerKey('')).toBeNull();
+		expect(parseTriggerKey('garbage')).toBeNull();
+		expect(parseTriggerKey('dev0:cc:notanumber:7')).toBeNull();
+		expect(parseTriggerKey('dev0:cc:1')).toBeNull(); // manque le number pour cc
+	});
+});
+
+describe('findMatchingOutputId', () => {
+	const outputs = [{ id: 'out1', name: 'FakePad' }, { id: 'out2', name: 'Other' }];
+
+	it('matche par nom exact', () => {
+		expect(findMatchingOutputId('FakePad', outputs)).toBe('out1');
+	});
+
+	it('retourne null si aucun match', () => {
+		expect(findMatchingOutputId('Unknown', outputs)).toBeNull();
+	});
+
+	it('retourne null pour un nom absent (null/undefined)', () => {
+		expect(findMatchingOutputId(null, outputs)).toBeNull();
+		expect(findMatchingOutputId(undefined, outputs)).toBeNull();
+	});
+
+	it('prend le premier match si les noms sont dupliqués', () => {
+		const dup = [{ id: 'a', name: 'X' }, { id: 'b', name: 'X' }];
+		expect(findMatchingOutputId('X', dup)).toBe('a');
 	});
 });

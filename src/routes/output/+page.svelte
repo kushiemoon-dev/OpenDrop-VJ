@@ -7,6 +7,7 @@
 	import { initPresets, buildPresetList, loadPresetData } from '$lib/presets/index.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
 	import { type Overlay } from '$lib/engine/overlay.js';
+	import { visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import type { ClipRef } from '$lib/engine/video-store.js';
@@ -43,6 +44,8 @@
 	]);
 
 	let overlays = $state<Overlay[]>([]);
+	let overlayQueueIndex = $state(0);
+	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
 	let beat = $state(false);
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -230,6 +233,8 @@
 					invisibleFps = msg.invisibleFps;
 				} else if (msg.type === 'overlays') {
 					overlays = msg.list;
+				} else if (msg.type === 'overlay-queue-index') {
+					overlayQueueIndex = msg.index;
 				} else if (msg.type === 'video') {
 					gotState = true;
 					videoEnabled = msg.enabled;
@@ -334,7 +339,7 @@
 	<canvas bind:this={canvas2} class="deck-src"></canvas>
 	<canvas bind:this={canvas3} class="deck-src"></canvas>
 	<canvas bind:this={compositorCanvas} class="layer" style="mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
-	<OverlayLayer {overlays} {beat} />
+	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
 	{/if}

@@ -33,6 +33,39 @@ export function formatTrigger(key: MidiTriggerKey): string {
 	return key;
 }
 
+export type ParsedTriggerKey =
+	| { deviceId: string; kind: 'note' | 'cc'; channel: number; number: number }
+	| { deviceId: string; kind: 'pb'; channel: number };
+
+/** Parses the new-format key produced by triggerKey(). Returns null for the legacy
+ * 3-part format (no deviceId) — those mappings predate multi-controller support and
+ * can't be addressed for output feedback. */
+export function parseTriggerKey(key: MidiTriggerKey): ParsedTriggerKey | null {
+	const parts = key.split(':');
+	if (parts.length < 3) return null;
+	const kind = parts[1];
+	if (kind !== 'cc' && kind !== 'note' && kind !== 'pb') return null;
+	const deviceId = parts[0];
+	const channel = Number(parts[2]);
+	if (!Number.isFinite(channel)) return null;
+	if (kind === 'pb') return { deviceId, kind, channel };
+	if (parts.length < 4) return null;
+	const number = Number(parts[3]);
+	if (!Number.isFinite(number)) return null;
+	return { deviceId, kind, channel, number };
+}
+
+/** Finds the output port whose name matches the given input port's name — WebMIDI
+ * doesn't guarantee a shared id between the input/output of the same physical device. */
+export function findMatchingOutputId(
+	inputName: string | null | undefined,
+	outputs: Array<{ id: string; name: string | null }>,
+): string | null {
+	if (!inputName) return null;
+	const match = outputs.find((o) => o.name === inputName);
+	return match ? match.id : null;
+}
+
 type MsgCb = (msg: MidiMessage) => void;
 type ClockCb = () => void;
 

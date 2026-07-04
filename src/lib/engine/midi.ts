@@ -73,6 +73,7 @@ export class MidiEngine {
 	private access: MIDIAccess | null = null;
 	private msgCb: MsgCb | null = null;
 	private clockCb: ClockCb | null = null;
+	private outputReconnectCb: (() => void) | null = null;
 	// 14-bit pending MSBs keyed by `${deviceId}:${ch}:${ccNum}`
 	private readonly _msb = new Map<string, number>();
 
@@ -86,6 +87,9 @@ export class MidiEngine {
 			if (e.port.type === 'input' && e.port.state === 'connected') {
 				(e.port as MIDIInput).onmidimessage = (ev) => this._handle(ev);
 			}
+			if (e.port.type === 'output' && e.port.state === 'connected') {
+				this.outputReconnectCb?.();
+			}
 		};
 	}
 
@@ -93,6 +97,24 @@ export class MidiEngine {
 
 	/** Called on every MIDI clock pulse (0xF8, 24 per quarter note). */
 	onClock(cb: ClockCb) { this.clockCb = cb; }
+
+	/** Called whenever an output port (re)connects — used to re-push LED feedback state. */
+	onOutputReconnect(cb: () => void) { this.outputReconnectCb = cb; }
+
+	/** Sends generic on/off LED feedback (no color/sysex) for a bound trigger key. */
+	sendFeedback(key: MidiTriggerKey, on: boolean): void {
+		if (!this.access) return;
+		const parsed = parseTriggerKey(key);
+		if (!parsed || parsed.kind === 'pb') return;
+		const inputName = this.access.inputs.get(parsed.deviceId)?.name;
+		const outputs = Array.from(this.access.outputs.values(), (o) => ({ id: o.id, name: o.name }));
+		const outputId = findMatchingOutputId(inputName, outputs);
+		if (!outputId) return;
+		const output = this.access.outputs.get(outputId);
+		if (!output) return;
+		const statusByte = (parsed.kind === 'note' ? 0x90 : 0xb0) | (parsed.channel - 1);
+		output.send([statusByte, parsed.number, on ? 127 : 0]);
+	}
 
 	get deviceNames(): string[] {
 		if (!this.access) return [];
@@ -164,6 +186,7 @@ export class MidiEngine {
 		}
 		this.msgCb = null;
 		this.clockCb = null;
+		this.outputReconnectCb = null;
 		this._msb.clear();
 	}
 }

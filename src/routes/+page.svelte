@@ -11,7 +11,7 @@
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
 		clampBeatsPerChange, clampOffset,
 	} from '$lib/engine/beat-trigger.js';
-	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex } from '$lib/engine/overlay-queue.js';
+	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex, visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
@@ -283,6 +283,7 @@
 	let overlayQueueTrigger = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
 	let overlayQueueMode = $state<PlaylistMode>('sequential');
 	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
+	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
 
 	function toggleOverlayQueue() {
 		overlayQueueEnabled = !overlayQueueEnabled;
@@ -467,6 +468,12 @@
 	$effect(() => {
 		const x = crossfader;
 		sync?.sendCrossfader(x);
+	});
+
+	// — Sync overlay queue index vers output ——————————————
+	$effect(() => {
+		const idx = overlayQueueIndex;
+		sync?.sendOverlayQueueIndex(idx);
 	});
 
 	// — VU meter polling + FPS counter + video speed warp —
@@ -936,6 +943,7 @@
 				for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
+				sync?.sendOverlayQueueIndex(overlayQueueIndex);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
@@ -2228,7 +2236,7 @@
 		<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
 		<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
 		<!-- Overlay sprites -->
-		<OverlayLayer {overlays} {beat} />
+		<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
 		<!-- Strobe flash — top z-index, pointer-events none -->
 		{#if strobeOn && strobeFlash}
 			<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>

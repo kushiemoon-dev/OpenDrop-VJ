@@ -35,4 +35,9 @@ describe('makeOverlay', () => {
 		expect(ov.color).toBe('#ff2d78');
 		expect(ov.fontSize).toBe(8); // pas touché, garde le défaut
 	});
+
+	it('inQueue défaut à false (non-cassant, opt-in)', () => {
+		const ov = makeOverlay('mon-image');
+		expect(ov.inQueue).toBe(false);
+	});
 });

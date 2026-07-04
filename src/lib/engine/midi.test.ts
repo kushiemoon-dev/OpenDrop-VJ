@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { triggerKey, formatTrigger, parseTriggerKey, findMatchingOutputId, type MidiMessage } from './midi.js';
+import { describe, it, expect, vi } from 'vitest';
+import { triggerKey, formatTrigger, parseTriggerKey, findMatchingOutputId, MidiEngine, type MidiMessage } from './midi.js';
 
 const DEV = 'dev0';
 
@@ -109,5 +109,85 @@ describe('findMatchingOutputId', () => {
 	it('prend le premier match si les noms sont dupliqués', () => {
 		const dup = [{ id: 'a', name: 'X' }, { id: 'b', name: 'X' }];
 		expect(findMatchingOutputId('X', dup)).toBe('a');
+	});
+});
+
+function fakeAccess(opts: {
+	inputs?: Array<{ id: string; name: string }>;
+	outputs?: Array<{ id: string; name: string; send: (data: number[]) => void }>;
+}) {
+	return {
+		inputs: new Map((opts.inputs ?? []).map((i) => [i.id, i])),
+		outputs: new Map((opts.outputs ?? []).map((o) => [o.id, o])),
+		onstatechange: null,
+	};
+}
+
+describe('MidiEngine.sendFeedback', () => {
+	it('envoie Note On/Off vers le port de sortie qui matche par nom', () => {
+		const send = vi.fn();
+		const engine = new MidiEngine();
+		// @ts-expect-error — injection directe pour tester sans navigator.requestMIDIAccess
+		engine.access = fakeAccess({
+			inputs: [{ id: 'dev0', name: 'FakePad' }],
+			outputs: [{ id: 'out0', name: 'FakePad', send }],
+		});
+		engine.sendFeedback('dev0:note:1:60', true);
+		expect(send).toHaveBeenCalledWith([0x90, 60, 127]);
+		engine.sendFeedback('dev0:note:1:60', false);
+		expect(send).toHaveBeenCalledWith([0x90, 60, 0]);
+	});
+
+	it('envoie un CC pour un binding de type cc', () => {
+		const send = vi.fn();
+		const engine = new MidiEngine();
+		// @ts-expect-error — injection directe
+		engine.access = fakeAccess({
+			inputs: [{ id: 'dev0', name: 'FakePad' }],
+			outputs: [{ id: 'out0', name: 'FakePad', send }],
+		});
+		engine.sendFeedback('dev0:cc:1:7', true);
+		expect(send).toHaveBeenCalledWith([0xb0, 7, 127]);
+	});
+
+	it('ne fait rien pour un binding pitchbend', () => {
+		const send = vi.fn();
+		const engine = new MidiEngine();
+		// @ts-expect-error — injection directe
+		engine.access = fakeAccess({
+			inputs: [{ id: 'dev0', name: 'FakePad' }],
+			outputs: [{ id: 'out0', name: 'FakePad', send }],
+		});
+		engine.sendFeedback('dev0:pb:1', true);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it('ne fait rien si aucun output ne matche le nom du input', () => {
+		const send = vi.fn();
+		const engine = new MidiEngine();
+		// @ts-expect-error — injection directe
+		engine.access = fakeAccess({
+			inputs: [{ id: 'dev0', name: 'FakePad' }],
+			outputs: [{ id: 'out0', name: 'OtherDevice', send }],
+		});
+		engine.sendFeedback('dev0:note:1:60', true);
+		expect(send).not.toHaveBeenCalled();
+	});
+
+	it('ne fait rien et ne throw pas si non connecté', () => {
+		const engine = new MidiEngine();
+		expect(() => engine.sendFeedback('dev0:note:1:60', true)).not.toThrow();
+	});
+
+	it('ne fait rien pour une clé legacy sans deviceId', () => {
+		const send = vi.fn();
+		const engine = new MidiEngine();
+		// @ts-expect-error — injection directe
+		engine.access = fakeAccess({
+			inputs: [{ id: 'dev0', name: 'FakePad' }],
+			outputs: [{ id: 'out0', name: 'FakePad', send }],
+		});
+		engine.sendFeedback('note:1:60', true);
+		expect(send).not.toHaveBeenCalled();
 	});
 });

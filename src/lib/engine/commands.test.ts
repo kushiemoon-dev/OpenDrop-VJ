@@ -12,6 +12,7 @@ function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext & { cr
 		togglePlaylist: vi.fn(),
 		playlistNext: vi.fn(),
 		playlistPrev: vi.fn(),
+		advanceOverlayQueue: vi.fn(),
 		...overrides,
 		crossfader: state.crossfader,
 		activeDeck: state.activeDeck,
@@ -194,5 +195,21 @@ describe('createDefaultRegistry — time param sliders (1.4)', () => {
 				expect(reg.get(id)?.kind).toBe('range');
 			}
 		}
+	});
+});
+
+describe('overlay queue commands', () => {
+	const reg = createDefaultRegistry();
+
+	it('overlay-queue-next → advanceOverlayQueue(1)', () => {
+		const ctx = makeCtx();
+		reg.dispatch('overlay-queue-next', 1, ctx);
+		expect(ctx.advanceOverlayQueue).toHaveBeenCalledWith(1);
+	});
+
+	it('overlay-queue-prev → advanceOverlayQueue(-1)', () => {
+		const ctx = makeCtx();
+		reg.dispatch('overlay-queue-prev', 1, ctx);
+		expect(ctx.advanceOverlayQueue).toHaveBeenCalledWith(-1);
 	});
 });

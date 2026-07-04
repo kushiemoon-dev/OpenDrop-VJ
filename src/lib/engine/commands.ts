@@ -36,6 +36,8 @@ export type CommandId =
 	| 'time-dy-0' | 'time-dy-1' | 'time-dy-2' | 'time-dy-3'
 	| 'time-stretch-0' | 'time-stretch-1' | 'time-stretch-2' | 'time-stretch-3'
 	| 'time-wave-0' | 'time-wave-1' | 'time-wave-2' | 'time-wave-3'
+	// Overlay queue (auto-cycle)
+	| 'overlay-queue-next' | 'overlay-queue-prev'
 	;
 
 export interface CommandContext {
@@ -47,6 +49,7 @@ export interface CommandContext {
 	togglePlaylist(deck: 'A' | 'B'): void;
 	playlistNext(deck: 'A' | 'B'): void;
 	playlistPrev(deck: 'A' | 'B'): void;
+	advanceOverlayQueue(direction: 1 | -1): void;
 }
 
 export interface Command {
@@ -281,6 +284,11 @@ const DEFAULT_COMMANDS: Command[] = [
 	{ id: 'time-wave-1', label: 'Wave 1', kind: 'range', run() {} },
 	{ id: 'time-wave-2', label: 'Wave 2', kind: 'range', run() {} },
 	{ id: 'time-wave-3', label: 'Wave 3', kind: 'range', run() {} },
+	// Overlay queue (auto-cycle)
+	{ id: 'overlay-queue-next', label: 'Overlay Queue Next', kind: 'trigger',
+	  run(_, ctx) { ctx.advanceOverlayQueue(1); } },
+	{ id: 'overlay-queue-prev', label: 'Overlay Queue Prev', kind: 'trigger',
+	  run(_, ctx) { ctx.advanceOverlayQueue(-1); } },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

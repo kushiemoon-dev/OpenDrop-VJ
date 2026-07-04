@@ -65,6 +65,10 @@ describe('clampQueueIndex', () => {
 		expect(clampQueueIndex(1, 3)).toBe(1);
 	});
 
+	it('index négatif → 0', () => {
+		expect(clampQueueIndex(-1, 3)).toBe(0);
+	});
+
 	it('queueLength 0 → 0', () => {
 		expect(clampQueueIndex(0, 0)).toBe(0);
 	});

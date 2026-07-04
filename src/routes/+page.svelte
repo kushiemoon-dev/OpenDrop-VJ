@@ -1441,24 +1441,28 @@
 		if (id === 'strobe-toggle') return strobeOn;
 		if (id === 'playlist-toggle-a') return playlistAPlaying;
 		if (id === 'playlist-toggle-b') return playlistBPlaying;
+		if (id === 'playlist-toggle-active') return activeDeck === 'A' ? playlistAPlaying : playlistBPlaying;
 		return null;
 	}
 
-	// Lit strobeOn/playlistAPlaying/playlistBPlaying/midiMappings AVANT de vérifier `midi`
-	// (variable non-réactive) — sinon un $effect qui appelle cette fonction ne suivrait
+	// Lit strobeOn/playlistAPlaying/playlistBPlaying/activeDeck/midiMappings AVANT de vérifier
+	// `midi` (variable non-réactive) — sinon un $effect qui appelle cette fonction ne suivrait
 	// jamais ces $state s'il tournait une première fois avant la connexion MIDI (le même
 	// gotcha Svelte 5 documenté pour l'optional chaining dans un $effect).
 	function pushLedStates() {
 		const strobe = strobeOn;
 		const plA = playlistAPlaying;
 		const plB = playlistBPlaying;
+		const active = activeDeck;
 		const kStrobe = midiMappings['strobe-toggle'];
 		const kA = midiMappings['playlist-toggle-a'];
 		const kB = midiMappings['playlist-toggle-b'];
+		const kActive = midiMappings['playlist-toggle-active'];
 		if (!midi) return;
 		if (kStrobe) midi.sendFeedback(kStrobe, strobe);
 		if (kA) midi.sendFeedback(kA, plA);
 		if (kB) midi.sendFeedback(kB, plB);
+		if (kActive) midi.sendFeedback(kActive, active === 'A' ? plA : plB);
 	}
 
 	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {

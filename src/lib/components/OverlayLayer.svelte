@@ -5,9 +5,10 @@
 	interface Props {
 		overlays: Overlay[];
 		beat: boolean;
+		visibleIds: Set<string>;
 	}
 
-	let { overlays, beat }: Props = $props();
+	let { overlays, beat, visibleIds }: Props = $props();
 
 	// id → data URL, chargé depuis IndexedDB
 	let srcs = $state<Record<string, string>>({});
@@ -39,7 +40,7 @@
 	}
 </script>
 
-{#each overlays as ov (ov.id)}
+{#each overlays.filter((o) => visibleIds.has(o.id)) as ov (ov.id)}
 	{@const pulse = beat && ov.beatReactive}
 	<div class="overlay-anchor" style="left:{ov.x * 100}%; top:{ov.y * 100}%; {spinStyle(ov.spin)}">
 		<div class="overlay-drift" style={driftStyle(ov.driftX, ov.driftY)}>

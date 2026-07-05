@@ -5,6 +5,7 @@
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
+	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
@@ -1647,6 +1648,40 @@
 		};
 		reader.readAsText(file);
 		(e.target as HTMLInputElement).value = '';
+	}
+
+	// — Partage de set par URL (Track 2) ————————————————————
+	let shareSetName = $state('');
+	let shareCopyLabel = $state('Copier le lien');
+
+	function buildCurrentSharedSet(): SharedSet {
+		return {
+			version: 1,
+			name: shareSetName,
+			presetA, presetB,
+			deckBus,
+			crossfader, transitionTime,
+			colorParamsA, colorParamsB,
+			slotComposites,
+			timeParams,
+			snapshots,
+			snapshotRecallDuration,
+			timelineKeyframes,
+			overlays,
+			beatTriggerA, beatTriggerB,
+			beatSyncA, beatSyncB,
+			overlayQueueEnabled, overlayQueueTrigger,
+		};
+	}
+
+	async function copyShareLink() {
+		const set = buildCurrentSharedSet();
+		set.overlays = filterShareableOverlays(set.overlays);
+		const encoded = await encodeSharedSet(set);
+		const url = `${location.origin}${location.pathname}#share=${encoded}`;
+		await navigator.clipboard.writeText(url);
+		shareCopyLabel = 'Copié !';
+		setTimeout(() => { shareCopyLabel = 'Copier le lien'; }, 1500);
 	}
 
 	function openOutput() {

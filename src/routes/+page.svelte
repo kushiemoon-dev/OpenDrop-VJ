@@ -4,7 +4,7 @@
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
-	import { TimelineEngine, type TimelineKeyframe } from '$lib/engine/timeline.js';
+	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
@@ -277,7 +277,7 @@
 			timelinePlaying = false;
 			return;
 		}
-		if (timelineKeyframes.length < 2) return; // rien à interpoler, no-op silencieux
+		if (timelineLoopDuration(timelineKeyframes) <= 0) return; // rien à interpoler, no-op silencieux
 		timelinePlaying = true;
 	}
 	function addTimelineKeyframe() {
@@ -520,7 +520,7 @@
 		const kfs = timelineKeyframes;
 		const playing = timelinePlaying;
 		if (!playing) { timelineEngine.pause(); return; }
-		if (kfs.length < 2) { timelinePlaying = false; return; } // garde-fou, ne devrait pas arriver via toggleTimelinePlay
+		if (timelineLoopDuration(kfs) <= 0) { timelinePlaying = false; return; } // garde-fou (couvre aussi le cas dégénéré : tous les keyframes au même instant)
 		timelineEngine.play(kfs, snapshots, (values) => {
 			for (const key in values)
 				registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
@@ -2226,7 +2226,7 @@
 	<div class="controls-section">
 		<div class="pl-header">
 			<span class="label">Timeline</span>
-			<button class="btn-sm" class:active={timelinePlaying} disabled={timelineKeyframes.length < 2}
+			<button class="btn-sm" class:active={timelinePlaying} disabled={timelineLoopDuration(timelineKeyframes) <= 0}
 				onclick={toggleTimelinePlay} title={timelinePlaying ? 'Pause' : 'Play'}>
 				{timelinePlaying ? '⏸' : '▶'}
 			</button>

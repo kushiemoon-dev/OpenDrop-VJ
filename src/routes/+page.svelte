@@ -4,6 +4,7 @@
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
+	import { type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
@@ -265,6 +266,24 @@
 	}
 	function clearSnapshot(slot: number) {
 		snapshots[slot] = null;
+	}
+
+	// — Timeline (Track 2 — keyframe playback) ————————————————
+	let timelineKeyframes = $state<TimelineKeyframe[]>([]);
+	function addTimelineKeyframe() {
+		const firstFilledSlot = snapshots.findIndex((s) => s !== null);
+		const lastTime = timelineKeyframes.length > 0
+			? timelineKeyframes[timelineKeyframes.length - 1].timeSec
+			: -5;
+		timelineKeyframes = [...timelineKeyframes, { slot: firstFilledSlot >= 0 ? firstFilledSlot : 0, timeSec: lastTime + 5 }]
+			.sort((a, b) => a.timeSec - b.timeSec);
+	}
+	function removeTimelineKeyframe(index: number) {
+		timelineKeyframes = timelineKeyframes.filter((_, i) => i !== index);
+	}
+	function updateTimelineKeyframe(index: number, patch: Partial<TimelineKeyframe>) {
+		timelineKeyframes = timelineKeyframes.map((kf, i) => (i === index ? { ...kf, ...patch } : kf))
+			.sort((a, b) => a.timeSec - b.timeSec);
 	}
 
 	// — Performance decks ——————————————————————————————————
@@ -567,6 +586,7 @@
 		localStorage.setItem('od-snapshots', JSON.stringify(snapshots));
 		localStorage.setItem('od-snapshot-duration', String(snapshotRecallDuration));
 		localStorage.setItem('od-time-params', JSON.stringify(timeParams));
+		localStorage.setItem('od-timeline', JSON.stringify(timelineKeyframes));
 	});
 
 	// — Persistance localStorage vidéo ———————————————————
@@ -791,6 +811,17 @@
 						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
 					}
 				} catch { /* ignore corrupt od-time-params */ }
+			}
+			const savedTimeline = localStorage.getItem('od-timeline');
+			if (savedTimeline) {
+				try {
+					const parsed = JSON.parse(savedTimeline);
+					if (Array.isArray(parsed)) {
+						timelineKeyframes = parsed
+							.filter((kf): kf is TimelineKeyframe => kf && typeof kf.slot === 'number' && typeof kf.timeSec === 'number')
+							.sort((a, b) => a.timeSec - b.timeSec);
+					}
+				} catch { /* ignore corrupt od-timeline */ }
 			}
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {

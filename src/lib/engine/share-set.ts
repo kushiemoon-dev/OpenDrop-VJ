@@ -74,6 +74,11 @@ export async function decodeSharedSet(encoded: string): Promise<SharedSet | null
 		const decompressed = await new Response(stream).arrayBuffer();
 		const parsed = JSON.parse(new TextDecoder().decode(decompressed));
 		if (parsed?.version !== 1) return null;
+		// A hand-crafted (non-app-generated) link could carry a wrong-length array here, which
+		// would later crash the Time/Composite panels on a fixed-index read — reject up front.
+		if (!Array.isArray(parsed.timeParams) || parsed.timeParams.length !== 4) return null;
+		if (!Array.isArray(parsed.slotComposites) || parsed.slotComposites.length !== 4) return null;
+		if (!Array.isArray(parsed.snapshots) || parsed.snapshots.length !== 8) return null;
 		return parsed as SharedSet;
 	} catch {
 		return null;

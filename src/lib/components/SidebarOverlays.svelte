@@ -1,5 +1,8 @@
 <script lang="ts">
 	import type { Overlay } from '$lib/engine/overlay.js';
+	import type { BeatTriggerConfig } from '$lib/engine/beat-trigger.js';
+	import { clampBeatsPerChange, clampOffset } from '$lib/engine/beat-trigger.js';
+	import type { PlaylistMode } from '$lib/engine/playlist.js';
 
 	interface Props {
 		overlays: Overlay[];
@@ -7,9 +10,22 @@
 		onAddText: () => string;
 		onRemoveOverlay: (id: string) => void;
 		onUpdateOverlay: (id: string, patch: Partial<Overlay>) => void;
+		overlayQueueEnabled: boolean;
+		overlayQueueMode: PlaylistMode;
+		overlayQueueTrigger: BeatTriggerConfig;
+		onToggleOverlayQueue: () => void;
+		onOverlayQueueModeChange: (mode: PlaylistMode) => void;
+		onOverlayQueueTriggerChange: (patch: Partial<BeatTriggerConfig>) => void;
+		onOverlayQueueNext: () => void;
+		onOverlayQueuePrev: () => void;
 	}
 
-	let { overlays, onAddOverlays, onAddText, onRemoveOverlay, onUpdateOverlay }: Props = $props();
+	let {
+		overlays, onAddOverlays, onAddText, onRemoveOverlay, onUpdateOverlay,
+		overlayQueueEnabled, overlayQueueMode, overlayQueueTrigger,
+		onToggleOverlayQueue, onOverlayQueueModeChange, onOverlayQueueTriggerChange,
+		onOverlayQueueNext, onOverlayQueuePrev,
+	}: Props = $props();
 
 	let expandedOverlayId = $state<string | null>(null);
 
@@ -46,6 +62,7 @@
 						{ov.name}
 					</button>
 					<button class="btn-sm pl-btn" class:active={ov.beatReactive} onclick={() => onUpdateOverlay(ov.id, { beatReactive: !ov.beatReactive })} title="Beat reactive">♩</button>
+					<button class="btn-sm pl-btn" class:active={ov.inQueue} onclick={() => onUpdateOverlay(ov.id, { inQueue: !ov.inQueue })} title="Inclure dans la queue auto-cyclante">▤</button>
 					<button class="pl-remove" onclick={() => onRemoveOverlay(ov.id)} title="Supprimer">×</button>
 				</div>
 				{#if expandedOverlayId === ov.id}
@@ -106,6 +123,34 @@
 			</li>
 		{/each}
 	</ul>
+	<div class="beat-trigger-row">
+		<button class="btn-sm pl-btn" class:active={overlayQueueEnabled} onclick={onToggleOverlayQueue} title="Play/pause la queue overlay">{overlayQueueEnabled ? '⏸' : '▶'}</button>
+		<button class="btn-sm" onclick={onOverlayQueuePrev} title="Overlay précédent">◀</button>
+		<button class="btn-sm" onclick={onOverlayQueueNext} title="Overlay suivant">▶</button>
+		<select class="beats-select" value={overlayQueueMode} onchange={(e) => onOverlayQueueModeChange((e.target as HTMLSelectElement).value as PlaylistMode)}>
+			<option value="sequential">Séquentiel</option>
+			<option value="shuffle">Aléatoire</option>
+		</select>
+	</div>
+	<div class="beat-trigger-row">
+		<button class="btn-sm" onclick={() => onOverlayQueueTriggerChange({ beatsPerChange: clampBeatsPerChange(overlayQueueTrigger.beatsPerChange / 2) })}>÷2</button>
+		<input class="bt-num" type="number" min="1" max="64"
+			value={overlayQueueTrigger.beatsPerChange}
+			onchange={(e) => onOverlayQueueTriggerChange({ beatsPerChange: clampBeatsPerChange(+(e.target as HTMLInputElement).value) })} />
+		<button class="btn-sm" onclick={() => onOverlayQueueTriggerChange({ beatsPerChange: clampBeatsPerChange(overlayQueueTrigger.beatsPerChange * 2) })}>×2</button>
+		<span class="bt-sep">off</span>
+		<input class="bt-num" type="number" min="0" max={overlayQueueTrigger.beatsPerChange - 1}
+			value={overlayQueueTrigger.offset}
+			onchange={(e) => onOverlayQueueTriggerChange({ offset: clampOffset(+(e.target as HTMLInputElement).value, overlayQueueTrigger.beatsPerChange) })} />
+		<button class="btn-sm" class:active={overlayQueueTrigger.mode === 'volume-peak'}
+			onclick={() => onOverlayQueueTriggerChange({ mode: overlayQueueTrigger.mode === 'beat' ? 'volume-peak' : 'beat' })}
+			title="Toggle Beat / Volume trigger">{overlayQueueTrigger.mode === 'beat' ? '♩' : '🔊'}</button>
+		{#if overlayQueueTrigger.mode === 'volume-peak'}
+			<input class="bt-range" type="range" min="0" max="1" step="0.01"
+				value={overlayQueueTrigger.sensitivity}
+				oninput={(e) => onOverlayQueueTriggerChange({ sensitivity: +(e.target as HTMLInputElement).value })} />
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -256,4 +301,30 @@
 		cursor: pointer;
 	}
 	.ov-select:focus { outline: none; border-color: var(--violet); }
+
+	.beats-select {
+		background: var(--bg-base); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: 5px;
+		padding: 0.2rem 0.3rem; font-size: 10px; cursor: pointer;
+		-webkit-appearance: none; appearance: none;
+		flex: 1; min-width: 0;
+	}
+	.beats-select:focus { outline: none; border-color: var(--violet); }
+
+	.beat-trigger-row {
+		display: flex; align-items: center; gap: 0.3rem;
+		padding: 0.25rem 0.5rem;
+		background: #050514; border: 1px solid #101034;
+		border-radius: 6px;
+	}
+
+	.bt-sep { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+
+	.bt-num {
+		background: var(--bg-base); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: 5px;
+		padding: 0.15rem 0.25rem; font-size: 11px; width: 36px;
+	}
+
+	.bt-range { flex: 1; min-width: 40px; accent-color: var(--violet); cursor: pointer; }
 </style>

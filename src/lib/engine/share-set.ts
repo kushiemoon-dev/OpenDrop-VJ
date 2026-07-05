@@ -57,11 +57,12 @@ function base64UrlToBytes(b64url: string): Uint8Array<ArrayBuffer> {
 
 export async function encodeSharedSet(set: SharedSet): Promise<string> {
 	const input = new TextEncoder().encode(JSON.stringify(set));
-	const cs = new CompressionStream('gzip');
-	const writer = cs.writable.getWriter();
-	await writer.write(input);
-	await writer.close();
-	const compressed = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+	// pipeThrough (not a manual writer.write()/close() + separate read) — the manual sequence
+	// deadlocks under real browser backpressure: write()/close() wait for the transform's
+	// internal queue to drain, but nothing reads cs.readable until after they've already
+	// resolved. pipeThrough pumps both sides concurrently, which is exactly what avoids that.
+	const stream = new Blob([input]).stream().pipeThrough(new CompressionStream('gzip'));
+	const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
 	return bytesToBase64Url(compressed);
 }
 
@@ -69,11 +70,8 @@ export async function decodeSharedSet(encoded: string): Promise<SharedSet | null
 	try {
 		if (!encoded) return null;
 		const bytes = base64UrlToBytes(encoded);
-		const ds = new DecompressionStream('gzip');
-		const writer = ds.writable.getWriter();
-		await writer.write(bytes);
-		await writer.close();
-		const decompressed = await new Response(ds.readable).arrayBuffer();
+		const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+		const decompressed = await new Response(stream).arrayBuffer();
 		const parsed = JSON.parse(new TextDecoder().decode(decompressed));
 		if (parsed?.version !== 1) return null;
 		return parsed as SharedSet;

@@ -40,6 +40,7 @@
     compositeSection: Snippet
     snapshotSection: Snippet
     timelineSection: Snippet
+    shareSection: Snippet
     timeSection: Snippet
     electronSection: Snippet
   }
@@ -51,7 +52,7 @@
     onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,
     qualiteSection, outputSection, midiSection, clavierSection,
-    strobeSection, lfoSection, colorSection, compositeSection, snapshotSection, timelineSection, timeSection, electronSection,
+    strobeSection, lfoSection, colorSection, compositeSection, snapshotSection, timelineSection, shareSection, timeSection, electronSection,
   }: Props = $props()
 
   // Le deck actif détermine le "deck cible" du PresetBrowser en mode mixer.
@@ -135,6 +136,7 @@
     {@render compositeSection()}
     {@render snapshotSection()}
     {@render timelineSection()}
+    {@render shareSection()}
     {@render timeSection()}
     {@render strobeSection()}
     {@render lfoSection()}

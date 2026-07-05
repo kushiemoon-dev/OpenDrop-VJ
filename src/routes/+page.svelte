@@ -4,7 +4,7 @@
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
 	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
-	import { type TimelineKeyframe } from '$lib/engine/timeline.js';
+	import { TimelineEngine, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
@@ -270,6 +270,16 @@
 
 	// — Timeline (Track 2 — keyframe playback) ————————————————
 	let timelineKeyframes = $state<TimelineKeyframe[]>([]);
+	let timelinePlaying = $state(false);
+	const timelineEngine = new TimelineEngine();
+	function toggleTimelinePlay() {
+		if (timelinePlaying) {
+			timelinePlaying = false;
+			return;
+		}
+		if (timelineKeyframes.length < 2) return; // rien à interpoler, no-op silencieux
+		timelinePlaying = true;
+	}
 	function addTimelineKeyframe() {
 		const firstFilledSlot = snapshots.findIndex((s) => s !== null);
 		const lastTime = timelineKeyframes.length > 0
@@ -478,6 +488,12 @@
 	function recallSnapshot(slot: number) {
 		registry.dispatch(`recall-snapshot-${slot}` as CommandId, 1, commandCtx);
 	}
+	registry.register({
+		id: 'timeline-toggle',
+		label: 'Timeline Play/Pause',
+		kind: 'trigger',
+		run: toggleTimelinePlay,
+	});
 
 	// — Sync crossfader to output window ——————————————————
 	// Read crossfader unconditionally before sync?. so Svelte 5 tracks it as a
@@ -493,6 +509,22 @@
 	$effect(() => {
 		const idx = overlayQueueIndex;
 		sync?.sendOverlayQueueIndex(idx);
+	});
+
+	// — Pilote TimelineEngine.play()/.pause() ————————————————
+	// Lire timelineKeyframes et timelinePlaying inconditionnellement avant toute logique : les
+	// deux sont des $state, donc chaque changement (édition d'un keyframe en pleine lecture,
+	// toggle play/pause) redéclenche cet effect — jamais de boucle RAF orpheline sur un ancien
+	// tableau après un edit/remove pendant la lecture (voir note de design ci-dessus).
+	$effect(() => {
+		const kfs = timelineKeyframes;
+		const playing = timelinePlaying;
+		if (!playing) { timelineEngine.pause(); return; }
+		if (kfs.length < 2) { timelinePlaying = false; return; } // garde-fou, ne devrait pas arriver via toggleTimelinePlay
+		timelineEngine.play(kfs, snapshots, (values) => {
+			for (const key in values)
+				registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
+		});
 	});
 
 	// — Re-fit canvases au switch de layout —————————————————
@@ -908,6 +940,7 @@
 		manager.destroyAll();
 		compositor?.destroy();
 		snapshotEngine.cancel();
+		timelineEngine.destroy();
 		audio?.destroy(); // also calls stopPcmCapture()
 		sync?.destroy();
 		midi?.destroy();

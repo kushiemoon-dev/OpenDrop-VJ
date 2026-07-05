@@ -63,4 +63,22 @@ describe('encodeSharedSet / decodeSharedSet round-trip', () => {
 		const encoded = await encodeSharedSet(set);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});
+
+	it('timeParams de mauvaise longueur (lien forgé à la main) -> null', async () => {
+		const set = { ...fixtureSet(), timeParams: [defaultTimeParams()] };
+		const encoded = await encodeSharedSet(set as unknown as SharedSet);
+		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
+	});
+
+	it('slotComposites de mauvaise longueur (lien forgé à la main) -> null', async () => {
+		const set = { ...fixtureSet(), slotComposites: [DEFAULT_SLOT_COMPOSITE, DEFAULT_SLOT_COMPOSITE] };
+		const encoded = await encodeSharedSet(set as unknown as SharedSet);
+		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
+	});
+
+	it('snapshots de mauvaise longueur (lien forgé à la main) -> null', async () => {
+		const set = { ...fixtureSet(), snapshots: [null, null] };
+		const encoded = await encodeSharedSet(set as unknown as SharedSet);
+		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
+	});
 });

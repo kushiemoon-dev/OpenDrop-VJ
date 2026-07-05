@@ -2378,6 +2378,14 @@
 			onAddText={addTextOverlay}
 			onRemoveOverlay={(id) => removeOverlay(id)}
 			onUpdateOverlay={(id, patch) => updateOverlay(id, patch)}
+			{overlayQueueEnabled}
+			{overlayQueueMode}
+			{overlayQueueTrigger}
+			onToggleOverlayQueue={toggleOverlayQueue}
+			onOverlayQueueModeChange={(mode) => { overlayQueueMode = mode; }}
+			onOverlayQueueTriggerChange={(patch) => updateOverlayQueueTrigger(patch)}
+			onOverlayQueueNext={() => advanceOverlayQueue(1)}
+			onOverlayQueuePrev={() => advanceOverlayQueue(-1)}
 		/>
 
 		<!-- Video loops -->

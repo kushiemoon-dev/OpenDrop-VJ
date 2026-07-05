@@ -123,6 +123,15 @@ describe('createDefaultRegistry — recall snapshots (1.3)', () => {
 	});
 });
 
+describe('createDefaultRegistry — timeline toggle', () => {
+	const reg = createDefaultRegistry();
+
+	it('contient timeline-toggle en trigger', () => {
+		expect(reg.get('timeline-toggle')).toBeDefined();
+		expect(reg.get('timeline-toggle')?.kind).toBe('trigger');
+	});
+});
+
 describe('createDefaultRegistry — active-deck shortcuts', () => {
 	const reg = createDefaultRegistry();
 

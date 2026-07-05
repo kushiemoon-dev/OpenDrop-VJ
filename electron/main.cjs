@@ -6,6 +6,12 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const dgram = require('dgram');
 
+// Guard against a dead stdout/stderr pipe (e.g. dev launcher tearing down the terminal)
+// crashing the whole main process on a routine console write. Not a catch-all — anything
+// other than EPIPE is rethrown so real errors still surface.
+process.stdout.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+
 // Allow AudioContext to auto-start in renderer windows (including the output window
 // which opens programmatically via window.open, with no user gesture of its own).
 // Must be set before app is ready.

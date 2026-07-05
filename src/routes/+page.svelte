@@ -314,6 +314,7 @@
 	let overlayQueueMode = $state<PlaylistMode>('sequential');
 	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
 	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
+	const nonShareableOverlayCount = $derived(overlays.filter((o) => o.kind !== 'text').length);
 
 	function toggleOverlayQueue() {
 		overlayQueueEnabled = !overlayQueueEnabled;
@@ -2325,6 +2326,21 @@
 		<button class="btn-sm" onclick={addTimelineKeyframe}>+ Point</button>
 	</div>
 {/snippet}
+{#snippet shareSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Partage</span>
+		</div>
+		<input class="snap-name" type="text" bind:value={shareSetName} placeholder="Mon set"
+			style="font-size:11px;margin-bottom:4px;width:100%" />
+		<button class="btn-sm" onclick={copyShareLink}>{shareCopyLabel}</button>
+		{#if nonShareableOverlayCount > 0}
+			<span style="font-size:9px;color:#aaa;margin-top:4px;display:block">
+				{nonShareableOverlayCount} overlay(s) media non partagé(s) (fichier local)
+			</span>
+		{/if}
+	</div>
+{/snippet}
 {#snippet timeSection()}
 	<div class="controls-section">
 		<div class="pl-header">
@@ -2397,6 +2413,18 @@
 	</div>
 	{/if}
 {/snippet}
+{#if pendingSharedSet}
+	<div class="overlay share-confirm-overlay">
+		<p class="tagline">Charger le set partagé « {pendingSharedSet.name || 'Sans nom'} » ?</p>
+		<p style="font-size:11px;color:#aaa;max-width:320px;text-align:center">
+			Remplace ton état visuel actuel (presets, couleur, snapshots, timeline...).
+		</p>
+		<div style="display:flex;gap:8px">
+			<button class="btn-primary" onclick={applyPendingSharedSet}>Charger</button>
+			<button class="btn-secondary" onclick={cancelPendingSharedSet}>Annuler</button>
+		</div>
+	</div>
+{/if}
 <div
 	class="visualizer-wrap"
 	class:drag-over={overlayDragOver}
@@ -2657,6 +2685,7 @@
     {compositeSection}
     {snapshotSection}
     {timelineSection}
+    {shareSection}
     {timeSection}
     {electronSection}
   />
@@ -2709,6 +2738,9 @@
 	}
 
 	.overlay.error { background: rgba(20, 0, 10, 0.9); color: #ff6090; }
+	/* Rendered outside .visualizer-wrap (see template) so it stays visible even when the wrap
+	   is visibility:hidden in mixer layout — fixed to the viewport, not the wrap. */
+	.share-confirm-overlay { position: fixed; z-index: 300; }
 
 	.logo {
 		font-size: 3rem; font-weight: 800; letter-spacing: 0.15em;

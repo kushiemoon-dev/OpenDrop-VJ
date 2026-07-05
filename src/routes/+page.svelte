@@ -476,6 +476,19 @@
 		sync?.sendOverlayQueueIndex(idx);
 	});
 
+	// — Re-fit canvases au switch de layout —————————————————
+	// Le visualizer-wrap reste monté en permanence (jamais détruit, voir .mixer-hidden) mais
+	// change de box (flex:1 en stage vs position:absolute;inset:0 en mixer) — sans ce re-fit,
+	// revenir en stage laisse le canvas composite à l'ancienne résolution jusqu'au prochain
+	// resize fenêtre. Lire layout/status inconditionnellement avant le early-return interne à
+	// onResize (gotcha Svelte 5 : un $state lu seulement après un guard non-reactif casse le
+	// tracking si le 1er run tombe pendant que le guard est vrai).
+	$effect(() => {
+		const l = layout;
+		const s = status;
+		if (s === 'running') requestAnimationFrame(onResize);
+	});
+
 	// — VU meter polling + FPS counter + video speed warp —
 	$effect(() => {
 		if (status !== 'running' || !audio) return;
@@ -2217,47 +2230,48 @@
 	</div>
 	{/if}
 {/snippet}
+<div
+	class="visualizer-wrap"
+	class:drag-over={overlayDragOver}
+	class:mixer-hidden={layout !== 'stage'}
+	ondragover={onVisualizerDragOver}
+	ondragleave={() => overlayDragOver = false}
+	ondrop={onVisualizerDrop}
+	role="region"
+	aria-label="Visualizer"
+>
+	<!-- Video loop — premier enfant = derrière les decks -->
+	<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
+	<!-- Deck canvases — 4 slots, texture sources pour le Compositor (cachés) -->
+	{#each [0, 1, 2, 3] as i}
+		<canvas bind:this={canvases[i]} class="deck-src"></canvas>
+	{/each}
+	<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
+	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
+	<!-- Overlay sprites -->
+	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
+	<!-- Strobe flash — top z-index, pointer-events none -->
+	{#if strobeOn && strobeFlash}
+		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
+	{/if}
+
+	{#if status === 'idle'}
+		<div class="overlay">
+			<h1 class="logo">OpenDrop</h1>
+			<p class="tagline">Milkdrop visualizer — web-first</p>
+			<button class="btn-primary" onclick={startVisualizer}>▶ Start</button>
+		</div>
+	{/if}
+
+	{#if status === 'error'}
+		<div class="overlay error">
+			<p>⚠ {errorMsg}</p>
+			<button class="btn-secondary" onclick={() => { status = 'idle'; errorMsg = ''; }}>Retry</button>
+		</div>
+	{/if}
+</div>
+
 {#if layout === 'stage'}
-	<div
-		class="visualizer-wrap"
-		class:drag-over={overlayDragOver}
-		ondragover={onVisualizerDragOver}
-		ondragleave={() => overlayDragOver = false}
-		ondrop={onVisualizerDrop}
-		role="region"
-		aria-label="Visualizer"
-	>
-		<!-- Video loop — premier enfant = derrière les decks -->
-		<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
-		<!-- Deck canvases — 4 slots, texture sources pour le Compositor (cachés) -->
-		{#each [0, 1, 2, 3] as i}
-			<canvas bind:this={canvases[i]} class="deck-src"></canvas>
-		{/each}
-		<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
-		<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
-		<!-- Overlay sprites -->
-		<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
-		<!-- Strobe flash — top z-index, pointer-events none -->
-		{#if strobeOn && strobeFlash}
-			<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
-		{/if}
-
-		{#if status === 'idle'}
-			<div class="overlay">
-				<h1 class="logo">OpenDrop</h1>
-				<p class="tagline">Milkdrop visualizer — web-first</p>
-				<button class="btn-primary" onclick={startVisualizer}>▶ Start</button>
-			</div>
-		{/if}
-
-		{#if status === 'error'}
-			<div class="overlay error">
-				<p>⚠ {errorMsg}</p>
-				<button class="btn-secondary" onclick={() => { status = 'idle'; errorMsg = ''; }}>Retry</button>
-			</div>
-		{/if}
-	</div>
-
 	<aside class="controls">
 		<!-- Layout toggle -->
 		<div class="controls-section">
@@ -2506,6 +2520,10 @@
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
+	/* En mixer, le wrap reste monté (jamais détruit — les canvas gardent leur lien avec le
+	   moteur) mais sort du flux flex et se cache : visibility, pas display:none, pour garder
+	   clientWidth/Height non nuls (rAF + captureStream restent vivants). */
+	.visualizer-wrap.mixer-hidden { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
 	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }
 
 	.deck-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

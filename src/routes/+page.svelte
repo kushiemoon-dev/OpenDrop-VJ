@@ -2222,6 +2222,36 @@
 		{/each}
 	</div>
 {/snippet}
+{#snippet timelineSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Timeline</span>
+			<button class="btn-sm" class:active={timelinePlaying} disabled={timelineKeyframes.length < 2}
+				onclick={toggleTimelinePlay} title={timelinePlaying ? 'Pause' : 'Play'}>
+				{timelinePlaying ? '⏸' : '▶'}
+			</button>
+		</div>
+		{#each timelineKeyframes as kf, i}
+			<div class="midi-row" style="gap:4px;align-items:center">
+				<select class="blendmode-select" value={kf.slot}
+					onchange={(e) => updateTimelineKeyframe(i, { slot: +e.currentTarget.value })}
+					style="font-size:11px">
+					{#each [0, 1, 2, 3, 4, 5, 6, 7] as slot}
+						<option value={slot} disabled={!snapshots[slot]}>
+							{snapshots[slot]?.name ?? `Slot ${slot} (vide)`}
+						</option>
+					{/each}
+				</select>
+				<input type="number" min="0" step="0.5" value={kf.timeSec}
+					oninput={(e) => updateTimelineKeyframe(i, { timeSec: +e.currentTarget.value })}
+					style="width:56px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
+				<span style="font-size:9px;color:#666">s</span>
+				<button class="pl-remove" onclick={() => removeTimelineKeyframe(i)} title="Retirer">×</button>
+			</div>
+		{/each}
+		<button class="btn-sm" onclick={addTimelineKeyframe}>+ Point</button>
+	</div>
+{/snippet}
 {#snippet timeSection()}
 	<div class="controls-section">
 		<div class="pl-header">
@@ -2553,6 +2583,7 @@
     {colorSection}
     {compositeSection}
     {snapshotSection}
+    {timelineSection}
     {timeSection}
     {electronSection}
   />

@@ -760,6 +760,12 @@
 
 	// — Lifecycle ——————————————————————————————————————————
 	onMount(async () => {
+		if (location.hash.startsWith('#share=')) {
+			const encoded = location.hash.slice('#share='.length);
+			history.replaceState(null, '', location.pathname + location.search);
+			const decoded = await decodeSharedSet(encoded);
+			if (decoded) pendingSharedSet = decoded;
+		}
 		if (isElectron) {
 			platform = await window.electronAPI!.getPlatform();
 		}
@@ -1684,6 +1690,38 @@
 		setTimeout(() => { shareCopyLabel = 'Copier le lien'; }, 1500);
 	}
 
+	let pendingSharedSet = $state<SharedSet | null>(null);
+
+	async function applyPendingSharedSet() {
+		if (!pendingSharedSet) return;
+		const s = pendingSharedSet;
+		deckBus = s.deckBus;
+		crossfader = s.crossfader; transitionTime = s.transitionTime;
+		colorParamsA = s.colorParamsA; colorParamsB = s.colorParamsB;
+		slotComposites = s.slotComposites;
+		timeParams = s.timeParams as typeof timeParams;
+		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
+		snapshots = s.snapshots; snapshotRecallDuration = s.snapshotRecallDuration;
+		timelineKeyframes = s.timelineKeyframes;
+		overlays = s.overlays;
+		beatTriggerA = s.beatTriggerA; beatTriggerB = s.beatTriggerB;
+		beatSyncA = s.beatSyncA; beatSyncB = s.beatSyncB;
+		overlayQueueEnabled = s.overlayQueueEnabled; overlayQueueTrigger = s.overlayQueueTrigger;
+
+		if (status === 'running') {
+			await selectPresetForDeck('A', s.presetA);
+			await selectPresetForDeck('B', s.presetB);
+		} else {
+			presetA = s.presetA;
+			presetB = s.presetB;
+		}
+		pendingSharedSet = null;
+	}
+
+	function cancelPendingSharedSet() {
+		pendingSharedSet = null;
+	}
+
 	function openOutput() {
 		outputWinRef = window.open('/output', 'opendrop-output', 'width=1280,height=720');
 		outputOpen = true;
@@ -2384,7 +2422,7 @@
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
 	{/if}
 
-	{#if status === 'idle'}
+	{#if status === 'idle' && !pendingSharedSet}
 		<div class="overlay">
 			<h1 class="logo">OpenDrop</h1>
 			<p class="tagline">Milkdrop visualizer — web-first</p>

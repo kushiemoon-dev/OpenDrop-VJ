@@ -38,6 +38,8 @@ export type CommandId =
 	| 'time-wave-0' | 'time-wave-1' | 'time-wave-2' | 'time-wave-3'
 	// Overlay queue (auto-cycle)
 	| 'overlay-queue-next' | 'overlay-queue-prev'
+	// Timeline (Track 2 — keyframe playback)
+	| 'timeline-toggle'
 	;
 
 export interface CommandContext {
@@ -289,6 +291,8 @@ const DEFAULT_COMMANDS: Command[] = [
 	  run(_, ctx) { ctx.advanceOverlayQueue(1); } },
 	{ id: 'overlay-queue-prev', label: 'Overlay Queue Prev', kind: 'trigger',
 	  run(_, ctx) { ctx.advanceOverlayQueue(-1); } },
+	// Timeline stub — wired in +page.svelte (toggles TimelineEngine play/pause)
+	{ id: 'timeline-toggle', label: 'Timeline Play/Pause', kind: 'trigger', run() {} },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

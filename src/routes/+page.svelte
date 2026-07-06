@@ -714,6 +714,13 @@
 		for (let i = 0; i < 4; i++) sync.sendTime(i, params[i]);
 	});
 
+	// — Sync Q-vars vers output, par slot —
+	$effect(() => {
+		const params = qVarParams;
+		if (!sync) return;
+		for (let i = 0; i < 4; i++) sync.sendQVars(i, params[i]);
+	});
+
 	// Pousse opacité + config de compositing vers le Compositor local (Stage).
 	$effect(() => {
 		const ops = opacities;
@@ -1083,6 +1090,7 @@
 				sync?.sendQuality(quality);
 				for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
 				for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
+				for (let i = 0; i < 4; i++) sync?.sendQVars(i, qVarParams[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlays);
 				sync?.sendOverlayQueueIndex(overlayQueueIndex);

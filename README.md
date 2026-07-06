@@ -1,47 +1,88 @@
+<div align="center">
+
+<img src="docs/readme-assets/stage.png" alt="OpenDrop VJ" width="760">
+
 # OpenDrop VJ
 
-### Real-time 2-deck Milkdrop visualizer — web-first, Electron-ready
+### A 4-deck Milkdrop VJ instrument — GPU compositor, MIDI · OSC · Ableton Link, NDI · Spout · virtual-cam output. Web-first, Electron-powered.
 
 [![Live Demo](https://img.shields.io/badge/demo-opendrop.kushie.dev-ff2d78?style=flat-square)](https://opendrop.kushie.dev)
 [![Release](https://img.shields.io/github/v/release/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
 [![License](https://img.shields.io/github/license/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](LICENSE)
 
-Open-source VJ tool powered by [Butterchurn](https://github.com/jberg/butterchurn) (WebGL Milkdrop).
-Two independent decks, live crossfader, MIDI control, video loops, and a dedicated output window for
-second monitors or OBS — no C++ or native toolchain required.
+![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-42-47848F?style=flat-square&logo=electron&logoColor=white)
+
+![Web](https://img.shields.io/badge/Web-any_browser-ff2d78?style=flat-square)
+![Linux](https://img.shields.io/badge/Linux-AppImage-FCC624?style=flat-square&logo=linux&logoColor=black)
+![Windows](https://img.shields.io/badge/Windows-installer-0078D6?style=flat-square&logo=windows&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-dmg-000000?style=flat-square&logo=apple&logoColor=white)
+
+</div>
+
+---
+
+## Overview
+
+**OpenDrop VJ** is a live visual instrument built on [Butterchurn](https://github.com/jberg/butterchurn) (a WebGL port of the Milkdrop engine). Four independent decks — each assignable to bus A, B, or off — mix through a single live crossfader, and a GPU compositor layers, blends, and chroma-keys them on top of each other in real time. Started as a 2-deck web toy, it has grown into a full VJ rig: 16,375 presets, snapshot/timeline automation, per-deck parameter editing, MIDI/OSC/Ableton Link control surfaces, and professional outputs (NDI, Spout, a Linux virtual webcam). It runs in any browser with no install, or as an Electron desktop app that unlocks the native I/O.
 
 ---
 
 ## Features
 
-- **2 decks A/B** — independent Butterchurn (Milkdrop WebGL) instances
-- **Live crossfader** — real-time opacity blend A↔B; output window follows the fader continuously
-- **Playlists** — per-deck auto-cycle (sequential / shuffle), 2–120 s interval, prev / next
-- **Beat-sync / BPM** — bass-energy beat detector drives preset transitions on the beat
-- **MIDI mapping** — CC/note → crossfader, playlist controls *(Chromium / Electron only)*
-- **Preset browser** — search, favorites ★, 1 754 built-in presets (lazy-loaded)
-- **Video loops** — overlay MP4/WebM clips with opacity, beat-reactive cut/flash/hue/warp
-- **Overlays** — composited SVG/text layers synced to the output
-- **Output window** — detached fullscreen canvas for a second monitor or OBS Browser Source;
-  crossfader, presets, overlays, and video loops sync live from the main window
-- **Mixer layout** — grid preset browser alongside the decks for fast live switching
-- **Audio sources** — mic, device picker, audio file, system audio (all platforms)
-- **NDI output** *(Electron, optional)* — requires NDI SDK + grandiose native module
-- **Export / import** playlists as JSON
-- **Keyboard shortcuts** — ← → nudge crossfader, Tab switches active deck
+**Mixing & decks**
+- **4 independent Butterchurn decks**, each routed to bus A, B, or off, mixed through one live A↔B crossfader
+- **Per-deck playlists** — auto-cycle sequential/shuffle, 2–120 s interval, prev/next
+- **Beat / volume-peak trigger** per deck — auto-advance the playlist on the beat or on a volume peak
+- **Q-var live editing** — override a preset's own internal q1–q32 variables per deck in real time (NestDrop-style)
+- **Time param sliders** — per-deck speed/zoom/rotation/warp engine multipliers layered on top of any preset
+
+**GPU compositor & overlays**
+- **4 blend modes** (normal / additive / screen / multiply) + per-layer **LumaKey** and **ColorKey** chroma keying, all GPU-side
+- **Text and media overlays** — image/video sprites or text layers, with transform, blend mode, beat-reactive scaling, spin, and drift
+- **Overlay auto-cycling queue** — sequential or shuffled rotation through a set of overlays
+
+**Automation & performance state**
+- **Snapshots / macros** — 8 slots capturing and recalling a full "look" (color + compositing) with smooth interpolation
+- **Timeline / keyframes** — sequence the 8 snapshot slots on a looping wall-clock timeline
+- **LFO×4** (sine / saw / square / sample-and-hold), routable to any control, plus a strobe effect
+- **Share a set via URL** — encode the current visual state into a link; the recipient gets a one-click import
+
+**Presets & video**
+- **16,375 built-in presets** — search, 5-color favorites, cached lazy-rendered thumbnails
+- **Presets cloud** — a private per-device library for your own custom presets, backed by a small Cloudflare Worker + R2 (no account, just a portable token)
+- **Video loops** — beat-reactive flash/hue/scale, with an optional CDN-backed library
+
+**Control surfaces**
+- **MIDI** — CC/note/pitchbend mapping (14-bit CC support) with **bidirectional LED feedback** to your controller
+- **OSC** input over UDP *(Electron)*
+- **Ableton Link** tempo sync *(Electron)*
+- **Remote control from a phone or tablet** over LAN, token-authenticated *(Electron)*
+- Fully **customizable keymap**
+
+**Output & capture**
+- **Output window** — detached fullscreen canvas for a second monitor or an OBS Browser Source
+- **NDI** output *(Electron, requires the NDI SDK)*
+- **Spout** output *(Electron, Windows only)*
+- **Virtual webcam** via v4l2loopback *(Electron, Linux only)*
+- **Multi-display targeting** and adjustable quality tiers (with an "invisible mode" perf mode for when the output isn't on screen)
 
 ---
 
-## Stack
+## Screenshots
 
-| Layer | Tech |
-|-------|------|
-| UI | SvelteKit 2 + Svelte 5 runes, TypeScript |
-| Visualizer | [Butterchurn](https://github.com/jberg/butterchurn) (Milkdrop WebGL) |
-| Audio | Web Audio API — `AudioContext`, `AnalyserNode`, AudioWorklets |
-| MIDI | Web MIDI API |
-| Build | Vite + `@sveltejs/adapter-static` (SPA, `ssr: false`) |
-| Desktop | Electron 42 (optional — PCM audio streaming, native window, NDI) |
+<div align="center">
+
+| Stage layout | Mixer layout |
+|---------------|--------------|
+| ![Stage](docs/readme-assets/stage.png) | ![Mixer](docs/readme-assets/mixer.png) |
+
+| GPU compositor & keying |
+|--------------------------|
+| ![Compositor](docs/readme-assets/compositor.png) |
+
+</div>
 
 ---
 
@@ -64,12 +105,20 @@ Click **▶ Start** to initialize the audio context, then pick a preset in the b
 
 ## Desktop App (Electron)
 
-Download the latest AppImage (Linux) from the [Releases](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases) page,
-or build from source:
+Download the latest build for your platform from the [Releases](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases) page
+— Windows (`.exe`), macOS (`.dmg`, Intel and Apple Silicon), and Linux (`.AppImage`) — or build from source:
 
 ```bash
 pnpm electron:dev     # Vite dev + Electron in parallel
 pnpm electron:build   # Build SPA → package with electron-builder
+```
+
+Native modules (NDI, Spout, Ableton Link) need a one-time rebuild against Electron's Node ABI:
+
+```bash
+pnpm electron:rebuild        # grandiose (NDI)
+pnpm electron:rebuild:spout  # Windows only
+pnpm electron:rebuild:link   # Ableton Link
 ```
 
 **Linux / Wayland (Hyprland etc.)** — pass flags when launching the packaged app:
@@ -95,20 +144,32 @@ instead of using a raw `.monitor` device.
 
 ---
 
-## Output Window & OBS
+## Output & Streaming
 
 ### Second monitor (Electron)
-Click **Open Output** in the app. The fullscreen canvas follows the crossfader, presets, overlays,
-and video loops in real time.
+Click **Open Output** in the app. The fullscreen canvas follows the crossfader, presets, compositing,
+overlays, and video loops in real time.
 
 > **Known limitation:** on Linux (Electron), audio reactivity in the output window may require
-> re-selecting the audio device once after the first open. This is a known issue — re-pick the device
-> once and it stays reactive for the session.
+> re-selecting the audio device once after the first open. Re-pick the device once and it stays
+> reactive for the session.
 
 ### OBS Browser Source (web)
 1. Add a **Browser Source** in OBS
 2. URL: `http://localhost:1420/output` (dev) or the packaged app URL
 3. Width / Height: match your stream resolution
+
+### Pro outputs (Electron only)
+- **NDI** — requires the NDI SDK installed, plus the `grandiose` native module
+- **Spout** — Windows only, vendored SpoutDX
+- **Virtual webcam** — Linux only, via v4l2loopback + ffmpeg (`scripts/setup-v4l2.sh`)
+
+---
+
+## Remote Control
+
+Enable the remote server from the Electron app to control OpenDrop from a phone or tablet on the
+same network — a token-authenticated WebSocket server serves a touch UI at `/remote`.
 
 ---
 
@@ -119,8 +180,23 @@ pnpm check          # svelte-check (TypeScript + Svelte)
 pnpm test           # Vitest unit tests
 pnpm test:coverage  # Coverage report
 pnpm test:e2e       # Playwright E2E (requires pnpm dev running)
-pnpm build          # Production SPA → build/
+pnpm build          # Production SPA → build/ (runs presets:build first)
 ```
+
+---
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| UI | SvelteKit 2 + Svelte 5 runes, TypeScript |
+| Visualizer | [Butterchurn](https://github.com/jberg/butterchurn) (Milkdrop WebGL) |
+| Compositor | Custom WebGL2 blend + LumaKey/ColorKey pipeline |
+| Audio | Web Audio API — `AudioContext`, `AnalyserNode`, AudioWorklets |
+| Control | Web MIDI API, OSC (UDP), Ableton Link, WebSocket remote |
+| Build | Vite + `@sveltejs/adapter-static` (SPA, `ssr: false`) |
+| Desktop | Electron 42 (optional — native audio loopback, NDI/Spout/virtual-cam output, OSC, Ableton Link, remote server) |
+| Cloud | Cloudflare Worker + R2 (private custom-preset library) |
 
 ---
 
@@ -130,33 +206,51 @@ pnpm build          # Production SPA → build/
 src/
 ├── lib/
 │   ├── engine/
-│   │   ├── audio.ts        AudioEngine — AudioContext, sources, AudioWorklets, PCM streaming
-│   │   ├── bpm.ts          BeatDetector — bass-energy beat detection
-│   │   ├── deck.ts         Deck — Butterchurn instance wrapper
-│   │   ├── midi.ts         MidiEngine — Web MIDI, CC/note mapping
-│   │   ├── overlay.ts      Overlay types
-│   │   ├── playlist.ts     PlaylistEngine — auto-cycle, shuffle, prev/next
-│   │   ├── quality.ts      Quality tiers (low / medium / high)
-│   │   ├── sync.ts         Cross-window state sync (BroadcastChannel / Electron IPC)
-│   │   └── video-store.ts  Video loop clip registry
-│   ├── components/         Svelte UI components
-│   ├── presets/            Preset registry (butterchurn-presets, search, lazy-load)
-│   └── video-loops/        Built-in video loop manifests + loader
+│   │   ├── audio.ts          AudioEngine — shared AudioContext/AnalyserNode feeding all decks
+│   │   ├── deck.ts           Deck — single Butterchurn instance wrapper
+│   │   ├── deck-manager.ts   DeckManager — 4 slots, lazy init, pause/resume
+│   │   ├── compositor.ts     GPU compositor — blend modes, LumaKey/ColorKey, color params
+│   │   ├── overlay.ts        Overlay type — media (image/video) or text layers
+│   │   ├── overlay-queue.ts  Overlay auto-cycling queue
+│   │   ├── snapshot.ts       SnapshotEngine — 8-slot look capture/recall
+│   │   ├── timeline.ts       TimelineEngine — sequences snapshots on a loop
+│   │   ├── q-vars.ts         Per-deck live q1–q32 overrides
+│   │   ├── time-params.ts    Per-deck Time (speed/zoom/etc.) engine multipliers
+│   │   ├── beat-trigger.ts   Per-deck beat/volume-peak playlist trigger
+│   │   ├── lfo.ts            LfoEngine — routable LFOs
+│   │   ├── clock.ts          Shared BPM/phase/beat clock
+│   │   ├── bpm.ts            BeatDetector — bass-energy beat detection
+│   │   ├── midi.ts           MidiEngine — Web MIDI input + LED feedback
+│   │   ├── commands.ts       Central command registry (every controllable parameter)
+│   │   ├── keymap.ts         Default keyboard bindings
+│   │   ├── quality.ts        Quality tiers + invisible-mode perf throttling
+│   │   ├── playlist.ts       PlaylistEngine — auto-cycle, shuffle, prev/next
+│   │   ├── share-set.ts      Encode/decode a visual state to a shareable URL
+│   │   ├── cloud-presets.ts  Private per-device cloud preset library client
+│   │   ├── sync.ts           Cross-window state sync (BroadcastChannel / Electron IPC)
+│   │   └── video-store.ts    Video loop clip registry (IndexedDB)
+│   ├── components/           Svelte UI components (DeckCard, MixerLayout, sidebars, overlays…)
+│   ├── presets/               Preset registry (16,375 presets, search, lazy-load, thumbnails)
+│   └── video-loops/           Built-in video loop manifests + loader
 └── routes/
-    ├── +page.svelte        Main VJ controller (Stage / Mixer layouts)
-    └── output/
-        └── +page.svelte    Fullscreen output canvas (OBS / second monitor)
+    ├── +page.svelte           Main VJ controller (Stage / Mixer layouts)
+    ├── output/+page.svelte     Fullscreen output canvas (OBS / second monitor)
+    └── remote/+page.svelte     Touch UI for phone/tablet remote control
 
 electron/
-├── main.cjs                Main process (IPC relay, PCM audio bridge, app:// protocol, NDI)
-└── preload.cjs             contextBridge → window.electronAPI
+├── main.cjs                  Main process — IPC relay, PCM audio bridge, NDI/Spout/v4l2, OSC,
+│                              Ableton Link, remote WS server, multi-display targeting
+└── preload.cjs               contextBridge → window.electronAPI
+
+workers/
+└── presets-cloud/             Standalone Cloudflare Worker + R2 backing the presets cloud
 
 static/
-├── capture-worklet.js      AudioWorklet — taps gainNode, posts Int16 PCM chunks to main
-└── loopback-worklet.js     AudioWorklet — ring-buffer PCM injection for output window
+├── capture-worklet.js         AudioWorklet — taps gainNode, posts PCM chunks to main
+└── loopback-worklet.js        AudioWorklet — ring-buffer PCM injection for output window
 
 e2e/
-└── app.spec.ts             Playwright E2E tests
+└── *.spec.ts                  Playwright E2E tests
 ```
 
 ---
@@ -165,23 +259,26 @@ e2e/
 
 | Item | Status |
 |------|--------|
+| Signed installers | Planned — Windows/macOS/Linux builds are all currently unsigned (expect an OS security warning on first launch) |
 | Audio reactivity in output (Linux) | Requires re-picking the device once per session — known issue |
 | Web MIDI | Chromium / Electron only (not Firefox / Safari) |
 | System audio on macOS (browser) | Tab audio only — install BlackHole for full capture |
-| Packaged desktop app | Linux AppImage only — Windows / macOS users can use the [web version](https://opendrop.kushie.dev) |
-| Signed installers | Planned |
-| 4-deck compositor | Planned |
-| Spout / v4l2 output | Planned |
+| Spout output | Windows only |
+| Virtual webcam output | Linux only |
 
 ---
 
 ## Credits
 
 - [Butterchurn](https://github.com/jberg/butterchurn) — WebGL Milkdrop renderer by Jordan Berg
-- [butterchurn-presets](https://github.com/jberg/butterchurn-presets) — bundled preset collection
+- [butterchurn-presets](https://github.com/jberg/butterchurn-presets) — bundled preset collection, plus a merged MilkDrop community megapack
 - [SvelteKit](https://kit.svelte.dev) / [Svelte 5](https://svelte.dev)
 - [Electron](https://www.electronjs.org)
-- Preset authors — listed in each `.milk` file; used under their respective licenses
+- [grandiose](https://github.com/Streampunk/grandiose) — NDI bindings
+- SpoutDX — Spout SDK (vendored, Windows output)
+- [@ktamas77/abletonlink](https://github.com/ktamas77/abletonlink) — Ableton Link bindings
+- [Cloudflare Workers](https://workers.cloudflare.com) — presets cloud backend
+- Preset authors — listed in each preset file; used under their respective licenses
 
 ---
 

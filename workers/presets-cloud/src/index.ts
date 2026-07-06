@@ -9,7 +9,7 @@ function withCors(res: Response): Response {
 	const headers = new Headers(res.headers);
 	headers.set('Access-Control-Allow-Origin', '*');
 	headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-	headers.set('Access-Control-Allow-Headers', 'Content-Type');
+	headers.set('Access-Control-Allow-Headers', 'Content-Type, X-Cloud-Token');
 	return new Response(res.body, { status: res.status, headers });
 }
 
@@ -18,11 +18,14 @@ export default {
 		if (request.method === 'OPTIONS') return withCors(new Response(null, { status: 204 }));
 
 		const url = new URL(request.url);
-		const token = url.searchParams.get('token') ?? '';
+		// Token travels in a header, never a query string or request body — a query string
+		// would land in access logs, browser history, and any Referer header; keeping it out
+		// of the body too means every route reads it identically regardless of HTTP verb.
+		const token = request.headers.get('X-Cloud-Token') ?? '';
 
 		if (request.method === 'POST' && url.pathname === '/presets') {
-			const body = await request.json() as { token?: string; name?: string; data?: unknown };
-			const result = await handleUpload(env.PRESETS_BUCKET, body.token ?? '', body.name ?? '', body.data);
+			const body = await request.json() as { name?: string; data?: unknown };
+			const result = await handleUpload(env.PRESETS_BUCKET, token, body.name ?? '', body.data);
 			if ('error' in result) return withCors(Response.json({ error: result.error }, { status: result.status }));
 			return withCors(Response.json(result));
 		}

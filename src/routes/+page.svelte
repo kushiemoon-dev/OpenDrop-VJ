@@ -1742,6 +1742,7 @@
 			colorParamsA, colorParamsB,
 			slotComposites,
 			timeParams,
+			qVarParams,
 			snapshots,
 			snapshotRecallDuration,
 			timelineKeyframes,
@@ -1773,6 +1774,8 @@
 		slotComposites = s.slotComposites;
 		timeParams = s.timeParams as typeof timeParams;
 		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
+		qVarParams = s.qVarParams as typeof qVarParams;
+		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], qVarParams[slot]);
 		snapshots = s.snapshots; snapshotRecallDuration = s.snapshotRecallDuration;
 		timelineKeyframes = s.timelineKeyframes;
 		overlays = s.overlays;

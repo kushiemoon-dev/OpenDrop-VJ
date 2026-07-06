@@ -2429,6 +2429,36 @@
 		{/each}
 	</div>
 {/snippet}
+{#snippet qvarSection()}
+	<div class="controls-section">
+		<div class="pl-header">
+			<span class="label">Q-vars (slot {mixerSelectedSlot})</span>
+		</div>
+		<div class="midi-row" style="gap:6px;align-items:center">
+			<select class="blendmode-select" style="flex:1"
+				onchange={(e) => {
+					const n = Number(e.currentTarget.value);
+					if (n) addQVarWatch(mixerSelectedSlot, n);
+					e.currentTarget.value = '';
+				}}>
+				<option value="">+ Ajouter Q-var</option>
+				{#each Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !qVarParams[mixerSelectedSlot].enabled[n - 1]) as n (n)}
+					<option value={n}>Q{n}</option>
+				{/each}
+			</select>
+		</div>
+		{#each Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => qVarParams[mixerSelectedSlot].enabled[n - 1]) as n (n)}
+			<div class="midi-row" style="gap:6px;align-items:center">
+				<span class="midi-label" style="width:48px">Q{n}</span>
+				<input type="range" min="-2" max="2" step="0.01" value={qVarParams[mixerSelectedSlot].value[n - 1]}
+					oninput={(e) => updateQVarValue(mixerSelectedSlot, n, +e.currentTarget.value)}
+					style="flex:1" />
+				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{qVarParams[mixerSelectedSlot].value[n - 1].toFixed(2)}</span>
+				<button class="btn-sm" onclick={() => removeQVarWatch(mixerSelectedSlot, n)}>×</button>
+			</div>
+		{/each}
+	</div>
+{/snippet}
 {#snippet electronSection()}
 	{#if isElectron}
 	<div class="controls-section">
@@ -2758,6 +2788,7 @@
     {timelineSection}
     {shareSection}
     {timeSection}
+    {qvarSection}
     {electronSection}
   />
 {/if}

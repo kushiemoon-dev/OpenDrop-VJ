@@ -41,10 +41,16 @@ export function parsePresetFile(jsonText: string): object {
 	return parsed;
 }
 
+// Token always travels in this header, never a query string or request body — a query
+// string would land in access logs, browser history, and any Referer header.
+function tokenHeaders(token: string, extra?: Record<string, string>): Record<string, string> {
+	return { 'X-Cloud-Token': token, ...extra };
+}
+
 export async function getCloudPresetIndex(token: string): Promise<CloudPresetEntry[]> {
 	if (!PUBLIC_CLOUD_PRESETS_API || !token) return [];
 	try {
-		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets?token=${encodeURIComponent(token)}`);
+		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets`, { headers: tokenHeaders(token) });
 		if (!res.ok) return [];
 		const data = await res.json();
 		return Array.isArray(data) ? data : [];
@@ -60,8 +66,8 @@ export async function uploadPreset(
 	try {
 		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ token, name: `${CLOUD_PRESET_PREFIX}${name}`, data: presetData }),
+			headers: tokenHeaders(token, { 'Content-Type': 'application/json' }),
+			body: JSON.stringify({ name: `${CLOUD_PRESET_PREFIX}${name}`, data: presetData }),
 		});
 		const body = await res.json();
 		if (!res.ok) return { error: body?.error ?? `Erreur ${res.status}` };
@@ -76,7 +82,7 @@ export async function loadCloudPresetData(token: string, name: string): Promise<
 	const entry = index.find((e) => e.name === name);
 	if (!entry) return null;
 	try {
-		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${entry.id}?token=${encodeURIComponent(token)}`);
+		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${entry.id}`, { headers: tokenHeaders(token) });
 		if (!res.ok) return null;
 		return await res.json();
 	} catch {
@@ -87,7 +93,7 @@ export async function loadCloudPresetData(token: string, name: string): Promise<
 export async function deleteCloudPreset(token: string, id: string): Promise<void> {
 	if (!PUBLIC_CLOUD_PRESETS_API) return;
 	try {
-		await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${id}?token=${encodeURIComponent(token)}`, { method: 'DELETE' });
+		await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${id}`, { method: 'DELETE', headers: tokenHeaders(token) });
 	} catch {
 		/* best-effort */
 	}
@@ -96,9 +102,9 @@ export async function deleteCloudPreset(token: string, id: string): Promise<void
 export async function renameCloudPreset(token: string, id: string, name: string): Promise<void> {
 	if (!PUBLIC_CLOUD_PRESETS_API) return;
 	try {
-		await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${id}?token=${encodeURIComponent(token)}`, {
+		await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets/${id}`, {
 			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
+			headers: tokenHeaders(token, { 'Content-Type': 'application/json' }),
 			body: JSON.stringify({ name: `${CLOUD_PRESET_PREFIX}${name}` }),
 		});
 	} catch {

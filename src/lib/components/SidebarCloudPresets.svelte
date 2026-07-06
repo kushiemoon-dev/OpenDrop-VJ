@@ -1,6 +1,6 @@
 <!-- src/lib/components/SidebarCloudPresets.svelte -->
 <script lang="ts">
-	import type { CloudPresetEntry } from '$lib/engine/cloud-presets.js';
+	import { CLOUD_PRESET_PREFIX, type CloudPresetEntry } from '$lib/engine/cloud-presets.js';
 
 	interface Props {
 		presets: CloudPresetEntry[];
@@ -25,7 +25,7 @@
 
 	function startRename(entry: CloudPresetEntry) {
 		renamingId = entry.id;
-		renameValue = entry.name.replace('☁ ', '');
+		renameValue = entry.name.replace(CLOUD_PRESET_PREFIX, '');
 	}
 
 	function confirmRename() {

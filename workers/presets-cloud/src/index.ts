@@ -24,7 +24,12 @@ export default {
 		const token = request.headers.get('X-Cloud-Token') ?? '';
 
 		if (request.method === 'POST' && url.pathname === '/presets') {
-			const body = await request.json() as { name?: string; data?: unknown };
+			let body: { name?: string; data?: unknown };
+			try {
+				body = await request.json() as { name?: string; data?: unknown };
+			} catch {
+				return withCors(Response.json({ error: 'invalid JSON body' }, { status: 400 }));
+			}
 			const result = await handleUpload(env.PRESETS_BUCKET, token, body.name ?? '', body.data);
 			if ('error' in result) return withCors(Response.json({ error: result.error }, { status: result.status }));
 			return withCors(Response.json(result));
@@ -43,7 +48,12 @@ export default {
 				return withCors(Response.json(preset));
 			}
 			if (request.method === 'PATCH') {
-				const body = await request.json() as { name?: string };
+				let body: { name?: string };
+				try {
+					body = await request.json() as { name?: string };
+				} catch {
+					return withCors(Response.json({ error: 'invalid JSON body' }, { status: 400 }));
+				}
 				const result = await handleRename(env.PRESETS_BUCKET, token, id, body.name ?? '');
 				if ('error' in result) return withCors(Response.json({ error: result.error }, { status: result.status }));
 				return withCors(Response.json(result));

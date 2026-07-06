@@ -74,8 +74,8 @@ export async function handleRename(
 	const index = await readIndex(bucket, token);
 	const entry = index.find((e) => e.id === id);
 	if (!entry) return { error: 'not found', status: 404 };
-	entry.name = name;
-	await bucket.put(indexKey(token), JSON.stringify(index));
+	const nextIndex = index.map((e) => (e.id === id ? { ...e, name } : e));
+	await bucket.put(indexKey(token), JSON.stringify(nextIndex));
 	return { ok: true };
 }
 

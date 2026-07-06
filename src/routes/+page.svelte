@@ -369,10 +369,10 @@
 	}
 
 	async function onCloudPresetFilePick(e: Event) {
-		const files = (e.target as HTMLInputElement).files;
-		(e.target as HTMLInputElement).value = '';
-		if (!files || files.length === 0) return;
-		const file = files[0];
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file) return;
 		cloudPresetError = null;
 		try {
 			const text = await file.text();

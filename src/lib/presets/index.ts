@@ -6,6 +6,7 @@
  */
 
 import { base } from '$app/paths';
+import { loadCloudPresetData, CLOUD_PRESET_PREFIX } from '../engine/cloud-presets.js';
 
 export interface PresetMeta {
 	name: string;
@@ -38,7 +39,14 @@ export async function initPresets(): Promise<void> {
 export async function loadPresetData(name: string): Promise<object | null> {
 	if (_cache.has(name)) return _cache.get(name)!;
 	const slug = _nameToSlug.get(name);
-	if (!slug) return null;
+	if (!slug) {
+		if (!name.startsWith(CLOUD_PRESET_PREFIX)) return null;
+		const token = localStorage.getItem('od-cloud-token');
+		if (!token) return null;
+		const data = await loadCloudPresetData(token, name);
+		if (data) _cache.set(name, data);
+		return data;
+	}
 	try {
 		const res = await fetch(`${base}/presets/${encodeURIComponent(slug)}.json`);
 		if (!res.ok) return null;

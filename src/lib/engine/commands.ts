@@ -40,6 +40,39 @@ export type CommandId =
 	| 'overlay-queue-next' | 'overlay-queue-prev'
 	// Timeline (Track 2 — keyframe playback)
 	| 'timeline-toggle'
+	// Q-var live editing (Track 2 — 32 q-vars × 4 slots)
+	| 'qvar-1-0' | 'qvar-1-1' | 'qvar-1-2' | 'qvar-1-3'
+	| 'qvar-2-0' | 'qvar-2-1' | 'qvar-2-2' | 'qvar-2-3'
+	| 'qvar-3-0' | 'qvar-3-1' | 'qvar-3-2' | 'qvar-3-3'
+	| 'qvar-4-0' | 'qvar-4-1' | 'qvar-4-2' | 'qvar-4-3'
+	| 'qvar-5-0' | 'qvar-5-1' | 'qvar-5-2' | 'qvar-5-3'
+	| 'qvar-6-0' | 'qvar-6-1' | 'qvar-6-2' | 'qvar-6-3'
+	| 'qvar-7-0' | 'qvar-7-1' | 'qvar-7-2' | 'qvar-7-3'
+	| 'qvar-8-0' | 'qvar-8-1' | 'qvar-8-2' | 'qvar-8-3'
+	| 'qvar-9-0' | 'qvar-9-1' | 'qvar-9-2' | 'qvar-9-3'
+	| 'qvar-10-0' | 'qvar-10-1' | 'qvar-10-2' | 'qvar-10-3'
+	| 'qvar-11-0' | 'qvar-11-1' | 'qvar-11-2' | 'qvar-11-3'
+	| 'qvar-12-0' | 'qvar-12-1' | 'qvar-12-2' | 'qvar-12-3'
+	| 'qvar-13-0' | 'qvar-13-1' | 'qvar-13-2' | 'qvar-13-3'
+	| 'qvar-14-0' | 'qvar-14-1' | 'qvar-14-2' | 'qvar-14-3'
+	| 'qvar-15-0' | 'qvar-15-1' | 'qvar-15-2' | 'qvar-15-3'
+	| 'qvar-16-0' | 'qvar-16-1' | 'qvar-16-2' | 'qvar-16-3'
+	| 'qvar-17-0' | 'qvar-17-1' | 'qvar-17-2' | 'qvar-17-3'
+	| 'qvar-18-0' | 'qvar-18-1' | 'qvar-18-2' | 'qvar-18-3'
+	| 'qvar-19-0' | 'qvar-19-1' | 'qvar-19-2' | 'qvar-19-3'
+	| 'qvar-20-0' | 'qvar-20-1' | 'qvar-20-2' | 'qvar-20-3'
+	| 'qvar-21-0' | 'qvar-21-1' | 'qvar-21-2' | 'qvar-21-3'
+	| 'qvar-22-0' | 'qvar-22-1' | 'qvar-22-2' | 'qvar-22-3'
+	| 'qvar-23-0' | 'qvar-23-1' | 'qvar-23-2' | 'qvar-23-3'
+	| 'qvar-24-0' | 'qvar-24-1' | 'qvar-24-2' | 'qvar-24-3'
+	| 'qvar-25-0' | 'qvar-25-1' | 'qvar-25-2' | 'qvar-25-3'
+	| 'qvar-26-0' | 'qvar-26-1' | 'qvar-26-2' | 'qvar-26-3'
+	| 'qvar-27-0' | 'qvar-27-1' | 'qvar-27-2' | 'qvar-27-3'
+	| 'qvar-28-0' | 'qvar-28-1' | 'qvar-28-2' | 'qvar-28-3'
+	| 'qvar-29-0' | 'qvar-29-1' | 'qvar-29-2' | 'qvar-29-3'
+	| 'qvar-30-0' | 'qvar-30-1' | 'qvar-30-2' | 'qvar-30-3'
+	| 'qvar-31-0' | 'qvar-31-1' | 'qvar-31-2' | 'qvar-31-3'
+	| 'qvar-32-0' | 'qvar-32-1' | 'qvar-32-2' | 'qvar-32-3'
 	;
 
 export interface CommandContext {
@@ -293,6 +326,136 @@ const DEFAULT_COMMANDS: Command[] = [
 	  run(_, ctx) { ctx.advanceOverlayQueue(-1); } },
 	// Timeline stub — wired in +page.svelte (toggles TimelineEngine play/pause)
 	{ id: 'timeline-toggle', label: 'Timeline Play/Pause', kind: 'trigger', run() {} },
+	// Q-var stubs — wired in +page.svelte (writes DeckQVarParams.value only, never .enabled;
+	// watchlist add/remove is the only thing that flips .enabled — see q-vars.ts design)
+	{ id: 'qvar-1-0', label: 'Q1 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-1-1', label: 'Q1 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-1-2', label: 'Q1 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-1-3', label: 'Q1 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-2-0', label: 'Q2 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-2-1', label: 'Q2 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-2-2', label: 'Q2 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-2-3', label: 'Q2 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-3-0', label: 'Q3 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-3-1', label: 'Q3 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-3-2', label: 'Q3 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-3-3', label: 'Q3 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-4-0', label: 'Q4 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-4-1', label: 'Q4 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-4-2', label: 'Q4 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-4-3', label: 'Q4 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-5-0', label: 'Q5 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-5-1', label: 'Q5 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-5-2', label: 'Q5 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-5-3', label: 'Q5 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-6-0', label: 'Q6 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-6-1', label: 'Q6 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-6-2', label: 'Q6 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-6-3', label: 'Q6 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-7-0', label: 'Q7 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-7-1', label: 'Q7 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-7-2', label: 'Q7 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-7-3', label: 'Q7 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-8-0', label: 'Q8 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-8-1', label: 'Q8 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-8-2', label: 'Q8 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-8-3', label: 'Q8 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-9-0', label: 'Q9 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-9-1', label: 'Q9 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-9-2', label: 'Q9 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-9-3', label: 'Q9 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-10-0', label: 'Q10 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-10-1', label: 'Q10 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-10-2', label: 'Q10 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-10-3', label: 'Q10 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-11-0', label: 'Q11 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-11-1', label: 'Q11 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-11-2', label: 'Q11 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-11-3', label: 'Q11 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-12-0', label: 'Q12 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-12-1', label: 'Q12 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-12-2', label: 'Q12 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-12-3', label: 'Q12 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-13-0', label: 'Q13 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-13-1', label: 'Q13 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-13-2', label: 'Q13 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-13-3', label: 'Q13 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-14-0', label: 'Q14 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-14-1', label: 'Q14 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-14-2', label: 'Q14 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-14-3', label: 'Q14 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-15-0', label: 'Q15 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-15-1', label: 'Q15 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-15-2', label: 'Q15 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-15-3', label: 'Q15 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-16-0', label: 'Q16 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-16-1', label: 'Q16 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-16-2', label: 'Q16 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-16-3', label: 'Q16 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-17-0', label: 'Q17 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-17-1', label: 'Q17 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-17-2', label: 'Q17 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-17-3', label: 'Q17 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-18-0', label: 'Q18 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-18-1', label: 'Q18 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-18-2', label: 'Q18 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-18-3', label: 'Q18 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-19-0', label: 'Q19 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-19-1', label: 'Q19 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-19-2', label: 'Q19 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-19-3', label: 'Q19 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-20-0', label: 'Q20 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-20-1', label: 'Q20 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-20-2', label: 'Q20 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-20-3', label: 'Q20 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-21-0', label: 'Q21 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-21-1', label: 'Q21 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-21-2', label: 'Q21 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-21-3', label: 'Q21 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-22-0', label: 'Q22 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-22-1', label: 'Q22 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-22-2', label: 'Q22 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-22-3', label: 'Q22 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-23-0', label: 'Q23 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-23-1', label: 'Q23 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-23-2', label: 'Q23 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-23-3', label: 'Q23 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-24-0', label: 'Q24 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-24-1', label: 'Q24 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-24-2', label: 'Q24 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-24-3', label: 'Q24 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-25-0', label: 'Q25 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-25-1', label: 'Q25 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-25-2', label: 'Q25 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-25-3', label: 'Q25 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-26-0', label: 'Q26 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-26-1', label: 'Q26 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-26-2', label: 'Q26 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-26-3', label: 'Q26 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-27-0', label: 'Q27 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-27-1', label: 'Q27 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-27-2', label: 'Q27 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-27-3', label: 'Q27 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-28-0', label: 'Q28 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-28-1', label: 'Q28 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-28-2', label: 'Q28 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-28-3', label: 'Q28 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-29-0', label: 'Q29 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-29-1', label: 'Q29 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-29-2', label: 'Q29 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-29-3', label: 'Q29 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-30-0', label: 'Q30 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-30-1', label: 'Q30 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-30-2', label: 'Q30 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-30-3', label: 'Q30 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-31-0', label: 'Q31 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-31-1', label: 'Q31 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-31-2', label: 'Q31 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-31-3', label: 'Q31 — Deck 3', kind: 'range', run() {} },
+	{ id: 'qvar-32-0', label: 'Q32 — Deck 0', kind: 'range', run() {} },
+	{ id: 'qvar-32-1', label: 'Q32 — Deck 1', kind: 'range', run() {} },
+	{ id: 'qvar-32-2', label: 'Q32 — Deck 2', kind: 'range', run() {} },
+	{ id: 'qvar-32-3', label: 'Q32 — Deck 3', kind: 'range', run() {} },
 ];
 
 export function createDefaultRegistry(): CommandRegistry {

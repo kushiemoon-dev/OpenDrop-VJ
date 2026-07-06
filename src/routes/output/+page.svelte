@@ -12,6 +12,7 @@
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import type { ClipRef } from '$lib/engine/video-store.js';
 	import { getGlobalTimeParams } from '$lib/engine/time-params.js';
+	import { getGlobalQVarParams } from '$lib/engine/q-vars.js';
 
 	let canvas0: HTMLCanvasElement | undefined = $state();
 	let canvas1: HTMLCanvasElement | undefined = $state();
@@ -227,6 +228,8 @@
 					slotComposites = next;
 				} else if (msg.type === 'time') {
 					Object.assign(getGlobalTimeParams()[msg.slot], msg.params);
+				} else if (msg.type === 'qvars') {
+					Object.assign(getGlobalQVarParams()[msg.slot], msg.params);
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;

@@ -2,6 +2,7 @@ import type { Overlay } from '$lib/engine/overlay.js';
 import type { ClipRef } from '$lib/engine/video-store.js';
 import type { InvisibleMode } from '$lib/engine/quality.js';
 import type { DeckTimeParams } from '$lib/engine/time-params.js';
+import type { DeckQVarParams } from '$lib/engine/q-vars.js';
 
 export interface ColorParams {
 	hueRotate: number;   // 0..1 → 0..360°
@@ -65,6 +66,7 @@ export type SyncMessage =
 	| { type: 'quality'; tier: string }
 	| { type: 'composite'; slot: number; config: SlotComposite }
 	| { type: 'time'; slot: number; params: DeckTimeParams }
+	| { type: 'qvars'; slot: number; params: DeckQVarParams }
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'overlay-queue-index'; index: number }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
@@ -140,6 +142,13 @@ export class MainSync {
 
 	sendTime(slot: number, params: DeckTimeParams) {
 		sendMsg(this.bc, { type: 'time', slot, params: { ...params } });
+	}
+
+	sendQVars(slot: number, params: DeckQVarParams) {
+		// Explicit array rebuild, not `{ ...params }` — a shallow spread would keep the
+		// Svelte 5 $state-proxied `enabled`/`value` arrays by reference, which throws
+		// DataCloneError on postMessage (same class of bug as the 1.2 sendOverlays fix).
+		sendMsg(this.bc, { type: 'qvars', slot, params: { enabled: [...params.enabled], value: [...params.value] } });
 	}
 
 	sendOverlays(list: Overlay[]) {

@@ -1,0 +1,7 @@
+name = "presets-cloud"
+main = "src/index.ts"
+compatibility_date = "2026-07-06"
+
+[[r2_buckets]]
+binding = "PRESETS_BUCKET"
+bucket_name = "opendrop-presets-cloud"

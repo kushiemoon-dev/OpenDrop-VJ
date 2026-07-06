@@ -7,6 +7,7 @@
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
+	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams } from '$lib/engine/q-vars.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
 		type BeatTriggerConfig, defaultBeatTriggerConfig, shouldTriggerOnBeat,
@@ -247,6 +248,42 @@
 		// Write-through: this is what Butterchurn's injected preset code actually
 		// reads every frame — the $state above is only for the UI to bind to.
 		Object.assign(getGlobalTimeParams()[slot], patch);
+	}
+
+	// — Q-var live editing per deck (Track 2) ————————————————
+	// Generic q1-q32 knobs (like NestDrop) — no per-preset meaning known, so no
+	// neutral default: a q-var only has an effect once explicitly watchlisted
+	// (enabled=true). Watching a MIDI-mapped qvar-N-slot command alone does NOT
+	// enable it — see updateQVarValue vs addQVarWatch below.
+	let qVarParams = $state<[DeckQVarParams, DeckQVarParams, DeckQVarParams, DeckQVarParams]>([
+		defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams(),
+	]);
+	function updateQVarValue(slot: number, n: number, value: number) {
+		const next = [...qVarParams] as typeof qVarParams;
+		const nextValue = [...next[slot].value];
+		nextValue[n - 1] = value;
+		next[slot] = { ...next[slot], value: nextValue };
+		qVarParams = next;
+		getGlobalQVarParams()[slot].value[n - 1] = value;
+	}
+	function addQVarWatch(slot: number, n: number) {
+		const next = [...qVarParams] as typeof qVarParams;
+		const nextEnabled = [...next[slot].enabled];
+		const nextValue = [...next[slot].value];
+		nextEnabled[n - 1] = true;
+		nextValue[n - 1] = 0;
+		next[slot] = { enabled: nextEnabled, value: nextValue };
+		qVarParams = next;
+		getGlobalQVarParams()[slot].enabled[n - 1] = true;
+		getGlobalQVarParams()[slot].value[n - 1] = 0;
+	}
+	function removeQVarWatch(slot: number, n: number) {
+		const next = [...qVarParams] as typeof qVarParams;
+		const nextEnabled = [...next[slot].enabled];
+		nextEnabled[n - 1] = false;
+		next[slot] = { ...next[slot], enabled: nextEnabled };
+		qVarParams = next;
+		getGlobalQVarParams()[slot].enabled[n - 1] = false;
 	}
 
 	// — Snapshots / macros (1.3) ————————————————————————————
@@ -620,6 +657,7 @@
 		localStorage.setItem('od-snapshots', JSON.stringify(snapshots));
 		localStorage.setItem('od-snapshot-duration', String(snapshotRecallDuration));
 		localStorage.setItem('od-time-params', JSON.stringify(timeParams));
+		localStorage.setItem('od-qvars', JSON.stringify(qVarParams));
 		localStorage.setItem('od-timeline', JSON.stringify(timelineKeyframes));
 	});
 
@@ -851,6 +889,16 @@
 						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
 					}
 				} catch { /* ignore corrupt od-time-params */ }
+			}
+			const savedQVars = localStorage.getItem('od-qvars');
+			if (savedQVars) {
+				try {
+					const parsed = JSON.parse(savedQVars);
+					if (Array.isArray(parsed) && parsed.length === 4) {
+						qVarParams = parsed.map((p) => ({ ...defaultQVarParams(), ...p })) as typeof qVarParams;
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], qVarParams[slot]);
+					}
+				} catch { /* ignore corrupt od-qvars */ }
 			}
 			const savedTimeline = localStorage.getItem('od-timeline');
 			if (savedTimeline) {

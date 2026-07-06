@@ -3,10 +3,11 @@
 # Run once per session (or add to autostart).
 # The device appears as "OpenDrop - Son du PC" in any browser's audio picker.
 
-MONITOR=$(pactl list sources short | grep '\.monitor' | grep -v 'opendrop' | awk '{print $2}' | head -1)
+DEFAULT_SINK=$(pactl get-default-sink)
+MONITOR="${DEFAULT_SINK}.monitor"
 
-if [ -z "$MONITOR" ]; then
-  echo "No audio output monitor found. Is PipeWire running?"
+if [ -z "$DEFAULT_SINK" ] || ! pactl list sources short | grep -q "$MONITOR"; then
+  echo "No monitor found for default sink ($DEFAULT_SINK). Is PipeWire running?"
   exit 1
 fi
 

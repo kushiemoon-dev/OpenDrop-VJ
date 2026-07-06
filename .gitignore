@@ -36,6 +36,10 @@ playwright-report
 # Screenshots (debug)
 *.png
 
+# ...but keep committed README assets
+!docs/readme-assets/
+!docs/readme-assets/*.png
+
 # Video loops CDN (généré par video-loops:build, uploadé via rsync)
 /cdn-video-loops
 /.video-tmp

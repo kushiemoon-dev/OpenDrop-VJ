@@ -475,6 +475,15 @@
 				run(v) { updateTimeParams(slot, { [field]: v * 2 } as Partial<DeckTimeParams>); },
 			});
 
+	// — Câblage commandes Q-var live editing (Track 2) ——————————
+	// v (0..1) mappé sur la plage d'affichage [-2, 2] des sliders (v*4-2).
+	// Ne touche jamais `enabled` — seul le watchlist (UI) active un q-var.
+	for (let n = 1; n <= 32; n++)
+		for (const slot of [0, 1, 2, 3] as const)
+			registry.register({ id: `qvar-${n}-${slot}` as CommandId, label: `Q${n} — Deck ${slot}`, kind: 'range',
+				run(v) { updateQVarValue(slot, n, v * 4 - 2); },
+			});
+
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
 		getCrossfader: () => crossfader,
@@ -1623,6 +1632,12 @@
 		if (timeMatch) {
 			const e = TIME_CMDS.find(([prefix]) => prefix === timeMatch[1]);
 			return e ? timeParams[Number(timeMatch[2])][e[2]] / 2 : null;
+		}
+		const qvarMatch = id.match(/^qvar-(\d+)-([0-3])$/);
+		if (qvarMatch) {
+			const n = Number(qvarMatch[1]);
+			if (n < 1 || n > 32) return null;
+			return (qVarParams[Number(qvarMatch[2])].value[n - 1] + 2) / 4;
 		}
 		return null;
 	}

@@ -57,11 +57,5 @@
 		"vite": "^8.0.16",
 		"vitest": "^3.2.6",
 		"wait-on": "^8.0.5"
-	},
-	"pnpm": {
-		"overrides": {
-			"node-gyp>undici": "^6.27.0",
-			"jsdom>undici": "^7.28.0"
-		}
 	}
 }

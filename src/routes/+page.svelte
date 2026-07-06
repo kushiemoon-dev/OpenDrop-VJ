@@ -30,6 +30,11 @@
 	import SidebarAudio from '$lib/components/SidebarAudio.svelte';
 	import SidebarPlaylist from '$lib/components/SidebarPlaylist.svelte';
 	import SidebarOverlays from '$lib/components/SidebarOverlays.svelte';
+	import {
+		type CloudPresetEntry, getOrCreateCloudToken, setCloudToken, parsePresetFile,
+		getCloudPresetIndex, uploadPreset, deleteCloudPreset, renameCloudPreset,
+	} from '$lib/engine/cloud-presets.js';
+	import SidebarCloudPresets from '$lib/components/SidebarCloudPresets.svelte';
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
 	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
@@ -352,6 +357,59 @@
 	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
 	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
 	const nonShareableOverlayCount = $derived(overlays.filter((o) => o.kind !== 'text').length);
+
+	// — Presets cloud (Track 2) ——————————————————————————
+	let cloudToken = $state('');
+	let cloudPresets = $state<CloudPresetEntry[]>([]);
+	let cloudPresetError = $state<string | null>(null);
+	let cloudCopyLabel = $state('Copier mon token');
+
+	async function refreshCloudPresets() {
+		cloudPresets = await getCloudPresetIndex(cloudToken);
+	}
+
+	async function onCloudPresetFilePick(e: Event) {
+		const files = (e.target as HTMLInputElement).files;
+		(e.target as HTMLInputElement).value = '';
+		if (!files || files.length === 0) return;
+		const file = files[0];
+		cloudPresetError = null;
+		try {
+			const text = await file.text();
+			const data = parsePresetFile(text);
+			const name = file.name.replace(/\.json$/i, '');
+			const result = await uploadPreset(cloudToken, name, data);
+			if ('error' in result) {
+				cloudPresetError = result.error;
+				return;
+			}
+			await refreshCloudPresets();
+		} catch (err) {
+			cloudPresetError = err instanceof Error ? err.message : 'Fichier preset invalide';
+		}
+	}
+
+	function copyCloudToken() {
+		navigator.clipboard.writeText(cloudToken);
+		cloudCopyLabel = 'Copié !';
+		setTimeout(() => { cloudCopyLabel = 'Copier mon token'; }, 1500);
+	}
+
+	async function linkCloudDevice(token: string) {
+		setCloudToken(token);
+		cloudToken = token;
+		await refreshCloudPresets();
+	}
+
+	async function renameCloudPresetEntry(id: string, name: string) {
+		await renameCloudPreset(cloudToken, id, name);
+		await refreshCloudPresets();
+	}
+
+	async function deleteCloudPresetEntry(id: string) {
+		await deleteCloudPreset(cloudToken, id);
+		await refreshCloudPresets();
+	}
 
 	function toggleOverlayQueue() {
 		overlayQueueEnabled = !overlayQueueEnabled;
@@ -1002,6 +1060,9 @@
 		presetList = buildPresetList();
 		if (presetList.length > 0) presetA = presetList[0].name;
 		if (presetList.length > 1) presetB = presetList[1].name;
+
+		cloudToken = getOrCreateCloudToken();
+		await refreshCloudPresets();
 	});
 
 	onDestroy(() => {
@@ -2699,6 +2760,20 @@
 			onOverlayQueueTriggerChange={(patch) => updateOverlayQueueTrigger(patch)}
 			onOverlayQueueNext={() => advanceOverlayQueue(1)}
 			onOverlayQueuePrev={() => advanceOverlayQueue(-1)}
+		/>
+
+		<!-- Presets cloud -->
+		<SidebarCloudPresets
+			presets={cloudPresets}
+			token={cloudToken}
+			error={cloudPresetError}
+			onUploadFile={onCloudPresetFilePick}
+			onCopyToken={copyCloudToken}
+			copyLabel={cloudCopyLabel}
+			onLinkDevice={linkCloudDevice}
+			onLoadPreset={selectPreset}
+			onRename={renameCloudPresetEntry}
+			onDelete={deleteCloudPresetEntry}
 		/>
 
 		<!-- Video loops -->

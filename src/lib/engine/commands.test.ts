@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createDefaultRegistry, CommandRegistry, type CommandContext, type Command } from './commands.js';
+import { createDefaultRegistry, CommandRegistry, type CommandContext, type Command, type CommandId } from './commands.js';
 
 function makeCtx(overrides: Partial<CommandContext> = {}): CommandContext & { crossfader: number; activeDeck: 'A' | 'B' } {
 	const state = { crossfader: 0.5, activeDeck: 'A' as 'A' | 'B' };
@@ -220,5 +220,19 @@ describe('overlay queue commands', () => {
 		const ctx = makeCtx();
 		reg.dispatch('overlay-queue-prev', 1, ctx);
 		expect(ctx.advanceOverlayQueue).toHaveBeenCalledWith(-1);
+	});
+});
+
+describe('createDefaultRegistry — Q-var live editing (Track 2)', () => {
+	const reg = createDefaultRegistry();
+
+	it('contient les 128 commandes qvar-N-slot (32 q-vars × 4 slots)', () => {
+		for (let n = 1; n <= 32; n++) {
+			for (const slot of [0, 1, 2, 3] as const) {
+				const id = `qvar-${n}-${slot}` as CommandId;
+				expect(reg.get(id), `missing: ${id}`).toBeDefined();
+				expect(reg.get(id)?.kind).toBe('range');
+			}
+		}
 	});
 });

@@ -3,6 +3,7 @@ import { filterShareableOverlays, encodeSharedSet, decodeSharedSet, type SharedS
 import { makeOverlay } from './overlay.js';
 import { DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE } from './sync.js';
 import { defaultTimeParams } from './time-params.js';
+import { defaultQVarParams } from './q-vars.js';
 import { defaultBeatTriggerConfig } from './beat-trigger.js';
 
 function fixtureSet(): SharedSet {
@@ -15,6 +16,7 @@ function fixtureSet(): SharedSet {
 		colorParamsA: { ...DEFAULT_COLOR_PARAMS, hueRotate: 0.2 }, colorParamsB: { ...DEFAULT_COLOR_PARAMS },
 		slotComposites: [DEFAULT_SLOT_COMPOSITE, DEFAULT_SLOT_COMPOSITE, DEFAULT_SLOT_COMPOSITE, DEFAULT_SLOT_COMPOSITE],
 		timeParams: [defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams()],
+		qVarParams: [defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams()],
 		snapshots: [{ name: 'Slot 0', values: { 'color-hue-a': 0.5 } }, null, null, null, null, null, null, null],
 		snapshotRecallDuration: 2,
 		timelineKeyframes: [{ slot: 0, timeSec: 0 }, { slot: 0, timeSec: 5 }],
@@ -78,6 +80,12 @@ describe('encodeSharedSet / decodeSharedSet round-trip', () => {
 
 	it('snapshots de mauvaise longueur (lien forgé à la main) -> null', async () => {
 		const set = { ...fixtureSet(), snapshots: [null, null] };
+		const encoded = await encodeSharedSet(set as unknown as SharedSet);
+		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
+	});
+
+	it('qVarParams de mauvaise longueur (lien forgé à la main) -> null', async () => {
+		const set = { ...fixtureSet(), qVarParams: [defaultQVarParams()] };
 		const encoded = await encodeSharedSet(set as unknown as SharedSet);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});

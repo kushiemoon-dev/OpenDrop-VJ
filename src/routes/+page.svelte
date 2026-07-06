@@ -912,7 +912,7 @@
 					const parsed = JSON.parse(savedQVars);
 					if (Array.isArray(parsed) && parsed.length === 4) {
 						qVarParams = parsed.map((p) => ({ ...defaultQVarParams(), ...p })) as typeof qVarParams;
-						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], qVarParams[slot]);
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qVarParams[slot].enabled], value: [...qVarParams[slot].value] });
 					}
 				} catch { /* ignore corrupt od-qvars */ }
 			}
@@ -1775,7 +1775,7 @@
 		timeParams = s.timeParams as typeof timeParams;
 		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
 		qVarParams = s.qVarParams as typeof qVarParams;
-		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], qVarParams[slot]);
+		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qVarParams[slot].enabled], value: [...qVarParams[slot].value] });
 		snapshots = s.snapshots; snapshotRecallDuration = s.snapshotRecallDuration;
 		timelineKeyframes = s.timelineKeyframes;
 		overlays = s.overlays;

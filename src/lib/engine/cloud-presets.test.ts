@@ -114,7 +114,9 @@ describe('uploadPreset', () => {
 		const { uploadPreset } = await import('./cloud-presets.js');
 		const result = await uploadPreset('tok1', 'Mon Preset', { x: 1 });
 		expect(result).toEqual({ id: 'new-id' });
+		expect(fetchMock.mock.calls[0][1].headers['X-Cloud-Token']).toBe('tok1');
 		const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+		expect(body.token).toBeUndefined();
 		expect(body.name).toBe('☁ Mon Preset');
 	});
 

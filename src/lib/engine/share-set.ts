@@ -7,6 +7,7 @@
 
 import type { ColorParams, SlotComposite } from './sync.js';
 import type { DeckTimeParams } from './time-params.js';
+import type { DeckQVarParams } from './q-vars.js';
 import type { Snapshot } from './snapshot.js';
 import type { TimelineKeyframe } from './timeline.js';
 import type { Overlay } from './overlay.js';
@@ -24,6 +25,7 @@ export interface SharedSet {
 	colorParamsB: ColorParams;
 	slotComposites: [SlotComposite, SlotComposite, SlotComposite, SlotComposite];
 	timeParams: DeckTimeParams[];
+	qVarParams: DeckQVarParams[];
 	snapshots: (Snapshot | null)[];
 	snapshotRecallDuration: number;
 	timelineKeyframes: TimelineKeyframe[];
@@ -77,6 +79,7 @@ export async function decodeSharedSet(encoded: string): Promise<SharedSet | null
 		// A hand-crafted (non-app-generated) link could carry a wrong-length array here, which
 		// would later crash the Time/Composite panels on a fixed-index read — reject up front.
 		if (!Array.isArray(parsed.timeParams) || parsed.timeParams.length !== 4) return null;
+		if (!Array.isArray(parsed.qVarParams) || parsed.qVarParams.length !== 4) return null;
 		if (!Array.isArray(parsed.slotComposites) || parsed.slotComposites.length !== 4) return null;
 		if (!Array.isArray(parsed.snapshots) || parsed.snapshots.length !== 8) return null;
 		return parsed as SharedSet;

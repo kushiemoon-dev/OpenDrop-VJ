@@ -26,6 +26,20 @@ export function defaultTimeParams(): DeckTimeParams {
 	};
 }
 
+/** Time params for the 4 decks, indexed 0-3. */
+export type TimeParamsTuple = [DeckTimeParams, DeckTimeParams, DeckTimeParams, DeckTimeParams];
+
+/**
+ * Merge a patch into one slot's DeckTimeParams. Pure — returns a new tuple.
+ * Does not write through to getGlobalTimeParams(); callers driving the
+ * Butterchurn-visible global must still do that side effect themselves.
+ */
+export function withTimeParams(params: TimeParamsTuple, slot: number, patch: Partial<DeckTimeParams>): TimeParamsTuple {
+	const next = [...params] as TimeParamsTuple;
+	next[slot] = { ...next[slot], ...patch };
+	return next;
+}
+
 /**
  * Shallow-clones `preset` and appends/prepends lines to its frame_eqs_str
  * that reference window.__odDeckParams[slot].*mult — pure string

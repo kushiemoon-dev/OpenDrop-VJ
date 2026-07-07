@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { blendStateFor, blendModeFromValue01, blendModeToValue01, migrateBlendModeString, GLBlend } from './compositor.js';
+import { blendStateFor, blendModeFromValue01, blendModeToValue01, migrateBlendModeString, GLBlend, withSlotComposite, type SlotComposites } from './compositor.js';
+import { DEFAULT_SLOT_COMPOSITE } from './sync.js';
 
 describe('blendStateFor', () => {
 	it('normal → over classique (SRC_ALPHA coverage constant)', () => {
@@ -72,4 +73,32 @@ describe('migrateBlendModeString', () => {
 	it('overlay (non supporté) → normal', () => { expect(migrateBlendModeString('overlay')).toBe('normal'); });
 	it('lighten (non supporté) → normal', () => { expect(migrateBlendModeString('lighten')).toBe('normal'); });
 	it('valeur inconnue quelconque → normal', () => { expect(migrateBlendModeString('garbage')).toBe('normal'); });
+});
+
+describe('withSlotComposite', () => {
+	const composites: SlotComposites = [
+		{ ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE },
+	];
+
+	it('met à jour uniquement le slot ciblé', () => {
+		const next = withSlotComposite(composites, 1, { blend: 'screen' });
+		expect(next[1].blend).toBe('screen');
+		expect(next[0].blend).toBe('normal');
+		expect(next[2].blend).toBe('normal');
+		expect(next[3].blend).toBe('normal');
+	});
+
+	it('merge un patch partiel sans toucher aux autres champs du slot', () => {
+		const next = withSlotComposite(composites, 0, { lumaBlack: 0.3 });
+		expect(next[0].lumaBlack).toBe(0.3);
+		expect(next[0].lumaWhite).toBe(1);
+		expect(next[0].blend).toBe('normal');
+	});
+
+	it('ne mute pas le tableau ni les objets source', () => {
+		const next = withSlotComposite(composites, 2, { colorKey: true });
+		expect(next).not.toBe(composites);
+		expect(next[2]).not.toBe(composites[2]);
+		expect(composites[2].colorKey).toBe(false);
+	});
 });

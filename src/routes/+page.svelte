@@ -17,9 +17,9 @@
 	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex, visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
-	import { MidiEngine, triggerKey, formatTrigger, type MidiTriggerKey } from '$lib/engine/midi.js';
+	import { MidiEngine, triggerKey, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
-	import { loadKeymap, saveKeymap, resetKeymap, formatKey, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
+	import { loadKeymap, saveKeymap, resetKeymap, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
 	import { Clock } from '$lib/engine/clock.js';
 	import { LfoEngine, defaultSlot } from '$lib/engine/lfo.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
@@ -36,6 +36,14 @@
 	} from '$lib/engine/cloud-presets-store.svelte.js';
 	import SidebarCloudPresets from '$lib/components/SidebarCloudPresets.svelte';
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
+	import SidebarQuality from '$lib/components/SidebarQuality.svelte';
+	import SidebarOutput from '$lib/components/SidebarOutput.svelte';
+	import SidebarMidi from '$lib/components/SidebarMidi.svelte';
+	import SidebarKeymap from '$lib/components/SidebarKeymap.svelte';
+	import SidebarStrobe from '$lib/components/SidebarStrobe.svelte';
+	import SidebarLfo from '$lib/components/SidebarLfo.svelte';
+	import SidebarColor from '$lib/components/SidebarColor.svelte';
+	import SidebarElectron from '$lib/components/SidebarElectron.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
 	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 	import MixerLayout from '$lib/components/MixerLayout.svelte';
@@ -2021,253 +2029,87 @@
   />
 {/snippet}
 {#snippet qualiteSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Qualité rendu</span>
-			{#if status === 'running' && fps > 0}
-				<span class="label" style="color:var(--info)">{fps} fps</span>
-			{/if}
-		</div>
-		<div class="btn-row">
-			<button class="btn-sm" class:active={quality === 'low'} onclick={() => quality = 'low'} disabled={status !== 'running'}>Low</button>
-			<button class="btn-sm" class:active={quality === 'medium'} onclick={() => quality = 'medium'} disabled={status !== 'running'}>Med</button>
-			<button class="btn-sm" class:active={quality === 'high'} onclick={() => quality = 'high'} disabled={status !== 'running'}>High</button>
-		</div>
-		<div class="btn-row" style="margin-top:6px">
-			<button class="btn-sm" class:active={targetFps === 30} onclick={() => targetFps = 30} disabled={status !== 'running'}>30 fps</button>
-			<button class="btn-sm" class:active={targetFps === 45} onclick={() => targetFps = 45} disabled={status !== 'running'}>45 fps</button>
-			<button class="btn-sm" class:active={targetFps === 60} onclick={() => targetFps = 60} disabled={status !== 'running'}>60 fps</button>
-		</div>
-		<div class="btn-row" style="margin-top:4px">
-			<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => invisibleMode = 'eco'} disabled={status !== 'running'} title="Decks cachés à ~8 fps">Éco</button>
-			<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => invisibleMode = 'pause'} disabled={status !== 'running'} title="Decks cachés pausés">Pause</button>
-			<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => invisibleMode = 'off'} disabled={status !== 'running'} title="Tous les decks à plein régime">Off</button>
-		</div>
-	</div>
+	<SidebarQuality
+		{quality}
+		{targetFps}
+		{invisibleMode}
+		{status}
+		{fps}
+		onQualityChange={(q) => { quality = q; }}
+		onTargetFpsChange={(n) => { targetFps = n; }}
+		onInvisibleModeChange={(m) => { invisibleMode = m; }}
+	/>
 {/snippet}
 {#snippet outputSection()}
-	<div class="controls-section">
-		<div class="output-row">
-			<button class="btn-output" onclick={openOutput} disabled={status !== 'running'}>
-				⎋ Open output window
-			</button>
-			{#if isElectron && outputOpen}
-				<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive}
-					onclick={() => showStreamPanel = !showStreamPanel}
-					title="Stream output">
-					⏏ Stream {ndiActive || v4l2Active || spoutActive ? '●' : '○'}
-				</button>
-			{/if}
-		</div>
-		{#if isElectron && displays.length > 0}
-			<div class="midi-row" style="gap:6px;align-items:center;margin-top:6px">
-				<select
-					style="flex:1;font-size:10px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;padding:3px 4px"
-					value={selectedDisplayId}
-					onchange={(e) => { selectedDisplayId = Number(e.currentTarget.value); }}
-				>
-					{#each displays as d}
-						<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
-					{/each}
-				</select>
-				<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
-					⛶ Fullscreen
-				</button>
-			</div>
-		{:else if !isElectron}
-			<button class="btn-sm" onclick={openOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
-				⛶ Fullscreen
-			</button>
-		{/if}
-		{#if outputOpen && !isElectron}
-			<span class="label" style="color:var(--info)">Output window open — use as OBS Browser Source</span>
-		{/if}
-		{#if showStreamPanel && isElectron}
-			<div class="stream-panel">
-				{#if platform === 'linux'}
-					<button class="stream-btn" class:stream-btn--on={v4l2Active} onclick={toggleV4l2}
-						title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
-						V4L2 {v4l2Active ? '●' : '○'}
-					</button>
-				{/if}
-				<button class="stream-btn stream-btn--ndi" class:stream-btn--on={ndiActive} onclick={toggleNdi}
-					title={ndiActive ? 'Stop NDI' : 'Start NDI'}>
-					NDI {ndiActive ? '●' : '○'}
-				</button>
-				{#if platform === 'win32'}
-					<button class="stream-btn stream-btn--spout" class:stream-btn--on={spoutActive} onclick={toggleSpout}
-						title={spoutActive ? 'Stop Spout' : 'Start Spout'}>
-						SPOUT {spoutActive ? '●' : '○'}
-					</button>
-				{/if}
-				{#if v4l2Error}<div class="stream-error">{v4l2Error}</div>{/if}
-				{#if ndiError}<div class="stream-error">{ndiError}</div>{/if}
-				{#if spoutError}<div class="stream-error">{spoutError}</div>{/if}
-			</div>
-		{/if}
-	</div>
+	<SidebarOutput
+		{status}
+		{isElectron}
+		{outputOpen}
+		{displays}
+		{selectedDisplayId}
+		{showStreamPanel}
+		{platform}
+		{ndiActive}
+		{v4l2Active}
+		{spoutActive}
+		{ndiError}
+		{v4l2Error}
+		{spoutError}
+		onOpenOutput={openOutput}
+		onOpenOutputFullscreen={openOutputFullscreen}
+		onToggleStreamPanel={() => { showStreamPanel = !showStreamPanel; }}
+		onSelectDisplay={(id) => { selectedDisplayId = id; }}
+		onToggleNdi={toggleNdi}
+		onToggleV4l2={toggleV4l2}
+		onToggleSpout={toggleSpout}
+	/>
 {/snippet}
 {#snippet midiSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">MIDI</span>
-			{#if midiSupported}
-				<button class="btn-sm" class:active={midiConnected} onclick={toggleMidi}>
-					{midiConnected ? 'Déconnecter' : 'Connecter'}
-				</button>
-			{:else}
-				<span style="font-size:10px;color:var(--error)">Chromium only</span>
-			{/if}
-		</div>
-		{#if midiConnected}
-			<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
-			{#if midiClockBpm > 0}
-				<span class="source-badge" style="color:var(--ok)">♩ MIDI Clock {midiClockBpm} BPM</span>
-			{/if}
-			{#if learningAction !== null}
-				<span style="font-size:11px;color:var(--warn)">Bouge un knob/bouton sur ton contrôleur…</span>
-			{/if}
-			<div class="midi-list">
-				{#each registry.all() as cmd}
-					{@const mapped = midiMappings[cmd.id]}
-					<div class="midi-row">
-						<span class="midi-label">{cmd.label}</span>
-						<span class="midi-binding" class:midi-learning={learningAction === cmd.id}>
-							{mapped ? formatTrigger(mapped) : '—'}
-						</span>
-						<button class="btn-sm pl-btn" class:active={learningAction === cmd.id}
-							onclick={() => startLearn(cmd.id)}>
-							{learningAction === cmd.id ? '…' : 'Learn'}
-						</button>
-						{#if mapped}
-							<button class="pl-remove" onclick={() => clearMapping(cmd.id)}>×</button>
-						{/if}
-					</div>
-				{/each}
-			</div>
-		{/if}
-	</div>
+	<SidebarMidi
+		{midiSupported}
+		{midiConnected}
+		{midiDeviceNames}
+		{midiClockBpm}
+		{learningAction}
+		{midiMappings}
+		{registry}
+		onToggleMidi={toggleMidi}
+		onStartLearn={startLearn}
+		onClearMapping={clearMapping}
+	/>
 {/snippet}
 {#snippet clavierSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Clavier</span>
-			<button class="btn-sm" onclick={doResetKeymap}>Reset</button>
-		</div>
-		{#if learningKey !== null}
-			<span style="font-size:11px;color:var(--warn)">Appuie sur la touche à assigner… (Esc = annuler)</span>
-		{/if}
-		<div class="midi-list">
-			{#each registry.all() as cmd}
-				{@const assignedKey = keyById.get(cmd.id)}
-				<div class="midi-row">
-					<span class="midi-label">{cmd.label}</span>
-					<span class="midi-binding" class:midi-learning={learningKey === cmd.id}>
-						{assignedKey ? formatKey(assignedKey) : '—'}
-					</span>
-					<button class="btn-sm pl-btn" class:active={learningKey === cmd.id}
-						onclick={() => { learningKey = learningKey === cmd.id ? null : cmd.id; }}>
-						{learningKey === cmd.id ? '…' : 'Learn'}
-					</button>
-					{#if assignedKey}
-						<button class="pl-remove" onclick={() => clearKeyBinding(cmd.id)}>×</button>
-					{/if}
-				</div>
-			{/each}
-		</div>
-	</div>
+	<SidebarKeymap
+		{learningKey}
+		{keyById}
+		{registry}
+		onResetKeymap={doResetKeymap}
+		onToggleLearnKey={(id) => { learningKey = learningKey === id ? null : id; }}
+		onClearKeyBinding={clearKeyBinding}
+	/>
 {/snippet}
 {#snippet strobeSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Strobe</span>
-			<button class="btn-sm" class:active={strobeOn} onclick={() => { strobeOn = !strobeOn; }}>
-				{strobeOn ? 'ON' : 'OFF'}
-			</button>
-		</div>
-		{#if strobeOn}
-			<div class="midi-row" style="gap:4px;flex-wrap:wrap">
-				<span class="midi-label">Rate</span>
-				{#each [0.25, 0.5, 1, 2, 4] as r}
-					<button class="btn-sm" class:active={strobeRate === r}
-						onclick={() => { strobeRate = r; }}>
-						{r < 1 ? `1/${Math.round(1/r)}` : `${r}×`}
-					</button>
-				{/each}
-			</div>
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label">Intensité</span>
-				<input type="range" min="0" max="1" step="0.05" bind:value={strobeIntensity} style="flex:1" />
-				<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
-			</div>
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label">Couleur</span>
-				<input type="color" bind:value={strobeColor} style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />
-			</div>
-		{/if}
-	</div>
+	<SidebarStrobe
+		{strobeOn}
+		{strobeRate}
+		{strobeIntensity}
+		{strobeColor}
+		onToggleStrobe={() => { strobeOn = !strobeOn; }}
+		onRateChange={(r) => { strobeRate = r; }}
+		onIntensityChange={(v) => { strobeIntensity = v; }}
+		onColorChange={(c) => { strobeColor = c; }}
+	/>
 {/snippet}
 {#snippet lfoSection()}
-	<div class="controls-section">
-		<div class="pl-header"><span class="label">LFO</span></div>
-		{#each lfoSlots as slot, i}
-			<div style="margin-bottom:6px;font-size:11px">
-				<div class="midi-row" style="gap:4px;flex-wrap:wrap">
-					<input type="checkbox" bind:checked={slot.enabled} />
-					<span class="midi-label">LFO {i+1}</span>
-					{#each (['sine','saw','square','sh'] as const) as shape}
-						<button class="btn-sm" class:active={slot.shape === shape}
-							onclick={() => { slot.shape = shape; }}>
-							{shape}
-						</button>
-					{/each}
-				</div>
-				{#if slot.enabled}
-					<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
-						<span class="midi-label">Cible</span>
-						<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
-							value={slot.target ?? ''}
-							onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>
-							<option value="">—</option>
-							{#each registry.all().filter(c => c.kind === 'range') as cmd}
-								<option value={cmd.id}>{cmd.label}</option>
-							{/each}
-						</select>
-					</div>
-					<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
-						<span class="midi-label">Rate</span>
-						<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
-						<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
-					</div>
-					<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
-						<span class="midi-label">Amount</span>
-						<input type="range" min="0" max="1" step="0.05" bind:value={slot.amount} style="flex:1" />
-					</div>
-				{/if}
-			</div>
-		{/each}
-	</div>
-{/snippet}
-{#snippet colorDeck(label: string, params: ColorParams, onUpdate: (p: ColorParams) => void, mt?: string)}
-	<div class="pl-header" style={mt}>
-		<span class="label">Color {label}</span>
-		<button class="btn-sm" onclick={() => onUpdate({ ...DEFAULT_COLOR_PARAMS })}>↺</button>
-	</div>
-	{#each ([['Hue', 'hueRotate', 0, 1, '°', 360], ['Sat', 'saturate', 0, 1, '%', 200], ['Bright', 'brightness', 0, 1, '%', 200], ['Contrast', 'contrast', 0, 1, '%', 200], ['Invert', 'invert', 0, 1, '%', 100]] as const) as [lbl, key, min, max, unit, scale]}
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">{lbl}</span>
-			<input type="range" {min} {max} step="0.01" value={params[key]}
-				oninput={(e) => { onUpdate({ ...params, [key]: +e.currentTarget.value }); }}
-				style="flex:1" />
-			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{Math.round(params[key] * scale)}{unit}</span>
-		</div>
-	{/each}
+	<SidebarLfo {lfoSlots} {registry} />
 {/snippet}
 {#snippet colorSection()}
-	<div class="controls-section">
-		{@render colorDeck('A', colorParamsA, (p) => { colorParamsA = p; })}
-		{@render colorDeck('B', colorParamsB, (p) => { colorParamsB = p; }, 'margin-top:6px')}
-	</div>
+	<SidebarColor
+		{colorParamsA}
+		{colorParamsB}
+		onUpdateA={(p) => { colorParamsA = p; }}
+		onUpdateB={(p) => { colorParamsB = p; }}
+	/>
 {/snippet}
 {#snippet compositeDeck(slot: number)}
 	{@const cfg = slotComposites[slot]}
@@ -2445,59 +2287,22 @@
 	</div>
 {/snippet}
 {#snippet electronSection()}
-	{#if isElectron}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">OSC</span>
-			<button class="btn-sm" class:active={oscActive} onclick={toggleOsc}>
-				{oscActive ? 'Stop' : 'Start'}
-			</button>
-		</div>
-		{#if oscActive}
-			<span class="source-badge">Écoute UDP :{oscPort}</span>
-			<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
-		{:else}
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label">Port</span>
-				<input type="number" min="1024" max="65535" bind:value={oscPort}
-					style="width:70px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
-			</div>
-		{/if}
-		{#if oscError}<div style="font-size:10px;color:var(--error);margin-top:4px">{oscError}</div>{/if}
-	</div>
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Remote</span>
-			<button class="btn-sm" class:active={remoteActive} onclick={toggleRemote}>
-				{remoteActive ? 'Stop' : 'Démarrer'}
-			</button>
-		</div>
-		{#if remoteActive && remoteUrl}
-			<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
-			<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:var(--info);display:block;margin-top:4px">
-				Ouvrir sur cet appareil ↗
-			</a>
-		{/if}
-		{#if !remoteActive}
-			<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
-		{/if}
-		{#if remoteError}<div style="font-size:10px;color:var(--error);margin-top:4px">{remoteError}</div>{/if}
-	</div>
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Ableton Link</span>
-			<button class="btn-sm" class:active={linkActive} onclick={toggleLink}>
-				{linkActive ? 'Stop' : 'Démarrer'}
-			</button>
-		</div>
-		{#if linkActive}
-			<span class="source-badge">{linkPeers} pair{linkPeers !== 1 ? 's' : ''} connecté{linkPeers !== 1 ? 's' : ''}</span>
-		{:else}
-			<span style="font-size:10px;color:#666">Synchronise le tempo avec Ableton Live et autres apps Link sur le réseau local.</span>
-		{/if}
-		{#if linkError}<div style="font-size:10px;color:var(--error);margin-top:4px">{linkError}</div>{/if}
-	</div>
-	{/if}
+	<SidebarElectron
+		{isElectron}
+		{oscActive}
+		{oscPort}
+		{oscError}
+		{remoteActive}
+		{remoteUrl}
+		{remoteError}
+		{linkActive}
+		{linkPeers}
+		{linkError}
+		onToggleOsc={toggleOsc}
+		onOscPortChange={(port) => { oscPort = port; }}
+		onToggleRemote={toggleRemote}
+		onToggleLink={toggleLink}
+	/>
 {/snippet}
 {#if pendingSharedSet}
 	<div class="overlay share-confirm-overlay">
@@ -2880,11 +2685,6 @@
 		color: var(--accent); font-weight: 600;
 	}
 
-	.btn-row { display: flex; gap: 0.4rem; }
-
-	.source-badge { font-size: 11px; color: var(--cyan); }
-
-
 	/* ── Mixer ── */
 	.deck-cards-row { display: flex; gap: 0.4rem; }
 
@@ -2955,8 +2755,6 @@
 
 	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
 
-	.pl-btn { padding: 0.22rem 0.4rem; font-size: 11px; }
-
 	.pl-header { display: flex; align-items: center; justify-content: space-between; }
 
 	.pl-remove {
@@ -2977,97 +2775,9 @@
 	.snap-name:focus { outline: none; border-color: var(--accent); }
 	.snap-name:disabled { color: var(--text-muted); cursor: not-allowed; }
 
-	/* MIDI */
-	.midi-list {
-		display: flex; flex-direction: column; gap: 2px;
-		max-height: 160px; overflow-y: auto;
-	}
-
 	.midi-row { display: flex; align-items: center; gap: 3px; }
 
 	.midi-label { font-size: 10px; color: var(--text-muted); width: 80px; flex-shrink: 0; white-space: nowrap; }
-
-	.midi-binding {
-		flex: 1; font-size: 10px; color: var(--text-muted); font-family: 'Courier New', monospace;
-		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-	}
-
-	.midi-binding.midi-learning { color: var(--warn); animation: blink 0.6s step-end infinite; }
-
-	@keyframes blink { 50% { opacity: 0; } }
-
-	/* Output button */
-	.btn-output {
-		width: 100%;
-		background: linear-gradient(135deg, rgba(0,229,255,0.08), rgba(180,79,255,0.08));
-		color: var(--cyan); border: 1px solid #004455;
-		border-radius: 6px; padding: 0.45rem; font-size: 12px; font-weight: 600;
-		cursor: pointer; letter-spacing: 0.03em;
-		transition: all 0.15s;
-		box-shadow: 0 0 12px rgba(0,229,255,0.1);
-	}
-
-	.btn-output:hover:not(:disabled) {
-		background: linear-gradient(135deg, rgba(0,229,255,0.14), rgba(180,79,255,0.14));
-		box-shadow: 0 0 20px rgba(0,229,255,0.25);
-		border-color: var(--cyan);
-	}
-
-	.btn-output:disabled { opacity: 0.3; cursor: not-allowed; }
-
-	.output-row {
-		display: flex;
-		gap: 6px;
-		align-items: center;
-	}
-
-	.btn-stream {
-		background: transparent;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: var(--text-muted);
-		font-size: 11px;
-		font-weight: 700;
-		padding: 4px 8px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-	.btn-stream:hover { border-color: #aaa; color: #aaa; }
-	.btn-stream.stream-active { border-color: var(--info); color: var(--info); }
-
-	.stream-panel {
-		margin-top: 6px;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		align-items: center;
-	}
-
-	.stream-btn {
-		background: rgba(0,0,0,0.4);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		color: var(--text-muted);
-		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.05em;
-		padding: 4px 10px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-	.stream-btn:hover { border-color: #aaa; color: #aaa; }
-	.stream-btn--on { border-color: currentColor; }
-	.stream-btn--ndi { color: var(--text-muted); }
-	.stream-btn--ndi:hover, .stream-btn--ndi.stream-btn--on { border-color: var(--warn); color: var(--warn); background: var(--warn-dim, rgba(255,140,0,0.1)); }
-	.stream-btn--spout { color: var(--text-muted); }
-	.stream-btn--spout:hover, .stream-btn--spout.stream-btn--on { border-color: var(--violet); color: var(--violet); background: var(--violet-dim); }
-	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout) { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
-
-	.stream-error {
-		width: 100%;
-		font-size: 10px;
-		color: var(--error);
-	}
 
 	/* Visualizer drag-over */
 	.visualizer-wrap.drag-over::after {

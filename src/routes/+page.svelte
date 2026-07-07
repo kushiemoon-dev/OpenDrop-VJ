@@ -59,7 +59,10 @@
 	import MixerLayout from '$lib/components/MixerLayout.svelte';
 	import { DeckManager } from '$lib/engine/deck-manager.js';
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
-	import { saveVideo, deleteVideo, type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
+	import { type ClipRef } from '$lib/engine/video-store.js';
+	import {
+		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoBeat, onVideoAudioTick,
+	} from '$lib/video-loops/playback-store.svelte.js';
 
 	// — State —————————————————————————————————————————————
 	let canvases = $state<(HTMLCanvasElement | undefined)[]>([undefined, undefined, undefined, undefined]);
@@ -195,19 +198,7 @@
 	const effectiveOS = $derived(platform || detectWebOS());
 	const loopbackSupported = $derived(isElectron && platform === 'win32' && !!window.electronAPI?.listOutputDevices);
 
-	// — Video loops ———————————————————————————————————————
-	let videoEnabled = $state(false);
-	let videoOpacity = $state(0.6);
-	let videoAdvance = $state<'shuffle' | 'sequential' | 'manual'>('shuffle');
-	let videoBeatsPerCut = $state(8);
-	let vrCut = $state(true);
-	let vrFlash = $state(true);
-	let vrWarp = $state(true);
-	let vrHue = $state(false);
-	let userClips = $state<VideoClipMeta[]>([]);
-	let currentClipIndex = $state(0);
-	let videoPlaybackRate = $state(1);
-	let videoBeatCount = 0;
+	// — Video loops — state/actions extracted into playback-store.svelte.ts
 
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
@@ -366,7 +357,7 @@
 	const opacityB = $derived(opacities[1]);
 	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
 	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
-	const allClips = $derived([...builtinClips, ...userClips]);
+	const allClips = $derived([...builtinClips, ...videoState.userClips]);
 
 	/** Returns the preset of the first running deck on a given bus, or the last known preset if none running. */
 	function primaryPreset(bus: 'A' | 'B'): string {
@@ -382,10 +373,10 @@
 	const runningCount = $derived([0, 1, 2, 3].filter(i => manager.isRunning(i)).length);
 
 	const currentClip = $derived<ClipRef | null>(
-		videoEnabled && allClips.length > 0 ? allClips[currentClipIndex % allClips.length].ref : null
+		videoState.enabled && allClips.length > 0 ? allClips[videoState.currentClipIndex % allClips.length].ref : null
 	);
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
-	const videoPlaybackRateStep = $derived(Math.round(videoPlaybackRate * 20) / 20);
+	const videoPlaybackRateStep = $derived(Math.round(videoState.playbackRate * 20) / 20);
 
 	// — Câblage commandes M2 (strobe/LFO) dans le registre ——
 	registry.register({
@@ -597,12 +588,7 @@
 				overlayQueueVolumeState = next;
 				if (triggered) advanceOverlayQueue(1);
 			}
-			if (videoEnabled && vrWarp) {
-				const target = 0.6 + lv.bass * 1.4;
-				videoPlaybackRate += (target - videoPlaybackRate) * 0.15;
-			} else {
-				videoPlaybackRate = 1;
-			}
+			onVideoAudioTick(lv.bass);
 			// FPS counter — mesure les renders Butterchurn réels (pas les ticks RAF)
 			if (t - fpsLast >= 500) {
 				const activeSlot = ([0, 1, 2, 3] as const).find(i => manager.isRunning(i)) ?? 0;
@@ -651,12 +637,12 @@
 	// — Persistance localStorage vidéo ———————————————————
 	$effect(() => {
 		if (!_ready) return;
-		localStorage.setItem('od-video-enabled', String(videoEnabled));
-		localStorage.setItem('od-video-opacity', String(videoOpacity));
-		localStorage.setItem('od-video-advance', videoAdvance);
-		localStorage.setItem('od-video-beats', String(videoBeatsPerCut));
-		localStorage.setItem('od-video-reactions', JSON.stringify({ cut: vrCut, flash: vrFlash, warp: vrWarp, hue: vrHue }));
-		localStorage.setItem('od-video-userclips', JSON.stringify(userClips));
+		localStorage.setItem('od-video-enabled', String(videoState.enabled));
+		localStorage.setItem('od-video-opacity', String(videoState.opacity));
+		localStorage.setItem('od-video-advance', videoState.advance);
+		localStorage.setItem('od-video-beats', String(videoState.beatsPerCut));
+		localStorage.setItem('od-video-reactions', JSON.stringify({ cut: videoState.reactCut, flash: videoState.reactFlash, warp: videoState.reactWarp, hue: videoState.reactHue }));
+		localStorage.setItem('od-video-userclips', JSON.stringify(videoState.userClips));
 	});
 
 	// — Sync overlays vers output ——————————————————————————
@@ -668,12 +654,12 @@
 	// — Sync vidéo vers output ————————————————————————————
 	$effect(() => {
 		const payload = { // force tracking of all fields before sync?.
-			enabled: videoEnabled,
+			enabled: videoState.enabled,
 			clip: currentClip,
-			opacity: videoOpacity,
+			opacity: videoState.opacity,
 			playbackRate: videoPlaybackRateStep,
-			flashOn: vrFlash,
-			hueOn: vrHue,
+			flashOn: videoState.reactFlash,
+			hueOn: videoState.reactHue,
 		};
 		sync?.sendVideo(payload);
 	});
@@ -929,17 +915,17 @@
 				} catch { /* ignore corrupt od-overlay-queue */ }
 			}
 			const savedVideoEnabled = localStorage.getItem('od-video-enabled');
-			if (savedVideoEnabled) videoEnabled = savedVideoEnabled === 'true';
+			if (savedVideoEnabled) videoState.enabled = savedVideoEnabled === 'true';
 			const savedVideoOpacity = localStorage.getItem('od-video-opacity');
-			if (savedVideoOpacity) videoOpacity = Number(savedVideoOpacity);
+			if (savedVideoOpacity) videoState.opacity = Number(savedVideoOpacity);
 			const savedVideoAdvance = localStorage.getItem('od-video-advance');
-			if (savedVideoAdvance === 'shuffle' || savedVideoAdvance === 'sequential' || savedVideoAdvance === 'manual') videoAdvance = savedVideoAdvance;
+			if (savedVideoAdvance === 'shuffle' || savedVideoAdvance === 'sequential' || savedVideoAdvance === 'manual') videoState.advance = savedVideoAdvance;
 			const savedVideoBeats = localStorage.getItem('od-video-beats');
-			if (savedVideoBeats) videoBeatsPerCut = Number(savedVideoBeats);
+			if (savedVideoBeats) videoState.beatsPerCut = Number(savedVideoBeats);
 			const savedVideoReactions = localStorage.getItem('od-video-reactions');
-			if (savedVideoReactions) { try { const r = JSON.parse(savedVideoReactions); vrCut = !!r.cut; vrFlash = !!r.flash; vrWarp = !!r.warp; vrHue = !!r.hue; } catch {} }
+			if (savedVideoReactions) { try { const r = JSON.parse(savedVideoReactions); videoState.reactCut = !!r.cut; videoState.reactFlash = !!r.flash; videoState.reactWarp = !!r.warp; videoState.reactHue = !!r.hue; } catch {} }
 			const savedVideoClips = localStorage.getItem('od-video-userclips');
-			if (savedVideoClips) { try { userClips = JSON.parse(savedVideoClips); } catch {} }
+			if (savedVideoClips) { try { videoState.userClips = JSON.parse(savedVideoClips); } catch {} }
 			const savedDeckBus = localStorage.getItem('od-deck-bus');
 			if (savedDeckBus) {
 				try { deckBus = JSON.parse(savedDeckBus); } catch {}
@@ -1074,7 +1060,7 @@
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 				sync?.sendOverlays(overlayState.overlays);
 				sync?.sendOverlayQueueIndex(overlayState.queueIndex);
-				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
+				sync?.sendVideo({ enabled: videoState.enabled, clip: currentClip, opacity: videoState.opacity, playbackRate: videoPlaybackRateStep, flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
 				// Stream live PCM to the output window so it becomes audio-reactive
@@ -1319,14 +1305,7 @@
 		setTimeout(() => { beat = false; }, 80);
 		sync?.sendBeat(clock.bpm || detectedBpm);
 
-		if (videoEnabled && vrCut && videoAdvance !== 'manual' && allClips.length > 1) {
-			videoBeatCount = (videoBeatCount + 1) % videoBeatsPerCut;
-			if (videoBeatCount === 0) {
-				currentClipIndex = videoAdvance === 'shuffle'
-					? Math.floor(Math.random() * allClips.length)
-					: (currentClipIndex + 1) % allClips.length;
-			}
-		}
+		onVideoBeat();
 
 		if (autoXfade) {
 			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
@@ -1359,11 +1338,7 @@
 		const y = (e.clientY - rect.top) / rect.height;
 		for (const f of Array.from(e.dataTransfer.files)) {
 			if (f.type.startsWith('video/')) {
-				if (f.size > 50 * 1024 * 1024) continue;
-				const id = crypto.randomUUID();
-				await saveVideo(id, f);
-				userClips = [...userClips, { ref: { kind: 'user', id }, name: f.name.replace(/\.[^.]+$/, '') }];
-				if (!videoEnabled) videoEnabled = true;
+				await addVideoFromFile(f);
 				continue;
 			}
 			if (!f.type.startsWith('image/')) continue;
@@ -1377,28 +1352,6 @@
 				reader.readAsDataURL(f);
 			});
 		}
-	}
-
-	async function addVideoFromFile(file: File) {
-		if (file.size > 50 * 1024 * 1024) return;
-		const id = crypto.randomUUID();
-		await saveVideo(id, file);
-		userClips = [...userClips, { ref: { kind: 'user', id }, name: file.name.replace(/\.[^.]+$/, '') }];
-		if (!videoEnabled) videoEnabled = true;
-	}
-
-	async function onVideoFilePick(e: Event) {
-		const files = (e.target as HTMLInputElement).files;
-		if (!files) return;
-		for (const f of Array.from(files)) await addVideoFromFile(f);
-		(e.target as HTMLInputElement).value = '';
-	}
-
-	async function removeVideoClip(index: number) {
-		const clip = userClips[index - builtinClips.length];
-		if (clip?.ref.kind === 'user') await deleteVideo(clip.ref.id);
-		userClips = userClips.filter((_, i) => i !== index - builtinClips.length);
-		if (currentClipIndex >= allClips.length) currentClipIndex = 0;
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
@@ -1951,25 +1904,25 @@
 {/snippet}
 {#snippet videoSection()}
   <SidebarVideo
-    {videoEnabled}
-    {videoOpacity}
-    {videoAdvance}
-    {videoBeatsPerCut}
-    {vrCut}
-    {vrFlash}
-    {vrWarp}
-    {vrHue}
-    {currentClipIndex}
+    videoEnabled={videoState.enabled}
+    videoOpacity={videoState.opacity}
+    videoAdvance={videoState.advance}
+    videoBeatsPerCut={videoState.beatsPerCut}
+    vrCut={videoState.reactCut}
+    vrFlash={videoState.reactFlash}
+    vrWarp={videoState.reactWarp}
+    vrHue={videoState.reactHue}
+    currentClipIndex={videoState.currentClipIndex}
     {allClips}
-    onToggleVideo={() => { videoEnabled = !videoEnabled }}
-    onOpacityChange={(v) => { videoOpacity = v }}
-    onAdvanceChange={(v) => { videoAdvance = v }}
-    onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
-    onToggleVrCut={() => { vrCut = !vrCut }}
-    onToggleVrFlash={() => { vrFlash = !vrFlash }}
-    onToggleVrWarp={() => { vrWarp = !vrWarp }}
-    onToggleVrHue={() => { vrHue = !vrHue }}
-    onSelectClip={(i) => { currentClipIndex = i }}
+    onToggleVideo={() => { videoState.enabled = !videoState.enabled }}
+    onOpacityChange={(v) => { videoState.opacity = v }}
+    onAdvanceChange={(v) => { videoState.advance = v }}
+    onBeatsPerCutChange={(v) => { videoState.beatsPerCut = v }}
+    onToggleVrCut={() => { videoState.reactCut = !videoState.reactCut }}
+    onToggleVrFlash={() => { videoState.reactFlash = !videoState.reactFlash }}
+    onToggleVrWarp={() => { videoState.reactWarp = !videoState.reactWarp }}
+    onToggleVrHue={() => { videoState.reactHue = !videoState.reactHue }}
+    onSelectClip={(i) => { videoState.currentClipIndex = i }}
     onRemoveClip={(i) => removeVideoClip(i)}
     onAddVideo={onVideoFilePick}
   />
@@ -2153,13 +2106,13 @@
 	aria-label="Visualizer"
 >
 	<!-- Video loop — premier enfant = derrière les decks -->
-	<VideoLayer clip={currentClip} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
+	<VideoLayer clip={currentClip} opacity={videoState.opacity} {beat} playbackRate={videoState.playbackRate} flashOn={videoState.reactFlash} hueOn={videoState.reactHue} />
 	<!-- Deck canvases — 4 slots, texture sources pour le Compositor (cachés) -->
 	{#each [0, 1, 2, 3] as i}
 		<canvas bind:this={canvases[i]} class="deck-src"></canvas>
 	{/each}
 	<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
-	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
+	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoState.enabled ? 'screen' : 'normal'}></canvas>
 	<!-- Overlay sprites -->
 	<OverlayLayer overlays={overlayState.overlays} {beat} visibleIds={overlayVisibleIds} />
 	<!-- Strobe flash — top z-index, pointer-events none -->
@@ -2330,25 +2283,25 @@
 
 		<!-- Video loops -->
 		<SidebarVideo
-			{videoEnabled}
-			{videoOpacity}
-			{videoAdvance}
-			{videoBeatsPerCut}
-			{vrCut}
-			{vrFlash}
-			{vrWarp}
-			{vrHue}
-			{currentClipIndex}
+			videoEnabled={videoState.enabled}
+			videoOpacity={videoState.opacity}
+			videoAdvance={videoState.advance}
+			videoBeatsPerCut={videoState.beatsPerCut}
+			vrCut={videoState.reactCut}
+			vrFlash={videoState.reactFlash}
+			vrWarp={videoState.reactWarp}
+			vrHue={videoState.reactHue}
+			currentClipIndex={videoState.currentClipIndex}
 			{allClips}
-			onToggleVideo={() => { videoEnabled = !videoEnabled }}
-			onOpacityChange={(v) => { videoOpacity = v }}
-			onAdvanceChange={(v) => { videoAdvance = v }}
-			onBeatsPerCutChange={(v) => { videoBeatsPerCut = v }}
-			onToggleVrCut={() => { vrCut = !vrCut }}
-			onToggleVrFlash={() => { vrFlash = !vrFlash }}
-			onToggleVrWarp={() => { vrWarp = !vrWarp }}
-			onToggleVrHue={() => { vrHue = !vrHue }}
-			onSelectClip={(i) => { currentClipIndex = i }}
+			onToggleVideo={() => { videoState.enabled = !videoState.enabled }}
+			onOpacityChange={(v) => { videoState.opacity = v }}
+			onAdvanceChange={(v) => { videoState.advance = v }}
+			onBeatsPerCutChange={(v) => { videoState.beatsPerCut = v }}
+			onToggleVrCut={() => { videoState.reactCut = !videoState.reactCut }}
+			onToggleVrFlash={() => { videoState.reactFlash = !videoState.reactFlash }}
+			onToggleVrWarp={() => { videoState.reactWarp = !videoState.reactWarp }}
+			onToggleVrHue={() => { videoState.reactHue = !videoState.reactHue }}
+			onSelectClip={(i) => { videoState.currentClipIndex = i }}
 			onRemoveClip={(i) => removeVideoClip(i)}
 			onAddVideo={onVideoFilePick}
 		/>

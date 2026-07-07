@@ -14,7 +14,7 @@
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
 		clampBeatsPerChange, clampOffset, applyBeatTriggerPatch,
 	} from '$lib/engine/beat-trigger.js';
-	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex, visibleOverlayIds } from '$lib/engine/overlay-queue.js';
+	import { visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, type MidiTriggerKey } from '$lib/engine/midi.js';
@@ -24,7 +24,11 @@
 	import { LfoEngine, defaultSlot } from '$lib/engine/lfo.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
 	import { getQualitySettings, DEFAULT_TIER, DEFAULT_PERF, type QualityTier, type InvisibleMode } from '$lib/engine/quality.js';
-	import { makeOverlay, saveAsset, deleteAsset, type Overlay } from '$lib/engine/overlay.js';
+	import {
+		overlayState, onOverlayFilePick, addTextOverlay, addOverlayAtPosition, onVisualizerDragOver,
+		removeOverlay, updateOverlay, toggleOverlayQueue, setOverlayQueueMode,
+		updateOverlayQueueTrigger, advanceOverlayQueue,
+	} from '$lib/engine/overlay-store.svelte.js';
 	import OverlayLayer from '$lib/components/OverlayLayer.svelte';
 	import VideoLayer from '$lib/components/VideoLayer.svelte';
 	import SidebarAudio from '$lib/components/SidebarAudio.svelte';
@@ -337,33 +341,13 @@
 	let lastFps = [0, 0, 0, 0];            // non-réactif: anti-churn inter-runs du $effect éco
 
 	// — Overlays ——————————————————————————————————————————
-	let overlays = $state<Overlay[]>([]);
 	let beat = $state(false);
-	let overlayDragOver = $state(false);
-	let overlayQueueEnabled = $state(false);
-	let overlayQueueIndex = $state(0);
-	let overlayQueueTrigger = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
-	let overlayQueueMode = $state<PlaylistMode>('sequential');
+	// overlays + overlay auto-cycle queue state/actions extracted into overlay-store.svelte.ts
 	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
-	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
-	const nonShareableOverlayCount = $derived(overlays.filter((o) => o.kind !== 'text').length);
+	const overlayVisibleIds = $derived(visibleOverlayIds(overlayState.overlays, overlayState.queueIndex));
+	const nonShareableOverlayCount = $derived(overlayState.overlays.filter((o) => o.kind !== 'text').length);
 
 	// — Presets cloud (Track 2) — état + actions extraits dans cloud-presets-store.svelte.ts
-
-	function toggleOverlayQueue() {
-		overlayQueueEnabled = !overlayQueueEnabled;
-	}
-
-	function updateOverlayQueueTrigger(patch: Partial<BeatTriggerConfig>) {
-		overlayQueueTrigger = applyBeatTriggerPatch(overlayQueueTrigger, patch);
-	}
-
-	function advanceOverlayQueue(direction: 1 | -1) {
-		const queued = pickQueuedOverlays(overlays);
-		overlayQueueIndex = direction === 1
-			? advanceQueueIndex(overlayQueueIndex, queued.length, overlayQueueMode)
-			: retreatQueueIndex(overlayQueueIndex, queued.length);
-	}
 	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
 	const activeDeck = $derived<'A' | 'B'>(deckBus[activeSlot] === 'B' ? 'B' : 'A');
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
@@ -549,7 +533,7 @@
 
 	// — Sync overlay queue index vers output ——————————————
 	$effect(() => {
-		const idx = overlayQueueIndex;
+		const idx = overlayState.queueIndex;
 		sync?.sendOverlayQueueIndex(idx);
 	});
 
@@ -608,8 +592,8 @@
 					else applyMidiAction('preset-next-b', 127);
 				}
 			}
-			if (overlayQueueEnabled && overlayQueueTrigger.mode === 'volume-peak') {
-				const { triggered, next } = detectVolumePeak(lv.rms, overlayQueueVolumeState, overlayQueueTrigger.sensitivity, t);
+			if (overlayState.queueEnabled && overlayState.queueTrigger.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, overlayQueueVolumeState, overlayState.queueTrigger.sensitivity, t);
 				overlayQueueVolumeState = next;
 				if (triggered) advanceOverlayQueue(1);
 			}
@@ -645,14 +629,14 @@
 		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatTriggerA));
 		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatTriggerB));
 		localStorage.setItem('od-overlay-queue', JSON.stringify({
-			enabled: overlayQueueEnabled, trigger: overlayQueueTrigger, mode: overlayQueueMode,
+			enabled: overlayState.queueEnabled, trigger: overlayState.queueTrigger, mode: overlayState.queueMode,
 		}));
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
 		localStorage.setItem('od-keymap', JSON.stringify(keymap));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-target-fps', String(targetFps));
 		localStorage.setItem('od-invisible-mode', invisibleMode);
-		localStorage.setItem('od-overlays', JSON.stringify(overlays));
+		localStorage.setItem('od-overlays', JSON.stringify(overlayState.overlays));
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
 		localStorage.setItem('od-transition', String(transitionTime));
@@ -677,7 +661,7 @@
 
 	// — Sync overlays vers output ——————————————————————————
 	$effect(() => {
-		const list = overlays; // force tracking (same pattern as crossfader above)
+		const list = overlayState.overlays; // force tracking (same pattern as crossfader above)
 		sync?.sendOverlays(list);
 	});
 
@@ -931,17 +915,17 @@
 				invisibleMode = savedInvisibleMode;
 			}
 			const savedOverlays = localStorage.getItem('od-overlays');
-			if (savedOverlays) overlays = JSON.parse(savedOverlays);
+			if (savedOverlays) overlayState.overlays = JSON.parse(savedOverlays);
 			const savedOverlayQueue = localStorage.getItem('od-overlay-queue');
 			if (savedOverlayQueue) {
 				try {
 					const parsed = JSON.parse(savedOverlayQueue);
-					overlayQueueEnabled = !!parsed.enabled;
+					overlayState.queueEnabled = !!parsed.enabled;
 					const rawTrigger = { ...defaultBeatTriggerConfig(), ...parsed.trigger };
 					rawTrigger.beatsPerChange = clampBeatsPerChange(rawTrigger.beatsPerChange);
 					rawTrigger.offset = clampOffset(rawTrigger.offset, rawTrigger.beatsPerChange);
-					overlayQueueTrigger = rawTrigger;
-					if (parsed.mode === 'sequential' || parsed.mode === 'shuffle') overlayQueueMode = parsed.mode;
+					overlayState.queueTrigger = rawTrigger;
+					if (parsed.mode === 'sequential' || parsed.mode === 'shuffle') overlayState.queueMode = parsed.mode;
 				} catch { /* ignore corrupt od-overlay-queue */ }
 			}
 			const savedVideoEnabled = localStorage.getItem('od-video-enabled');
@@ -1088,8 +1072,8 @@
 				for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
 				for (let i = 0; i < 4; i++) sync?.sendQVars(i, qVarParams[i]);
 				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
-				sync?.sendOverlays(overlays);
-				sync?.sendOverlayQueueIndex(overlayQueueIndex);
+				sync?.sendOverlays(overlayState.overlays);
+				sync?.sendOverlayQueueIndex(overlayState.queueIndex);
 				sync?.sendVideo({ enabled: videoEnabled, clip: currentClip, opacity: videoOpacity, playbackRate: videoPlaybackRateStep, flashOn: vrFlash, hueOn: vrHue });
 				if (currentDeviceId) sync?.sendSource(currentDeviceId);
 				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
@@ -1359,48 +1343,16 @@
 			if (playlistBItems.length > 0) playlistB?.next();
 			else applyMidiAction('preset-next-b', 127);
 		}
-		if (overlayQueueEnabled && shouldTriggerOnBeat(clock.beatCount, overlayQueueTrigger)) {
+		if (overlayState.queueEnabled && shouldTriggerOnBeat(clock.beatCount, overlayState.queueTrigger)) {
 			advanceOverlayQueue(1);
 		}
 	}
 
-	// — Overlay helpers ————————————————————————————————————
-	async function addOverlayFromFile(file: File) {
-		return new Promise<void>((resolve) => {
-			const reader = new FileReader();
-			reader.onload = async () => {
-				const dataUrl = reader.result as string;
-				const ov = makeOverlay(file.name.replace(/\.[^.]+$/, ''), { video: file.type.startsWith('video/') });
-				await saveAsset(ov.id, dataUrl);
-				overlays = [...overlays, ov];
-				resolve();
-			};
-			reader.readAsDataURL(file);
-		});
-	}
-
-	async function onOverlayFilePick(e: Event) {
-		const files = (e.target as HTMLInputElement).files;
-		if (!files) return;
-		for (const f of Array.from(files)) await addOverlayFromFile(f);
-		(e.target as HTMLInputElement).value = '';
-	}
-
-	function addTextOverlay(): string {
-		const ov = makeOverlay('Texte', { kind: 'text', text: 'Texte' });
-		overlays = [...overlays, ov];
-		return ov.id;
-	}
-
-	function onVisualizerDragOver(e: DragEvent) {
-		if (!e.dataTransfer?.types.includes('Files')) return;
-		e.preventDefault();
-		overlayDragOver = true;
-	}
-
+	// — Overlay helpers — extraits dans overlay-store.svelte.ts (addOverlayFromFile,
+	// onOverlayFilePick, addTextOverlay, onVisualizerDragOver, removeOverlay, updateOverlay)
 	async function onVisualizerDrop(e: DragEvent) {
 		e.preventDefault();
-		overlayDragOver = false;
+		overlayState.dragOver = false;
 		if (!e.dataTransfer?.files.length) return;
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		const x = (e.clientX - rect.left) / rect.width;
@@ -1419,24 +1371,12 @@
 				const reader = new FileReader();
 				reader.onload = async () => {
 					const dataUrl = reader.result as string;
-					const ov = makeOverlay(f.name.replace(/\.[^.]+$/, ''), { x, y });
-					await saveAsset(ov.id, dataUrl);
-					overlays = [...overlays, ov];
+					await addOverlayAtPosition(f.name.replace(/\.[^.]+$/, ''), dataUrl, x, y);
 					res();
 				};
 				reader.readAsDataURL(f);
 			});
 		}
-	}
-
-	async function removeOverlay(id: string) {
-		await deleteAsset(id);
-		overlays = overlays.filter(o => o.id !== id);
-		overlayQueueIndex = clampQueueIndex(overlayQueueIndex, pickQueuedOverlays(overlays).length);
-	}
-
-	function updateOverlay(id: string, patch: Partial<Overlay>) {
-		overlays = overlays.map(o => o.id === id ? { ...o, ...patch } : o);
 	}
 
 	async function addVideoFromFile(file: File) {
@@ -1742,10 +1682,10 @@
 			snapshots,
 			snapshotRecallDuration,
 			timelineKeyframes,
-			overlays,
+			overlays: overlayState.overlays,
 			beatTriggerA, beatTriggerB,
 			beatSyncA, beatSyncB,
-			overlayQueueEnabled, overlayQueueTrigger,
+			overlayQueueEnabled: overlayState.queueEnabled, overlayQueueTrigger: overlayState.queueTrigger,
 		};
 	}
 
@@ -1774,10 +1714,10 @@
 		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qVarParams[slot].enabled], value: [...qVarParams[slot].value] });
 		snapshots = s.snapshots; snapshotRecallDuration = s.snapshotRecallDuration;
 		timelineKeyframes = s.timelineKeyframes;
-		overlays = s.overlays;
+		overlayState.overlays = s.overlays;
 		beatTriggerA = s.beatTriggerA; beatTriggerB = s.beatTriggerB;
 		beatSyncA = s.beatSyncA; beatSyncB = s.beatSyncB;
-		overlayQueueEnabled = s.overlayQueueEnabled; overlayQueueTrigger = s.overlayQueueTrigger;
+		overlayState.queueEnabled = s.overlayQueueEnabled; overlayState.queueTrigger = s.overlayQueueTrigger;
 
 		if (status === 'running') {
 			await selectPresetForDeck('A', s.presetA);
@@ -2204,10 +2144,10 @@
 {/if}
 <div
 	class="visualizer-wrap"
-	class:drag-over={overlayDragOver}
+	class:drag-over={overlayState.dragOver}
 	class:mixer-hidden={layout !== 'stage'}
 	ondragover={onVisualizerDragOver}
-	ondragleave={() => overlayDragOver = false}
+	ondragleave={() => { overlayState.dragOver = false; }}
 	ondrop={onVisualizerDrop}
 	role="region"
 	aria-label="Visualizer"
@@ -2221,7 +2161,7 @@
 	<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
 	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoEnabled ? 'screen' : 'normal'}></canvas>
 	<!-- Overlay sprites -->
-	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
+	<OverlayLayer overlays={overlayState.overlays} {beat} visibleIds={overlayVisibleIds} />
 	<!-- Strobe flash — top z-index, pointer-events none -->
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
@@ -2359,16 +2299,16 @@
 
 		<!-- Overlays -->
 		<SidebarOverlays
-			{overlays}
+			overlays={overlayState.overlays}
 			onAddOverlays={onOverlayFilePick}
 			onAddText={addTextOverlay}
 			onRemoveOverlay={(id) => removeOverlay(id)}
 			onUpdateOverlay={(id, patch) => updateOverlay(id, patch)}
-			{overlayQueueEnabled}
-			{overlayQueueMode}
-			{overlayQueueTrigger}
+			overlayQueueEnabled={overlayState.queueEnabled}
+			overlayQueueMode={overlayState.queueMode}
+			overlayQueueTrigger={overlayState.queueTrigger}
 			onToggleOverlayQueue={toggleOverlayQueue}
-			onOverlayQueueModeChange={(mode) => { overlayQueueMode = mode; }}
+			onOverlayQueueModeChange={(mode) => setOverlayQueueMode(mode)}
 			onOverlayQueueTriggerChange={(patch) => updateOverlayQueueTrigger(patch)}
 			onOverlayQueueNext={() => advanceOverlayQueue(1)}
 			onOverlayQueuePrev={() => advanceOverlayQueue(-1)}

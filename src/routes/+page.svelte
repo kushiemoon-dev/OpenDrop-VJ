@@ -10,6 +10,10 @@
 	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch } from '$lib/engine/q-vars.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
+		playlistState, setPlaylistEngines, destroyPlaylistEngines, addToPlaylist, removeFromPlaylist,
+		togglePlaylist, playlistNext, playlistPrev, setPlaylistBeatSyncInterval, exportPlaylists, importPlaylists,
+	} from '$lib/engine/playlist-store.svelte.js';
+	import {
 		type BeatTriggerConfig, defaultBeatTriggerConfig, shouldTriggerOnBeat,
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
 		clampBeatsPerChange, clampOffset, applyBeatTriggerPatch,
@@ -101,15 +105,7 @@
 	let selectedDisplayId = $state<number | null>(null);
 	let outputWindowClosedUnlisten: (() => void) | null = null;
 
-	// — Playlist state ————————————————————————————————————
-	let playlistIntervalSec = $state(10);
-	let playlistMode = $state<PlaylistMode>('sequential');
-	let playlistAPlaying = $state(false);
-	let playlistBPlaying = $state(false);
-	let playlistA: PlaylistEngine | null = null;
-	let playlistB: PlaylistEngine | null = null;
-	let playlistAItems = $state<string[]>([]);
-	let playlistBItems = $state<string[]>([]);
+	// — Playlist state — extraite dans playlist-store.svelte.ts
 
 	// — MIDI ——————————————————————————————————————————————
 	const registry = createDefaultRegistry();
@@ -571,7 +567,7 @@
 				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateA, beatTriggerA.sensitivity, t);
 				volumePeakStateA = next;
 				if (triggered) {
-					if (playlistAItems.length > 0) playlistA?.next();
+					if (playlistState.aItems.length > 0) playlistNext('A');
 					else applyMidiAction('preset-next-a', 127);
 				}
 			}
@@ -579,7 +575,7 @@
 				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateB, beatTriggerB.sensitivity, t);
 				volumePeakStateB = next;
 				if (triggered) {
-					if (playlistBItems.length > 0) playlistB?.next();
+					if (playlistState.bItems.length > 0) playlistNext('B');
 					else applyMidiAction('preset-next-b', 127);
 				}
 			}
@@ -608,10 +604,10 @@
 	let _ready = $state(false);
 	$effect(() => {
 		if (!_ready) return;
-		localStorage.setItem('od-pl-a', JSON.stringify(playlistAItems));
-		localStorage.setItem('od-pl-b', JSON.stringify(playlistBItems));
-		localStorage.setItem('od-pl-interval', String(playlistIntervalSec));
-		localStorage.setItem('od-pl-mode', playlistMode);
+		localStorage.setItem('od-pl-a', JSON.stringify(playlistState.aItems));
+		localStorage.setItem('od-pl-b', JSON.stringify(playlistState.bItems));
+		localStorage.setItem('od-pl-interval', String(playlistState.intervalSec));
+		localStorage.setItem('od-pl-mode', playlistState.mode);
 		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatTriggerA));
 		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatTriggerB));
 		localStorage.setItem('od-overlay-queue', JSON.stringify({
@@ -791,13 +787,13 @@
 		// Restaurer les playlists sauvegardées
 		try {
 			const savedA = localStorage.getItem('od-pl-a');
-			if (savedA) playlistAItems = JSON.parse(savedA);
+			if (savedA) playlistState.aItems = JSON.parse(savedA);
 			const savedB = localStorage.getItem('od-pl-b');
-			if (savedB) playlistBItems = JSON.parse(savedB);
+			if (savedB) playlistState.bItems = JSON.parse(savedB);
 			const savedInterval = localStorage.getItem('od-pl-interval');
-			if (savedInterval) playlistIntervalSec = Number(savedInterval);
+			if (savedInterval) playlistState.intervalSec = Number(savedInterval);
 			const savedMode = localStorage.getItem('od-pl-mode');
-			if (savedMode) playlistMode = savedMode as PlaylistMode;
+			if (savedMode) playlistState.mode = savedMode as PlaylistMode;
 			const savedTriggerA = localStorage.getItem('od-beat-trigger-a');
 			if (savedTriggerA) {
 				try {
@@ -973,8 +969,7 @@
 	onDestroy(() => {
 		_stopLoopbackIpc();
 		if (outputCloseTimer !== null) clearInterval(outputCloseTimer);
-		playlistA?.destroy();
-		playlistB?.destroy();
+		destroyPlaylistEngines();
 		manager.destroyAll();
 		compositor?.destroy();
 		snapshotEngine.cancel();
@@ -1035,18 +1030,19 @@
 			await manager.start(0, audio.ctx, audio.gainNode, q, d0);
 			await manager.start(1, audio.ctx, audio.gainNode, q, d1);
 
-			playlistA = new PlaylistEngine(playlistAItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
+			const newPlaylistA = new PlaylistEngine(playlistState.aItems, playlistState.mode, playlistState.intervalSec * 1000, async (name) => {
 				presetA = name;
 				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, transitionTime);
 				sync?.sendPreset('A', name, transitionTime);
-				playlistAPlaying = playlistA?.playing ?? false;
+				playlistState.aPlaying = newPlaylistA.playing;
 			});
-			playlistB = new PlaylistEngine(playlistBItems, playlistMode, playlistIntervalSec * 1000, async (name) => {
+			const newPlaylistB = new PlaylistEngine(playlistState.bItems, playlistState.mode, playlistState.intervalSec * 1000, async (name) => {
 				presetB = name;
 				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, transitionTime);
 				sync?.sendPreset('B', name, transitionTime);
-				playlistBPlaying = playlistB?.playing ?? false;
+				playlistState.bPlaying = newPlaylistB.playing;
 			});
+			setPlaylistEngines(newPlaylistA, newPlaylistB);
 
 			sync = new MainSync();
 			sync.onOutputReady(async () => {
@@ -1255,50 +1251,6 @@
 		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'), transitionTime);
 	}
 
-	function addToPlaylist(deck: 'A' | 'B', name: string) {
-		if (deck === 'A') {
-			if (playlistAItems.includes(name)) return;
-			playlistAItems = [...playlistAItems, name];
-			playlistA?.setItems(playlistAItems);
-		} else {
-			if (playlistBItems.includes(name)) return;
-			playlistBItems = [...playlistBItems, name];
-			playlistB?.setItems(playlistBItems);
-		}
-	}
-
-	function removeFromPlaylist(deck: 'A' | 'B', name: string) {
-		if (deck === 'A') {
-			playlistAItems = playlistAItems.filter((n) => n !== name);
-			playlistA?.setItems(playlistAItems);
-		} else {
-			playlistBItems = playlistBItems.filter((n) => n !== name);
-			playlistB?.setItems(playlistBItems);
-		}
-	}
-
-	function togglePlaylist(deck: 'A' | 'B') {
-		const pl = deck === 'A' ? playlistA : playlistB;
-		if (!pl) return;
-		pl.setInterval(playlistIntervalSec * 1000);
-		pl.setMode(playlistMode);
-		if (pl.playing) {
-			pl.stop();
-		} else {
-			pl.start();
-		}
-		if (deck === 'A') playlistAPlaying = pl.playing;
-		else playlistBPlaying = pl.playing;
-	}
-
-	function playlistNext(deck: 'A' | 'B') {
-		(deck === 'A' ? playlistA : playlistB)?.next();
-	}
-
-	function playlistPrev(deck: 'A' | 'B') {
-		(deck === 'A' ? playlistA : playlistB)?.prev();
-	}
-
 	function onBeat() {
 		// Pulse overlay beat-reactive
 		beat = true;
@@ -1315,11 +1267,11 @@
 			}
 		}
 		if (beatSyncA && !lockA && shouldTriggerOnBeat(clock.beatCount, beatTriggerA)) {
-			if (playlistAItems.length > 0) playlistA?.next();
+			if (playlistState.aItems.length > 0) playlistNext('A');
 			else applyMidiAction('preset-next-a', 127);
 		}
 		if (beatSyncB && !lockB && shouldTriggerOnBeat(clock.beatCount, beatTriggerB)) {
-			if (playlistBItems.length > 0) playlistB?.next();
+			if (playlistState.bItems.length > 0) playlistNext('B');
 			else applyMidiAction('preset-next-b', 127);
 		}
 		if (overlayState.queueEnabled && shouldTriggerOnBeat(clock.beatCount, overlayState.queueTrigger)) {
@@ -1357,10 +1309,10 @@
 	function toggleBeatSync(deck: 'A' | 'B') {
 		if (deck === 'A') {
 			beatSyncA = !beatSyncA;
-			playlistA?.setInterval(beatSyncA ? Infinity : playlistIntervalSec * 1000);
+			setPlaylistBeatSyncInterval('A', beatSyncA ? Infinity : playlistState.intervalSec * 1000);
 		} else {
 			beatSyncB = !beatSyncB;
-			playlistB?.setInterval(beatSyncB ? Infinity : playlistIntervalSec * 1000);
+			setPlaylistBeatSyncInterval('B', beatSyncB ? Infinity : playlistState.intervalSec * 1000);
 		}
 	}
 
@@ -1541,20 +1493,20 @@
 
 	function getCommandLedState(id: CommandId): boolean | null {
 		if (id === 'strobe-toggle') return strobeOn;
-		if (id === 'playlist-toggle-a') return playlistAPlaying;
-		if (id === 'playlist-toggle-b') return playlistBPlaying;
-		if (id === 'playlist-toggle-active') return activeDeck === 'A' ? playlistAPlaying : playlistBPlaying;
+		if (id === 'playlist-toggle-a') return playlistState.aPlaying;
+		if (id === 'playlist-toggle-b') return playlistState.bPlaying;
+		if (id === 'playlist-toggle-active') return activeDeck === 'A' ? playlistState.aPlaying : playlistState.bPlaying;
 		return null;
 	}
 
-	// Lit strobeOn/playlistAPlaying/playlistBPlaying/activeDeck/midiMappings AVANT de vérifier
+	// Lit strobeOn/playlistState.aPlaying/bPlaying/activeDeck/midiMappings AVANT de vérifier
 	// `midi` (variable non-réactive) — sinon un $effect qui appelle cette fonction ne suivrait
 	// jamais ces $state s'il tournait une première fois avant la connexion MIDI (le même
 	// gotcha Svelte 5 documenté pour l'optional chaining dans un $effect).
 	function pushLedStates() {
 		const strobe = strobeOn;
-		const plA = playlistAPlaying;
-		const plB = playlistBPlaying;
+		const plA = playlistState.aPlaying;
+		const plB = playlistState.bPlaying;
 		const active = activeDeck;
 		const kStrobe = midiMappings['strobe-toggle'];
 		const kA = midiMappings['playlist-toggle-a'];
@@ -1581,41 +1533,6 @@
 		}
 	}
 
-	function exportPlaylists() {
-		const data = JSON.stringify({
-			version: 1,
-			playlistA: playlistAItems,
-			playlistB: playlistBItems,
-			intervalSec: playlistIntervalSec,
-			mode: playlistMode,
-		}, null, 2);
-		const blob = new Blob([data], { type: 'application/json' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = 'opendrop-playlists.json';
-		a.click();
-		URL.revokeObjectURL(url);
-	}
-
-	function importPlaylists(e: Event) {
-		const file = (e.target as HTMLInputElement).files?.[0];
-		if (!file) return;
-		const reader = new FileReader();
-		reader.onload = () => {
-			try {
-				const data = JSON.parse(reader.result as string);
-				if (Array.isArray(data.playlistA)) playlistAItems = data.playlistA;
-				if (Array.isArray(data.playlistB)) playlistBItems = data.playlistB;
-				if (typeof data.intervalSec === 'number') playlistIntervalSec = data.intervalSec;
-				if (data.mode === 'sequential' || data.mode === 'shuffle') playlistMode = data.mode;
-				playlistA?.setItems(playlistAItems);
-				playlistB?.setItems(playlistBItems);
-			} catch {}
-		};
-		reader.readAsText(file);
-		(e.target as HTMLInputElement).value = '';
-	}
 
 	// — Partage de set par URL (Track 2) ————————————————————
 	let shareSetName = $state('');
@@ -2209,8 +2126,8 @@
 
 		<!-- Playlist -->
 		<SidebarPlaylist
-			{playlistMode}
-			{playlistIntervalSec}
+			playlistMode={playlistState.mode}
+			playlistIntervalSec={playlistState.intervalSec}
 			{beatSyncA}
 			{beatSyncB}
 			{autoXfade}
@@ -2219,17 +2136,17 @@
 			{beatTriggerB}
 			{detectedBpm}
 			{manualBpm}
-			{playlistAItems}
-			{playlistBItems}
-			{playlistAPlaying}
-			{playlistBPlaying}
+			playlistAItems={playlistState.aItems}
+			playlistBItems={playlistState.bItems}
+			playlistAPlaying={playlistState.aPlaying}
+			playlistBPlaying={playlistState.bPlaying}
 			audioRunning={status === 'running'}
 			{presetA}
 			{presetB}
 			{lockA}
 			{lockB}
-			onModeChange={(m) => { playlistMode = m }}
-			onIntervalChange={(s) => { playlistIntervalSec = s }}
+			onModeChange={(m) => { playlistState.mode = m }}
+			onIntervalChange={(s) => { playlistState.intervalSec = s }}
 			onBeatsPerChangeChange={(n) => { beatsPerChange = n }}
 			onBeatTriggerAChange={updateBeatTriggerA}
 			onBeatTriggerBChange={updateBeatTriggerB}
@@ -2328,8 +2245,8 @@
 		isOpen={showPresetBrowser}
 		{activeDeck}
 		targetSlot={activeSlot}
-		{playlistAItems}
-		{playlistBItems}
+		playlistAItems={playlistState.aItems}
+		playlistBItems={playlistState.bItems}
 		onClose={() => { showPresetBrowser = false }}
 		onLoadPreset={selectPreset}
 		onAddToPlaylist={addToPlaylist}
@@ -2345,8 +2262,8 @@
     {crossfader}
     {transitionTime}
     {presetList}
-    {playlistAItems}
-    {playlistBItems}
+    playlistAItems={playlistState.aItems}
+    playlistBItems={playlistState.bItems}
     {layout}
     onStartSlot={startSlot}
     onPauseSlot={pauseSlot}

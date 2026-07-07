@@ -93,6 +93,15 @@ describe('PlaylistEngine', () => {
 		expect(cb).toHaveBeenCalledWith('B');
 	});
 
+	it("setInterval(Infinity) désactive l'avance automatique (mode beat-sync)", () => {
+		const cb = vi.fn();
+		const pl = new PlaylistEngine(['A', 'B', 'C'], 'sequential', Infinity, cb);
+		pl.start();
+		cb.mockClear();
+		vi.advanceTimersByTime(100000);
+		expect(cb).not.toHaveBeenCalled();
+	});
+
 	it('playing reflète correctement start/stop', () => {
 		const pl = new PlaylistEngine(['A', 'B'], 'sequential', 1000, vi.fn());
 		expect(pl.playing).toBe(false);

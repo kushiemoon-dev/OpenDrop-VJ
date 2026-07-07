@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 250" width="100%" font-family="monospace">
+<defs>
+ <linearGradient id="l" x1="0" x2="1"><stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#e91e8c"/></linearGradient>
+ <linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a855f7" stop-opacity=".35"/><stop offset="1" stop-color="#a855f7" stop-opacity="0"/></linearGradient>
+</defs>
+<rect width="800" height="250" rx="10" fill="#0d1117"/>
+<polygon points="40.0,210 40.0,191.1 59.9,172.2 60.3,153.3 164.4,134.4 173.9,115.6 313.8,96.7 352.8,77.8 426.2,58.9 760.0,40.0 760.0,210" fill="url(#f)"/>
+<polyline points="40.0,191.1 59.9,172.2 60.3,153.3 164.4,134.4 173.9,115.6 313.8,96.7 352.8,77.8 426.2,58.9 760.0,40.0" fill="none" stroke="url(#l)" stroke-width="2.5" stroke-linejoin="round"/>
+<text x="40" y="30" fill="#a855f7" font-size="16">&#9733; 9 stars</text>
+<text x="40" y="236" fill="#6b7280" font-size="11">2026-01-17</text>
+<text x="760" y="236" fill="#6b7280" font-size="11" text-anchor="end">2026-06-17</text>
+<text x="760" y="30" fill="#6b7280" font-size="12" text-anchor="end">Star History</text>
+</svg>

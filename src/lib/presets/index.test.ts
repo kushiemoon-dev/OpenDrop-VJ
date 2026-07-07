@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// Mock $app/paths avant d'importer le module
+// Mock $app/paths before importing the module
 vi.mock('$app/paths', () => ({ base: '' }))
 
-// index.ts importe désormais cloud-presets.ts, qui importe $env/static/public —
-// mock nécessaire pour que TOUS les imports de ce fichier (y compris ceux de
-// describe('getSlug', ...) plus bas) résolvent, même sans usage direct du cloud.
+// index.ts now imports cloud-presets.ts, which imports $env/static/public —
+// this mock is needed so that ALL imports in this file (including those in
+// describe('getSlug', ...) below) resolve, even without direct use of the cloud.
 vi.mock('$env/static/public', () => ({ PUBLIC_CLOUD_PRESETS_API: '' }))
 
-// Mock fetch avant d'importer initPresets
+// Mock fetch before importing initPresets
 const FAKE_MANIFEST = {
 	entries: [
 		{ slug: 'category/cool-preset', name: 'Cool Category - Cool Preset' },
@@ -29,7 +29,7 @@ describe('getSlug', () => {
 		vi.unstubAllGlobals()
 	})
 
-	it('retourne le slug pour un nom connu après initPresets', async () => {
+	it('returns the slug for a known name after initPresets', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
 			ok: true,
 			json: async () => FAKE_MANIFEST,
@@ -43,7 +43,7 @@ describe('getSlug', () => {
 		expect(slug('Another - Preset')).toBe('another/preset')
 	})
 
-	it('retourne undefined pour un nom inconnu', async () => {
+	it('returns undefined for an unknown name', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
 			ok: true,
 			json: async () => FAKE_MANIFEST,
@@ -56,8 +56,8 @@ describe('getSlug', () => {
 		expect(slug('Unknown - Preset')).toBeUndefined()
 	})
 
-	it('retourne undefined avant initPresets', async () => {
-		// Sans appeler initPresets, _nameToSlug est vide
+	it('returns undefined before initPresets', async () => {
+		// Without calling initPresets, _nameToSlug is empty
 		const { getSlug: slug } = await import('./index.js')
 		expect(slug('Cool Category - Cool Preset')).toBeUndefined()
 	})
@@ -82,17 +82,17 @@ describe('loadPresetData — cloud fallback', () => {
 		vi.unstubAllGlobals()
 	})
 
-	it('un nom absent du manifest statique et sans préfixe cloud -> null (comportement inchangé)', async () => {
+	it('a name absent from the static manifest and without a cloud prefix -> null (unchanged behavior)', async () => {
 		const { loadPresetData } = await import('./index.js')
 		expect(await loadPresetData('Nom Inconnu')).toBeNull()
 	})
 
-	it('un nom préfixé ☁ sans token en localStorage -> null', async () => {
+	it('a name prefixed with ☁ without a token in localStorage -> null', async () => {
 		const { loadPresetData } = await import('./index.js')
 		expect(await loadPresetData('☁ Mon Preset')).toBeNull()
 	})
 
-	it('un nom préfixé ☁ avec token -> résout via loadCloudPresetData', async () => {
+	it('a name prefixed with ☁ with a token -> resolves via loadCloudPresetData', async () => {
 		localStorage.setItem('od-cloud-token', 'tok1')
 		vi.stubGlobal('fetch', vi.fn()
 			.mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'a', name: '☁ Mon Preset', sizeBytes: 10, uploadedAt: 1 }] })

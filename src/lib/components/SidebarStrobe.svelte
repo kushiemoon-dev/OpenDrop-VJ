@@ -31,13 +31,13 @@
 			{/each}
 		</div>
 		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label">Intensité</span>
+			<span class="midi-label">Intensity</span>
 			<input type="range" min="0" max="1" step="0.05" value={strobeIntensity}
 				oninput={(e) => onIntensityChange(+e.currentTarget.value)} style="flex:1" />
 			<span style="font-size:10px;color:#aaa">{Math.round(strobeIntensity*100)}%</span>
 		</div>
 		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label">Couleur</span>
+			<span class="midi-label">Color</span>
 			<input type="color" value={strobeColor}
 				oninput={(e) => onColorChange(e.currentTarget.value)}
 				style="width:32px;height:20px;padding:0;border:none;background:none;cursor:pointer" />

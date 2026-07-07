@@ -17,7 +17,7 @@
 
 <div class="controls-section">
 	<div class="pl-header">
-		<span class="label">Qualité rendu</span>
+		<span class="label">Render quality</span>
 		{#if status === 'running' && fps > 0}
 			<span class="label" style="color:var(--info)">{fps} fps</span>
 		{/if}
@@ -33,9 +33,9 @@
 		<button class="btn-sm" class:active={targetFps === 60} onclick={() => onTargetFpsChange(60)} disabled={status !== 'running'}>60 fps</button>
 	</div>
 	<div class="btn-row" style="margin-top:4px">
-		<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => onInvisibleModeChange('eco')} disabled={status !== 'running'} title="Decks cachés à ~8 fps">Éco</button>
-		<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => onInvisibleModeChange('pause')} disabled={status !== 'running'} title="Decks cachés pausés">Pause</button>
-		<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => onInvisibleModeChange('off')} disabled={status !== 'running'} title="Tous les decks à plein régime">Off</button>
+		<button class="btn-sm" class:active={invisibleMode === 'eco'} onclick={() => onInvisibleModeChange('eco')} disabled={status !== 'running'} title="Hidden decks at ~8 fps">Eco</button>
+		<button class="btn-sm" class:active={invisibleMode === 'pause'} onclick={() => onInvisibleModeChange('pause')} disabled={status !== 'running'} title="Hidden decks paused">Pause</button>
+		<button class="btn-sm" class:active={invisibleMode === 'off'} onclick={() => onInvisibleModeChange('off')} disabled={status !== 'running'} title="All decks at full rate">Off</button>
 	</div>
 </div>
 

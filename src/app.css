@@ -17,7 +17,7 @@
   --text-muted:     #44447a;
   --live:           #00e096;
 
-  /* Palette étendue (effets / états) */
+  /* Extended palette (effects / states) */
   --cyan:        #00e5ff;   --cyan-dim:   rgba(0, 229, 255, 0.10);
   --violet:      #b44fff;   --violet-dim: rgba(180, 79, 255, 0.10);
   --warn:        #ff8c00;
@@ -40,16 +40,16 @@
   --t-fast: 150ms ease;
 }
 
-/* ── Mixer utilitaires ── */
+/* ── Mixer utilities ── */
 
-/* Grille des 4 decks responsive */
+/* Responsive 4-deck grid */
 .mixer-decks-4 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-2);
 }
 
-/* Override: PresetBrowser en mode inline (dans MixerLayout) */
+/* Override: PresetBrowser in inline mode (inside MixerLayout) */
 .mixer-preset-inline .preset-drawer {
   position: static;
   transform: none;

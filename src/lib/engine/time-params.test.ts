@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { defaultTimeParams, injectTimeParams, withTimeParams, type TimeParamsTuple } from './time-params.js';
 
 describe('defaultTimeParams', () => {
-	it('tous les multiplicateurs valent 1 (neutre)', () => {
+	it('all multipliers equal 1 (neutral)', () => {
 		expect(defaultTimeParams()).toEqual({
 			speedMult: 1, zoomMult: 1, rotMult: 1, warpMult: 1,
 			dxMult: 1, dyMult: 1, stretchMult: 1, waveMult: 1,
@@ -11,15 +11,15 @@ describe('defaultTimeParams', () => {
 });
 
 describe('injectTimeParams', () => {
-	it('clone le preset sans muter l\'original', () => {
+	it('clones the preset without mutating the original', () => {
 		const preset = { frame_eqs_str: 'a.zoom = 1.01;', other: 'field' };
 		const patched = injectTimeParams(preset, 0);
-		expect(preset.frame_eqs_str).toBe('a.zoom = 1.01;'); // inchangé
-		expect(patched).not.toBe(preset); // objet différent
-		expect((patched as any).other).toBe('field'); // champs non touchés préservés
+		expect(preset.frame_eqs_str).toBe('a.zoom = 1.01;'); // unchanged
+		expect(patched).not.toBe(preset); // different object
+		expect((patched as any).other).toBe('field'); // untouched fields preserved
 	});
 
-	it('préfixe a.time scalé, avant le code original du preset', () => {
+	it('prefixes scaled a.time, before the preset\'s original code', () => {
 		const preset = { frame_eqs_str: 'a.zoom = 1.01;' };
 		const patched = injectTimeParams(preset, 0) as any;
 		const speedLineIndex = patched.frame_eqs_str.indexOf('a.time = a.time *');
@@ -28,7 +28,7 @@ describe('injectTimeParams', () => {
 		expect(speedLineIndex).toBeLessThan(originalLineIndex);
 	});
 
-	it('ajoute les 7 lignes de multiplicateur après le code original, référençant window.__odDeckParams[slot]', () => {
+	it('adds the 7 multiplier lines after the original code, referencing window.__odDeckParams[slot]', () => {
 		const preset = { frame_eqs_str: 'a.zoom = 1.01;' };
 		const patched = injectTimeParams(preset, 2) as any;
 		for (const field of ['zoomMult', 'rotMult', 'warpMult', 'dxMult', 'dyMult', 'stretchMult', 'waveMult']) {
@@ -36,7 +36,7 @@ describe('injectTimeParams', () => {
 		}
 	});
 
-	it('namespace correctement par slot (pas de collision entre decks)', () => {
+	it('namespaces correctly per slot (no collision between decks)', () => {
 		const preset = { frame_eqs_str: '' };
 		const patched0 = injectTimeParams(preset, 0) as any;
 		const patched3 = injectTimeParams(preset, 3) as any;
@@ -46,7 +46,7 @@ describe('injectTimeParams', () => {
 		expect(patched3.frame_eqs_str).not.toContain('window.__odDeckParams[0]');
 	});
 
-	it('gère un preset sans frame_eqs_str (chaîne vide par défaut)', () => {
+	it('handles a preset without frame_eqs_str (empty string by default)', () => {
 		const preset = {};
 		const patched = injectTimeParams(preset, 0) as any;
 		expect(patched.frame_eqs_str).toContain('a.time = a.time *');
@@ -56,20 +56,20 @@ describe('injectTimeParams', () => {
 describe('withTimeParams', () => {
 	const params: TimeParamsTuple = [defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams()];
 
-	it('met à jour uniquement le slot ciblé', () => {
+	it('updates only the targeted slot', () => {
 		const next = withTimeParams(params, 1, { speedMult: 1.5 });
 		expect(next[1].speedMult).toBe(1.5);
 		expect(next[0].speedMult).toBe(1);
 		expect(next[2].speedMult).toBe(1);
 	});
 
-	it('merge un patch partiel sans toucher aux autres champs', () => {
+	it('merges a partial patch without touching other fields', () => {
 		const next = withTimeParams(params, 0, { zoomMult: 2 });
 		expect(next[0].zoomMult).toBe(2);
 		expect(next[0].speedMult).toBe(1);
 	});
 
-	it('ne mute pas le tableau ni les objets source', () => {
+	it('does not mutate the array or the source objects', () => {
 		const next = withTimeParams(params, 3, { rotMult: 0.5 });
 		expect(next).not.toBe(params);
 		expect(next[3]).not.toBe(params[3]);

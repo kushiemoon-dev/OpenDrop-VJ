@@ -5,25 +5,26 @@ import { injectQVarParams } from './q-vars.js';
 type SlotEntry = { deck: Deck; canvas: HTMLCanvasElement } | null;
 
 /**
- * DeckManager — gère N slots Butterchurn avec lazy init et pause/resume.
+ * DeckManager — manages N Butterchurn slots with lazy init and pause/resume.
  *
- * Un slot est instancié au premier start() et ne libère jamais son
- * contexte WebGL (pause/resume). Plafond 4 slots = sous la limite browser.
+ * A slot is instantiated on its first start() call and never releases its
+ * WebGL context (pause/resume instead). Capped at 4 slots to stay under the
+ * browser's WebGL context limit.
  */
 export class DeckManager {
 	private slots: SlotEntry[] = [null, null, null, null];
 	private canvases: (HTMLCanvasElement | null)[] = [null, null, null, null];
 	private audioNode: AudioNode | null = null;
-	private _targetFps = 0;  // 0 = illimité
+	private _targetFps = 0;  // 0 = unlimited
 
 	attachCanvas(slot: number, canvas: HTMLCanvasElement): void {
 		this.canvases[slot] = canvas;
 	}
 
 	/**
-	 * Démarre ou reprend un slot.
-	 * - Premier appel : crée et initialise un Deck (coûteux).
-	 * - Appels suivants : appelle deck.resume() (instantané, zéro fuite WebGL).
+	 * Starts or resumes a slot.
+	 * - First call: creates and initializes a Deck (expensive).
+	 * - Subsequent calls: calls deck.resume() (instant, no WebGL leak).
 	 */
 	async start(
 		slot: number,
@@ -68,7 +69,7 @@ export class DeckManager {
 		this.slots[slot]?.deck.loadPreset(injectQVarParams(injectTimeParams(data, slot), slot), blend);
 	}
 
-	/** Re-route l'audio vers TOUS les slots initialisés (ex: switch source/loopback). */
+	/** Re-routes audio to ALL initialized slots (e.g. switching source/loopback). */
 	connectAudio(node: AudioNode): void {
 		this.audioNode = node;
 		for (const slot of this.slots) {

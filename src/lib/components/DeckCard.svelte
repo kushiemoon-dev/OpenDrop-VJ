@@ -25,7 +25,7 @@
       const stream = (canvas as any).captureStream(10) as MediaStream
       videoEl.srcObject = stream
     } catch {
-      // captureStream non disponible (Firefox, Safari) — fallback silencieux
+      // captureStream not available (Firefox, Safari) — silent fallback
     }
   })
 </script>
@@ -70,7 +70,7 @@
         style:color={BUS_COLORS[bus ?? 'off']}
         onclick={(e) => { e.stopPropagation(); onCycleBus?.() }}
         type="button"
-        title="Bus: {bus ?? 'off'} — cliquer pour changer"
+        title="Bus: {bus ?? 'off'} — click to change"
       >{BUS_LABELS[bus ?? 'off']}</button>
       <button
         class="deck-card__run"

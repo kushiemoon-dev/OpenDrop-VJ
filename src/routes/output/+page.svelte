@@ -21,16 +21,16 @@
 	let compositorCanvas: HTMLCanvasElement | undefined = $state();
 	let compositor: Compositor | null = null;
 
-	// Opacités par slot — remplace crossfader + opacityA/B
+	// Per-slot opacities — replaces crossfader + opacityA/B
 	let slotOpacities = $state<[number, number, number, number]>([1, 0, 0, 0]);
-	// Compositing par slot (blend + lumaKey + colorKey)
+	// Per-slot compositing (blend + lumaKey + colorKey)
 	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
 		{ ...DEFAULT_SLOT_COMPOSITE },
 	]);
-	// Couleurs par slot
+	// Per-slot colors
 	let slotColors = $state<[ColorParams, ColorParams, ColorParams, ColorParams]>([
 		{ ...DEFAULT_COLOR_PARAMS },
 		{ ...DEFAULT_COLOR_PARAMS },
@@ -107,12 +107,12 @@
 	let audioFrameUnlisten: (() => void) | null = null;
 	let audioAcquired = $state(false);
 
-	// — Performance reçue du main ——————————————————————————
+	// — Performance settings received from main ——————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
 	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
 
-	// Throttle des slots invisibles selon le perf mode
+	// Throttle invisible slots according to the perf mode
 	$effect(() => {
 		const ops = slotOpacities;
 		const mode = invisibleMode;
@@ -126,7 +126,7 @@
 		}
 	});
 
-	// Pousse opacité + config de compositing vers le Compositor à chaque changement.
+	// Pushes opacity + compositing config to the Compositor on every change.
 	$effect(() => {
 		const ops = slotOpacities;
 		const composites = slotComposites;
@@ -136,7 +136,7 @@
 		}
 	});
 
-	// Pousse les params couleur (hue/sat/bright/contrast/invert) vers le Compositor.
+	// Pushes color params (hue/sat/bright/contrast/invert) to the Compositor.
 	$effect(() => {
 		const colors = slotColors;
 		if (!compositor) return;
@@ -161,26 +161,26 @@
 			compositor.attachSource(2, canvas2!);
 			compositor.attachSource(3, canvas3!);
 			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
-			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
-			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
+			// Explicit initial push — the $effect won't re-trigger until one of
+			// the $state values it reads changes (compositor isn't one of those).
 			for (let i = 0; i < 4; i++) {
 				compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
 				compositor.setColor(i, slotColors[i]);
 			}
 			compositor.start();
 
-			// Démarrer slots 0 et 1 par défaut (équivalent A/B compat)
+			// Start slots 0 and 1 by default (A/B-compat equivalent)
 			await manager.start(0, audio.ctx, audio.analyser, q, null);
 			await manager.start(1, audio.ctx, audio.analyser, q, null);
 			manager.setTargetFps(targetFps);
 
-			// Charger les presets par défaut pour éviter l'écran noir au démarrage
+			// Load default presets to avoid a black screen on startup
 			await initPresets();
 			const list = buildPresetList();
 			if (list[0]) { const d = await loadPresetData(list[0].name); if (d) manager.loadPreset(0, d, 0.0); }
 			if (list[1]) { const d = await loadPresetData(list[1].name); if (d) manager.loadPreset(1, d, 0.0); }
 
-			// PCM frames streamés depuis le renderer principal (Electron-only)
+			// PCM frames streamed from the main renderer (Electron-only)
 			const eAPI = window.electronAPI;
 			if (eAPI?.onAudioFrame) {
 				audioFrameUnlisten = eAPI.onAudioFrame(async (frame) => {
@@ -198,7 +198,7 @@
 			let gotState = false;
 			sync.listen(async (msg) => {
 				if (msg.type === 'preset') {
-					// Compat backward : deck A → slot 0, deck B → slot 1
+					// Backward compat: deck A → slot 0, deck B → slot 1
 					gotState = true;
 					const slot = msg.deck === 'A' ? 0 : 1;
 					const preset = await loadPresetData(msg.name);
@@ -212,7 +212,7 @@
 					await ensureSlot(msg.slot, q);
 					manager?.loadPreset(msg.slot, preset, msg.blend ?? 2.0);
 				} else if (msg.type === 'crossfader') {
-					// Compat backward : crossfader → opacités slot 0/1
+					// Backward compat: crossfader → slot 0/1 opacities
 					gotState = true;
 					const cf = msg.value;
 					slotOpacities = [1 - cf, cf, slotOpacities[2], slotOpacities[3]];

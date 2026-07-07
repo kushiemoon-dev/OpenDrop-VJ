@@ -26,19 +26,19 @@
 		<span class="label">MIDI</span>
 		{#if midiSupported}
 			<button class="btn-sm" class:active={midiConnected} onclick={onToggleMidi}>
-				{midiConnected ? 'Déconnecter' : 'Connecter'}
+				{midiConnected ? 'Disconnect' : 'Connect'}
 			</button>
 		{:else}
 			<span style="font-size:10px;color:var(--error)">Chromium only</span>
 		{/if}
 	</div>
 	{#if midiConnected}
-		<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'aucun périphérique'}</span>
+		<span class="source-badge">▶ {midiDeviceNames.length > 0 ? midiDeviceNames.join(', ') : 'no device'}</span>
 		{#if midiClockBpm > 0}
 			<span class="source-badge" style="color:var(--ok)">♩ MIDI Clock {midiClockBpm} BPM</span>
 		{/if}
 		{#if learningAction !== null}
-			<span style="font-size:11px;color:var(--warn)">Bouge un knob/bouton sur ton contrôleur…</span>
+			<span style="font-size:11px;color:var(--warn)">Move a knob/button on your controller…</span>
 		{/if}
 		<div class="midi-list">
 			{#each registry.all() as cmd}

@@ -33,8 +33,8 @@ test.describe('Strobe', () => {
 
 		// Les contrôles Rate, Intensité, Couleur apparaissent
 		await expect(sec.getByText('Rate')).toBeVisible();
-		await expect(sec.getByText('Intensité')).toBeVisible();
-		await expect(sec.getByText('Couleur')).toBeVisible();
+		await expect(sec.getByText('Intensity')).toBeVisible();
+		await expect(sec.getByText('Color')).toBeVisible();
 	});
 
 	test('toggle strobe OFF masque les contrôles', async ({ page }) => {
@@ -189,7 +189,7 @@ test.describe('Keyboard learn', () => {
 	test.beforeEach(async ({ page }) => { await startVisualizer(page); });
 
 	test('clic Learn active le mode apprentissage', async ({ page }) => {
-		const sec = section(page, 'Clavier');
+		const sec = section(page, 'Keyboard');
 		await sec.scrollIntoViewIfNeeded();
 
 		// .pl-btn est la classe stable du bouton Learn (distinct du "Reset" .pl-header .btn-sm)
@@ -200,7 +200,7 @@ test.describe('Keyboard learn', () => {
 	});
 
 	test('Escape annule le learn', async ({ page }) => {
-		const sec = section(page, 'Clavier');
+		const sec = section(page, 'Keyboard');
 		await sec.scrollIntoViewIfNeeded();
 
 		const learnBtn = sec.locator('.pl-btn').first();
@@ -218,13 +218,13 @@ test.describe('Page /remote', () => {
 	test('charge sans params et affiche le guide de connexion', async ({ page }) => {
 		await page.goto('/remote');
 		// Sans params → affiche le guide (.guide), pas un message d'erreur
-		await expect(page.getByText(/Pour utiliser la télécommande/i)).toBeVisible({ timeout: 10000 });
+		await expect(page.getByText(/To use the remote/i)).toBeVisible({ timeout: 10000 });
 	});
 
 	test('avec params invalides affiche erreur de connexion', async ({ page }) => {
 		await page.goto('/remote?host=127.0.0.1&port=9999&token=fake');
 		// Tente de se connecter — WebSocket vers un port fermé → ws.onerror → affiche l'erreur
-		await expect(page.getByText(/Connexion échouée/i)).toBeVisible({ timeout: 15000 });
+		await expect(page.getByText(/Connection failed/i)).toBeVisible({ timeout: 15000 });
 	});
 
 	test('crossfader est visible avec params (même déconnecté)', async ({ page }) => {

@@ -5,8 +5,8 @@ export function pickQueuedOverlays(overlays: Overlay[]): Overlay[] {
 	return overlays.filter((o) => o.inQueue);
 }
 
-// "next" — respecte le mode (séquentiel ou aléatoire-différent-du-courant), extrait du couple
-// next()/_randomIndex() privé de PlaylistEngine.
+// "next" — respects the mode (sequential or random-different-from-current), extracted from the
+// next()/_randomIndex() pair that used to be private to PlaylistEngine.
 export function advanceQueueIndex(currentIndex: number, queueLength: number, mode: PlaylistMode): number {
 	if (queueLength === 0) return 0;
 	if (mode === 'sequential') return (currentIndex + 1) % queueLength;
@@ -16,22 +16,22 @@ export function advanceQueueIndex(currentIndex: number, queueLength: number, mod
 	return idx;
 }
 
-// "prev" — toujours séquentiel-arrière quel que soit le mode, même comportement que
-// PlaylistEngine.prev() aujourd'hui (qui ignore déjà le mode shuffle pour le "précédent").
+// "prev" — always steps backward sequentially regardless of mode, same behavior as
+// PlaylistEngine.prev() today (which already ignores shuffle mode for "previous").
 export function retreatQueueIndex(currentIndex: number, queueLength: number): number {
 	if (queueLength === 0) return 0;
 	return (currentIndex - 1 + queueLength) % queueLength;
 }
 
-// Défensif : si la file a rétréci (overlay actif supprimé), retombe sur 0 plutôt que de
-// pointer hors-bornes — même pattern que PlaylistEngine.setItems().
+// Defensive: if the queue has shrunk (active overlay removed), falls back to 0 instead of
+// pointing out of bounds — same pattern as PlaylistEngine.setItems().
 export function clampQueueIndex(index: number, queueLength: number): number {
 	if (queueLength === 0) return 0;
 	return index >= queueLength || index < 0 ? 0 : index;
 }
 
-// Overlays à rendre : tous les non-cochés (toujours visibles) + l'overlay actif de la
-// rotation (s'il y en a au moins un coché).
+// Overlays to render: all non-queued ones (always visible) + the active overlay from the
+// rotation (if at least one is queued).
 export function visibleOverlayIds(overlays: Overlay[], activeQueueIndex: number): Set<string> {
 	const queued = pickQueuedOverlays(overlays);
 	const ids = new Set(overlays.filter((o) => !o.inQueue).map((o) => o.id));

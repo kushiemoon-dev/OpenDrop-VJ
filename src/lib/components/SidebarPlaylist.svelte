@@ -95,8 +95,8 @@
 		<div class="btn-row">
 			<button class="btn-sm" class:active={playlistMode === 'sequential'} onclick={() => onModeChange('sequential')}>Seq</button>
 			<button class="btn-sm" class:active={playlistMode === 'shuffle'} onclick={() => onModeChange('shuffle')}>Shuffle</button>
-			<button class="btn-sm" onclick={onExportPlaylists} title="Exporter les playlists">⬇</button>
-			<label class="btn-sm file-label" title="Importer des playlists">⬆<input type="file" accept=".json" onchange={onImportPlaylists} style="display:none" /></label>
+			<button class="btn-sm" onclick={onExportPlaylists} title="Export playlists">⬇</button>
+			<label class="btn-sm file-label" title="Import playlists">⬆<input type="file" accept=".json" onchange={onImportPlaylists} style="display:none" /></label>
 		</div>
 	</div>
 	<div class="crossfader-row">

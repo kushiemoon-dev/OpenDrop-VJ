@@ -8,6 +8,7 @@
 
 [![Live Demo](https://img.shields.io/badge/demo-opendrop.kushie.dev-ff2d78?style=flat-square)](https://opendrop.kushie.dev)
 [![Release](https://img.shields.io/github/v/release/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases)
+[![Stars](https://img.shields.io/github/stars/kushiemoon-dev/OpenDrop-VJ?style=flat-square&color=a855f7)](https://github.com/kushiemoon-dev/OpenDrop-VJ/stargazers)
 [![License](https://img.shields.io/github/license/kushiemoon-dev/OpenDrop-VJ?style=flat-square)](LICENSE)
 
 ![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)
@@ -279,6 +280,16 @@ e2e/
 - [@ktamas77/abletonlink](https://github.com/ktamas77/abletonlink) — Ableton Link bindings
 - [Cloudflare Workers](https://workers.cloudflare.com) — presets cloud backend
 - Preset authors — listed in each preset file; used under their respective licenses
+
+---
+
+## Star History
+
+<div align="center">
+
+[![Star History](docs/star-history.svg)](https://github.com/kushiemoon-dev/OpenDrop-VJ/stargazers)
+
+</div>
 
 ---
 

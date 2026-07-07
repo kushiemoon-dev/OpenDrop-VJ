@@ -26,7 +26,7 @@
 			</div>
 			{#if slot.enabled}
 				<div class="midi-row" style="gap:6px;align-items:center;margin-top:3px">
-					<span class="midi-label">Cible</span>
+					<span class="midi-label">Target</span>
 					<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
 						value={slot.target ?? ''}
 						onchange={(e) => { slot.target = (e.currentTarget.value || null) as typeof slot.target; }}>

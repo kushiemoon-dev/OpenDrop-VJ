@@ -105,7 +105,7 @@
 	let selectedDisplayId = $state<number | null>(null);
 	let outputWindowClosedUnlisten: (() => void) | null = null;
 
-	// — Playlist state — extraite dans playlist-store.svelte.ts
+	// — Playlist state — extracted into playlist-store.svelte.ts
 
 	// — MIDI ——————————————————————————————————————————————
 	const registry = createDefaultRegistry();
@@ -123,7 +123,7 @@
 	const clock = new Clock();
 	const lfoEngine = new LfoEngine();
 	const lfoSlots = $state(lfoEngine.slots);
-	let midiClockBpm = $state(0);   // BPM détecté via MIDI clock IN (0 = inactif)
+	let midiClockBpm = $state(0);   // BPM detected via MIDI clock IN (0 = inactive)
 	let strobeOn = $state(false);
 	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
 	let strobeRate = $state(1);
@@ -224,7 +224,7 @@
 	let lockA = $state(false);
 	let lockB = $state(false);
 
-	// — Qualité rendu ——————————————————————————————————————
+	// — Render quality ——————————————————————————————————————
 	let quality = $state<QualityTier>(DEFAULT_TIER);
 	let fps = $state(0);
 
@@ -274,7 +274,7 @@
 
 	// — Snapshots / macros (1.3) ————————————————————————————
 	let snapshots = $state<(Snapshot | null)[]>(new Array(8).fill(null));
-	let snapshotRecallDuration = $state(2); // secondes, global, partagé par tous les slots
+	let snapshotRecallDuration = $state(2); // seconds, global, shared by all slots
 	const snapshotEngine = new SnapshotEngine();
 	function saveSnapshot(slot: number) {
 		const values: Partial<Record<CommandId, number>> = {};
@@ -301,7 +301,7 @@
 			timelinePlaying = false;
 			return;
 		}
-		if (timelineLoopDuration(timelineKeyframes) <= 0) return; // rien à interpoler, no-op silencieux
+		if (timelineLoopDuration(timelineKeyframes) <= 0) return; // nothing to interpolate, silent no-op
 		timelinePlaying = true;
 	}
 	function addTimelineKeyframe() {
@@ -324,8 +324,8 @@
 	let targetFps = $state(DEFAULT_PERF.targetFps);
 	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
 	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
-	let pausedSlots = new Set<number>();   // non-réactif: mémoire inter-runs du $effect éco
-	let lastFps = [0, 0, 0, 0];            // non-réactif: anti-churn inter-runs du $effect éco
+	let pausedSlots = new Set<number>();   // non-reactive: cross-run memory for the eco $effect
+	let lastFps = [0, 0, 0, 0];            // non-reactive: cross-run anti-churn for the eco $effect
 
 	// — Overlays ——————————————————————————————————————————
 	let beat = $state(false);
@@ -334,7 +334,7 @@
 	const overlayVisibleIds = $derived(visibleOverlayIds(overlayState.overlays, overlayState.queueIndex));
 	const nonShareableOverlayCount = $derived(overlayState.overlays.filter((o) => o.kind !== 'text').length);
 
-	// — Presets cloud (Track 2) — état + actions extraits dans cloud-presets-store.svelte.ts
+	// — Cloud presets (Track 2) — state + actions extracted into cloud-presets-store.svelte.ts
 	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
 	const activeDeck = $derived<'A' | 'B'>(deckBus[activeSlot] === 'B' ? 'B' : 'A');
 	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
@@ -374,7 +374,7 @@
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoState.playbackRate * 20) / 20);
 
-	// — Câblage commandes M2 (strobe/LFO) dans le registre ——
+	// — Wiring M2 commands (strobe/LFO) into the registry ——
 	registry.register({
 		id: 'strobe-toggle', label: 'Strobe ON/OFF', kind: 'trigger',
 		run() { strobeOn = !strobeOn; },
@@ -388,14 +388,14 @@
 		run() { strobeRate = Math.max(0.25, strobeRate / 2); },
 	});
 
-	// — Câblage commandes M3 (color controls) ——————————————
+	// — Wiring M3 commands (color controls) ——————————————
 	for (const [sfx, field, lbl] of COLOR_CMDS)
 		for (const deck of ['a', 'b'] as const)
 			registry.register({ id: `color-${sfx}-${deck}` as CommandId, label: `${lbl} ${deck.toUpperCase()}`, kind: 'range',
 				run(v) { if (deck === 'a') colorParamsA = {...colorParamsA, [field]: v}; else colorParamsB = {...colorParamsB, [field]: v}; },
 			});
 
-	// — Câblage commandes 1.1 (compositing: blend + lumaKey + colorKey, 4 slots) —
+	// — Wiring 1.1 commands (compositing: blend + lumaKey + colorKey, 4 slots) —
 	type CompositeCmd = [
 		prefix: string, label: string,
 		apply: (cfg: SlotComposite, v: number) => SlotComposite,
@@ -408,9 +408,9 @@
 		['colorkey-hue', 'Key Hue', (c, v) => ({ ...c, colorHue: v }), (c) => c.colorHue],
 		['colorkey-tolerance', 'Key Tolerance', (c, v) => ({ ...c, colorTol: v }), (c) => c.colorTol],
 	];
-	// Les 30 commandes "look" qu'un snapshot capture/rappelle — dérivé de COLOR_CMDS/
-	// COMPOSITE_CMDS pour rester synchronisé si ces tableaux évoluent. Le crossfader
-	// n'apparaît dans aucun des deux, donc il est exclu par construction.
+	// The 30 "look" commands that a snapshot captures/recalls — derived from COLOR_CMDS/
+	// COMPOSITE_CMDS to stay in sync if those arrays change. The crossfader
+	// doesn't appear in either one, so it's excluded by construction.
 	const LOOK_COMMAND_IDS: CommandId[] = [
 		...COLOR_CMDS.flatMap(([sfx]) => (['a', 'b'] as const).map((d) => `color-${sfx}-${d}` as CommandId)),
 		...COMPOSITE_CMDS.flatMap(([prefix]) => ([0, 1, 2, 3] as const).map((s) => `${prefix}-${s}` as CommandId)),
@@ -421,8 +421,8 @@
 				run(v) { updateComposite(slot, apply(slotComposites[slot], v)); },
 			});
 
-	// — Câblage commandes 1.4 (time param sliders) ——————————
-	// v (0..1) est mappé sur la plage d'affichage 0..2 des sliders (v*2).
+	// — Wiring 1.4 commands (time param sliders) ——————————
+	// v (0..1) is mapped to the sliders' 0..2 display range (v*2).
 	type TimeCmd = [prefix: string, label: string, field: keyof DeckTimeParams];
 	const TIME_CMDS: TimeCmd[] = [
 		['time-speed', 'Speed', 'speedMult'],
@@ -440,9 +440,9 @@
 				run(v) { updateTimeParams(slot, { [field]: v * 2 } as Partial<DeckTimeParams>); },
 			});
 
-	// — Câblage commandes Q-var live editing (Track 2) ——————————
-	// v (0..1) mappé sur la plage d'affichage [-2, 2] des sliders (v*4-2).
-	// Ne touche jamais `enabled` — seul le watchlist (UI) active un q-var.
+	// — Wiring Q-var live editing commands (Track 2) ——————————
+	// v (0..1) mapped to the sliders' [-2, 2] display range (v*4-2).
+	// Never touches `enabled` — only the watchlist (UI) activates a q-var.
 	for (let n = 1; n <= 32; n++)
 		for (const slot of [0, 1, 2, 3] as const)
 			registry.register({ id: `qvar-${n}-${slot}` as CommandId, label: `Q${n} — Deck ${slot}`, kind: 'range',
@@ -475,7 +475,7 @@
 		advanceOverlayQueue,
 	};
 
-	// — Câblage commandes 1.3 (recall snapshots) ——————————————
+	// — Wiring 1.3 commands (recall snapshots) ——————————————
 	for (const slot of [0, 1, 2, 3, 4, 5, 6, 7] as const) {
 		registry.register({
 			id: `recall-snapshot-${slot}` as CommandId,
@@ -484,8 +484,8 @@
 			run() {
 				const snap = snapshots[slot];
 				if (!snap) return; // slot vide → inerte, pas de rappel
-				// Relu en direct (jamais mis en cache) : un redémarrage mid-rappel doit
-				// toujours partir de l'état visuel réel du moment, pas d'une valeur périmée.
+				// Re-read live (never cached): a restart mid-recall must
+				// always start from the actual visual state at that moment, not a stale value.
 				const start: Partial<Record<CommandId, number>> = {};
 				for (const id of LOOK_COMMAND_IDS) {
 					const v = getCommandCurrentValue(id);
@@ -525,28 +525,28 @@
 	});
 
 	// — Pilote TimelineEngine.play()/.pause() ————————————————
-	// Lire timelineKeyframes et timelinePlaying inconditionnellement avant toute logique : les
-	// deux sont des $state, donc chaque changement (édition d'un keyframe en pleine lecture,
-	// toggle play/pause) redéclenche cet effect — jamais de boucle RAF orpheline sur un ancien
-	// tableau après un edit/remove pendant la lecture (voir note de design ci-dessus).
+	// Read timelineKeyframes and timelinePlaying unconditionally before any logic: both
+	// are $state, so any change (editing a keyframe mid-playback,
+	// toggling play/pause) re-triggers this effect — never an orphaned RAF loop on a stale
+	// array after an edit/remove during playback (see design note above).
 	$effect(() => {
 		const kfs = timelineKeyframes;
 		const playing = timelinePlaying;
 		if (!playing) { timelineEngine.pause(); return; }
-		if (timelineLoopDuration(kfs) <= 0) { timelinePlaying = false; return; } // garde-fou (couvre aussi le cas dégénéré : tous les keyframes au même instant)
+		if (timelineLoopDuration(kfs) <= 0) { timelinePlaying = false; return; } // guard (also covers the degenerate case: all keyframes at the same instant)
 		timelineEngine.play(kfs, snapshots, (values) => {
 			for (const key in values)
 				registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
 		});
 	});
 
-	// — Re-fit canvases au switch de layout —————————————————
-	// Le visualizer-wrap reste monté en permanence (jamais détruit, voir .mixer-hidden) mais
-	// change de box (flex:1 en stage vs position:absolute;inset:0 en mixer) — sans ce re-fit,
-	// revenir en stage laisse le canvas composite à l'ancienne résolution jusqu'au prochain
-	// resize fenêtre. Lire layout/status inconditionnellement avant le early-return interne à
-	// onResize (gotcha Svelte 5 : un $state lu seulement après un guard non-reactif casse le
-	// tracking si le 1er run tombe pendant que le guard est vrai).
+	// — Re-fit canvases on layout switch —————————————————
+	// The visualizer-wrap stays permanently mounted (never destroyed, see .mixer-hidden) but
+	// changes box (flex:1 in stage vs position:absolute;inset:0 in mixer) — without this re-fit,
+	// coming back to stage leaves the composite canvas at the old resolution until the next
+	// window resize. Read layout/status unconditionally before the early-return inside
+	// onResize (Svelte 5 gotcha: a $state read only after a non-reactive guard breaks
+	// tracking if the 1st run happens while the guard is true).
 	$effect(() => {
 		const l = layout;
 		const s = status;
@@ -585,7 +585,7 @@
 				if (triggered) advanceOverlayQueue(1);
 			}
 			onVideoAudioTick(lv.bass);
-			// FPS counter — mesure les renders Butterchurn réels (pas les ticks RAF)
+			// FPS counter — measures actual Butterchurn renders (not RAF ticks)
 			if (t - fpsLast >= 500) {
 				const activeSlot = ([0, 1, 2, 3] as const).find(i => manager.isRunning(i)) ?? 0;
 				const current = manager.getRenderCount(activeSlot);
@@ -600,7 +600,7 @@
 	});
 
 	// — Persistance localStorage ——————————————————————————
-	// _ready évite que les $effect écrasent le localStorage avant qu'onMount l'ait lu
+	// _ready prevents the $effects from overwriting localStorage before onMount has read it
 	let _ready = $state(false);
 	$effect(() => {
 		if (!_ready) return;
@@ -630,7 +630,7 @@
 		localStorage.setItem('od-timeline', JSON.stringify(timelineKeyframes));
 	});
 
-	// — Persistance localStorage vidéo ———————————————————
+	// — Video localStorage persistence ———————————————————
 	$effect(() => {
 		if (!_ready) return;
 		localStorage.setItem('od-video-enabled', String(videoState.enabled));
@@ -647,7 +647,7 @@
 		sync?.sendOverlays(list);
 	});
 
-	// — Sync vidéo vers output ————————————————————————————
+	// — Video sync to output ————————————————————————————
 	$effect(() => {
 		const payload = { // force tracking of all fields before sync?.
 			enabled: videoState.enabled,
@@ -681,7 +681,7 @@
 		for (let i = 0; i < 4; i++) sync.sendQVars(i, params[i]);
 	});
 
-	// Pousse opacité + config de compositing vers le Compositor local (Stage).
+	// Pushes opacity + compositing config to the local Compositor (Stage).
 	$effect(() => {
 		const ops = opacities;
 		const composites = slotComposites;
@@ -689,8 +689,8 @@
 		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i], composites[i]);
 	});
 
-	// Pousse les params couleur vers le Compositor — par bus assigné (même
-	// mapping que l'ancien style:filter par-canvas : off → neutre).
+	// Pushes color params to the Compositor — by assigned bus (same
+	// mapping as the old per-canvas style:filter: off → neutral).
 	$effect(() => {
 		const bus = deckBus;
 		const paramsA = colorParamsA;
@@ -711,7 +711,7 @@
 		sync?.sendStrobe(on, rate, intensity, color);
 	});
 
-	// — Feedback LED MIDI (états persistants) ——————————————
+	// — MIDI LED feedback (persistent states) ——————————————
 	$effect(() => {
 		pushLedStates();
 	});
@@ -726,7 +726,7 @@
 		sync?.sendColor('B', paramsB);
 	});
 
-	// — Appliquer la qualité aux decks + sync output ———————
+	// — Apply quality to decks + sync output ———————
 	$effect(() => {
 		if (status !== 'running') return;
 		const settings = getQualitySettings(quality);
@@ -734,20 +734,20 @@
 		sync?.sendQuality(quality);
 	});
 
-	// — Appliquer le FPS cible aux decks + sync output ————
+	// — Apply target FPS to decks + sync output ————
 	$effect(() => {
 		if (status !== 'running') return;
-		const fps = targetFps;    // lire avant sync?. pour forcer le tracking
+		const fps = targetFps;    // read before sync?. to force tracking
 		const mode = invisibleMode;
 		const eco = invisibleFps;
 		manager.setTargetFps(fps);
 		sync?.sendPerf({ targetFps: fps, invisibleMode: mode, invisibleFps: eco });
 	});
 
-	// — Throttle des decks invisibles (éco) ——————————————
+	// — Throttle invisible decks (eco) ——————————————
 	$effect(() => {
 		if (status !== 'running') return;
-		const ops = opacities;          // lire en premier → tracké
+		const ops = opacities;          // read first → tracked
 		const mode = invisibleMode;
 		const target = targetFps;
 		const eco = invisibleFps;
@@ -784,7 +784,7 @@
 		if (isElectron) {
 			platform = await window.electronAPI!.getPlatform();
 		}
-		// Restaurer les playlists sauvegardées
+		// Restore saved playlists
 		try {
 			const savedA = localStorage.getItem('od-pl-a');
 			if (savedA) playlistState.aItems = JSON.parse(savedA);
@@ -940,7 +940,7 @@
 				registry.dispatch(cmd as CommandId, value, commandCtx);
 			}) ?? null;
 			linkUnlisten = window.electronAPI?.onLinkState?.((state) => {
-				// phase de Link est sur quantum=4 → normaliser en 0..1
+				// Link's phase is on quantum=4 → normalize to 0..1
 				clock.syncExternal(state.tempo, state.phase / 4.0);
 				linkPeers = state.peers;
 			}) ?? null;
@@ -948,7 +948,7 @@
 				outputOpen = false;
 				audio?.stopPcmCapture();
 			}) ?? null;
-			// Charger la liste des écrans
+			// Load the list of screens
 			try {
 				const list = await window.electronAPI!.listScreens();
 				displays = list;
@@ -1002,7 +1002,7 @@
 			audio = new AudioEngine();
 			await audio.resume();
 
-			// Attacher les 4 canvases au manager (slots 2-3 peuvent être undefined)
+			// Attach the 4 canvases to the manager (slots 2-3 may be undefined)
 			for (let i = 0; i < 4; i++) {
 				const c = canvases[i];
 				if (c) manager.attachCanvas(i, c);
@@ -1016,8 +1016,8 @@
 				if (c) compositor.attachSource(i, c);
 			}
 			compositor.resize(compositorCanvas!.clientWidth || window.innerWidth, compositorCanvas!.clientHeight || window.innerHeight, q.pixelRatio);
-			// Poussée initiale explicite — le $effect ne se redéclenche pas tant
-			// qu'aucun $state qu'il lit ne change (compositor n'en est pas un).
+			// Explicit initial push — the $effect won't re-trigger until one of
+			// the $state values it reads changes (compositor isn't one of those).
 			for (let i = 0; i < 4; i++) {
 				compositor.setLayer(i, opacities[i], slotComposites[i]);
 				const color = deckBus[i] === 'A' ? colorParamsA : deckBus[i] === 'B' ? colorParamsB : DEFAULT_COLOR_PARAMS;
@@ -1111,7 +1111,7 @@
 		try {
 			await audio.resume();
 			if (isElectron && platform === 'win32') {
-				// Electron Windows: setDisplayMediaRequestHandler → loopback natif, pas de picker
+				// Electron Windows: setDisplayMediaRequestHandler → native loopback, no picker
 				await audio.connectDisplay();
 				sourceLabel = 'system audio';
 			} else if (effectiveOS === 'linux' || effectiveOS === 'darwin') {
@@ -1132,7 +1132,7 @@
 					showSystemAudioHelp = true;
 				}
 			} else {
-				// Web Windows / navigateur inconnu : getDisplayMedia avec guidance honnête
+				// Web Windows / unknown browser: getDisplayMedia with honest guidance
 				await audio.connectDisplay();
 				sourceLabel = 'system audio';
 			}
@@ -1279,7 +1279,7 @@
 		}
 	}
 
-	// — Overlay helpers — extraits dans overlay-store.svelte.ts (addOverlayFromFile,
+	// — Overlay helpers — extracted into overlay-store.svelte.ts (addOverlayFromFile,
 	// onOverlayFilePick, addTextOverlay, onVisualizerDragOver, removeOverlay, updateOverlay)
 	async function onVisualizerDrop(e: DragEvent) {
 		e.preventDefault();
@@ -1352,9 +1352,9 @@
 			midiConnected = true;
 			midiDeviceNames = midi.deviceNames;
 			midi.onOutputReconnect(() => pushLedStates());
-			pushLedStates(); // état initial des LED au moment de la connexion
+			pushLedStates(); // initial LED state at connection time
 
-			// Soft-takeover: Set<key> de contrôles déjà en phase avec la valeur app
+			// Soft-takeover: Set<key> of controls already in phase with the app value
 			const takenOver = new Set<MidiTriggerKey>();
 
 			midi.onMessage((msg) => {
@@ -1363,7 +1363,7 @@
 				if (learningAction !== null) {
 					if (msg.type === 'note_off') return;
 					midiMappings = { ...midiMappings, [learningAction]: key };
-					takenOver.add(key); // immédiatement en phase après learn
+					takenOver.add(key); // immediately in phase after learn
 					learningAction = null;
 					return;
 				}
@@ -1372,10 +1372,10 @@
 					if (mapped !== key) continue;
 					if (msg.type === 'note_off') break;
 
-					// Normaliser : 14-bit sur 0..16383, sinon 7-bit sur 0..127
+					// Normalize: 14-bit over 0..16383, otherwise 7-bit over 0..127
 					const value01 = msg.is14bit ? msg.value / 16383 : msg.value / 127;
 
-					// Soft-takeover uniquement pour les commandes range
+					// Soft-takeover only applies to range commands
 					const cmd = registry.get(action);
 					if (cmd?.kind === 'range' && !takenOver.has(key)) {
 						const current = getCommandCurrentValue(action);
@@ -1385,10 +1385,10 @@
 
 					if (status === 'running') {
 						registry.dispatch(action, value01, commandCtx);
-						// Flash de confirmation — exclu pour les commandes à état persistant
-						// (strobe-toggle, playlist-toggle-*) : sans cette garde, le setTimeout
-						// ci-dessous écraserait à tort l'état que pushLedStates() vient de
-						// mettre à jour au même tick (voir Global Constraints).
+						// Confirmation flash — excluded for commands with persistent state
+						// (strobe-toggle, playlist-toggle-*): without this guard, the setTimeout
+						// below would wrongly overwrite the state that pushLedStates() just
+						// updated on the same tick (see Global Constraints).
 						if (cmd?.kind === 'trigger' && getCommandLedState(action) === null) {
 							midi?.sendFeedback(key, true);
 							setTimeout(() => midi?.sendFeedback(key, false), 120);
@@ -1398,7 +1398,7 @@
 				}
 			});
 
-			// MIDI clock IN → alimente la Clock (24 pulses par quarter note)
+			// MIDI clock IN → feeds the Clock (24 pulses per quarter note)
 			let _clockPulses = 0;
 			let _clockTsRing: number[] = [];
 			let _clockTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1409,7 +1409,7 @@
 				_clockTsRing.push(now);
 				if (_clockTsRing.length > 49) _clockTsRing.shift();
 
-				// Mise à jour BPM toutes les 6 pulses (≈4× par beat à 120 BPM)
+				// BPM update every 6 pulses (≈4× per beat at 120 BPM)
 				if (_clockPulses % 6 === 0 && _clockTsRing.length >= 7) {
 					const recent = _clockTsRing.slice(-7);
 					const intervals = recent.slice(1).map((t, i) => t - recent[i]);
@@ -1421,10 +1421,10 @@
 					}
 				}
 
-				// Beat sur chaque quarter note (24 pulses)
+				// Beat on every quarter note (24 pulses)
 				if (_clockPulses % 24 === 0) clock.pulse();
 
-				// Timeout d'inactivité : MIDI clock arrêté depuis 2s
+				// Inactivity timeout: MIDI clock stopped for 2s
 				if (_clockTimer !== null) clearTimeout(_clockTimer);
 				_clockTimer = setTimeout(() => {
 					midiClockBpm = 0;
@@ -1464,7 +1464,7 @@
 		registry.dispatch(action, value / 127, commandCtx);
 	}
 
-	/** Lire la valeur courante (0..1) d'une commande range, pour le soft-takeover. */
+	/** Read the current value (0..1) of a range command, for soft-takeover. */
 	function getCommandCurrentValue(id: CommandId): number | null {
 		if (id === 'crossfader') return crossfader;
 		const colorMatch = id.match(/^color-(\w+)-([ab])$/);
@@ -1499,10 +1499,10 @@
 		return null;
 	}
 
-	// Lit strobeOn/playlistState.aPlaying/bPlaying/activeDeck/midiMappings AVANT de vérifier
-	// `midi` (variable non-réactive) — sinon un $effect qui appelle cette fonction ne suivrait
-	// jamais ces $state s'il tournait une première fois avant la connexion MIDI (le même
-	// gotcha Svelte 5 documenté pour l'optional chaining dans un $effect).
+	// Reads strobeOn/playlistState.aPlaying/bPlaying/activeDeck/midiMappings BEFORE checking
+	// `midi` (non-reactive variable) — otherwise an $effect calling this function would never
+	// track those $state values if it first ran before the MIDI connection (the same
+	// Svelte 5 gotcha documented for optional chaining in an $effect).
 	function pushLedStates() {
 		const strobe = strobeOn;
 		const plA = playlistState.aPlaying;
@@ -1565,8 +1565,8 @@
 		const encoded = await encodeSharedSet(set);
 		const url = `${location.origin}${location.pathname}#share=${encoded}`;
 		await navigator.clipboard.writeText(url);
-		shareCopyLabel = 'Copié !';
-		setTimeout(() => { shareCopyLabel = 'Copier le lien'; }, 1500);
+		shareCopyLabel = 'Copied!';
+		setTimeout(() => { shareCopyLabel = 'Copy link'; }, 1500);
 	}
 
 	let pendingSharedSet = $state<SharedSet | null>(null);
@@ -1668,7 +1668,7 @@
 			const h = window.screen.height;
 			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
 			if (res?.ok) ndiActive = true;
-			else ndiError = res?.error ?? 'NDI SDK non trouvé — installez le NDI Runtime depuis ndi.video.';
+			else ndiError = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
 		}
 	}
 
@@ -1844,7 +1844,7 @@
     onAddVideo={onVideoFilePick}
   />
 {/snippet}
-{#snippet qualiteSection()}
+{#snippet qualitySection()}
 	<SidebarQuality
 		{quality}
 		{targetFps}
@@ -1894,7 +1894,7 @@
 		onClearMapping={clearMapping}
 	/>
 {/snippet}
-{#snippet clavierSection()}
+{#snippet keyboardSection()}
 	<SidebarKeymap
 		{learningKey}
 		{keyById}
@@ -2002,13 +2002,13 @@
 {/snippet}
 {#if pendingSharedSet}
 	<div class="overlay share-confirm-overlay">
-		<p class="tagline">Charger le set partagé « {pendingSharedSet.name || 'Sans nom'} » ?</p>
+		<p class="tagline">Load the shared set « {pendingSharedSet.name || 'Unnamed'} » ?</p>
 		<p style="font-size:11px;color:#aaa;max-width:320px;text-align:center">
-			Remplace ton état visuel actuel (presets, couleur, snapshots, timeline...).
+			Replaces your current visual state (presets, color, snapshots, timeline...).
 		</p>
 		<div style="display:flex;gap:8px">
-			<button class="btn-primary" onclick={applyPendingSharedSet}>Charger</button>
-			<button class="btn-secondary" onclick={cancelPendingSharedSet}>Annuler</button>
+			<button class="btn-primary" onclick={applyPendingSharedSet}>Load</button>
+			<button class="btn-secondary" onclick={cancelPendingSharedSet}>Cancel</button>
 		</div>
 	</div>
 {/if}
@@ -2022,13 +2022,13 @@
 	role="region"
 	aria-label="Visualizer"
 >
-	<!-- Video loop — premier enfant = derrière les decks -->
+	<!-- Video loop — first child = behind the decks -->
 	<VideoLayer clip={currentClip} opacity={videoState.opacity} {beat} playbackRate={videoState.playbackRate} flashOn={videoState.reactFlash} hueOn={videoState.reactHue} />
-	<!-- Deck canvases — 4 slots, texture sources pour le Compositor (cachés) -->
+	<!-- Deck canvases — 4 slots, texture sources for the Compositor (hidden) -->
 	{#each [0, 1, 2, 3] as i}
 		<canvas bind:this={canvases[i]} class="deck-src"></canvas>
 	{/each}
-	<!-- Rendu composé (blend + lumaKey + colorKey par slot) -->
+	<!-- Composited render (blend + lumaKey + colorKey per slot) -->
 	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoState.enabled ? 'screen' : 'normal'}></canvas>
 	<!-- Overlay sprites -->
 	<OverlayLayer overlays={overlayState.overlays} {beat} visibleIds={overlayVisibleIds} />
@@ -2109,10 +2109,10 @@
 				<span class="cf-label" class:bright={crossfader > 0.8}>B</span>
 			</div>
 			<div class="transition-row">
-				<span class="transition-label">Fondu</span>
-				<input class="transition-slider" type="range" min="0" max="5" step="0.1" bind:value={transitionTime} title="Durée de transition preset (s)" />
+				<span class="transition-label">Fade</span>
+				<input class="transition-slider" type="range" min="0" max="5" step="0.1" bind:value={transitionTime} title="Preset transition duration (s)" />
 				<span class="transition-value">{transitionTime.toFixed(1)}s</span>
-				<button class="btn-sm" onclick={() => { transitionTime = 0 }} title="Coupe nette">Hard Cut</button>
+				<button class="btn-sm" onclick={() => { transitionTime = 0 }} title="Hard cut">Hard Cut</button>
 			</div>
 			<button
 				class="btn-sm preset-browser-toggle"
@@ -2223,13 +2223,13 @@
 			onAddVideo={onVideoFilePick}
 		/>
 
-		{@render qualiteSection()}
+		{@render qualitySection()}
 
 		{@render outputSection()}
 
 		{@render midiSection()}
 
-		{@render clavierSection()}
+		{@render keyboardSection()}
 
 		{@render strobeSection()}
 
@@ -2276,10 +2276,10 @@
     onLayoutToggle={(l) => { layout = l }}
     {audioSection}
     {videoSection}
-    {qualiteSection}
+    {qualitySection}
     {outputSection}
     {midiSection}
-    {clavierSection}
+    {keyboardSection}
     {strobeSection}
     {lfoSection}
     {colorSection}
@@ -2319,8 +2319,8 @@
 	main { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 	.visualizer-wrap { flex: 1; position: relative; background: #000; min-width: 0; isolation: isolate; }
-	/* En mixer, le wrap reste monté (jamais détruit — les canvas gardent leur lien avec le
-	   moteur) mais sort du flux flex et se cache : visibility, pas display:none, pour garder
+	/* In mixer mode, the wrap stays mounted (never destroyed — the canvases keep their link
+	   with the engine) but exits the flex flow and hides: visibility, not display:none, to keep
 	   clientWidth/Height non nuls (rAF + captureStream restent vivants). */
 	.visualizer-wrap.mixer-hidden { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
 	.strobe-flash { position: absolute; inset: 0; z-index: 200; pointer-events: none; }

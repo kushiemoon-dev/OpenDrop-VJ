@@ -40,14 +40,14 @@
 	}
 
 	function handleDelete(entry: CloudPresetEntry) {
-		if (window.confirm(`Supprimer "${entry.name}" ?`)) onDelete(entry.id);
+		if (window.confirm(`Delete "${entry.name}"?`)) onDelete(entry.id);
 	}
 </script>
 
 <div class="controls-section">
 	<div class="pl-header">
-		<span class="label">Mes presets ({presets.length})</span>
-		<label class="btn-sm file-label" title="Uploader un preset JSON (format Butterchurn)">
+		<span class="label">My presets ({presets.length})</span>
+		<label class="btn-sm file-label" title="Upload a JSON preset (Butterchurn format)">
 			+ Upload
 			<input type="file" accept=".json,application/json" onchange={onUploadFile} style="display:none" />
 		</label>
@@ -57,12 +57,12 @@
 	{/if}
 	<div class="cloud-token-row">
 		<button class="btn-sm" onclick={onCopyToken}>{copyLabel}</button>
-		<input class="cloud-token-input" type="text" placeholder="Lier un autre appareil (coller le token)"
+		<input class="cloud-token-input" type="text" placeholder="Link another device (paste the token)"
 			bind:value={linkTokenInput} onkeydown={(e) => { if (e.key === 'Enter') handleLink(); }} />
-		<button class="btn-sm" onclick={handleLink}>Lier</button>
+		<button class="btn-sm" onclick={handleLink}>Link</button>
 	</div>
 	{#if presets.length === 0}
-		<p class="hint">Aucun preset custom. Upload un fichier JSON au format Butterchurn.</p>
+		<p class="hint">No custom presets yet. Upload a JSON file in Butterchurn format.</p>
 	{/if}
 	<ul class="overlay-list">
 		{#each presets as entry (entry.id)}
@@ -73,12 +73,12 @@
 							onkeydown={(e) => { if (e.key === 'Enter') confirmRename(); }} />
 						<button class="btn-sm pl-btn" onclick={confirmRename}>✓</button>
 					{:else}
-						<button class="overlay-name" onclick={() => onLoadPreset(entry.name)} title="Charger sur le deck actif">
+						<button class="overlay-name" onclick={() => onLoadPreset(entry.name)} title="Load onto the active deck">
 							{entry.name}
 						</button>
-						<button class="btn-sm pl-btn" onclick={() => startRename(entry)} title="Renommer">✎</button>
+						<button class="btn-sm pl-btn" onclick={() => startRename(entry)} title="Rename">✎</button>
 					{/if}
-					<button class="pl-remove" onclick={() => handleDelete(entry)} title="Supprimer">×</button>
+					<button class="pl-remove" onclick={() => handleDelete(entry)} title="Delete">×</button>
 				</div>
 			</li>
 		{/each}

@@ -20,14 +20,14 @@ vi.mock('./index.js', () => ({
 import { enqueueFront, dequeueJob } from './thumbnailer.svelte.js'
 
 describe('enqueueFront', () => {
-	it('ajoute un job en tête', () => {
+	it('adds a job at the front', () => {
 		const q = [{ slug: 'a', name: 'A' }]
 		const result = enqueueFront(q, { slug: 'b', name: 'B' })
 		expect(result[0].slug).toBe('b')
 		expect(result[1].slug).toBe('a')
 	})
 
-	it('déduplique un slug existant', () => {
+	it('deduplicates an existing slug', () => {
 		const q = [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }]
 		const result = enqueueFront(q, { slug: 'a', name: 'A' })
 		expect(result).toHaveLength(2)
@@ -35,19 +35,19 @@ describe('enqueueFront', () => {
 		expect(result[1].slug).toBe('b')
 	})
 
-	it('file vide + ajout → [job]', () => {
+	it('empty queue + add → [job]', () => {
 		expect(enqueueFront([], { slug: 'x', name: 'X' })).toHaveLength(1)
 	})
 })
 
 describe('dequeueJob', () => {
-	it('retourne null pour file vide', () => {
+	it('returns null for an empty queue', () => {
 		const [job, rest] = dequeueJob([])
 		expect(job).toBeNull()
 		expect(rest).toHaveLength(0)
 	})
 
-	it('retourne le premier job et le reste', () => {
+	it('returns the first job and the rest', () => {
 		const q = [{ slug: 'a', name: 'A' }, { slug: 'b', name: 'B' }]
 		const [job, rest] = dequeueJob(q)
 		expect(job?.slug).toBe('a')

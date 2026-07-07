@@ -6,7 +6,7 @@
 	let { layout, onToggle }: Props = $props()
 </script>
 
-<div class="layout-toggle" role="group" aria-label="Choisir le layout">
+<div class="layout-toggle" role="group" aria-label="Choose layout">
 	<button
 		class="toggle-btn"
 		class:active={layout === 'mixer'}

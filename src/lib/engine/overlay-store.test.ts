@@ -37,7 +37,7 @@ describe('overlay-store', () => {
 	});
 
 	describe('addTextOverlay', () => {
-		it('ajoute un overlay texte et retourne son id', () => {
+		it('adds a text overlay and returns its id', () => {
 			const id = addTextOverlay();
 			expect(overlayState.overlays).toHaveLength(1);
 			expect(overlayState.overlays[0].kind).toBe('text');
@@ -46,7 +46,7 @@ describe('overlay-store', () => {
 	});
 
 	describe('addOverlayAtPosition', () => {
-		it('sauvegarde l\'asset et ajoute un overlay positionné', async () => {
+		it('saves the asset and adds a positioned overlay', async () => {
 			await addOverlayAtPosition('photo', 'data:image/png;base64,xxx', 0.2, 0.8);
 			expect(overlayApi.saveAsset).toHaveBeenCalledWith('id-photo', 'data:image/png;base64,xxx');
 			expect(overlayState.overlays).toHaveLength(1);
@@ -56,14 +56,14 @@ describe('overlay-store', () => {
 	});
 
 	describe('onOverlayFilePick', () => {
-		it("ne fait rien si aucun fichier n'est sélectionné", async () => {
+		it('does nothing if no file is selected', async () => {
 			const input = { files: null, value: '' };
 			await onOverlayFilePick({ target: input } as unknown as Event);
 			expect(overlayApi.saveAsset).not.toHaveBeenCalled();
 			expect(overlayState.overlays).toHaveLength(0);
 		});
 
-		it('lit chaque fichier sélectionné via FileReader et ajoute un overlay par fichier', async () => {
+		it('reads each selected file via FileReader and adds one overlay per file', async () => {
 			class FakeFileReader {
 				result: string | null = null;
 				onload: (() => void) | null = null;
@@ -87,7 +87,7 @@ describe('overlay-store', () => {
 	});
 
 	describe('removeOverlay', () => {
-		it('supprime l\'asset et retire l\'overlay de la liste', async () => {
+		it('deletes the asset and removes the overlay from the list', async () => {
 			addTextOverlay();
 			const id = overlayState.overlays[0].id;
 			await removeOverlay(id);
@@ -95,7 +95,7 @@ describe('overlay-store', () => {
 			expect(overlayState.overlays).toHaveLength(0);
 		});
 
-		it('re-clampe queueIndex si la file rétrécit', async () => {
+		it('re-clamps queueIndex if the queue shrinks', async () => {
 			overlayState.overlays = [
 				{ id: 'a', inQueue: true } as never,
 				{ id: 'b', inQueue: true } as never,
@@ -107,7 +107,7 @@ describe('overlay-store', () => {
 	});
 
 	describe('updateOverlay', () => {
-		it('merge un patch sur le bon overlay uniquement', () => {
+		it('merges a patch onto the correct overlay only', () => {
 			addTextOverlay();
 			const id = overlayState.overlays[0].id;
 			updateOverlay(id, { opacity: 0.4 });
@@ -117,7 +117,7 @@ describe('overlay-store', () => {
 	});
 
 	describe('toggleOverlayQueue', () => {
-		it('bascule enabled', () => {
+		it('toggles enabled', () => {
 			expect(overlayState.queueEnabled).toBe(false);
 			toggleOverlayQueue();
 			expect(overlayState.queueEnabled).toBe(true);
@@ -127,21 +127,21 @@ describe('overlay-store', () => {
 	});
 
 	describe('setOverlayQueueMode', () => {
-		it('remplace le mode', () => {
+		it('replaces the mode', () => {
 			setOverlayQueueMode('shuffle');
 			expect(overlayState.queueMode).toBe('shuffle');
 		});
 	});
 
 	describe('updateOverlayQueueTrigger', () => {
-		it('merge et re-clampe via applyBeatTriggerPatch', () => {
+		it('merges and re-clamps via applyBeatTriggerPatch', () => {
 			updateOverlayQueueTrigger({ beatsPerChange: 100 });
 			expect(overlayState.queueTrigger.beatsPerChange).toBe(64);
 		});
 	});
 
 	describe('advanceOverlayQueue', () => {
-		it('avance séquentiellement parmi les overlays en queue', () => {
+		it('advances sequentially among the queued overlays', () => {
 			overlayState.overlays = [
 				{ id: 'a', inQueue: true } as never,
 				{ id: 'b', inQueue: true } as never,
@@ -153,7 +153,7 @@ describe('overlay-store', () => {
 			expect(overlayState.queueIndex).toBe(1);
 		});
 
-		it('recule sans tenir compte du mode', () => {
+		it('goes backward regardless of mode', () => {
 			overlayState.overlays = [
 				{ id: 'a', inQueue: true } as never,
 				{ id: 'b', inQueue: true } as never,
@@ -165,14 +165,14 @@ describe('overlay-store', () => {
 	});
 
 	describe('onVisualizerDragOver', () => {
-		it('active dragOver seulement si des fichiers sont traînés', () => {
+		it('activates dragOver only when files are being dragged', () => {
 			const withFiles = { dataTransfer: { types: ['Files'] }, preventDefault: vi.fn() };
 			onVisualizerDragOver(withFiles as unknown as DragEvent);
 			expect(overlayState.dragOver).toBe(true);
 			expect(withFiles.preventDefault).toHaveBeenCalled();
 		});
 
-		it('ignore un dragover sans fichiers', () => {
+		it('ignores a dragover without files', () => {
 			const withoutFiles = { dataTransfer: { types: ['text/plain'] }, preventDefault: vi.fn() };
 			onVisualizerDragOver(withoutFiles as unknown as DragEvent);
 			expect(overlayState.dragOver).toBe(false);

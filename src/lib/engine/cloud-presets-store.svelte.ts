@@ -17,7 +17,7 @@ export const cloudPresetsState = $state({
 	token: '',
 	presets: [] as CloudPresetEntry[],
 	error: null as string | null,
-	copyLabel: 'Copier mon token',
+	copyLabel: 'Copy my token',
 });
 
 /** Get/create the device's cloud token and load its preset list. Call once on mount. */
@@ -47,14 +47,14 @@ export async function onCloudPresetFilePick(e: Event): Promise<void> {
 		}
 		await refreshCloudPresets();
 	} catch (err) {
-		cloudPresetsState.error = err instanceof Error ? err.message : 'Fichier preset invalide';
+		cloudPresetsState.error = err instanceof Error ? err.message : 'Invalid preset file';
 	}
 }
 
 export function copyCloudToken(): void {
 	navigator.clipboard.writeText(cloudPresetsState.token);
-	cloudPresetsState.copyLabel = 'Copié !';
-	setTimeout(() => { cloudPresetsState.copyLabel = 'Copier mon token'; }, 1500);
+	cloudPresetsState.copyLabel = 'Copied!';
+	setTimeout(() => { cloudPresetsState.copyLabel = 'Copy my token'; }, 1500);
 }
 
 export async function linkCloudDevice(token: string): Promise<void> {

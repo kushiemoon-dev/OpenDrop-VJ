@@ -1,24 +1,24 @@
 export interface Overlay {
 	id: string;
 	name: string;
-	x: number;           // centre X normalisé 0-1
-	y: number;           // centre Y normalisé 0-1
-	scale: number;       // 1 = taille originale
-	rotation: number;    // degrés
+	x: number;           // normalized center X, 0-1
+	y: number;           // normalized center Y, 0-1
+	scale: number;       // 1 = original size
+	rotation: number;    // degrees
 	opacity: number;     // 0-1
 	blendMode: string;   // CSS mix-blend-mode
 	beatReactive: boolean;
-	beatScale: number;   // multiplicateur d'échelle sur le beat (ex: 1.2)
-	video: boolean;      // true = asset vidéo (rendu <video> au lieu de <img>) — ignoré si kind='text'
-	spin: number;        // deg/s, 0 = pas de rotation continue
-	driftX: number;      // fraction largeur/s, dérive horizontale
-	driftY: number;      // fraction hauteur/s, dérive verticale
-	kind: 'media' | 'text';        // 'media' = image/vidéo (défaut), 'text' = overlay texte
-	text: string;                  // contenu du texte (vide pour kind='media')
+	beatScale: number;   // scale multiplier applied on the beat (e.g. 1.2)
+	video: boolean;      // true = video asset (rendered as <video> instead of <img>) — ignored if kind='text'
+	spin: number;        // deg/s, 0 = no continuous rotation
+	driftX: number;      // fraction of width/s, horizontal drift
+	driftY: number;      // fraction of height/s, vertical drift
+	kind: 'media' | 'text';        // 'media' = image/video (default), 'text' = text overlay
+	text: string;                  // text content (empty for kind='media')
 	fontFamily: 'sans' | 'serif' | 'mono' | 'impact' | 'comic';
-	fontSize: number;              // vh — indépendant de la résolution, multiplié par `scale`
-	color: string;                 // couleur du texte, hex
-	inQueue: boolean;              // fait partie de la rotation auto-cyclante (queue overlay)
+	fontSize: number;              // vh — resolution-independent, multiplied by `scale`
+	color: string;                 // text color, hex
+	inQueue: boolean;              // part of the auto-cycling rotation (queue overlay)
 }
 
 export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overlay {
@@ -47,7 +47,7 @@ export function makeOverlay(name: string, partial: Partial<Overlay> = {}): Overl
 	};
 }
 
-// ── IndexedDB — stockage des images (data URL) ────────────────────────────
+// ── IndexedDB — image storage (data URL) ────────────────────────────
 
 const DB_NAME = 'opendrop-overlays';
 const STORE = 'assets';

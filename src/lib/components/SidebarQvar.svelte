@@ -23,7 +23,7 @@
 				if (n) onAddWatch(n);
 				e.currentTarget.value = '';
 			}}>
-			<option value="">+ Ajouter Q-var</option>
+			<option value="">+ Add Q-var</option>
 			{#each Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !qvar.enabled[n - 1]) as n (n)}
 				<option value={n}>Q{n}</option>
 			{/each}

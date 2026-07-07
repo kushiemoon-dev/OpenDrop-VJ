@@ -1,18 +1,18 @@
 /**
- * Cache IndexedDB pour les miniatures de presets (WebP 192×108).
+ * IndexedDB cache for preset thumbnails (WebP 192x108).
  *
- * Croissance non bornée assumée (~16 374 presets × ~8 Ko ≈ 130 Mo) pour une
- * app desktop. Pas de LRU (YAGNI). Utiliser clearThumbs() pour forcer un rebuild.
+ * Unbounded growth is accepted (~16,374 presets x ~8KB ≈ 130MB) for a
+ * desktop app. No LRU (YAGNI). Use clearThumbs() to force a rebuild.
  */
 
-// Garde browser — IndexedDB n'existe pas côté Node/SSR
-// (SPA mode : ssr=false, mais les imports de modules sont évalués au build)
+// Browser guard — IndexedDB doesn't exist on the Node/SSR side
+// (SPA mode: ssr=false, but module imports are still evaluated at build time)
 
 const DB_NAME = 'opendrop-thumbs';
 const STORE = 'thumbs';
 const DB_VERSION = 1;
 
-// Mémo en mémoire : slug → object-URL (évite de recréer des object-URLs)
+// In-memory memo: slug -> object URL (avoids recreating object URLs)
 const _urlCache = new Map<string, string>();
 
 function openDB(): Promise<IDBDatabase> {
@@ -24,7 +24,7 @@ function openDB(): Promise<IDBDatabase> {
 	});
 }
 
-/** Lire un blob WebP depuis IndexedDB. Null si absent ou hors browser. */
+/** Read a WebP blob from IndexedDB. Null if missing or outside the browser. */
 export async function getThumbBlob(slug: string): Promise<Blob | null> {
 	if (typeof indexedDB === 'undefined') return null;
 	const db = await openDB();
@@ -37,7 +37,7 @@ export async function getThumbBlob(slug: string): Promise<Blob | null> {
 	return result;
 }
 
-/** Persister un blob WebP dans IndexedDB. No-op hors browser. */
+/** Persist a WebP blob to IndexedDB. No-op outside the browser. */
 export async function putThumbBlob(slug: string, blob: Blob): Promise<void> {
 	if (typeof indexedDB === 'undefined') return;
 	const db = await openDB();
@@ -50,7 +50,7 @@ export async function putThumbBlob(slug: string, blob: Blob): Promise<void> {
 	db.close();
 }
 
-/** Vider tout le store (permet un rebuild complet du cache). */
+/** Clear the entire store (allows a full cache rebuild). */
 export async function clearThumbs(): Promise<void> {
 	if (typeof indexedDB === 'undefined') return;
 	const db = await openDB();
@@ -64,8 +64,8 @@ export async function clearThumbs(): Promise<void> {
 }
 
 /**
- * Récupérer l'object-URL d'une miniature (crée depuis IndexedDB, mémoïse).
- * Retourne null si le slug n'est pas en cache.
+ * Get the object URL for a thumbnail (creates it from IndexedDB, memoizes it).
+ * Returns null if the slug isn't cached.
  */
 export async function getThumbUrl(slug: string): Promise<string | null> {
 	if (_urlCache.has(slug)) return _urlCache.get(slug)!;
@@ -77,8 +77,8 @@ export async function getThumbUrl(slug: string): Promise<string | null> {
 }
 
 /**
- * Mémoïser une URL immédiatement après génération (blob déjà disponible, pas besoin d'IDB).
- * Retourne l'object-URL créé.
+ * Memoize a URL immediately after generation (blob already available, no need to hit IDB).
+ * Returns the created object URL.
  */
 export function cacheUrl(slug: string, blob: Blob): string {
 	if (_urlCache.has(slug)) return _urlCache.get(slug)!;

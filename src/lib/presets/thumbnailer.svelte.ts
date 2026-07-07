@@ -28,7 +28,7 @@ export const WEBP_QUALITY = 0.7
 // ─── Reactive state ───────────────────────────────────────────────────────────
 
 // Extension .svelte.ts required for $state
-// Svelte 5 $state Map — .set()/.delete() sont les mutations correctes sur un proxy réactif
+// Svelte 5 $state Map — .set()/.delete() are the correct mutations on a reactive proxy
 export const thumbUrls = $state(new Map<string, string>())
 
 // ─── Internal types ───────────────────────────────────────────────────────────

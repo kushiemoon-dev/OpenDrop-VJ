@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// mock relatif — pas d'alias $lib en env:node
+// relative mock — no $lib alias in env:node
 const mockDeckInstance = {
   init: vi.fn().mockResolvedValue(undefined),
   connectAudio: vi.fn(),
@@ -19,7 +19,7 @@ const MockDeck = vi.fn(() => mockDeckInstance)
 
 vi.mock('./deck.js', () => ({ Deck: MockDeck }))
 
-// import APRÈS le mock
+// import AFTER the mock
 const { DeckManager } = await import('./deck-manager.js')
 
 describe('DeckManager', () => {
@@ -36,14 +36,14 @@ describe('DeckManager', () => {
     manager.attachCanvas(1, mockCanvas)
   })
 
-  it('start() crée et initialise un Deck au premier appel', async () => {
+  it('start() creates and initializes a Deck on the first call', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     expect(MockDeck).toHaveBeenCalledWith(mockCanvas, 'deck-0')
     expect(mockDeckInstance.init).toHaveBeenCalledTimes(1)
     expect(mockDeckInstance.startRenderLoop).toHaveBeenCalledTimes(1)
   })
 
-  it('start() charge le preset si fourni', async () => {
+  it('start() loads the preset if provided', async () => {
     const preset = { name: 'test' }
     await manager.start(0, audioCtx, audioNode, {}, preset)
     expect(mockDeckInstance.loadPreset).toHaveBeenCalledWith(
@@ -52,7 +52,7 @@ describe('DeckManager', () => {
     )
   })
 
-  it('start() appelle resume() au deuxième appel, sans re-init', async () => {
+  it('start() calls resume() on the second call, without re-init', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     MockDeck.mockClear()
     mockDeckInstance.init.mockClear()
@@ -62,17 +62,17 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.resume).toHaveBeenCalledTimes(1)
   })
 
-  it('pause() appelle deck.pause()', async () => {
+  it('pause() calls deck.pause()', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     manager.pause(0)
     expect(mockDeckInstance.pause).toHaveBeenCalledTimes(1)
   })
 
-  it('pause() sur slot non initialisé ne plante pas', () => {
+  it('pause() on an uninitialized slot does not crash', () => {
     expect(() => manager.pause(3)).not.toThrow()
   })
 
-  it('resume() appelle deck.resume() si state === idle', async () => {
+  it('resume() calls deck.resume() if state === idle', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     mockDeckInstance.state = 'idle'
     mockDeckInstance.resume.mockClear()
@@ -80,7 +80,7 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.resume).toHaveBeenCalledTimes(1)
   })
 
-  it('resume() est un no-op si state === running', async () => {
+  it('resume() is a no-op if state === running', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     mockDeckInstance.state = 'running'
     mockDeckInstance.resume.mockClear()
@@ -88,30 +88,30 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.resume).not.toHaveBeenCalled()
   })
 
-  it('resume() sur slot non initialisé ne plante pas', () => {
+  it('resume() on an uninitialized slot does not crash', () => {
     expect(() => manager.resume(3)).not.toThrow()
   })
 
-  it('isRunning() retourne false sur slot non initialisé', () => {
+  it('isRunning() returns false for an uninitialized slot', () => {
     expect(manager.isRunning(0)).toBe(false)
   })
 
-  it('isRunning() retourne true après start()', async () => {
+  it('isRunning() returns true after start()', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     expect(manager.isRunning(0)).toBe(true)
   })
 
-  it('runningCount() retourne le nombre de slots running', async () => {
+  it('runningCount() returns the number of running slots', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     await manager.start(1, audioCtx, audioNode, {}, null)
     expect(manager.runningCount()).toBe(2)
   })
 
-  it('runningCount() = 0 si aucun slot init', () => {
+  it('runningCount() = 0 if no slot is initialized', () => {
     expect(manager.runningCount()).toBe(0)
   })
 
-  it('connectAudio() re-route tous les slots initialisés', async () => {
+  it('connectAudio() re-routes all initialized slots', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     mockDeckInstance.connectAudio.mockClear()
     const newNode = {} as AudioNode
@@ -119,11 +119,11 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.connectAudio).toHaveBeenCalledWith(newNode)
   })
 
-  it('loadPreset() sur slot non initialisé ne plante pas', () => {
+  it('loadPreset() on an uninitialized slot does not crash', () => {
     expect(() => manager.loadPreset(2, { name: 'test' }, 2.0)).not.toThrow()
   })
 
-  it('destroyAll() détruit tous les slots et les reset', async () => {
+  it('destroyAll() destroys all slots and resets them', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     manager.destroyAll()
     expect(mockDeckInstance.destroy).toHaveBeenCalledTimes(1)
@@ -131,7 +131,7 @@ describe('DeckManager', () => {
     expect(manager.isRunning(0)).toBe(false)
   })
 
-  it('setTargetFps(45) applique frameInterval ≈ 22.22 ms sur tous les slots initialisés', async () => {
+  it('setTargetFps(45) applies frameInterval ≈ 22.22 ms to all initialized slots', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     await manager.start(1, audioCtx, audioNode, {}, null)
     mockDeckInstance.setTargetFps.mockClear()
@@ -140,14 +140,14 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(45)
   })
 
-  it('setTargetFps(0) passe 0 (illimité) à tous les slots', async () => {
+  it('setTargetFps(0) passes 0 (unlimited) to all slots', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     mockDeckInstance.setTargetFps.mockClear()
     manager.setTargetFps(0)
     expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(0)
   })
 
-  it('setSlotTargetFps() applique le fps uniquement au slot ciblé', async () => {
+  it('setSlotTargetFps() applies the fps only to the targeted slot', async () => {
     await manager.start(0, audioCtx, audioNode, {}, null)
     await manager.start(1, audioCtx, audioNode, {}, null)
     mockDeckInstance.setTargetFps.mockClear()
@@ -156,11 +156,11 @@ describe('DeckManager', () => {
     expect(mockDeckInstance.setTargetFps).toHaveBeenCalledWith(30)
   })
 
-  it('setSlotTargetFps() sur slot non initialisé ne plante pas', () => {
+  it('setSlotTargetFps() on an uninitialized slot does not crash', () => {
     expect(() => manager.setSlotTargetFps(3, 30)).not.toThrow()
   })
 
-  it('start() après setTargetFps(30) appelle setTargetFps(30) sur le nouveau deck', async () => {
+  it('start() after setTargetFps(30) calls setTargetFps(30) on the new deck', async () => {
     manager.setTargetFps(30)
     mockDeckInstance.setTargetFps.mockClear()
     await manager.start(0, audioCtx, audioNode, {}, null)

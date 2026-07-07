@@ -44,15 +44,15 @@
 	<div class="pl-header">
 		<span class="label">Overlays ({overlays.length})</span>
 		<div style="display:flex; gap:4px">
-			<button class="btn-sm" onclick={handleAddText} title="Ajouter un overlay texte">+ Texte</button>
-			<label class="btn-sm file-label" title="Ajouter une image ou une vidéo (sprite)">
+			<button class="btn-sm" onclick={handleAddText} title="Add a text overlay">+ Text</button>
+			<label class="btn-sm file-label" title="Add an image or video (sprite)">
 				+ Sprite
 				<input type="file" accept="image/*,video/*" multiple onchange={onAddOverlays} style="display:none" />
 			</label>
 		</div>
 	</div>
 	{#if overlays.length === 0}
-		<p class="hint">Glisse une image sur le visualizer, ou clique + Sprite / + Texte</p>
+		<p class="hint">Drag an image onto the visualizer, or click + Sprite / + Text</p>
 	{/if}
 	<ul class="overlay-list">
 		{#each overlays as ov (ov.id)}
@@ -62,26 +62,26 @@
 						{ov.name}
 					</button>
 					<button class="btn-sm pl-btn" class:active={ov.beatReactive} onclick={() => onUpdateOverlay(ov.id, { beatReactive: !ov.beatReactive })} title="Beat reactive">♩</button>
-					<button class="btn-sm pl-btn" class:active={ov.inQueue} onclick={() => onUpdateOverlay(ov.id, { inQueue: !ov.inQueue })} title="Inclure dans la queue auto-cyclante">▤</button>
-					<button class="pl-remove" onclick={() => onRemoveOverlay(ov.id)} title="Supprimer">×</button>
+					<button class="btn-sm pl-btn" class:active={ov.inQueue} onclick={() => onUpdateOverlay(ov.id, { inQueue: !ov.inQueue })} title="Include in the auto-cycling queue">▤</button>
+					<button class="pl-remove" onclick={() => onRemoveOverlay(ov.id)} title="Delete">×</button>
 				</div>
 				{#if expandedOverlayId === ov.id}
 					<div class="overlay-controls">
 						{#if ov.kind === 'text'}
-							<label class="ov-label ov-label--stack">Contenu
+							<label class="ov-label ov-label--stack">Content
 								<textarea class="ov-textarea" rows="2" value={ov.text} oninput={(e) => onUpdateOverlay(ov.id, { text: (e.target as HTMLTextAreaElement).value })}></textarea>
 							</label>
-							<label class="ov-label">Police
+							<label class="ov-label">Font
 								<select class="ov-select" value={ov.fontFamily} onchange={(e) => onUpdateOverlay(ov.id, { fontFamily: (e.target as HTMLSelectElement).value as Overlay['fontFamily'] })}>
 									{#each FONT_FAMILIES as [value, label]}
 										<option {value}>{label}</option>
 									{/each}
 								</select>
 							</label>
-							<label class="ov-label">Couleur
+							<label class="ov-label">Color
 								<input type="color" class="ov-color" value={ov.color} oninput={(e) => onUpdateOverlay(ov.id, { color: (e.target as HTMLInputElement).value })} />
 							</label>
-							<label class="ov-label">Taille
+							<label class="ov-label">Size
 								<input type="range" min="2" max="20" step="0.5" value={ov.fontSize} oninput={(e) => onUpdateOverlay(ov.id, { fontSize: +(e.target as HTMLInputElement).value })} />
 							</label>
 						{/if}
@@ -124,12 +124,12 @@
 		{/each}
 	</ul>
 	<div class="beat-trigger-row">
-		<button class="btn-sm pl-btn" class:active={overlayQueueEnabled} onclick={onToggleOverlayQueue} title="Play/pause la queue overlay">{overlayQueueEnabled ? '⏸' : '▶'}</button>
-		<button class="btn-sm" onclick={onOverlayQueuePrev} title="Overlay précédent">◀</button>
-		<button class="btn-sm" onclick={onOverlayQueueNext} title="Overlay suivant">▶</button>
+		<button class="btn-sm pl-btn" class:active={overlayQueueEnabled} onclick={onToggleOverlayQueue} title="Play/pause the overlay queue">{overlayQueueEnabled ? '⏸' : '▶'}</button>
+		<button class="btn-sm" onclick={onOverlayQueuePrev} title="Previous overlay">◀</button>
+		<button class="btn-sm" onclick={onOverlayQueueNext} title="Next overlay">▶</button>
 		<select class="beats-select" value={overlayQueueMode} onchange={(e) => onOverlayQueueModeChange((e.target as HTMLSelectElement).value as PlaylistMode)}>
-			<option value="sequential">Séquentiel</option>
-			<option value="shuffle">Aléatoire</option>
+			<option value="sequential">Sequential</option>
+			<option value="shuffle">Shuffle</option>
 		</select>
 	</div>
 	<div class="beat-trigger-row">

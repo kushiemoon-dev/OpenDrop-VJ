@@ -32,7 +32,7 @@
 	onkeydown={(e) => e.key === 'Enter' && onLoad()}
 	title={preset.name}
 >
-	<!-- Vignette ou placeholder dégradé -->
+	<!-- Thumbnail or gradient placeholder -->
 	<div class="ptile__thumb">
 		{#if thumbUrl}
 			<img src={thumbUrl} alt={preset.name} class="ptile__img" />
@@ -41,10 +41,10 @@
 		{/if}
 	</div>
 
-	<!-- Nom tronqué -->
+	<!-- Truncated name -->
 	<div class="ptile__name" title={preset.name}>{preset.name.split('/').pop() ?? preset.name}</div>
 
-	<!-- Swatch favori (coin haut-droit) — clic cycle 0→1→2→3→4→5→0 -->
+	<!-- Favorite swatch (top-right corner) — click cycles 0→1→2→3→4→5→0 -->
 	<button
 		class="ptile__fav"
 		class:ptile__fav--on={favColor > 0}
@@ -54,12 +54,12 @@
 			onSetFavColor((favColor + 1) % 6)
 		}}
 		type="button"
-		aria-label={favColor > 0 ? 'Changer couleur favori' : 'Ajouter aux favoris'}
+		aria-label={favColor > 0 ? 'Change favorite color' : 'Add to favorites'}
 	>
 		★
 	</button>
 
-	<!-- Pied A/B -->
+	<!-- A/B footer -->
 	<div class="ptile__footer">
 		<button class="ptile__pl" class:ptile__pl--in={inA} onclick={(e) => { e.stopPropagation(); onAddA(); }} type="button">
 			A
@@ -104,7 +104,7 @@
 		display: block;
 	}
 
-	/* Placeholder dégradé + animation pulse quand pas de miniature */
+	/* Gradient placeholder + pulse animation while there is no thumbnail */
 	.ptile__placeholder {
 		position: absolute;
 		inset: 0;
@@ -132,7 +132,7 @@
 		min-height: 16px;
 	}
 
-	/* Étoile favori — positionnée en coin haut-droit */
+	/* Favorite star — positioned in the top-right corner */
 	.ptile__fav {
 		position: absolute;
 		top: 2px;
@@ -158,7 +158,7 @@
 		opacity: 1 !important;
 	}
 
-	/* Pied A/B */
+	/* A/B footer */
 	.ptile__footer {
 		display: flex;
 		gap: 3px;

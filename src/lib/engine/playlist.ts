@@ -18,7 +18,7 @@ export class PlaylistEngine {
 	start() {
 		if (this._playing || this.items.length === 0) return;
 		this._playing = true;
-		this.onPreset(this.items[this._index]); // charge le preset courant immédiatement
+		this.onPreset(this.items[this._index]); // load the current preset immediately
 		this._schedule();
 	}
 

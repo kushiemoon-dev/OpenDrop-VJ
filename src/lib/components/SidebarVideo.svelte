@@ -69,7 +69,7 @@
 		<div class="btn-row">
 			<button class="btn-sm" class:active={videoAdvance === 'shuffle'} onclick={() => onAdvanceChange('shuffle')}>Shuffle</button>
 			<button class="btn-sm" class:active={videoAdvance === 'sequential'} onclick={() => onAdvanceChange('sequential')}>Seq</button>
-			<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => onAdvanceChange('manual')}>Manuel</button>
+			<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => onAdvanceChange('manual')}>Manual</button>
 			<select class="beats-select" value={videoBeatsPerCut} onchange={(e) => onBeatsPerCutChange(+(e.target as HTMLSelectElement).value)} disabled={videoAdvance === 'manual'}>
 				<option value={4}>4</option>
 				<option value={8}>8</option>
@@ -78,20 +78,20 @@
 			</select>
 		</div>
 		<div class="btn-row">
-			<button class="btn-sm pl-btn" class:active={vrCut} onclick={onToggleVrCut} disabled={videoAdvance === 'manual'} title="Cut de clip sur le beat">✂ Cut</button>
-			<button class="btn-sm pl-btn" class:active={vrFlash} onclick={onToggleVrFlash} title="Flash brightness sur le beat">✦ Flash</button>
-			<button class="btn-sm pl-btn" class:active={vrWarp} onclick={onToggleVrWarp} title="Speed warp sur les basses">⏩ Warp</button>
-			<button class="btn-sm pl-btn" class:active={vrHue} onclick={onToggleVrHue} title="Hue rotate sur le beat">🌈 Hue</button>
+			<button class="btn-sm pl-btn" class:active={vrCut} onclick={onToggleVrCut} disabled={videoAdvance === 'manual'} title="Clip cut on the beat">✂ Cut</button>
+			<button class="btn-sm pl-btn" class:active={vrFlash} onclick={onToggleVrFlash} title="Flash brightness on the beat">✦ Flash</button>
+			<button class="btn-sm pl-btn" class:active={vrWarp} onclick={onToggleVrWarp} title="Speed warp on the bass">⏩ Warp</button>
+			<button class="btn-sm pl-btn" class:active={vrHue} onclick={onToggleVrHue} title="Hue rotate on the beat">🌈 Hue</button>
 		</div>
 	{/if}
 	<div class="pl-header" style="margin-top:0.2rem">
-		<label class="btn-sm file-label" title="Ajouter une vidéo">
+		<label class="btn-sm file-label" title="Add a video">
 			+ Video
 			<input type="file" accept="video/*" multiple onchange={onAddVideo} style="display:none" />
 		</label>
 	</div>
 	{#if allClips.length === 0}
-		<p class="hint">Glisse une vidéo sur le visualizer ou clique + Video</p>
+		<p class="hint">Drag a video onto the visualizer or click + Video</p>
 	{/if}
 	<ul class="overlay-list">
 		{#each allClips as clip, i (clip.ref.kind === 'user' ? clip.ref.id : clip.ref.src)}
@@ -101,12 +101,12 @@
 						class="overlay-name"
 						class:pl-active={i === currentClipIndex % allClips.length}
 						onclick={() => onSelectClip(i)}
-						title={clip.ref.kind === 'builtin' ? 'Intégré' : 'Utilisateur'}
+						title={clip.ref.kind === 'builtin' ? 'Built-in' : 'User'}
 					>
 						{clip.ref.kind === 'builtin' ? '📦 ' : ''}{clip.name}
 					</button>
 					{#if clip.ref.kind === 'user'}
-						<button class="pl-remove" onclick={() => onRemoveClip(i)} title="Supprimer">×</button>
+						<button class="pl-remove" onclick={() => onRemoveClip(i)} title="Delete">×</button>
 					{/if}
 				</div>
 			</li>

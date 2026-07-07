@@ -1,8 +1,8 @@
 /**
- * Preset registry — 16 375 presets servis comme fichiers statiques.
+ * Preset registry — 16,375 presets served as static files.
  *
- * Appeler `await initPresets()` une fois avant tout usage.
- * Après ça, toutes les fonctions ci-dessous sont synchrones, sauf loadPresetData.
+ * Call `await initPresets()` once before any other usage.
+ * After that, all the functions below are synchronous, except loadPresetData.
  */
 
 import { base } from '$app/paths';
@@ -19,10 +19,10 @@ let _nameToSlug = new Map<string, string>();
 const _cache = new Map<string, object>();
 let _initialized = false;
 
-/** Noms de tous les presets, disponibles après initPresets(). */
+/** Names of all presets, available after initPresets(). */
 export let allPresetNames: string[] = [];
 
-/** Charger le manifest. À appeler une fois dans onMount avant tout usage. */
+/** Load the manifest. Call once in onMount before any other usage. */
 export async function initPresets(): Promise<void> {
 	if (_initialized) return;
 	const res = await fetch(`${base}/presets/manifest.json`);
@@ -35,7 +35,7 @@ export async function initPresets(): Promise<void> {
 	_initialized = true;
 }
 
-/** Charger les données d'un preset (mis en cache). */
+/** Load a preset's data (cached). */
 export async function loadPresetData(name: string): Promise<object | null> {
 	if (_cache.has(name)) return _cache.get(name)!;
 	const slug = _nameToSlug.get(name);
@@ -58,25 +58,25 @@ export async function loadPresetData(name: string): Promise<object | null> {
 	}
 }
 
-/** Construire la liste complète des presets avec catégorie. */
+/** Build the full preset list with category. */
 export function buildPresetList(): PresetMeta[] {
 	return allPresetNames.map((name) => ({ name, category: getCategory(name) }));
 }
 
-/** Extraire la catégorie/auteur depuis le nom (partie avant " - "). */
+/** Extract the category/author from the name (the part before " - "). */
 export function getCategory(name: string): string {
 	const dash = name.indexOf(' - ');
 	return dash > 0 ? name.slice(0, dash).trim() : 'Other';
 }
 
-/** Filtrer les presets par recherche. */
+/** Filter presets by search query. */
 export function searchPresets(list: PresetMeta[], query: string): PresetMeta[] {
 	if (!query) return list;
 	const q = query.toLowerCase();
 	return list.filter((p) => p.name.toLowerCase().includes(q));
 }
 
-/** Récupérer le slug d'un preset par son nom. */
+/** Get a preset's slug by its name. */
 export function getSlug(name: string): string | undefined {
 	return _nameToSlug.get(name);
 }

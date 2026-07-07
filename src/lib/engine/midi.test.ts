@@ -14,7 +14,7 @@ describe('triggerKey — format multi-controller', () => {
 		expect(triggerKey(msg)).toBe('dev0:note:2:60');
 	});
 
-	it('note_off → même clé que note_on', () => {
+	it('note_off → same key as note_on', () => {
 		const msg: MidiMessage = { type: 'note_off', deviceId: DEV, channel: 1, number: 36, value: 0 };
 		expect(triggerKey(msg)).toBe('dev0:note:1:36');
 	});
@@ -24,7 +24,7 @@ describe('triggerKey — format multi-controller', () => {
 		expect(triggerKey(msg)).toBe('dev0:pb:1');
 	});
 
-	it('deux contrôleurs différents → clés différentes pour même CC', () => {
+	it('two different controllers → different keys for the same CC', () => {
 		const a: MidiMessage = { type: 'cc', deviceId: 'ctrl-a', channel: 1, number: 1, value: 64 };
 		const b: MidiMessage = { type: 'cc', deviceId: 'ctrl-b', channel: 1, number: 1, value: 64 };
 		expect(triggerKey(a)).not.toBe(triggerKey(b));
@@ -32,26 +32,26 @@ describe('triggerKey — format multi-controller', () => {
 });
 
 describe('formatTrigger', () => {
-	it('formate une clé CC new-format', () => {
+	it('formats a new-format CC key', () => {
 		expect(formatTrigger('dev0:cc:1:7')).toBe('CC7 ch1');
 	});
 
-	it('formate une clé Note new-format', () => {
+	it('formats a new-format Note key', () => {
 		expect(formatTrigger('dev0:note:3:60')).toBe('Note60 ch3');
 	});
 
-	it('formate pitchbend', () => {
+	it('formats pitchbend', () => {
 		expect(formatTrigger('dev0:pb:1')).toBe('PitchBend ch1');
 	});
 
-	it('rétrocompat avec ancien format 3 parties (legacy)', () => {
+	it('backward compatibility with old 3-part format (legacy)', () => {
 		expect(formatTrigger('cc:1:7')).toBe('CC7 ch1');
 		expect(formatTrigger('note:3:60')).toBe('Note60 ch3');
 	});
 });
 
-describe('normalisation 14-bit vs 7-bit', () => {
-	it('14-bit pitchbend centre (8192) → 0.5', () => {
+describe('normalization 14-bit vs 7-bit', () => {
+	it('14-bit pitchbend center (8192) → 0.5', () => {
 		expect(8192 / 16383).toBeCloseTo(0.5, 2);
 	});
 
@@ -65,48 +65,48 @@ describe('normalisation 14-bit vs 7-bit', () => {
 });
 
 describe('parseTriggerKey', () => {
-	it('parse une clé note', () => {
+	it('parses a note key', () => {
 		expect(parseTriggerKey('dev0:note:2:60')).toEqual({ deviceId: 'dev0', kind: 'note', channel: 2, number: 60 });
 	});
 
-	it('parse une clé cc', () => {
+	it('parses a cc key', () => {
 		expect(parseTriggerKey('dev0:cc:1:7')).toEqual({ deviceId: 'dev0', kind: 'cc', channel: 1, number: 7 });
 	});
 
-	it('parse pitchbend (pas de champ number)', () => {
+	it('parses pitchbend (no number field)', () => {
 		expect(parseTriggerKey('dev0:pb:1')).toEqual({ deviceId: 'dev0', kind: 'pb', channel: 1 });
 	});
 
-	it('rejette le format legacy 3-parties (pas de deviceId)', () => {
+	it('rejects the legacy 3-part format (no deviceId)', () => {
 		expect(parseTriggerKey('cc:1:7')).toBeNull();
 		expect(parseTriggerKey('note:3:60')).toBeNull();
 	});
 
-	it('rejette une clé invalide', () => {
+	it('rejects an invalid key', () => {
 		expect(parseTriggerKey('')).toBeNull();
 		expect(parseTriggerKey('garbage')).toBeNull();
 		expect(parseTriggerKey('dev0:cc:notanumber:7')).toBeNull();
-		expect(parseTriggerKey('dev0:cc:1')).toBeNull(); // manque le number pour cc
+		expect(parseTriggerKey('dev0:cc:1')).toBeNull(); // missing the number for cc
 	});
 });
 
 describe('findMatchingOutputId', () => {
 	const outputs = [{ id: 'out1', name: 'FakePad' }, { id: 'out2', name: 'Other' }];
 
-	it('matche par nom exact', () => {
+	it('matches by exact name', () => {
 		expect(findMatchingOutputId('FakePad', outputs)).toBe('out1');
 	});
 
-	it('retourne null si aucun match', () => {
+	it("returns null if there's no match", () => {
 		expect(findMatchingOutputId('Unknown', outputs)).toBeNull();
 	});
 
-	it('retourne null pour un nom absent (null/undefined)', () => {
+	it('returns null for a missing name (null/undefined)', () => {
 		expect(findMatchingOutputId(null, outputs)).toBeNull();
 		expect(findMatchingOutputId(undefined, outputs)).toBeNull();
 	});
 
-	it('prend le premier match si les noms sont dupliqués', () => {
+	it('takes the first match if names are duplicated', () => {
 		const dup = [{ id: 'a', name: 'X' }, { id: 'b', name: 'X' }];
 		expect(findMatchingOutputId('X', dup)).toBe('a');
 	});
@@ -124,10 +124,10 @@ function fakeAccess(opts: {
 }
 
 describe('MidiEngine.sendFeedback', () => {
-	it('envoie Note On/Off vers le port de sortie qui matche par nom', () => {
+	it('sends Note On/Off to the output port that matches by name', () => {
 		const send = vi.fn();
 		const engine = new MidiEngine();
-		// @ts-expect-error — injection directe pour tester sans navigator.requestMIDIAccess
+		// @ts-expect-error — direct injection to test without navigator.requestMIDIAccess
 		engine.access = fakeAccess({
 			inputs: [{ id: 'dev0', name: 'FakePad' }],
 			outputs: [{ id: 'out0', name: 'FakePad', send }],
@@ -138,10 +138,10 @@ describe('MidiEngine.sendFeedback', () => {
 		expect(send).toHaveBeenCalledWith([0x90, 60, 0]);
 	});
 
-	it('envoie un CC pour un binding de type cc', () => {
+	it('sends a CC for a cc-type binding', () => {
 		const send = vi.fn();
 		const engine = new MidiEngine();
-		// @ts-expect-error — injection directe
+		// @ts-expect-error — direct injection
 		engine.access = fakeAccess({
 			inputs: [{ id: 'dev0', name: 'FakePad' }],
 			outputs: [{ id: 'out0', name: 'FakePad', send }],
@@ -150,10 +150,10 @@ describe('MidiEngine.sendFeedback', () => {
 		expect(send).toHaveBeenCalledWith([0xb0, 7, 127]);
 	});
 
-	it('ne fait rien pour un binding pitchbend', () => {
+	it('does nothing for a pitchbend binding', () => {
 		const send = vi.fn();
 		const engine = new MidiEngine();
-		// @ts-expect-error — injection directe
+		// @ts-expect-error — direct injection
 		engine.access = fakeAccess({
 			inputs: [{ id: 'dev0', name: 'FakePad' }],
 			outputs: [{ id: 'out0', name: 'FakePad', send }],
@@ -162,10 +162,10 @@ describe('MidiEngine.sendFeedback', () => {
 		expect(send).not.toHaveBeenCalled();
 	});
 
-	it('ne fait rien si aucun output ne matche le nom du input', () => {
+	it("does nothing if no output matches the input's name", () => {
 		const send = vi.fn();
 		const engine = new MidiEngine();
-		// @ts-expect-error — injection directe
+		// @ts-expect-error — direct injection
 		engine.access = fakeAccess({
 			inputs: [{ id: 'dev0', name: 'FakePad' }],
 			outputs: [{ id: 'out0', name: 'OtherDevice', send }],
@@ -174,15 +174,15 @@ describe('MidiEngine.sendFeedback', () => {
 		expect(send).not.toHaveBeenCalled();
 	});
 
-	it('ne fait rien et ne throw pas si non connecté', () => {
+	it('does nothing and does not throw if not connected', () => {
 		const engine = new MidiEngine();
 		expect(() => engine.sendFeedback('dev0:note:1:60', true)).not.toThrow();
 	});
 
-	it('ne fait rien pour une clé legacy sans deviceId', () => {
+	it('does nothing for a legacy key without deviceId', () => {
 		const send = vi.fn();
 		const engine = new MidiEngine();
-		// @ts-expect-error — injection directe
+		// @ts-expect-error — direct injection
 		engine.access = fakeAccess({
 			inputs: [{ id: 'dev0', name: 'FakePad' }],
 			outputs: [{ id: 'out0', name: 'FakePad', send }],

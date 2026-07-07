@@ -31,10 +31,10 @@
     variant = 'list',
   }: Props = $props()
 
-  // ── Recherche ──────────────────────────────────────────────────────────────
+  // ── Search ─────────────────────────────────────────────────────────────────
   let searchQuery: string = $state('')
   let debouncedQuery: string = $state('')
-  // 0 = tous, -1 = tous favoris (n'importe quelle couleur), 1-5 = couleur spécifique
+  // 0 = all, -1 = all favorites (any color), 1-5 = specific color
   let activeColorFilter: number = $state(0)
 
   $effect(() => {
@@ -43,7 +43,7 @@
     return () => clearTimeout(timer)
   })
 
-  // ── Favoris couleur (localStorage) ──────────────────────────────────────────
+  // ── Color favorites (localStorage) ──────────────────────────────────────────
   let favColors: Record<string, number> = $state(loadFavColors())
 
   function setFavColor(name: string, color: number) {
@@ -54,7 +54,7 @@
     saveFavColors(next)
   }
 
-  // ── Notes preset (localStorage) ─────────────────────────────────────────────
+  // ── Preset notes (localStorage) ──────────────────────────────────────────────
   const NOTE_KEY = 'od-preset-notes'
   function loadNotes(): Record<string, string> {
     try { return JSON.parse(localStorage.getItem(NOTE_KEY) ?? '{}') }
@@ -72,7 +72,7 @@
     localStorage.setItem(NOTE_KEY, JSON.stringify(next))
   }
 
-  // ── Filtrage ───────────────────────────────────────────────────────────────
+  // ── Filtering ──────────────────────────────────────────────────────────────
   let filteredPresets: PresetMeta[] = $derived(
     (() => {
       let list = debouncedQuery ? searchPresets(presets, debouncedQuery) : presets
@@ -82,7 +82,7 @@
     })()
   )
 
-  // ── Virtualisation ────────────────────────────────────────────────────────
+  // ── Virtualization ─────────────────────────────────────────────────────────
   const PRESET_ROW_H = 28
   let listEl: HTMLElement | undefined = $state()
   let containerH: number = $state(180)
@@ -103,9 +103,9 @@
     scrollTop = (e.currentTarget as HTMLElement).scrollTop
   }
 
-  // ── Virtualisation grille ──────────────────────────────────────────────────
+  // ── Grid virtualization ───────────────────────────────────────────────────
   const CARD_MIN_W = 120
-  const CARD_H = 120   // hauteur approximative (thumb 16/9 ~80px + nom ~16px + pied ~24px)
+  const CARD_H = 120   // approximate height (thumb 16/9 ~80px + name ~16px + footer ~24px)
   const GRID_GAP = 8
 
   let gridEl: HTMLElement | undefined = $state()
@@ -126,7 +126,7 @@
     })
   )
 
-  // Map nom→slug précalculée pour O(1)
+  // Precomputed name→slug map for O(1) lookups
   let slugMap: Map<string, string> = $derived(
     new Map(filteredPresets.map(p => [p.name, getSlug(p.name) ?? p.name]))
   )
@@ -135,7 +135,7 @@
     gridScrollTop = (e.currentTarget as HTMLElement).scrollTop
   }
 
-  // ── Fermeture clavier ──────────────────────────────────────────────────────
+  // ── Keyboard close ─────────────────────────────────────────────────────────
   function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onClose()
   }
@@ -156,7 +156,7 @@
         class:tag-active={activeColorFilter === 0}
         onclick={() => { activeColorFilter = 0 }}
         type="button"
-      >Tous</button>
+      >All</button>
       <button
         class="tag-chip"
         class:tag-active={activeColorFilter === -1}
@@ -171,7 +171,7 @@
           style:border-color={activeColorFilter === c ? FAV_COLORS[c] : undefined}
           onclick={() => { activeColorFilter = activeColorFilter === c ? 0 : c }}
           type="button"
-          aria-label={`Filtrer couleur ${c}`}
+          aria-label={`Filter color ${c}`}
         ><span class="fav-dot" style:background={FAV_COLORS[c]}></span></button>
       {/each}
     </div>
@@ -194,7 +194,7 @@
       bind:value={searchQuery}
     />
 
-    <button class="preset-drawer__close" onclick={onClose} type="button" aria-label="Fermer">✕</button>
+    <button class="preset-drawer__close" onclick={onClose} type="button" aria-label="Close">✕</button>
   </div>
 
   {#if variant === 'grid'}
@@ -248,7 +248,7 @@
             style:color={FAV_COLORS[fc] || undefined}
             onclick={() => setFavColor(p.name, (fc + 1) % 6)}
             type="button"
-            aria-label={fc > 0 ? 'Changer couleur favori' : 'Ajouter aux favoris'}
+            aria-label={fc > 0 ? 'Change favorite color' : 'Add to favorites'}
           >★</button>
 
           <button
@@ -384,7 +384,7 @@
 
   .preset-drawer__close:hover { color: #ff2d78; }
 
-  /* Liste virtualisée */
+  /* Virtualized list */
   .preset-list {
     flex: 1;
     overflow-y: auto;
@@ -449,7 +449,7 @@
   .pl-add:hover { border-color: #ff2d78; color: #ff2d78; }
   .in-list { border-color: #ff2d78; color: #ff2d78; background: #1a0a22; }
 
-  /* Grille de presets virtualisée */
+  /* Virtualized preset grid */
   .preset-grid {
     flex: 1;
     overflow-y: auto;

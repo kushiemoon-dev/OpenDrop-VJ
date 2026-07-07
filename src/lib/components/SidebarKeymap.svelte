@@ -16,11 +16,11 @@
 
 <div class="controls-section">
 	<div class="pl-header">
-		<span class="label">Clavier</span>
+		<span class="label">Keyboard</span>
 		<button class="btn-sm" onclick={onResetKeymap}>Reset</button>
 	</div>
 	{#if learningKey !== null}
-		<span style="font-size:11px;color:var(--warn)">Appuie sur la touche à assigner… (Esc = annuler)</span>
+		<span style="font-size:11px;color:var(--warn)">Press the key to assign… (Esc = cancel)</span>
 	{/if}
 	<div class="midi-list">
 		{#each registry.all() as cmd}

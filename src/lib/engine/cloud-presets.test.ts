@@ -3,17 +3,17 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 vi.mock('$env/static/public', () => ({ PUBLIC_CLOUD_PRESETS_API: 'https://presets-cloud.example' }));
 
 describe('parsePresetFile', () => {
-	it('parse un JSON valide représentant un objet', async () => {
+	it('parses valid JSON representing an object', async () => {
 		const { parsePresetFile } = await import('./cloud-presets.js');
 		expect(parsePresetFile('{"frame_eqs_str":"a.zoom=1;"}')).toEqual({ frame_eqs_str: 'a.zoom=1;' });
 	});
 
-	it('lève une erreur sur du JSON invalide', async () => {
+	it('throws on invalid JSON', async () => {
 		const { parsePresetFile } = await import('./cloud-presets.js');
 		expect(() => parsePresetFile('not json')).toThrow();
 	});
 
-	it('lève une erreur si le JSON parsé n\'est pas un objet (ex: un tableau ou un nombre)', async () => {
+	it('throws if the parsed JSON is not an object (e.g. an array or a number)', async () => {
 		const { parsePresetFile } = await import('./cloud-presets.js');
 		expect(() => parsePresetFile('[1,2,3]')).toThrow();
 		expect(() => parsePresetFile('42')).toThrow();
@@ -35,21 +35,21 @@ describe('getOrCreateCloudToken / setCloudToken', () => {
 	});
 	afterEach(() => { vi.unstubAllGlobals(); });
 
-	it('génère et persiste un token au premier appel', async () => {
+	it('generates and persists a token on the first call', async () => {
 		const { getOrCreateCloudToken } = await import('./cloud-presets.js');
 		const token = getOrCreateCloudToken();
 		expect(token).toMatch(/^[0-9a-f-]{36}$/);
 		expect(localStorage.getItem('od-cloud-token')).toBe(token);
 	});
 
-	it('retourne le même token aux appels suivants', async () => {
+	it('returns the same token on subsequent calls', async () => {
 		const { getOrCreateCloudToken } = await import('./cloud-presets.js');
 		const first = getOrCreateCloudToken();
 		const second = getOrCreateCloudToken();
 		expect(second).toBe(first);
 	});
 
-	it('setCloudToken écrase le token existant', async () => {
+	it('setCloudToken overwrites the existing token', async () => {
 		const { getOrCreateCloudToken, setCloudToken } = await import('./cloud-presets.js');
 		getOrCreateCloudToken();
 		setCloudToken('mon-token-a-moi');
@@ -67,19 +67,19 @@ describe('getCloudPresetIndex', () => {
 	});
 	afterEach(() => { vi.unstubAllGlobals(); });
 
-	it('retourne [] si PUBLIC_CLOUD_PRESETS_API est vide', async () => {
+	it('returns [] if PUBLIC_CLOUD_PRESETS_API is empty', async () => {
 		vi.resetModules();
 		vi.doMock('$env/static/public', () => ({ PUBLIC_CLOUD_PRESETS_API: '' }));
 		const { getCloudPresetIndex } = await import('./cloud-presets.js');
 		expect(await getCloudPresetIndex('tok1')).toEqual([]);
 	});
 
-	it('retourne [] si le token est vide', async () => {
+	it('returns [] if the token is empty', async () => {
 		const { getCloudPresetIndex } = await import('./cloud-presets.js');
 		expect(await getCloudPresetIndex('')).toEqual([]);
 	});
 
-	it('retourne la liste sur succès', async () => {
+	it('returns the list on success', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({
 			ok: true,
 			json: async () => [{ id: 'a', name: '☁ X', sizeBytes: 10, uploadedAt: 1 }],
@@ -88,13 +88,13 @@ describe('getCloudPresetIndex', () => {
 		expect(await getCloudPresetIndex('tok1')).toEqual([{ id: 'a', name: '☁ X', sizeBytes: 10, uploadedAt: 1 }]);
 	});
 
-	it('retourne [] si le fetch échoue (jamais une exception)', async () => {
+	it('returns [] if the fetch fails (never an exception)', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('network')));
 		const { getCloudPresetIndex } = await import('./cloud-presets.js');
 		expect(await getCloudPresetIndex('tok1')).toEqual([]);
 	});
 
-	it('retourne [] si la réponse n\'est pas ok', async () => {
+	it('returns [] if the response is not ok', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: false }));
 		const { getCloudPresetIndex } = await import('./cloud-presets.js');
 		expect(await getCloudPresetIndex('tok1')).toEqual([]);
@@ -108,7 +108,7 @@ describe('uploadPreset', () => {
 	});
 	afterEach(() => { vi.unstubAllGlobals(); });
 
-	it('préfixe le nom avec CLOUD_PRESET_PREFIX avant l\'envoi', async () => {
+	it('prefixes the name with CLOUD_PRESET_PREFIX before sending', async () => {
 		const fetchMock = vi.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'new-id' }) });
 		vi.stubGlobal('fetch', fetchMock);
 		const { uploadPreset } = await import('./cloud-presets.js');
@@ -120,14 +120,14 @@ describe('uploadPreset', () => {
 		expect(body.name).toBe('☁ Mon Preset');
 	});
 
-	it('retourne {error} si le Worker répond une erreur', async () => {
+	it('returns {error} if the Worker responds with an error', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: false, status: 413, json: async () => ({ error: 'quota exceeded: max 300 presets' }) }));
 		const { uploadPreset } = await import('./cloud-presets.js');
 		const result = await uploadPreset('tok1', 'name', { x: 1 });
 		expect(result).toEqual({ error: 'quota exceeded: max 300 presets' });
 	});
 
-	it('retourne {error} si le fetch échoue (jamais une exception)', async () => {
+	it('returns {error} if the fetch fails (never an exception)', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('network')));
 		const { uploadPreset } = await import('./cloud-presets.js');
 		const result = await uploadPreset('tok1', 'name', { x: 1 });
@@ -142,7 +142,7 @@ describe('loadCloudPresetData', () => {
 	});
 	afterEach(() => { vi.unstubAllGlobals(); });
 
-	it('résout le preset par nom via l\'index puis fetch son contenu', async () => {
+	it('resolves the preset by name via the index then fetches its content', async () => {
 		const fetchMock = vi.fn()
 			.mockResolvedValueOnce({ ok: true, json: async () => [{ id: 'a', name: '☁ X', sizeBytes: 10, uploadedAt: 1 }] })
 			.mockResolvedValueOnce({ ok: true, json: async () => ({ frame_eqs_str: 'a.zoom=1;' }) });
@@ -151,7 +151,7 @@ describe('loadCloudPresetData', () => {
 		expect(await loadCloudPresetData('tok1', '☁ X')).toEqual({ frame_eqs_str: 'a.zoom=1;' });
 	});
 
-	it('nom absent de l\'index -> null', async () => {
+	it('name absent from the index -> null', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce({ ok: true, json: async () => [] }));
 		const { loadCloudPresetData } = await import('./cloud-presets.js');
 		expect(await loadCloudPresetData('tok1', '☁ Inconnu')).toBeNull();

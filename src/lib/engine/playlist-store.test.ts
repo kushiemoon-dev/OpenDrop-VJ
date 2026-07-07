@@ -25,26 +25,26 @@ describe('playlist-store', () => {
 	});
 
 	describe('addToPlaylist / removeFromPlaylist', () => {
-		it("ajoute un preset à la playlist A sans doublon", () => {
+		it("adds a preset to playlist A without duplicating it", () => {
 			addToPlaylist('A', 'preset1');
 			addToPlaylist('A', 'preset1');
 			expect(playlistState.aItems).toEqual(['preset1']);
 		});
 
-		it('ajoute un preset à la playlist B indépendamment de A', () => {
+		it('adds a preset to playlist B independently of A', () => {
 			addToPlaylist('B', 'presetX');
 			expect(playlistState.bItems).toEqual(['presetX']);
 			expect(playlistState.aItems).toEqual([]);
 		});
 
-		it('retire un preset de la playlist ciblée', () => {
+		it('removes a preset from the targeted playlist', () => {
 			addToPlaylist('A', 'p1');
 			addToPlaylist('A', 'p2');
 			removeFromPlaylist('A', 'p1');
 			expect(playlistState.aItems).toEqual(['p2']);
 		});
 
-		it('répercute setItems sur le PlaylistEngine actif', () => {
+		it('propagates setItems to the active PlaylistEngine', () => {
 			const cbA = vi.fn();
 			const engineA = new PlaylistEngine([], 'sequential', 1000, cbA);
 			const engineB = new PlaylistEngine([], 'sequential', 1000, vi.fn());
@@ -56,7 +56,7 @@ describe('playlist-store', () => {
 	});
 
 	describe('togglePlaylist', () => {
-		it('démarre puis arrête, et reflète playing dans playlistState', () => {
+		it('starts then stops, and reflects playing in playlistState', () => {
 			const engineA = new PlaylistEngine(['p1'], 'sequential', 1000, vi.fn());
 			setPlaylistEngines(engineA, new PlaylistEngine([], 'sequential', 1000, vi.fn()));
 			togglePlaylist('A');
@@ -65,12 +65,12 @@ describe('playlist-store', () => {
 			expect(playlistState.aPlaying).toBe(false);
 		});
 
-		it("ne fait rien si l'engine n'est pas encore créé", () => {
+		it("does nothing if the engine hasn't been created yet", () => {
 			expect(() => togglePlaylist('A')).not.toThrow();
 			expect(playlistState.aPlaying).toBe(false);
 		});
 
-		it("applique intervalSec/mode courants avant de démarrer", () => {
+		it("applies the current intervalSec/mode before starting", () => {
 			const cbB = vi.fn();
 			const engineB = new PlaylistEngine(['x', 'y'], 'sequential', 5000, cbB);
 			setPlaylistEngines(new PlaylistEngine([], 'sequential', 1000, vi.fn()), engineB);
@@ -84,7 +84,7 @@ describe('playlist-store', () => {
 	});
 
 	describe('playlistNext / playlistPrev', () => {
-		it('avance/recule sur le bon deck', () => {
+		it('advances/goes back on the correct deck', () => {
 			const cbA = vi.fn();
 			const engineA = new PlaylistEngine(['p1', 'p2'], 'sequential', 1000, cbA);
 			setPlaylistEngines(engineA, new PlaylistEngine([], 'sequential', 1000, vi.fn()));
@@ -96,7 +96,7 @@ describe('playlist-store', () => {
 	});
 
 	describe('setPlaylistBeatSyncInterval', () => {
-		it("appelle setInterval sur l'engine du deck ciblé, pas sur l'autre", () => {
+		it("calls setInterval on the targeted deck's engine, not the other one", () => {
 			const engineA = new PlaylistEngine(['p1', 'p2'], 'sequential', 1000, vi.fn());
 			const engineB = new PlaylistEngine([], 'sequential', 1000, vi.fn());
 			setPlaylistEngines(engineA, engineB);
@@ -113,7 +113,7 @@ describe('playlist-store', () => {
 	describe('exportPlaylists / importPlaylists', () => {
 		afterEach(() => { vi.unstubAllGlobals(); });
 
-		it('exporte un blob téléchargeable nommé opendrop-playlists.json', () => {
+		it('exports a downloadable blob named opendrop-playlists.json', () => {
 			playlistState.aItems = ['p1'];
 			playlistState.bItems = ['p2'];
 			const clickSpy = vi.fn();
@@ -128,7 +128,7 @@ describe('playlist-store', () => {
 			expect(clickSpy).toHaveBeenCalled();
 		});
 
-		it('importe un JSON valide et répercute sur les engines', async () => {
+		it('imports a valid JSON and propagates it to the engines', async () => {
 			const engineA = new PlaylistEngine([], 'sequential', 1000, vi.fn());
 			const engineB = new PlaylistEngine([], 'sequential', 1000, vi.fn());
 			setPlaylistEngines(engineA, engineB);
@@ -153,7 +153,7 @@ describe('playlist-store', () => {
 			expect(input.value).toBe('');
 		});
 
-		it("ne fait rien si aucun fichier n'est sélectionné", () => {
+		it("does nothing if no file is selected", () => {
 			const input = { files: undefined, value: '' };
 			expect(() => importPlaylists({ target: input } as unknown as Event)).not.toThrow();
 		});

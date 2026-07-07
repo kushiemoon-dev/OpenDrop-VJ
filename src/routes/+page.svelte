@@ -8,7 +8,7 @@
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams, withTimeParams } from '$lib/engine/time-params.js';
 	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch } from '$lib/engine/q-vars.js';
-	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
+	import { PlaylistEngine } from '$lib/engine/playlist.js';
 	import {
 		playlistState, setPlaylistEngines, destroyPlaylistEngines, addToPlaylist, removeFromPlaylist,
 		togglePlaylist, playlistNext, playlistPrev, setPlaylistBeatSyncInterval, exportPlaylists, importPlaylists,
@@ -793,7 +793,7 @@
 			const savedInterval = localStorage.getItem('od-pl-interval');
 			if (savedInterval) playlistState.intervalSec = Number(savedInterval);
 			const savedMode = localStorage.getItem('od-pl-mode');
-			if (savedMode) playlistState.mode = savedMode as PlaylistMode;
+			if (savedMode === 'sequential' || savedMode === 'shuffle') playlistState.mode = savedMode;
 			const savedTriggerA = localStorage.getItem('od-beat-trigger-a');
 			if (savedTriggerA) {
 				try {

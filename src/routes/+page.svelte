@@ -2,17 +2,17 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
-	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
+	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01, withSlotComposite } from '$lib/engine/compositor.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
-	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
-	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams } from '$lib/engine/q-vars.js';
+	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams, withTimeParams } from '$lib/engine/time-params.js';
+	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch } from '$lib/engine/q-vars.js';
 	import { PlaylistEngine, type PlaylistMode } from '$lib/engine/playlist.js';
 	import {
 		type BeatTriggerConfig, defaultBeatTriggerConfig, shouldTriggerOnBeat,
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
-		clampBeatsPerChange, clampOffset,
+		clampBeatsPerChange, clampOffset, applyBeatTriggerPatch,
 	} from '$lib/engine/beat-trigger.js';
 	import { pickQueuedOverlays, advanceQueueIndex, retreatQueueIndex, clampQueueIndex, visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
@@ -203,16 +203,10 @@
 	let volumePeakStateB: VolumePeakState = defaultVolumePeakState();
 
 	function updateBeatTriggerA(patch: Partial<BeatTriggerConfig>) {
-		const next = { ...beatTriggerA, ...patch };
-		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
-		next.offset = clampOffset(next.offset, next.beatsPerChange);
-		beatTriggerA = next;
+		beatTriggerA = applyBeatTriggerPatch(beatTriggerA, patch);
 	}
 	function updateBeatTriggerB(patch: Partial<BeatTriggerConfig>) {
-		const next = { ...beatTriggerB, ...patch };
-		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
-		next.offset = clampOffset(next.offset, next.beatsPerChange);
-		beatTriggerB = next;
+		beatTriggerB = applyBeatTriggerPatch(beatTriggerB, patch);
 	}
 	let autoXfade = $state(false);
 	let autoXfadeCount = 0;
@@ -237,9 +231,7 @@
 		{ ...DEFAULT_SLOT_COMPOSITE },
 	]);
 	function updateComposite(slot: number, patch: Partial<SlotComposite>) {
-		const next = [...slotComposites] as typeof slotComposites;
-		next[slot] = { ...next[slot], ...patch };
-		slotComposites = next;
+		slotComposites = withSlotComposite(slotComposites, slot, patch);
 	}
 
 	// — Time param sliders per deck (1.4) ————————————————————
@@ -247,9 +239,7 @@
 		defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams(),
 	]);
 	function updateTimeParams(slot: number, patch: Partial<DeckTimeParams>) {
-		const next = [...timeParams] as typeof timeParams;
-		next[slot] = { ...next[slot], ...patch };
-		timeParams = next;
+		timeParams = withTimeParams(timeParams, slot, patch);
 		// Write-through: this is what Butterchurn's injected preset code actually
 		// reads every frame — the $state above is only for the UI to bind to.
 		Object.assign(getGlobalTimeParams()[slot], patch);
@@ -264,30 +254,16 @@
 		defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams(),
 	]);
 	function updateQVarValue(slot: number, n: number, value: number) {
-		const next = [...qVarParams] as typeof qVarParams;
-		const nextValue = [...next[slot].value];
-		nextValue[n - 1] = value;
-		next[slot] = { ...next[slot], value: nextValue };
-		qVarParams = next;
+		qVarParams = withQVarValue(qVarParams, slot, n, value);
 		getGlobalQVarParams()[slot].value[n - 1] = value;
 	}
 	function addQVarWatch(slot: number, n: number) {
-		const next = [...qVarParams] as typeof qVarParams;
-		const nextEnabled = [...next[slot].enabled];
-		const nextValue = [...next[slot].value];
-		nextEnabled[n - 1] = true;
-		nextValue[n - 1] = 0;
-		next[slot] = { enabled: nextEnabled, value: nextValue };
-		qVarParams = next;
+		qVarParams = withQVarWatch(qVarParams, slot, n);
 		getGlobalQVarParams()[slot].enabled[n - 1] = true;
 		getGlobalQVarParams()[slot].value[n - 1] = 0;
 	}
 	function removeQVarWatch(slot: number, n: number) {
-		const next = [...qVarParams] as typeof qVarParams;
-		const nextEnabled = [...next[slot].enabled];
-		nextEnabled[n - 1] = false;
-		next[slot] = { ...next[slot], enabled: nextEnabled };
-		qVarParams = next;
+		qVarParams = withoutQVarWatch(qVarParams, slot, n);
 		getGlobalQVarParams()[slot].enabled[n - 1] = false;
 	}
 
@@ -416,10 +392,7 @@
 	}
 
 	function updateOverlayQueueTrigger(patch: Partial<BeatTriggerConfig>) {
-		const next = { ...overlayQueueTrigger, ...patch };
-		next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
-		next.offset = clampOffset(next.offset, next.beatsPerChange);
-		overlayQueueTrigger = next;
+		overlayQueueTrigger = applyBeatTriggerPatch(overlayQueueTrigger, patch);
 	}
 
 	function advanceOverlayQueue(direction: 1 | -1) {

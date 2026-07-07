@@ -3,6 +3,7 @@ import {
 	defaultBeatTriggerConfig, shouldTriggerOnBeat,
 	defaultVolumePeakState, detectVolumePeak,
 	clampBeatsPerChange, clampOffset,
+	applyBeatTriggerPatch,
 } from './beat-trigger.js';
 
 describe('defaultBeatTriggerConfig', () => {
@@ -93,5 +94,34 @@ describe('clampOffset', () => {
 		expect(clampOffset(-1, 8)).toBe(0);
 		expect(clampOffset(10, 8)).toBe(7);
 		expect(clampOffset(3, 8)).toBe(3);
+	});
+});
+
+describe('applyBeatTriggerPatch', () => {
+	it('merge un patch partiel sans toucher aux champs non fournis', () => {
+		const current = defaultBeatTriggerConfig();
+		const next = applyBeatTriggerPatch(current, { mode: 'volume-peak' });
+		expect(next.mode).toBe('volume-peak');
+		expect(next.beatsPerChange).toBe(8);
+		expect(next.sensitivity).toBe(0.5);
+	});
+
+	it('re-clamp beatsPerChange après le patch', () => {
+		const current = defaultBeatTriggerConfig();
+		expect(applyBeatTriggerPatch(current, { beatsPerChange: 100 }).beatsPerChange).toBe(64);
+		expect(applyBeatTriggerPatch(current, { beatsPerChange: 0 }).beatsPerChange).toBe(1);
+	});
+
+	it('re-clamp offset relatif au NOUVEAU beatsPerChange (pas l\'ancien)', () => {
+		const current = { ...defaultBeatTriggerConfig(), beatsPerChange: 8, offset: 7 };
+		const next = applyBeatTriggerPatch(current, { beatsPerChange: 4 });
+		expect(next.offset).toBe(3);
+	});
+
+	it('ne mute pas l\'objet current', () => {
+		const current = defaultBeatTriggerConfig();
+		const next = applyBeatTriggerPatch(current, { mode: 'volume-peak' });
+		expect(current.mode).toBe('beat');
+		expect(next).not.toBe(current);
 	});
 });

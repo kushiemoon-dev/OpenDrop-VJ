@@ -18,6 +18,43 @@ export function defaultQVarParams(): DeckQVarParams {
 	return { enabled: new Array(32).fill(false), value: new Array(32).fill(0) };
 }
 
+/** Q-var params for the 4 decks, indexed 0-3. */
+export type QVarParamsTuple = [DeckQVarParams, DeckQVarParams, DeckQVarParams, DeckQVarParams];
+
+/**
+ * Update a single q-var's value (1-indexed) for one deck slot, without
+ * touching `enabled`. Pure — returns a new tuple. Does not write through to
+ * getGlobalQVarParams(); callers driving the Butterchurn-visible global must
+ * still do that side effect themselves.
+ */
+export function withQVarValue(params: QVarParamsTuple, slot: number, n: number, value: number): QVarParamsTuple {
+	const next = [...params] as QVarParamsTuple;
+	const nextValue = [...next[slot].value];
+	nextValue[n - 1] = value;
+	next[slot] = { ...next[slot], value: nextValue };
+	return next;
+}
+
+/** Enable watching a q-var (1-indexed), resetting its value to 0. Pure — returns a new tuple. */
+export function withQVarWatch(params: QVarParamsTuple, slot: number, n: number): QVarParamsTuple {
+	const next = [...params] as QVarParamsTuple;
+	const nextEnabled = [...next[slot].enabled];
+	const nextValue = [...next[slot].value];
+	nextEnabled[n - 1] = true;
+	nextValue[n - 1] = 0;
+	next[slot] = { enabled: nextEnabled, value: nextValue };
+	return next;
+}
+
+/** Disable watching a q-var (1-indexed), leaving its last value untouched. Pure — returns a new tuple. */
+export function withoutQVarWatch(params: QVarParamsTuple, slot: number, n: number): QVarParamsTuple {
+	const next = [...params] as QVarParamsTuple;
+	const nextEnabled = [...next[slot].enabled];
+	nextEnabled[n - 1] = false;
+	next[slot] = { ...next[slot], enabled: nextEnabled };
+	return next;
+}
+
 /**
  * Shallow-clones `preset` and appends 32 guard lines to its frame_eqs_str,
  * each referencing window.__odQVarParams[slot] — pure string manipulation,

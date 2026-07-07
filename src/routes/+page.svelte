@@ -44,6 +44,12 @@
 	import SidebarLfo from '$lib/components/SidebarLfo.svelte';
 	import SidebarColor from '$lib/components/SidebarColor.svelte';
 	import SidebarElectron from '$lib/components/SidebarElectron.svelte';
+	import SidebarComposite from '$lib/components/SidebarComposite.svelte';
+	import SidebarSnapshot from '$lib/components/SidebarSnapshot.svelte';
+	import SidebarTimeline from '$lib/components/SidebarTimeline.svelte';
+	import SidebarShare from '$lib/components/SidebarShare.svelte';
+	import SidebarTime from '$lib/components/SidebarTime.svelte';
+	import SidebarQvar from '$lib/components/SidebarQvar.svelte';
 	import DeckCard from '$lib/components/DeckCard.svelte';
 	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 	import MixerLayout from '$lib/components/MixerLayout.svelte';
@@ -2111,180 +2117,60 @@
 		onUpdateB={(p) => { colorParamsB = p; }}
 	/>
 {/snippet}
-{#snippet compositeDeck(slot: number)}
-	{@const cfg = slotComposites[slot]}
-	<div class="midi-row" style="gap:6px;align-items:center">
-		<span class="midi-label" style="width:48px">Blend</span>
-		<select class="blendmode-select" style="flex:1" value={cfg.blend}
-			onchange={(e) => updateComposite(slot, { blend: e.currentTarget.value as SlotComposite['blend'] })}>
-			<option value="normal">Normal</option>
-			<option value="additive">Additive</option>
-			<option value="screen">Screen</option>
-			<option value="multiply">Multiply</option>
-		</select>
-	</div>
-	<div class="midi-row" style="gap:6px;align-items:center">
-		<label class="midi-label" style="width:auto;display:flex;align-items:center;gap:4px;cursor:pointer">
-			<input type="checkbox" checked={cfg.lumaKey} onchange={(e) => updateComposite(slot, { lumaKey: e.currentTarget.checked })} />
-			Luma Key
-		</label>
-	</div>
-	{#if cfg.lumaKey}
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">Black</span>
-			<input type="range" min="0" max="1" step="0.01" value={cfg.lumaBlack}
-				oninput={(e) => updateComposite(slot, { lumaBlack: +e.currentTarget.value })} style="flex:1" />
-		</div>
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">White</span>
-			<input type="range" min="0" max="1" step="0.01" value={cfg.lumaWhite}
-				oninput={(e) => updateComposite(slot, { lumaWhite: +e.currentTarget.value })} style="flex:1" />
-		</div>
-	{/if}
-	<div class="midi-row" style="gap:6px;align-items:center">
-		<label class="midi-label" style="width:auto;display:flex;align-items:center;gap:4px;cursor:pointer">
-			<input type="checkbox" checked={cfg.colorKey} onchange={(e) => updateComposite(slot, { colorKey: e.currentTarget.checked })} />
-			Color Key
-		</label>
-	</div>
-	{#if cfg.colorKey}
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">Hue</span>
-			<input type="range" min="0" max="1" step="0.01" value={cfg.colorHue}
-				oninput={(e) => updateComposite(slot, { colorHue: +e.currentTarget.value })} style="flex:1" />
-		</div>
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">Tol</span>
-			<input type="range" min="0" max="1" step="0.01" value={cfg.colorTol}
-				oninput={(e) => updateComposite(slot, { colorTol: +e.currentTarget.value })} style="flex:1" />
-		</div>
-	{/if}
-{/snippet}
 {#snippet compositeSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Composite (slot {mixerSelectedSlot})</span>
-			<button class="btn-sm" onclick={() => updateComposite(mixerSelectedSlot, { ...DEFAULT_SLOT_COMPOSITE })}>↺</button>
-		</div>
-		{@render compositeDeck(mixerSelectedSlot)}
-	</div>
+	<SidebarComposite
+		{mixerSelectedSlot}
+		composite={slotComposites[mixerSelectedSlot]}
+		onUpdate={(patch) => updateComposite(mixerSelectedSlot, patch)}
+	/>
 {/snippet}
 {#snippet snapshotSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Snapshots</span>
-		</div>
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<span class="midi-label" style="width:48px">Durée</span>
-			<input type="range" min="0.1" max="10" step="0.1" value={snapshotRecallDuration}
-				oninput={(e) => { snapshotRecallDuration = +e.currentTarget.value; }} style="flex:1" />
-			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{snapshotRecallDuration.toFixed(1)}s</span>
-		</div>
-		{#each [0, 1, 2, 3, 4, 5, 6, 7] as slot}
-			{@const snap = snapshots[slot]}
-			<div class="midi-row" style="gap:4px;align-items:center">
-				<input class="snap-name" type="text" value={snap?.name ?? ''} placeholder="—"
-					disabled={!snap}
-					oninput={(e) => renameSnapshot(slot, e.currentTarget.value)}
-					style="flex:1;min-width:0;font-size:11px" />
-				<button class="btn-sm" onclick={() => saveSnapshot(slot)} title="Capturer l'état courant">Save</button>
-				<button class="btn-sm" disabled={!snap} onclick={() => recallSnapshot(slot)} title="Rappeler ce snapshot">▶</button>
-				<button class="pl-remove" disabled={!snap} onclick={() => clearSnapshot(slot)} title="Vider">×</button>
-			</div>
-		{/each}
-	</div>
+	<SidebarSnapshot
+		{snapshotRecallDuration}
+		{snapshots}
+		onDurationChange={(v) => { snapshotRecallDuration = v; }}
+		onRenameSnapshot={renameSnapshot}
+		onSaveSnapshot={saveSnapshot}
+		onRecallSnapshot={recallSnapshot}
+		onClearSnapshot={clearSnapshot}
+	/>
 {/snippet}
 {#snippet timelineSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Timeline</span>
-			<button class="btn-sm" class:active={timelinePlaying} disabled={timelineLoopDuration(timelineKeyframes) <= 0}
-				onclick={toggleTimelinePlay} title={timelinePlaying ? 'Pause' : 'Play'}>
-				{timelinePlaying ? '⏸' : '▶'}
-			</button>
-		</div>
-		{#each timelineKeyframes as kf, i}
-			<div class="midi-row" style="gap:4px;align-items:center">
-				<select class="blendmode-select" value={kf.slot}
-					onchange={(e) => updateTimelineKeyframe(i, { slot: +e.currentTarget.value })}
-					style="font-size:11px">
-					{#each [0, 1, 2, 3, 4, 5, 6, 7] as slot}
-						<option value={slot} disabled={!snapshots[slot]}>
-							{snapshots[slot]?.name ?? `Slot ${slot} (vide)`}
-						</option>
-					{/each}
-				</select>
-				<input type="number" min="0" step="0.5" value={kf.timeSec}
-					oninput={(e) => updateTimelineKeyframe(i, { timeSec: +e.currentTarget.value })}
-					style="width:56px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
-				<span style="font-size:9px;color:#666">s</span>
-				<button class="pl-remove" onclick={() => removeTimelineKeyframe(i)} title="Retirer">×</button>
-			</div>
-		{/each}
-		<button class="btn-sm" onclick={addTimelineKeyframe}>+ Point</button>
-	</div>
+	<SidebarTimeline
+		{timelinePlaying}
+		{timelineKeyframes}
+		{snapshots}
+		onTogglePlay={toggleTimelinePlay}
+		onUpdateKeyframe={updateTimelineKeyframe}
+		onRemoveKeyframe={removeTimelineKeyframe}
+		onAddKeyframe={addTimelineKeyframe}
+	/>
 {/snippet}
 {#snippet shareSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Partage</span>
-		</div>
-		<input class="snap-name" type="text" bind:value={shareSetName} placeholder="Mon set"
-			style="font-size:11px;margin-bottom:4px;width:100%" />
-		<button class="btn-sm" onclick={copyShareLink}>{shareCopyLabel}</button>
-		{#if nonShareableOverlayCount > 0}
-			<span style="font-size:9px;color:#aaa;margin-top:4px;display:block">
-				{nonShareableOverlayCount} overlay(s) media non partagé(s) (fichier local)
-			</span>
-		{/if}
-	</div>
+	<SidebarShare
+		{shareSetName}
+		{shareCopyLabel}
+		{nonShareableOverlayCount}
+		onNameChange={(name) => { shareSetName = name; }}
+		onCopyShareLink={copyShareLink}
+	/>
 {/snippet}
 {#snippet timeSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Time (slot {mixerSelectedSlot})</span>
-			<button class="btn-sm" onclick={() => updateTimeParams(mixerSelectedSlot, defaultTimeParams())}>↺</button>
-		</div>
-		{#each ([['Speed', 'speedMult'], ['Zoom', 'zoomMult'], ['Rotation', 'rotMult'], ['Wrap', 'warpMult'], ['Horizontal', 'dxMult'], ['Vertical', 'dyMult'], ['Stretch', 'stretchMult'], ['Wave', 'waveMult']] as const) as [lbl, field]}
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label" style="width:48px">{lbl}</span>
-				<input type="range" min="0" max="2" step="0.01" value={timeParams[mixerSelectedSlot][field]}
-					oninput={(e) => updateTimeParams(mixerSelectedSlot, { [field]: +e.currentTarget.value } as Partial<DeckTimeParams>)}
-					style="flex:1" />
-				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{timeParams[mixerSelectedSlot][field].toFixed(2)}</span>
-			</div>
-		{/each}
-	</div>
+	<SidebarTime
+		{mixerSelectedSlot}
+		timeParams={timeParams[mixerSelectedSlot]}
+		onUpdate={(patch) => updateTimeParams(mixerSelectedSlot, patch)}
+		onReset={() => updateTimeParams(mixerSelectedSlot, defaultTimeParams())}
+	/>
 {/snippet}
 {#snippet qvarSection()}
-	<div class="controls-section">
-		<div class="pl-header">
-			<span class="label">Q-vars (slot {mixerSelectedSlot})</span>
-		</div>
-		<div class="midi-row" style="gap:6px;align-items:center">
-			<select class="blendmode-select" style="flex:1"
-				onchange={(e) => {
-					const n = Number(e.currentTarget.value);
-					if (n) addQVarWatch(mixerSelectedSlot, n);
-					e.currentTarget.value = '';
-				}}>
-				<option value="">+ Ajouter Q-var</option>
-				{#each Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => !qVarParams[mixerSelectedSlot].enabled[n - 1]) as n (n)}
-					<option value={n}>Q{n}</option>
-				{/each}
-			</select>
-		</div>
-		{#each Array.from({ length: 32 }, (_, i) => i + 1).filter((n) => qVarParams[mixerSelectedSlot].enabled[n - 1]) as n (n)}
-			<div class="midi-row" style="gap:6px;align-items:center">
-				<span class="midi-label" style="width:48px">Q{n}</span>
-				<input type="range" min="-2" max="2" step="0.01" value={qVarParams[mixerSelectedSlot].value[n - 1]}
-					oninput={(e) => updateQVarValue(mixerSelectedSlot, n, +e.currentTarget.value)}
-					style="flex:1" />
-				<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{qVarParams[mixerSelectedSlot].value[n - 1].toFixed(2)}</span>
-				<button class="btn-sm" onclick={() => removeQVarWatch(mixerSelectedSlot, n)}>×</button>
-			</div>
-		{/each}
-	</div>
+	<SidebarQvar
+		{mixerSelectedSlot}
+		qvar={qVarParams[mixerSelectedSlot]}
+		onAddWatch={(n) => addQVarWatch(mixerSelectedSlot, n)}
+		onUpdateValue={(n, value) => updateQVarValue(mixerSelectedSlot, n, value)}
+		onRemoveWatch={(n) => removeQVarWatch(mixerSelectedSlot, n)}
+	/>
 {/snippet}
 {#snippet electronSection()}
 	<SidebarElectron
@@ -2710,12 +2596,6 @@
 	.transition-slider { flex: 1; accent-color: var(--accent); cursor: pointer; }
 	.transition-value { font-size: 10px; color: var(--text-muted); width: 28px; text-align: right; }
 
-	.blendmode-select {
-		flex: 1; background: var(--bg-elevated); color: var(--text-secondary);
-		border: 1px solid var(--border); border-radius: var(--r-sm);
-		padding: 0.25rem 0.4rem; font-size: 11px; cursor: pointer;
-	}
-
 	/* ── Buttons ── */
 	.btn-primary {
 		background: linear-gradient(135deg, var(--accent), var(--violet));
@@ -2754,30 +2634,6 @@
 	}
 
 	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
-
-	.pl-header { display: flex; align-items: center; justify-content: space-between; }
-
-	.pl-remove {
-		background: none; border: none; color: var(--text-muted);
-		cursor: pointer; font-size: 14px; padding: 0 2px; line-height: 1; flex-shrink: 0;
-		transition: color var(--t-fast);
-	}
-
-	.pl-remove:hover { color: var(--accent); }
-	.pl-remove:disabled { opacity: 0.3; cursor: not-allowed; }
-	.pl-remove:disabled:hover { color: var(--text-muted); }
-
-	.snap-name {
-		background: var(--bg-elevated); color: var(--text-primary);
-		border: 1px solid var(--border); border-radius: var(--r-sm);
-		padding: 0.2rem 0.4rem;
-	}
-	.snap-name:focus { outline: none; border-color: var(--accent); }
-	.snap-name:disabled { color: var(--text-muted); cursor: not-allowed; }
-
-	.midi-row { display: flex; align-items: center; gap: 3px; }
-
-	.midi-label { font-size: 10px; color: var(--text-muted); width: 80px; flex-shrink: 0; white-space: nowrap; }
 
 	/* Visualizer drag-over */
 	.visualizer-wrap.drag-over::after {

@@ -57,3 +57,16 @@ export function clampBeatsPerChange(n: number): number {
 export function clampOffset(offset: number, beatsPerChange: number): number {
 	return Math.max(0, Math.min(beatsPerChange - 1, Math.round(offset)));
 }
+
+/**
+ * Merge a patch into a BeatTriggerConfig, re-clamping beatsPerChange/offset so
+ * they stay valid together (offset depends on the NEW beatsPerChange, not the
+ * old one). Pure — returns a new object. Same merge-then-clamp shape used for
+ * beatTriggerA, beatTriggerB, and the overlay queue trigger.
+ */
+export function applyBeatTriggerPatch(current: BeatTriggerConfig, patch: Partial<BeatTriggerConfig>): BeatTriggerConfig {
+	const next = { ...current, ...patch };
+	next.beatsPerChange = clampBeatsPerChange(next.beatsPerChange);
+	next.offset = clampOffset(next.offset, next.beatsPerChange);
+	return next;
+}

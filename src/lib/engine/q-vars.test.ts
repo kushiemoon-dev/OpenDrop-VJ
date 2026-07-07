@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { defaultQVarParams, injectQVarParams } from './q-vars.js';
+import { defaultQVarParams, injectQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch, type QVarParamsTuple } from './q-vars.js';
 
 describe('defaultQVarParams', () => {
 	it('32 slots, tous désactivés, valeur 0', () => {
@@ -53,5 +53,57 @@ describe('injectQVarParams', () => {
 		const preset = {};
 		const patched = injectQVarParams(preset, 0) as any;
 		expect(patched.frame_eqs_str).toContain('if (window.__odQVarParams[0].enabled[0])');
+	});
+});
+
+describe('withQVarValue', () => {
+	const params: QVarParamsTuple = [defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams()];
+
+	it('met à jour la valeur du q-var ciblé (1-indexé) pour le slot ciblé', () => {
+		const next = withQVarValue(params, 1, 5, 1.5);
+		expect(next[1].value[4]).toBe(1.5);
+		expect(next[0].value[4]).toBe(0);
+		expect(next[2].value[4]).toBe(0);
+	});
+
+	it('ne touche pas enabled ni les autres valeurs', () => {
+		const next = withQVarValue(params, 0, 3, -1);
+		expect(next[0].enabled[2]).toBe(false);
+		expect(next[0].value[0]).toBe(0);
+	});
+
+	it('ne mute pas le tableau ni les objets source', () => {
+		const next = withQVarValue(params, 2, 1, 2);
+		expect(next).not.toBe(params);
+		expect(next[2]).not.toBe(params[2]);
+		expect(params[2].value[0]).toBe(0);
+	});
+});
+
+describe('withQVarWatch', () => {
+	const params: QVarParamsTuple = [defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams()];
+
+	it('active le watch et remet la valeur à 0', () => {
+		const dirty: QVarParamsTuple = withQVarValue(params, 0, 7, 1.9);
+		const next = withQVarWatch(dirty, 0, 7);
+		expect(next[0].enabled[6]).toBe(true);
+		expect(next[0].value[6]).toBe(0);
+	});
+
+	it('ne touche pas les autres slots/q-vars', () => {
+		const next = withQVarWatch(params, 1, 10);
+		expect(next[0].enabled[9]).toBe(false);
+		expect(next[1].enabled.filter(Boolean)).toHaveLength(1);
+	});
+});
+
+describe('withoutQVarWatch', () => {
+	it('désactive le watch sans toucher à la dernière valeur', () => {
+		const params: QVarParamsTuple = [defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams()];
+		const watched = withQVarWatch(params, 0, 12);
+		const valued = withQVarValue(watched, 0, 12, 1.2);
+		const next = withoutQVarWatch(valued, 0, 12);
+		expect(next[0].enabled[11]).toBe(false);
+		expect(next[0].value[11]).toBe(1.2);
 	});
 });

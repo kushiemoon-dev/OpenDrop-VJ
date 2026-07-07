@@ -89,6 +89,16 @@ export function migrateBlendModeString(old: string): BlendMode {
 	return 'normal';
 }
 
+/** Per-slot compositing config for the 4 decks, indexed 0-3. */
+export type SlotComposites = [SlotComposite, SlotComposite, SlotComposite, SlotComposite];
+
+/** Merge a patch into one slot's SlotComposite. Pure — returns a new tuple. */
+export function withSlotComposite(composites: SlotComposites, slot: number, patch: Partial<SlotComposite>): SlotComposites {
+	const next = [...composites] as SlotComposites;
+	next[slot] = { ...next[slot], ...patch };
+	return next;
+}
+
 function glFactor(gl: WebGL2RenderingContext, f: GLBlendFactor): number {
 	switch (f) {
 		case 'ZERO': return gl.ZERO;

@@ -7,13 +7,13 @@ import {
 } from './beat-trigger.js';
 
 describe('defaultBeatTriggerConfig', () => {
-	it('mode beat, seuil 8, offset 0, sensibilité 0.5', () => {
+	it('mode beat, threshold 8, offset 0, sensitivity 0.5', () => {
 		expect(defaultBeatTriggerConfig()).toEqual({ mode: 'beat', beatsPerChange: 8, offset: 0, sensitivity: 0.5 });
 	});
 });
 
 describe('shouldTriggerOnBeat', () => {
-	it('déclenche tous les N beats (N = beatsPerChange)', () => {
+	it('triggers every N beats (N = beatsPerChange)', () => {
 		const cfg = { mode: 'beat' as const, beatsPerChange: 4, offset: 0, sensitivity: 0.5 };
 		expect(shouldTriggerOnBeat(0, cfg)).toBe(true);
 		expect(shouldTriggerOnBeat(1, cfg)).toBe(false);
@@ -21,14 +21,14 @@ describe('shouldTriggerOnBeat', () => {
 		expect(shouldTriggerOnBeat(8, cfg)).toBe(true);
 	});
 
-	it('respecte le décalage (offset)', () => {
+	it('respects the offset', () => {
 		const cfg = { mode: 'beat' as const, beatsPerChange: 4, offset: 2, sensitivity: 0.5 };
 		expect(shouldTriggerOnBeat(0, cfg)).toBe(false);
 		expect(shouldTriggerOnBeat(2, cfg)).toBe(true);
 		expect(shouldTriggerOnBeat(6, cfg)).toBe(true);
 	});
 
-	it('ne déclenche jamais en mode volume-peak', () => {
+	it('never triggers in volume-peak mode', () => {
 		const cfg = { mode: 'volume-peak' as const, beatsPerChange: 4, offset: 0, sensitivity: 0.5 };
 		expect(shouldTriggerOnBeat(0, cfg)).toBe(false);
 		expect(shouldTriggerOnBeat(4, cfg)).toBe(false);
@@ -36,37 +36,37 @@ describe('shouldTriggerOnBeat', () => {
 });
 
 describe('detectVolumePeak', () => {
-	it('ne déclenche pas sous le seuil', () => {
+	it('does not trigger below the threshold', () => {
 		const state = { rollingAvg: 0.3, lastTriggerAt: -Infinity };
 		const { triggered } = detectVolumePeak(0.35, state, 0.5, 1000);
 		expect(triggered).toBe(false);
 	});
 
-	it('déclenche sur un pic net au-dessus de la moyenne glissante', () => {
+	it('triggers on a clear peak above the rolling average', () => {
 		const state = { rollingAvg: 0.2, lastTriggerAt: -Infinity };
 		const { triggered } = detectVolumePeak(0.9, state, 0.5, 1000);
 		expect(triggered).toBe(true);
 	});
 
-	it('respecte le cooldown (pas de re-déclenchement avant 500ms)', () => {
+	it('respects the cooldown (no re-trigger before 500ms)', () => {
 		const state = { rollingAvg: 0.2, lastTriggerAt: 1000 };
 		const { triggered } = detectVolumePeak(0.9, state, 0.5, 1300);
 		expect(triggered).toBe(false);
 	});
 
-	it('redéclenche après le cooldown', () => {
+	it('re-triggers after the cooldown', () => {
 		const state = { rollingAvg: 0.2, lastTriggerAt: 1000 };
 		const { triggered } = detectVolumePeak(0.9, state, 0.5, 1600);
 		expect(triggered).toBe(true);
 	});
 
-	it('ignore le quasi-silence même avec un ratio élevé', () => {
+	it('ignores near-silence even with a high ratio', () => {
 		const state = { rollingAvg: 0.005, lastTriggerAt: -Infinity };
 		const { triggered } = detectVolumePeak(0.019, state, 1, 1000);
 		expect(triggered).toBe(false);
 	});
 
-	it('la moyenne glissante suit une tendance de volume croissante', () => {
+	it('the rolling average follows an increasing volume trend', () => {
 		let state = defaultVolumePeakState();
 		for (let i = 0; i < 50; i++) {
 			state = detectVolumePeak(0.5, state, 0.5, i * 100).next;
@@ -74,7 +74,7 @@ describe('detectVolumePeak', () => {
 		expect(state.rollingAvg).toBeGreaterThan(0.4);
 	});
 
-	it('met à jour lastTriggerAt seulement quand ça déclenche', () => {
+	it('updates lastTriggerAt only when it triggers', () => {
 		const state = { rollingAvg: 0.3, lastTriggerAt: -Infinity };
 		const { next } = detectVolumePeak(0.35, state, 0.5, 1000);
 		expect(next.lastTriggerAt).toBe(-Infinity);
@@ -82,7 +82,7 @@ describe('detectVolumePeak', () => {
 });
 
 describe('clampBeatsPerChange', () => {
-	it('borne entre 1 et 64', () => {
+	it('clamps between 1 and 64', () => {
 		expect(clampBeatsPerChange(0)).toBe(1);
 		expect(clampBeatsPerChange(100)).toBe(64);
 		expect(clampBeatsPerChange(8)).toBe(8);
@@ -90,7 +90,7 @@ describe('clampBeatsPerChange', () => {
 });
 
 describe('clampOffset', () => {
-	it('borne entre 0 et beatsPerChange - 1', () => {
+	it('clamps between 0 and beatsPerChange - 1', () => {
 		expect(clampOffset(-1, 8)).toBe(0);
 		expect(clampOffset(10, 8)).toBe(7);
 		expect(clampOffset(3, 8)).toBe(3);
@@ -98,7 +98,7 @@ describe('clampOffset', () => {
 });
 
 describe('applyBeatTriggerPatch', () => {
-	it('merge un patch partiel sans toucher aux champs non fournis', () => {
+	it("merges a partial patch without touching fields that weren't provided", () => {
 		const current = defaultBeatTriggerConfig();
 		const next = applyBeatTriggerPatch(current, { mode: 'volume-peak' });
 		expect(next.mode).toBe('volume-peak');
@@ -106,19 +106,19 @@ describe('applyBeatTriggerPatch', () => {
 		expect(next.sensitivity).toBe(0.5);
 	});
 
-	it('re-clamp beatsPerChange après le patch', () => {
+	it('re-clamps beatsPerChange after the patch', () => {
 		const current = defaultBeatTriggerConfig();
 		expect(applyBeatTriggerPatch(current, { beatsPerChange: 100 }).beatsPerChange).toBe(64);
 		expect(applyBeatTriggerPatch(current, { beatsPerChange: 0 }).beatsPerChange).toBe(1);
 	});
 
-	it('re-clamp offset relatif au NOUVEAU beatsPerChange (pas l\'ancien)', () => {
+	it('re-clamps offset relative to the NEW beatsPerChange (not the old one)', () => {
 		const current = { ...defaultBeatTriggerConfig(), beatsPerChange: 8, offset: 7 };
 		const next = applyBeatTriggerPatch(current, { beatsPerChange: 4 });
 		expect(next.offset).toBe(3);
 	});
 
-	it('ne mute pas l\'objet current', () => {
+	it('does not mutate the current object', () => {
 		const current = defaultBeatTriggerConfig();
 		const next = applyBeatTriggerPatch(current, { mode: 'volume-peak' });
 		expect(current.mode).toBe('beat');

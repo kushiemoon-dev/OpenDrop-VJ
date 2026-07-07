@@ -29,9 +29,9 @@ export function getQualitySettings(tier: QualityTier): QualitySettings {
 export type InvisibleMode = 'eco' | 'pause' | 'off';
 
 export interface PerfSettings {
-	targetFps: number;      // FPS cible du rendu (30 | 45 | 60)
-	invisibleMode: InvisibleMode;  // comportement des decks invisibles
-	invisibleFps: number;   // FPS des decks éco (~8)
+	targetFps: number;      // target render FPS (30 | 45 | 60)
+	invisibleMode: InvisibleMode;  // behavior for invisible decks
+	invisibleFps: number;   // FPS for eco-mode decks (~8)
 }
 
 export const DEFAULT_PERF: PerfSettings = {

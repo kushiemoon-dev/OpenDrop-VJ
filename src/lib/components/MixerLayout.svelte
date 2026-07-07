@@ -30,10 +30,10 @@
     onLayoutToggle: (l: 'stage' | 'mixer') => void
     audioSection: Snippet
     videoSection: Snippet
-    qualiteSection: Snippet
+    qualitySection: Snippet
     outputSection: Snippet
     midiSection: Snippet
-    clavierSection: Snippet
+    keyboardSection: Snippet
     strobeSection: Snippet
     lfoSection: Snippet
     colorSection: Snippet
@@ -52,17 +52,17 @@
     onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange, onTransitionChange,
     onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,
-    qualiteSection, outputSection, midiSection, clavierSection,
+    qualitySection, outputSection, midiSection, keyboardSection,
     strobeSection, lfoSection, colorSection, compositeSection, snapshotSection, timelineSection, shareSection, timeSection, qvarSection, electronSection,
   }: Props = $props()
 
-  // Le deck actif détermine le "deck cible" du PresetBrowser en mode mixer.
-  // On mappe le bus du slot sélectionné → 'A' | 'B' (off → 'A' par défaut).
+  // The active deck determines the PresetBrowser's "target deck" in mixer mode.
+  // Maps the selected slot's bus → 'A' | 'B' (off → 'A' by default).
   const activeDeckLetter = $derived<'A' | 'B'>(deckBus[selectedSlot] === 'B' ? 'B' : 'A')
 </script>
 
 <div class="mixer">
-  <!-- ── Colonne principale ── -->
+  <!-- ── Main column ── -->
   <div class="mixer__main">
     <!-- Header -->
     <div class="mixer__header">
@@ -74,7 +74,7 @@
       <span class="mixer__running">{runningCount}/4 running</span>
     </div>
 
-    <!-- Grille des 4 decks -->
+    <!-- 4-deck grid -->
     <div class="mixer__decks">
       {#each [0, 1, 2, 3] as i}
         <DeckCard
@@ -92,7 +92,7 @@
       {/each}
     </div>
 
-    <!-- Preset browser inline (toujours ouvert en mixer) -->
+    <!-- Inline preset browser (always open in mixer mode) -->
     <PresetBrowser
       presets={presetList}
       isOpen={true}
@@ -107,7 +107,7 @@
     />
   </div>
 
-  <!-- ── Colonne droite (contrôles) ── -->
+  <!-- ── Right column (controls) ── -->
   <aside class="mixer__sidebar">
     {@render audioSection()}
 
@@ -123,16 +123,16 @@
         <div class="xcf__curve">Linear</div>
       </div>
       <div class="transition-row">
-        <span class="transition-label">Fondu</span>
+        <span class="transition-label">Fade</span>
         <input class="transition-slider" type="range" min="0" max="5" step="0.1" value={transitionTime}
-          oninput={(e) => onTransitionChange(Number(e.currentTarget.value))} title="Durée de transition preset (s)" />
+          oninput={(e) => onTransitionChange(Number(e.currentTarget.value))} title="Preset transition duration (s)" />
         <span class="transition-value">{transitionTime.toFixed(1)}s</span>
-        <button class="btn-sm" onclick={() => onTransitionChange(0)} title="Coupe nette">Hard Cut</button>
+        <button class="btn-sm" onclick={() => onTransitionChange(0)} title="Hard cut">Hard Cut</button>
       </div>
     </div>
 
     {@render videoSection()}
-    {@render qualiteSection()}
+    {@render qualitySection()}
     {@render colorSection()}
     {@render compositeSection()}
     {@render snapshotSection()}
@@ -144,7 +144,7 @@
     {@render lfoSection()}
     {@render outputSection()}
     {@render midiSection()}
-    {@render clavierSection()}
+    {@render keyboardSection()}
     {@render electronSection()}
   </aside>
 </div>
@@ -208,7 +208,7 @@
     flex-shrink: 0;
   }
 
-  /* PresetBrowser en mode inline : override position fixed */
+  /* Inline PresetBrowser mode: override the fixed positioning */
   .mixer__main :global(.preset-drawer) {
     position: static !important;
     flex: 1;
@@ -231,7 +231,7 @@
     overflow-y: auto;
   }
 
-  /* Réutiliser les classes globales de +page.svelte */
+  /* Reuse the global classes from +page.svelte */
   .controls-section {
     padding: var(--sp-3);
     border-bottom: 1px solid var(--border-subtle);

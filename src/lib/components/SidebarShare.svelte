@@ -12,16 +12,16 @@
 
 <div class="controls-section">
 	<div class="pl-header">
-		<span class="label">Partage</span>
+		<span class="label">Share</span>
 	</div>
 	<input class="snap-name" type="text" value={shareSetName}
 		oninput={(e) => onNameChange(e.currentTarget.value)}
-		placeholder="Mon set"
+		placeholder="My set"
 		style="font-size:11px;margin-bottom:4px;width:100%" />
 	<button class="btn-sm" onclick={onCopyShareLink}>{shareCopyLabel}</button>
 	{#if nonShareableOverlayCount > 0}
 		<span style="font-size:9px;color:#aaa;margin-top:4px;display:block">
-			{nonShareableOverlayCount} overlay(s) media non partagé(s) (fichier local)
+			{nonShareableOverlayCount} media overlay(s) not shareable (local file)
 		</span>
 	{/if}
 </div>

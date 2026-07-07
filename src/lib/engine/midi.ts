@@ -7,7 +7,7 @@ export type MidiMessage = {
 	is14bit?: boolean; // true when value uses 14-bit range
 };
 
-// Clé unique pour identifier un trigger MIDI (inclut deviceId pour multi-controller)
+// Unique key identifying a MIDI trigger (includes deviceId for multi-controller support)
 export type MidiTriggerKey = string; // `${deviceId}:cc:${ch}:${num}` | `${deviceId}:note:${ch}:${num}` | `${deviceId}:pb:${ch}`
 
 export function triggerKey(msg: MidiMessage): MidiTriggerKey {

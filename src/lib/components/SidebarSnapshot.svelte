@@ -19,7 +19,7 @@
 		<span class="label">Snapshots</span>
 	</div>
 	<div class="midi-row" style="gap:6px;align-items:center">
-		<span class="midi-label" style="width:48px">Durée</span>
+		<span class="midi-label" style="width:48px">Duration</span>
 		<input type="range" min="0.1" max="10" step="0.1" value={snapshotRecallDuration}
 			oninput={(e) => onDurationChange(+e.currentTarget.value)} style="flex:1" />
 		<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{snapshotRecallDuration.toFixed(1)}s</span>
@@ -31,9 +31,9 @@
 				disabled={!snap}
 				oninput={(e) => onRenameSnapshot(slot, e.currentTarget.value)}
 				style="flex:1;min-width:0;font-size:11px" />
-			<button class="btn-sm" onclick={() => onSaveSnapshot(slot)} title="Capturer l'état courant">Save</button>
-			<button class="btn-sm" disabled={!snap} onclick={() => onRecallSnapshot(slot)} title="Rappeler ce snapshot">▶</button>
-			<button class="pl-remove" disabled={!snap} onclick={() => onClearSnapshot(slot)} title="Vider">×</button>
+			<button class="btn-sm" onclick={() => onSaveSnapshot(slot)} title="Capture the current state">Save</button>
+			<button class="btn-sm" disabled={!snap} onclick={() => onRecallSnapshot(slot)} title="Recall this snapshot">▶</button>
+			<button class="pl-remove" disabled={!snap} onclick={() => onClearSnapshot(slot)} title="Clear">×</button>
 		</div>
 	{/each}
 </div>

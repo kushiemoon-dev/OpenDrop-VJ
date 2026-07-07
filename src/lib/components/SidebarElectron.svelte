@@ -31,8 +31,8 @@
 		</button>
 	</div>
 	{#if oscActive}
-		<span class="source-badge">Écoute UDP :{oscPort}</span>
-		<span style="font-size:10px;color:#aaa">Adresse : /opendrop/&lt;commandId&gt; float32</span>
+		<span class="source-badge">Listening UDP :{oscPort}</span>
+		<span style="font-size:10px;color:#aaa">Address: /opendrop/&lt;commandId&gt; float32</span>
 	{:else}
 		<div class="midi-row" style="gap:6px;align-items:center">
 			<span class="midi-label">Port</span>
@@ -47,17 +47,17 @@
 	<div class="pl-header">
 		<span class="label">Remote</span>
 		<button class="btn-sm" class:active={remoteActive} onclick={onToggleRemote}>
-			{remoteActive ? 'Stop' : 'Démarrer'}
+			{remoteActive ? 'Stop' : 'Start'}
 		</button>
 	</div>
 	{#if remoteActive && remoteUrl}
 		<span style="font-size:10px;color:#aaa;word-break:break-all">{remoteUrl}</span>
 		<a href={remoteUrl} target="_blank" rel="noopener" style="font-size:10px;color:var(--info);display:block;margin-top:4px">
-			Ouvrir sur cet appareil ↗
+			Open on this device ↗
 		</a>
 	{/if}
 	{#if !remoteActive}
-		<span style="font-size:10px;color:#666">Démarre un serveur WS local pour piloter OpenDrop depuis un téléphone sur le même réseau.</span>
+		<span style="font-size:10px;color:#666">Starts a local WS server to control OpenDrop from a phone on the same network.</span>
 	{/if}
 	{#if remoteError}<div style="font-size:10px;color:var(--error);margin-top:4px">{remoteError}</div>{/if}
 </div>
@@ -65,13 +65,13 @@
 	<div class="pl-header">
 		<span class="label">Ableton Link</span>
 		<button class="btn-sm" class:active={linkActive} onclick={onToggleLink}>
-			{linkActive ? 'Stop' : 'Démarrer'}
+			{linkActive ? 'Stop' : 'Start'}
 		</button>
 	</div>
 	{#if linkActive}
-		<span class="source-badge">{linkPeers} pair{linkPeers !== 1 ? 's' : ''} connecté{linkPeers !== 1 ? 's' : ''}</span>
+		<span class="source-badge">{linkPeers} peer{linkPeers !== 1 ? 's' : ''} connected</span>
 	{:else}
-		<span style="font-size:10px;color:#666">Synchronise le tempo avec Ableton Live et autres apps Link sur le réseau local.</span>
+		<span style="font-size:10px;color:#666">Syncs tempo with Ableton Live and other Link apps on the local network.</span>
 	{/if}
 	{#if linkError}<div style="font-size:10px;color:var(--error);margin-top:4px">{linkError}</div>{/if}
 </div>

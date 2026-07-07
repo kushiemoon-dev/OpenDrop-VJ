@@ -10,7 +10,7 @@
 
 	let { overlays, beat, visibleIds }: Props = $props();
 
-	// id → data URL, chargé depuis IndexedDB
+	// id → data URL, loaded from IndexedDB
 	let srcs = $state<Record<string, string>>({});
 
 	$effect(() => {
@@ -23,9 +23,9 @@
 		}
 	});
 
-	// spin/drift = animations CSS pures (pas de RAF).
-	// ponytail: amplitude/vitesse approximées pour un rendu VJ convaincant,
-	// pas une simulation physique — suffisant tant que non mesuré insuffisant.
+	// spin/drift = pure CSS animations (no RAF).
+	// ponytail: amplitude/speed approximated for a convincing VJ look,
+	// not a physical simulation — good enough until proven otherwise.
 	function spinStyle(spin: number): string {
 		if (!spin) return '';
 		const dur = 360 / Math.abs(spin);
@@ -105,9 +105,9 @@
 	.overlay-media {
 		position: absolute;
 		pointer-events: none;
-		/* vw/vh plutôt que % : le containing block ici est le wrapper spin/drift
-		   (taille 0, nécessaire pour que la rotation pivote autour du point d'ancrage),
-		   pas le visualizer — % résoudrait à 0. Les 2 usages (stage, output) sont plein écran. */
+		/* vw/vh rather than % : the containing block here is the spin/drift wrapper
+		   (size 0, needed so rotation pivots around the anchor point),
+		   not the visualizer — % would resolve to 0. Both usages (stage, output) are fullscreen. */
 		max-width: 80vw;
 		max-height: 80vh;
 		transition: transform 80ms ease-out;

@@ -56,12 +56,12 @@
 					<option value={d.id}>{d.label} ({d.bounds.width}×{d.bounds.height})</option>
 				{/each}
 			</select>
-			<button class="btn-sm" onclick={onOpenOutputFullscreen} disabled={status !== 'running'} title="Ouvrir en plein écran sur cet écran">
+			<button class="btn-sm" onclick={onOpenOutputFullscreen} disabled={status !== 'running'} title="Open fullscreen on this screen">
 				⛶ Fullscreen
 			</button>
 		</div>
 	{:else if !isElectron}
-		<button class="btn-sm" onclick={onOpenOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Plein écran (appui F pour quitter)">
+		<button class="btn-sm" onclick={onOpenOutputFullscreen} disabled={status !== 'running'} style="margin-top:6px;width:100%" title="Fullscreen (press F to exit)">
 			⛶ Fullscreen
 		</button>
 	{/if}
@@ -72,7 +72,7 @@
 		<div class="stream-panel">
 			{#if platform === 'linux'}
 				<button class="stream-btn" class:stream-btn--on={v4l2Active} onclick={onToggleV4l2}
-					title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (webcam virtuelle)'}>
+					title={v4l2Active ? 'Stop V4L2' : 'Start V4L2 (virtual webcam)'}>
 					V4L2 {v4l2Active ? '●' : '○'}
 				</button>
 			{/if}

@@ -38,7 +38,7 @@ export class BeatDetector {
 
 		this.analyser.getByteFrequencyData(this.fftData);
 
-		// Énergie basses : premiers 5% des bins (~0-500Hz pour fftSize=2048)
+		// Bass energy: first 5% of bins (~0-500Hz for fftSize=2048)
 		const bassEnd = Math.max(1, Math.floor(this.fftData.length * 0.05));
 		let energy = 0;
 		for (let i = 0; i < bassEnd; i++) energy += this.fftData[i] ** 2;
@@ -50,12 +50,12 @@ export class BeatDetector {
 		const avg = this.energyHistory.reduce((s, v) => s + v, 0) / this.energyHistory.length;
 		const now = performance.now();
 
-		// Beat détecté si énergie > 1.35× moyenne, signal non silencieux, et cooldown 300ms
+		// Beat detected when energy exceeds 1.35x the rolling average, the signal isn't silent, and the 300ms cooldown has elapsed
 		if (energy > avg * 1.35 && avg > 8 && now - this.lastBeatTime > 300) {
 			const interval = now - this.lastBeatTime;
 			this.lastBeatTime = now;
 
-			// N'intègre l'intervalle que si cohérent (60–220 BPM)
+			// Only accumulate the interval if it's plausible (60-220 BPM)
 			if (interval > 270 && interval < 1000) {
 				this.beatIntervals.push(interval);
 				if (this.beatIntervals.length > 8) this.beatIntervals.shift();

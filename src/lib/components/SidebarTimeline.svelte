@@ -30,7 +30,7 @@
 				style="font-size:11px">
 				{#each [0, 1, 2, 3, 4, 5, 6, 7] as slot}
 					<option value={slot} disabled={!snapshots[slot]}>
-						{snapshots[slot]?.name ?? `Slot ${slot} (vide)`}
+						{snapshots[slot]?.name ?? `Slot ${slot} (empty)`}
 					</option>
 				{/each}
 			</select>
@@ -38,7 +38,7 @@
 				oninput={(e) => onUpdateKeyframe(i, { timeSec: +e.currentTarget.value })}
 				style="width:56px;background:#1a1a1a;border:1px solid #333;border-radius:3px;color:#ccc;font-size:11px;padding:2px 4px" />
 			<span style="font-size:9px;color:#666">s</span>
-			<button class="pl-remove" onclick={() => onRemoveKeyframe(i)} title="Retirer">×</button>
+			<button class="pl-remove" onclick={() => onRemoveKeyframe(i)} title="Remove">×</button>
 		</div>
 	{/each}
 	<button class="btn-sm" onclick={onAddKeyframe}>+ Point</button>

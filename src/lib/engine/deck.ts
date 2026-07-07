@@ -35,9 +35,9 @@ export class Deck {
 	private viz: import('butterchurn').Visualizer | null = null; // typed via src/lib/types/butterchurn.d.ts
 	private rafId: number | null = null;
 	private _state: DeckState = 'idle';
-	private frameInterval = 0;   // ms entre renders (0 = illimité)
-	private lastFrameTime = 0;   // timestamp du dernier viz.render()
-	renderCount = 0;             // total de renders appelés, pour mesure FPS réelle
+	private frameInterval = 0;   // ms between renders (0 = unlimited)
+	private lastFrameTime = 0;   // timestamp of the last viz.render() call
+	renderCount = 0;             // total renders called, used to measure actual FPS
 
 	readonly canvas: HTMLCanvasElement;
 	readonly id: string;

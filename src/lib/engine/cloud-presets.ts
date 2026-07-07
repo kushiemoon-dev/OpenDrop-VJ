@@ -1,9 +1,9 @@
 /**
- * Presets cloud (Track 2) — bibliothèque personnelle privée de presets custom,
- * stockée sur un Worker Cloudflare + R2 séparé (workers/presets-cloud/). Identité
- * = un token anonyme par appareil, pas de compte. Le préfixe CLOUD_PRESET_PREFIX
- * est l'unique garde-fou anti-collision avec les ~16k noms de presets statiques —
- * ne jamais dupliquer cette logique de préfixage ailleurs.
+ * Cloud presets (Track 2) — private personal library of custom presets,
+ * stored on a separate Cloudflare Worker + R2 (workers/presets-cloud/). Identity
+ * = one anonymous token per device, no account. The CLOUD_PRESET_PREFIX
+ * is the sole anti-collision guard against the ~16k static preset names —
+ * never duplicate this prefixing logic elsewhere.
  */
 
 import { PUBLIC_CLOUD_PRESETS_API } from '$env/static/public';
@@ -32,11 +32,11 @@ export function setCloudToken(token: string): void {
 	localStorage.setItem(TOKEN_KEY, token);
 }
 
-/** JSON.parse défensif — le fichier uploadé doit déjà être au format Butterchurn. */
+/** Defensive JSON.parse — the uploaded file must already be in Butterchurn format. */
 export function parsePresetFile(jsonText: string): object {
 	const parsed = JSON.parse(jsonText);
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-		throw new Error('Fichier preset invalide : doit être un objet JSON');
+		throw new Error('Invalid preset file: must be a JSON object');
 	}
 	return parsed;
 }
@@ -62,7 +62,7 @@ export async function getCloudPresetIndex(token: string): Promise<CloudPresetEnt
 export async function uploadPreset(
 	token: string, name: string, presetData: object
 ): Promise<{ id: string } | { error: string }> {
-	if (!PUBLIC_CLOUD_PRESETS_API) return { error: 'Presets cloud non configuré' };
+	if (!PUBLIC_CLOUD_PRESETS_API) return { error: 'Cloud presets not configured' };
 	try {
 		const res = await fetch(`${PUBLIC_CLOUD_PRESETS_API}/presets`, {
 			method: 'POST',
@@ -70,10 +70,10 @@ export async function uploadPreset(
 			body: JSON.stringify({ name: `${CLOUD_PRESET_PREFIX}${name}`, data: presetData }),
 		});
 		const body = await res.json();
-		if (!res.ok) return { error: body?.error ?? `Erreur ${res.status}` };
+		if (!res.ok) return { error: body?.error ?? `Error ${res.status}` };
 		return body as { id: string };
 	} catch {
-		return { error: 'Erreur réseau' };
+		return { error: 'Network error' };
 	}
 }
 

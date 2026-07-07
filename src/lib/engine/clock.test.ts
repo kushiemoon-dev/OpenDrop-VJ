@@ -1,38 +1,38 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Clock } from './clock.js';
 
-describe('Clock — setBpm + phase avancement', () => {
-	it('phase avance proportionnellement au BPM', () => {
+describe('Clock — setBpm + phase advancement', () => {
+	it('phase advances proportionally to BPM', () => {
 		const clock = new Clock();
 		clock.setBpm(120); // 2 beats/sec, phase += 2*dt
 		clock._stepForTest(0.25); // dt=0.25s → phase += 0.5
 		expect(clock.phase01).toBeCloseTo(0.5);
 	});
 
-	it('phase reste à 0 si bpm=0', () => {
+	it('phase stays at 0 if bpm=0', () => {
 		const clock = new Clock();
 		clock._stepForTest(1);
 		expect(clock.phase01).toBe(0);
 		expect(clock.beatCount).toBe(0);
 	});
 
-	it('émet un beat quand phase dépasse 1', () => {
+	it('emits a beat when phase exceeds 1', () => {
 		const clock = new Clock();
 		clock.setBpm(120);
 		const cb = vi.fn();
 		clock.onBeat(cb);
-		clock._stepForTest(0.5); // phase → 1.0 → 0.0, beat émis
+		clock._stepForTest(0.5); // phase → 1.0 → 0.0, beat emitted
 		expect(cb).toHaveBeenCalledTimes(1);
 		expect(clock.beatCount).toBe(1);
 		expect(clock.phase01).toBeCloseTo(0);
 	});
 
-	it('émet plusieurs beats en un seul grand step', () => {
+	it('emits multiple beats in a single large step', () => {
 		const clock = new Clock();
 		clock.setBpm(120); // 2 beats/sec
 		const cb = vi.fn();
 		clock.onBeat(cb);
-		clock._stepForTest(2.5); // 2.5s × 2bps = 5 beats, phase reste 0
+		clock._stepForTest(2.5); // 2.5s × 2bps = 5 beats, phase stays at 0
 		expect(cb).toHaveBeenCalledTimes(5);
 		expect(clock.beatCount).toBe(5);
 		expect(clock.phase01).toBeCloseTo(0);
@@ -48,7 +48,7 @@ describe('Clock — setBpm + phase avancement', () => {
 });
 
 describe('Clock — pulse', () => {
-	it('pulse(bpm) met à jour le BPM et remet phase à 0', () => {
+	it('pulse(bpm) updates the BPM and resets phase to 0', () => {
 		const clock = new Clock();
 		clock.setBpm(120);
 		clock._stepForTest(0.3);
@@ -58,26 +58,26 @@ describe('Clock — pulse', () => {
 		expect(clock.phase01).toBe(0);
 	});
 
-	it('pulse sans bpm en mode bpm=0 émet un beat direct', () => {
+	it('pulse without bpm in bpm=0 mode emits an immediate beat', () => {
 		const clock = new Clock();
 		const cb = vi.fn();
 		clock.onBeat(cb);
-		clock.pulse(); // bpm=0 → émet immédiatement
+		clock.pulse(); // bpm=0 → emits immediately
 		expect(cb).toHaveBeenCalledTimes(1);
 	});
 
-	it('pulse avec bpm>0 ne double-émet pas (le RAF émet)', () => {
+	it('pulse with bpm>0 does not double-emit (the RAF emits)', () => {
 		const clock = new Clock();
 		clock.setBpm(120);
 		const cb = vi.fn();
 		clock.onBeat(cb);
-		clock.pulse(120); // phase resync seulement, pas d'émission immédiate
+		clock.pulse(120); // phase resync only, no immediate emission
 		expect(cb).not.toHaveBeenCalled();
 	});
 });
 
 describe('Clock — onBeat unsubscribe', () => {
-	it('unsub supprime le listener', () => {
+	it('unsub removes the listener', () => {
 		const clock = new Clock();
 		clock.setBpm(120);
 		const cb = vi.fn();
@@ -89,7 +89,7 @@ describe('Clock — onBeat unsubscribe', () => {
 });
 
 describe('Clock — onTick', () => {
-	it('onTick est appelé à chaque step avec phase et beatCount', () => {
+	it('onTick is called on every step with phase and beatCount', () => {
 		const clock = new Clock();
 		clock.setBpm(60); // 1 beat/sec
 		const ticks: Array<[number, number]> = [];

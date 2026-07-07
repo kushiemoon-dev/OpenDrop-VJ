@@ -27,7 +27,7 @@ describe('CommandRegistry', () => {
 		expect(reg.get('crossfader')).toBe(cmd);
 	});
 
-	it('dispatch appelle run avec la bonne valeur', () => {
+	it('dispatch calls run with the correct value', () => {
 		const reg = new CommandRegistry();
 		const run = vi.fn();
 		reg.register({ id: 'crossfader', label: 'X', kind: 'range', run });
@@ -36,13 +36,13 @@ describe('CommandRegistry', () => {
 		expect(run).toHaveBeenCalledWith(0.75, ctx);
 	});
 
-	it('dispatch sur une id inconnue ne plante pas', () => {
+	it('dispatch on an unknown id does not crash', () => {
 		const reg = new CommandRegistry();
 		const ctx = makeCtx();
 		expect(() => reg.dispatch('strobe-toggle', 1, ctx)).not.toThrow();
 	});
 
-	it('all() retourne toutes les commandes', () => {
+	it('all() returns all commands', () => {
 		const reg = new CommandRegistry();
 		reg.register({ id: 'crossfader', label: 'X', kind: 'range', run: vi.fn() });
 		reg.register({ id: 'deck-switch', label: 'Y', kind: 'trigger', run: vi.fn() });
@@ -50,10 +50,10 @@ describe('CommandRegistry', () => {
 	});
 });
 
-describe('createDefaultRegistry — commandes de base', () => {
+describe('createDefaultRegistry — base commands', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient les 11 commandes MIDI héritées', () => {
+	it('contains the 11 legacy MIDI commands', () => {
 		const ids = [
 			'crossfader',
 			'preset-prev-a', 'preset-next-a', 'preset-prev-b', 'preset-next-b',
@@ -65,7 +65,7 @@ describe('createDefaultRegistry — commandes de base', () => {
 		}
 	});
 
-	it('crossfader (range) → setCrossfader avec la valeur', () => {
+	it('crossfader (range) → setCrossfader with the value', () => {
 		const ctx = makeCtx();
 		reg.dispatch('crossfader', 0.3, ctx);
 		expect(ctx.getCrossfader()).toBe(0.3);
@@ -96,10 +96,10 @@ describe('createDefaultRegistry — commandes de base', () => {
 	});
 });
 
-describe('createDefaultRegistry — commandes de compositing (1.1)', () => {
+describe('createDefaultRegistry — compositing commands (1.1)', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient les 20 commandes composite/lumakey/colorkey pour les 4 slots', () => {
+	it('contains the 20 composite/lumakey/colorkey commands for the 4 slots', () => {
 		const prefixes = ['composite-blend', 'lumakey-black', 'lumakey-white', 'colorkey-hue', 'colorkey-tolerance'] as const;
 		for (const prefix of prefixes) {
 			for (const slot of [0, 1, 2, 3] as const) {
@@ -114,7 +114,7 @@ describe('createDefaultRegistry — commandes de compositing (1.1)', () => {
 describe('createDefaultRegistry — recall snapshots (1.3)', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient les 8 triggers recall-snapshot-0..7', () => {
+	it('contains the 8 recall-snapshot-0..7 triggers', () => {
 		for (const slot of [0, 1, 2, 3, 4, 5, 6, 7] as const) {
 			const id = `recall-snapshot-${slot}` as const;
 			expect(reg.get(id), `missing: ${id}`).toBeDefined();
@@ -126,7 +126,7 @@ describe('createDefaultRegistry — recall snapshots (1.3)', () => {
 describe('createDefaultRegistry — timeline toggle', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient timeline-toggle en trigger', () => {
+	it('contains timeline-toggle as a trigger', () => {
 		expect(reg.get('timeline-toggle')).toBeDefined();
 		expect(reg.get('timeline-toggle')?.kind).toBe('trigger');
 	});
@@ -135,35 +135,35 @@ describe('createDefaultRegistry — timeline toggle', () => {
 describe('createDefaultRegistry — active-deck shortcuts', () => {
 	const reg = createDefaultRegistry();
 
-	it('crossfader-left décrémente de 0.05', () => {
+	it('crossfader-left decrements by 0.05', () => {
 		const ctx = makeCtx();
 		ctx.setCrossfader(0.5);
 		reg.dispatch('crossfader-left', 1, ctx);
 		expect(ctx.getCrossfader()).toBeCloseTo(0.45);
 	});
 
-	it('crossfader-right incrémente de 0.05', () => {
+	it('crossfader-right increments by 0.05', () => {
 		const ctx = makeCtx();
 		ctx.setCrossfader(0.5);
 		reg.dispatch('crossfader-right', 1, ctx);
 		expect(ctx.getCrossfader()).toBeCloseTo(0.55);
 	});
 
-	it('crossfader-left est clampé à 0', () => {
+	it('crossfader-left is clamped to 0', () => {
 		const ctx = makeCtx();
 		ctx.setCrossfader(0.02);
 		reg.dispatch('crossfader-left', 1, ctx);
 		expect(ctx.getCrossfader()).toBe(0);
 	});
 
-	it('crossfader-right est clampé à 1', () => {
+	it('crossfader-right is clamped to 1', () => {
 		const ctx = makeCtx();
 		ctx.setCrossfader(0.98);
 		reg.dispatch('crossfader-right', 1, ctx);
 		expect(ctx.getCrossfader()).toBe(1);
 	});
 
-	it('deck-switch alterne A↔B', () => {
+	it('deck-switch toggles A↔B', () => {
 		const ctx = makeCtx();
 		expect(ctx.getActiveDeck()).toBe('A');
 		reg.dispatch('deck-switch', 1, ctx);
@@ -172,20 +172,20 @@ describe('createDefaultRegistry — active-deck shortcuts', () => {
 		expect(ctx.getActiveDeck()).toBe('A');
 	});
 
-	it('preset-next-active utilise le deck actif', () => {
+	it('preset-next-active uses the active deck', () => {
 		const ctx = makeCtx();
 		ctx.switchActiveDeck(); // → B
 		reg.dispatch('preset-next-active', 1, ctx);
 		expect(ctx.navigatePreset).toHaveBeenCalledWith('B', 1);
 	});
 
-	it('playlist-toggle-active utilise le deck actif', () => {
+	it('playlist-toggle-active uses the active deck', () => {
 		const ctx = makeCtx();
 		reg.dispatch('playlist-toggle-active', 1, ctx);
 		expect(ctx.togglePlaylist).toHaveBeenCalledWith('A');
 	});
 
-	it('playlist-prev-active utilise le deck actif', () => {
+	it('playlist-prev-active uses the active deck', () => {
 		const ctx = makeCtx();
 		reg.dispatch('playlist-prev-active', 1, ctx);
 		expect(ctx.playlistPrev).toHaveBeenCalledWith('A');
@@ -195,7 +195,7 @@ describe('createDefaultRegistry — active-deck shortcuts', () => {
 describe('createDefaultRegistry — time param sliders (1.4)', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient les 32 commandes time-* pour les 4 slots', () => {
+	it('contains the 32 time-* commands for the 4 slots', () => {
 		const prefixes = ['time-speed', 'time-zoom', 'time-rot', 'time-warp', 'time-dx', 'time-dy', 'time-stretch', 'time-wave'] as const;
 		for (const prefix of prefixes) {
 			for (const slot of [0, 1, 2, 3] as const) {
@@ -226,7 +226,7 @@ describe('overlay queue commands', () => {
 describe('createDefaultRegistry — Q-var live editing (Track 2)', () => {
 	const reg = createDefaultRegistry();
 
-	it('contient les 128 commandes qvar-N-slot (32 q-vars × 4 slots)', () => {
+	it('contains the 128 qvar-N-slot commands (32 q-vars × 4 slots)', () => {
 		for (let n = 1; n <= 32; n++) {
 			for (const slot of [0, 1, 2, 3] as const) {
 				const id = `qvar-${n}-${slot}` as CommandId;

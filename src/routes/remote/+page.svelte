@@ -20,7 +20,7 @@
 
 	function connect() {
 		if (!host || !port || !token) {
-			error = 'Paramètres manquants dans l\'URL (?host=&port=&token=)';
+			error = 'Missing parameters in the URL (?host=&port=&token=)';
 			return;
 		}
 		if (ws) { ws.close(); ws = null; }
@@ -31,7 +31,7 @@
 		ws.onopen = () => { connected = true; connecting = false; };
 		ws.onclose = () => { connected = false; connecting = false; };
 		ws.onerror = () => {
-			error = `Connexion échouée — vérifier que OpenDrop est ouvert et sur le même réseau.`;
+			error = `Connection failed — check that OpenDrop is open and on the same network.`;
 			connected = false;
 			connecting = false;
 		};
@@ -67,14 +67,14 @@
 	<header>
 		<span class="logo">OpenDrop</span>
 		{#if connecting}
-			<span class="badge connecting">Connexion…</span>
+			<span class="badge connecting">Connecting…</span>
 		{:else if connected}
-			<span class="badge ok">Connecté</span>
-			<button class="btn-sm" onclick={disconnect}>Déconnecter</button>
+			<span class="badge ok">Connected</span>
+			<button class="btn-sm" onclick={disconnect}>Disconnect</button>
 		{:else}
-			<span class="badge off">Déconnecté</span>
+			<span class="badge off">Disconnected</span>
 			{#if host && port && token}
-				<button class="btn-sm" onclick={connect}>Reconnecter</button>
+				<button class="btn-sm" onclick={connect}>Reconnect</button>
 			{/if}
 		{/if}
 	</header>
@@ -85,11 +85,11 @@
 
 	{#if !host || !port || !token}
 		<div class="guide">
-			<p>Pour utiliser la télécommande :</p>
+			<p>To use the remote:</p>
 			<ol>
-				<li>Ouvrez OpenDrop sur votre ordinateur</li>
-				<li>Dans le panneau <strong>Remote</strong>, cliquez <strong>Démarrer</strong></li>
-				<li>Scannez le QR code ou copiez le lien affiché</li>
+				<li>Open OpenDrop on your computer</li>
+				<li>In the <strong>Remote</strong> panel, click <strong>Start</strong></li>
+				<li>Scan the QR code or copy the displayed link</li>
 			</ol>
 		</div>
 	{:else}

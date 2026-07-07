@@ -28,63 +28,63 @@ function fixtureSet(): SharedSet {
 }
 
 describe('filterShareableOverlays', () => {
-	it('garde uniquement les overlays texte', () => {
+	it('keeps only text overlays', () => {
 		const text = makeOverlay('Texte', { kind: 'text', text: 'Hello' });
 		const media = makeOverlay('img.png');
 		expect(filterShareableOverlays([text, media])).toEqual([text]);
 	});
 
-	it('liste vide → liste vide', () => {
+	it('empty list → empty list', () => {
 		expect(filterShareableOverlays([])).toEqual([]);
 	});
 });
 
 describe('encodeSharedSet / decodeSharedSet round-trip', () => {
-	it('un SharedSet complet survit encode -> decode intact', async () => {
+	it('a complete SharedSet survives encode -> decode intact', async () => {
 		const set = fixtureSet();
 		const encoded = await encodeSharedSet(set);
 		const decoded = await decodeSharedSet(encoded);
 		expect(decoded).toEqual(set);
 	});
 
-	it("l'encodage produit une chaîne url-safe (pas de +, /, =)", async () => {
+	it("encoding produces a url-safe string (no +, /, =)", async () => {
 		const encoded = await encodeSharedSet(fixtureSet());
 		expect(encoded).not.toMatch(/[+/=]/);
 	});
 
-	it('chaîne corrompue -> null, ne jette jamais', async () => {
+	it('corrupted string -> null, never throws', async () => {
 		await expect(decodeSharedSet('!!!pas-du-tout-du-base64-valide!!!')).resolves.toBeNull();
 	});
 
-	it('chaîne vide -> null', async () => {
+	it('empty string -> null', async () => {
 		await expect(decodeSharedSet('')).resolves.toBeNull();
 	});
 
-	it('version inconnue -> null', async () => {
+	it('unknown version -> null', async () => {
 		const set = { ...fixtureSet(), version: 2 as unknown as 1 };
 		const encoded = await encodeSharedSet(set);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});
 
-	it('timeParams de mauvaise longueur (lien forgé à la main) -> null', async () => {
+	it('timeParams with wrong length (hand-forged link) -> null', async () => {
 		const set = { ...fixtureSet(), timeParams: [defaultTimeParams()] };
 		const encoded = await encodeSharedSet(set as unknown as SharedSet);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});
 
-	it('slotComposites de mauvaise longueur (lien forgé à la main) -> null', async () => {
+	it('slotComposites with wrong length (hand-forged link) -> null', async () => {
 		const set = { ...fixtureSet(), slotComposites: [DEFAULT_SLOT_COMPOSITE, DEFAULT_SLOT_COMPOSITE] };
 		const encoded = await encodeSharedSet(set as unknown as SharedSet);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});
 
-	it('snapshots de mauvaise longueur (lien forgé à la main) -> null', async () => {
+	it('snapshots with wrong length (hand-forged link) -> null', async () => {
 		const set = { ...fixtureSet(), snapshots: [null, null] };
 		const encoded = await encodeSharedSet(set as unknown as SharedSet);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();
 	});
 
-	it('qVarParams de mauvaise longueur (lien forgé à la main) -> null', async () => {
+	it('qVarParams with wrong length (hand-forged link) -> null', async () => {
 		const set = { ...fixtureSet(), qVarParams: [defaultQVarParams()] };
 		const encoded = await encodeSharedSet(set as unknown as SharedSet);
 		await expect(decodeSharedSet(encoded)).resolves.toBeNull();

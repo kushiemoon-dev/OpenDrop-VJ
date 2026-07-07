@@ -53,19 +53,19 @@
 	<div class="btn-row">
 		<button class="btn-sm" class:active={sourceLabel === 'microphone'} onclick={onConnectMic} disabled={status !== 'running'}>Mic</button>
 		<button class="btn-sm" onclick={onOpenDevicePicker} disabled={status !== 'running'}>Pick device</button>
-		<button class="btn-sm" class:active={sourceLabel === 'system audio'} onclick={onCaptureSystemAudio} disabled={status !== 'running'} title="Capturer le son système">🔊 Audio système</button>
+		<button class="btn-sm" class:active={sourceLabel === 'system audio'} onclick={onCaptureSystemAudio} disabled={status !== 'running'} title="Capture system audio">🔊 System audio</button>
 	</div>
 	{#if showSystemAudioHelp}
 		<div class="device-picker">
 			{#if effectiveOS === 'darwin'}
-				<span class="label">Audio système sur macOS</span>
-				<p class="hint">Installer <strong>BlackHole</strong> (gratuit) :<br><code>brew install blackhole-2ch</code><br>Créer un Multi-Output Device dans Audio MIDI Setup,<br>puis <strong>Pick device</strong> → BlackHole.</p>
+				<span class="label">System audio on macOS</span>
+				<p class="hint">Install <strong>BlackHole</strong> (free):<br><code>brew install blackhole-2ch</code><br>Create a Multi-Output Device in Audio MIDI Setup,<br>then <strong>Pick device</strong> → BlackHole.</p>
 			{:else if effectiveOS === 'linux'}
-				<span class="label">Audio système sur Linux</span>
-				<p class="hint">Aucun périphérique monitor trouvé.<br>Utilisez <strong>Pick device</strong> → entrée se terminant par <code>.monitor</code> (sortie système).<br>Optionnel : <code>bash scripts/setup-audio.sh</code> pour un device nommé.</p>
+				<span class="label">System audio on Linux</span>
+				<p class="hint">No monitor device found.<br>Use <strong>Pick device</strong> → the entry ending in <code>.monitor</code> (system output).<br>Optional: <code>bash scripts/setup-audio.sh</code> for a named device.</p>
 			{:else}
-				<span class="label">Audio système</span>
-				<p class="hint">Dans Chrome/Edge : cliquer <strong>Audio système</strong> → choisir <strong>Écran entier</strong> → cocher <strong>"Partager l'audio système"</strong>.</p>
+				<span class="label">System audio</span>
+				<p class="hint">In Chrome/Edge: click <strong>System audio</strong> → choose <strong>Entire screen</strong> → check <strong>"Share system audio"</strong>.</p>
 			{/if}
 			<button class="btn-sm" onclick={onDismissSystemAudioHelp}>OK</button>
 		</div>

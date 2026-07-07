@@ -67,6 +67,10 @@ export class PlaylistEngine {
 	}
 
 	private _schedule() {
+		// Infinity is the beat-sync sentinel (advance is driven externally by
+		// beat triggers, not this timer). setTimeout clamps Infinity to ~0ms,
+		// which would otherwise fire almost continuously.
+		if (!Number.isFinite(this.intervalMs)) return;
 		this.timerId = setTimeout(() => {
 			if (!this._playing) return;
 			this.next();

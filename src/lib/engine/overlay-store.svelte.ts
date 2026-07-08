@@ -25,7 +25,7 @@ export const overlayState = $state({
 	queueMode: 'sequential' as PlaylistMode,
 });
 
-export async function addOverlayFromFile(file: File): Promise<void> {
+async function addOverlayFromFile(file: File): Promise<void> {
 	return new Promise<void>((resolve) => {
 		const reader = new FileReader();
 		reader.onload = async () => {

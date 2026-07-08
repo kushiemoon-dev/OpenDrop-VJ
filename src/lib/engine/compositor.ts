@@ -29,7 +29,7 @@ export const GLBlend = {
 	ONE_MINUS_SRC_ALPHA: 'ONE_MINUS_SRC_ALPHA',
 } as const;
 
-export type GLBlendFactor = (typeof GLBlend)[keyof typeof GLBlend];
+type GLBlendFactor = (typeof GLBlend)[keyof typeof GLBlend];
 
 export interface BlendState {
 	srcRGB: GLBlendFactor;

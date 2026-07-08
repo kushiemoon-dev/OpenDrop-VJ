@@ -1,6 +1,6 @@
 import type { CommandId } from './commands.js';
 
-export type LfoShape = 'sine' | 'saw' | 'square' | 'sh';
+type LfoShape = 'sine' | 'saw' | 'square' | 'sh';
 
 export interface LfoSlot {
 	enabled: boolean;

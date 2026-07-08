@@ -20,7 +20,7 @@ const _cache = new Map<string, object>();
 let _initialized = false;
 
 /** Names of all presets, available after initPresets(). */
-export let allPresetNames: string[] = [];
+let allPresetNames: string[] = [];
 
 /** Load the manifest. Call once in onMount before any other usage. */
 export async function initPresets(): Promise<void> {
@@ -64,7 +64,7 @@ export function buildPresetList(): PresetMeta[] {
 }
 
 /** Extract the category/author from the name (the part before " - "). */
-export function getCategory(name: string): string {
+function getCategory(name: string): string {
 	const dash = name.indexOf(' - ');
 	return dash > 0 ? name.slice(0, dash).trim() : 'Other';
 }

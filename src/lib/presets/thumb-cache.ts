@@ -2,7 +2,7 @@
  * IndexedDB cache for preset thumbnails (WebP 192x108).
  *
  * Unbounded growth is accepted (~16,374 presets x ~8KB ≈ 130MB) for a
- * desktop app. No LRU (YAGNI). Use clearThumbs() to force a rebuild.
+ * desktop app. No LRU (YAGNI).
  */
 
 // Browser guard — IndexedDB doesn't exist on the Node/SSR side
@@ -25,7 +25,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /** Read a WebP blob from IndexedDB. Null if missing or outside the browser. */
-export async function getThumbBlob(slug: string): Promise<Blob | null> {
+async function getThumbBlob(slug: string): Promise<Blob | null> {
 	if (typeof indexedDB === 'undefined') return null;
 	const db = await openDB();
 	const result = await new Promise<Blob | null>((res, rej) => {
@@ -44,19 +44,6 @@ export async function putThumbBlob(slug: string, blob: Blob): Promise<void> {
 	await new Promise<void>((res, rej) => {
 		const tx = db.transaction(STORE, 'readwrite');
 		const req = tx.objectStore(STORE).put(blob, slug);
-		req.onsuccess = () => res();
-		req.onerror = () => rej(req.error);
-	});
-	db.close();
-}
-
-/** Clear the entire store (allows a full cache rebuild). */
-export async function clearThumbs(): Promise<void> {
-	if (typeof indexedDB === 'undefined') return;
-	const db = await openDB();
-	await new Promise<void>((res, rej) => {
-		const tx = db.transaction(STORE, 'readwrite');
-		const req = tx.objectStore(STORE).clear();
 		req.onsuccess = () => res();
 		req.onerror = () => rej(req.error);
 	});

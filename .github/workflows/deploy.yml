@@ -38,4 +38,4 @@ jobs:
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts
-          rsync -avz --delete -e "ssh -p $SSH_PORT -i ~/.ssh/deploy_key" build/ "$SSH_USER@$SSH_HOST:$REMOTE_PATH/"
+          rsync -avz --delete --exclude=presets -e "ssh -p $SSH_PORT -i ~/.ssh/deploy_key" build/ "$SSH_USER@$SSH_HOST:$REMOTE_PATH/"

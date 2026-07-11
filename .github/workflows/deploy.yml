@@ -19,7 +19,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec svelte-kit sync
       - run: pnpm build
         env:
           PUBLIC_VIDEO_CDN: https://loops.kushie.dev

@@ -17,6 +17,10 @@ declare global {
 			onBroadcast: (cb: (data: unknown) => void) => () => void;
 			ndiStart: (name: string, width: number, height: number) => Promise<{ ok: boolean; error?: string }>;
 			ndiStop: () => Promise<{ ok: boolean }>;
+			ndiFind: () => Promise<{ ok: boolean; sources: Array<{ name: string; urlAddress: string }>; error?: string }>;
+			ndiReceiveStart: (name: string, urlAddress: string) => Promise<{ ok: boolean; error?: string }>;
+			ndiReceiveStop: () => Promise<{ ok: boolean }>;
+			onNdiFrame: (cb: (frame: { width: number; height: number; lineStrideBytes: number; data: Uint8Array<ArrayBuffer> }) => void) => () => void;
 			v4l2Start: () => Promise<{ ok: boolean; error?: string }>;
 			v4l2Stop: () => Promise<{ ok: boolean }>;
 			spoutStart: (name: string) => Promise<{ ok: boolean; error?: string }>;

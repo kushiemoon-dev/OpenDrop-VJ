@@ -52,8 +52,10 @@
 
 **Presets & video**
 - **16,375 built-in presets** — search, 5-color favorites, cached lazy-rendered thumbnails
+- **Import your own `.milk`/`.prjm` presets** — drag one onto the visualizer to convert and load it on the fly
 - **Presets cloud** — a private per-device library for your own custom presets, backed by a small Cloudflare Worker + R2 (no account, just a portable token)
 - **Video loops** — beat-reactive flash/hue/scale, with an optional CDN-backed library
+- **Live video layer** — webcam, or an **NDI** source received over the LAN *(NDI receive, Electron)*, as an alternative to a video loop clip
 
 **Control surfaces**
 - **MIDI** — CC/note/pitchbend mapping (14-bit CC support) with **bidirectional LED feedback** to your controller
@@ -261,11 +263,13 @@ e2e/
 | Item | Status |
 |------|--------|
 | Signed installers | Planned — Windows/macOS/Linux builds are all currently unsigned (expect an OS security warning on first launch) |
-| Audio reactivity in output (Linux) | Requires re-picking the device once per session — known issue |
+| Audio reactivity in output (Linux) | A retry mitigation is in place (the PCM-capture kick now retries a few times instead of once); still needs real-world confirmation — re-pick the device if it doesn't kick in |
 | Web MIDI | Chromium / Electron only (not Firefox / Safari) |
 | System audio on macOS (browser) | Tab audio only — install BlackHole for full capture |
 | Spout output | Windows only |
+| Spout input (receive) | Not implemented — the native addon only sends; receive would need new Windows-only DirectX 11 code |
 | Virtual webcam output | Linux only |
+| NDI input (receive) | Electron only — no receive path on the web build |
 
 ---
 

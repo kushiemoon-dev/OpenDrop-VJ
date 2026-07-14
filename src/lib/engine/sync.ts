@@ -57,7 +57,11 @@ export const DEFAULT_SLOT_COMPOSITE: SlotComposite = {
 };
 
 export type SyncMessage =
-	| { type: 'preset'; deck: 'A' | 'B'; name: string; blend?: number }
+	// `data` carries the preset inline for locally-imported (.milk drag-drop)
+	// presets that don't exist in the manifest or cloud library — the output
+	// window can't resolve those by name via loadPresetData(), so it falls
+	// back to `data` when present. Omitted for every normal preset switch.
+	| { type: 'preset'; deck: 'A' | 'B'; name: string; blend?: number; data?: object }
 	| { type: 'preset-slot'; slot: number; name: string; blend?: number }
 	| { type: 'crossfader'; value: number }
 	| { type: 'deckbus'; opacities: [number, number, number, number] }
@@ -108,8 +112,8 @@ export class MainSync {
 
 	onOutputReady(cb: () => void) { this.readyCb = cb; }
 
-	sendPreset(deck: 'A' | 'B', name: string, blend?: number) {
-		sendMsg(this.bc, { type: 'preset', deck, name, blend });
+	sendPreset(deck: 'A' | 'B', name: string, blend?: number, data?: object) {
+		sendMsg(this.bc, { type: 'preset', deck, name, blend, data });
 	}
 
 	sendPresetSlot(slot: number, name: string, blend?: number) {

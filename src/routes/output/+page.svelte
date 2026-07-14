@@ -201,7 +201,7 @@
 					// Backward compat: deck A → slot 0, deck B → slot 1
 					gotState = true;
 					const slot = msg.deck === 'A' ? 0 : 1;
-					const preset = await loadPresetData(msg.name);
+					const preset = msg.data ?? await loadPresetData(msg.name);
 					if (!preset) return;
 					await ensureSlot(slot, q);
 					manager?.loadPreset(slot, preset, msg.blend ?? 2.0);
@@ -293,8 +293,16 @@
 
 			sync.sendHello();
 			let tries = 0;
+			let triesSincePreset = 0;
 			helloTimer = setInterval(() => {
-				if (gotState || tries++ > 12) { clearInterval(helloTimer!); helloTimer = null; return; }
+				// Keep pinging a few times past first contact, not just until gotState —
+				// the main window's audio-capture kick (startPcmCapture) is retried on
+				// every hello and can silently fail to activate on Linux with no other
+				// retry signal (README Known Limitations — the "re-pick the device once"
+				// workaround). Full preset/crossfader/etc state is only ever re-sent
+				// once (gated on the main side), so these extra pings don't flicker presets.
+				if (gotState) triesSincePreset++; else tries++;
+				if (tries > 12 || triesSincePreset > 3) { clearInterval(helloTimer!); helloTimer = null; return; }
 				sync!.sendHello();
 			}, 700);
 

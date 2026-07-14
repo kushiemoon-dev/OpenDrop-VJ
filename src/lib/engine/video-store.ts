@@ -1,9 +1,12 @@
 export type ClipRef =
 	| { kind: 'builtin'; src: string }
-	| { kind: 'user'; id: string };
+	| { kind: 'user'; id: string }
+	| { kind: 'live'; deviceId: string; label: string }
+	| { kind: 'ndi'; sourceName: string; urlAddress: string };
 
 export interface VideoClipMeta {
-	ref: ClipRef;
+	// Library entries only — a live camera or NDI source is never stored in builtinClips/userClips.
+	ref: Exclude<ClipRef, { kind: 'live' | 'ndi' }>;
 	name: string;
 }
 

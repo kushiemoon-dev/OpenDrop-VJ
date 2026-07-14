@@ -19,6 +19,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ndiStart: (name, width, height) => ipcRenderer.invoke('ndi:start', { name, width, height }),
   ndiStop: () => ipcRenderer.invoke('ndi:stop'),
 
+  // NDI input (find sources on the LAN + receive one as a video layer)
+  ndiFind: () => ipcRenderer.invoke('ndi:find'),
+  ndiReceiveStart: (name, urlAddress) => ipcRenderer.invoke('ndi:receiveStart', { name, urlAddress }),
+  ndiReceiveStop: () => ipcRenderer.invoke('ndi:receiveStop'),
+  onNdiFrame: (cb) => {
+    const handler = (_, frame) => cb(frame);
+    ipcRenderer.on('ndi:frame', handler);
+    return () => ipcRenderer.off('ndi:frame', handler);
+  },
+
   // v4l2loopback virtual webcam (Linux — requires ffmpeg + v4l2loopback kernel module)
   v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
   v4l2Stop: () => ipcRenderer.invoke('v4l2:stop'),

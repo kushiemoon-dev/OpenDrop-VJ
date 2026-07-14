@@ -12,7 +12,16 @@
 		vrHue: boolean;
 		currentClipIndex: number;
 		allClips: VideoClipMeta[];
+		liveActive: boolean;
+		liveLabel: string;
+		ndiActive: boolean;
+		ndiSourceLabel: string;
+		ndiSources: Array<{ name: string; urlAddress: string }>;
 		onToggleVideo: () => void;
+		onToggleLiveCamera: () => void;
+		onFindNdiSources: () => void;
+		onSelectNdiSource: (name: string, urlAddress: string) => void;
+		onClearNdiSource: () => void;
 		onOpacityChange: (v: number) => void;
 		onAdvanceChange: (v: 'shuffle' | 'sequential' | 'manual') => void;
 		onBeatsPerCutChange: (v: number) => void;
@@ -36,7 +45,16 @@
 		vrHue,
 		currentClipIndex,
 		allClips,
+		liveActive,
+		liveLabel,
+		ndiActive,
+		ndiSourceLabel,
+		ndiSources,
 		onToggleVideo,
+		onToggleLiveCamera,
+		onFindNdiSources,
+		onSelectNdiSource,
+		onClearNdiSource,
 		onOpacityChange,
 		onAdvanceChange,
 		onBeatsPerCutChange,
@@ -67,10 +85,10 @@
 			<span class="cf-label bright">{Math.round(videoOpacity * 100)}%</span>
 		</div>
 		<div class="btn-row">
-			<button class="btn-sm" class:active={videoAdvance === 'shuffle'} onclick={() => onAdvanceChange('shuffle')}>Shuffle</button>
-			<button class="btn-sm" class:active={videoAdvance === 'sequential'} onclick={() => onAdvanceChange('sequential')}>Seq</button>
-			<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => onAdvanceChange('manual')}>Manual</button>
-			<select class="beats-select" value={videoBeatsPerCut} onchange={(e) => onBeatsPerCutChange(+(e.target as HTMLSelectElement).value)} disabled={videoAdvance === 'manual'}>
+			<button class="btn-sm" class:active={videoAdvance === 'shuffle'} onclick={() => onAdvanceChange('shuffle')} disabled={liveActive || ndiActive}>Shuffle</button>
+			<button class="btn-sm" class:active={videoAdvance === 'sequential'} onclick={() => onAdvanceChange('sequential')} disabled={liveActive || ndiActive}>Seq</button>
+			<button class="btn-sm" class:active={videoAdvance === 'manual'} onclick={() => onAdvanceChange('manual')} disabled={liveActive || ndiActive}>Manual</button>
+			<select class="beats-select" value={videoBeatsPerCut} onchange={(e) => onBeatsPerCutChange(+(e.target as HTMLSelectElement).value)} disabled={videoAdvance === 'manual' || liveActive || ndiActive}>
 				<option value={4}>4</option>
 				<option value={8}>8</option>
 				<option value={16}>16</option>
@@ -78,11 +96,30 @@
 			</select>
 		</div>
 		<div class="btn-row">
-			<button class="btn-sm pl-btn" class:active={vrCut} onclick={onToggleVrCut} disabled={videoAdvance === 'manual'} title="Clip cut on the beat">✂ Cut</button>
+			<button class="btn-sm pl-btn" class:active={vrCut} onclick={onToggleVrCut} disabled={videoAdvance === 'manual' || liveActive || ndiActive} title="Clip cut on the beat">✂ Cut</button>
 			<button class="btn-sm pl-btn" class:active={vrFlash} onclick={onToggleVrFlash} title="Flash brightness on the beat">✦ Flash</button>
-			<button class="btn-sm pl-btn" class:active={vrWarp} onclick={onToggleVrWarp} title="Speed warp on the bass">⏩ Warp</button>
+			<button class="btn-sm pl-btn" class:active={vrWarp} onclick={onToggleVrWarp} disabled={liveActive || ndiActive} title="Speed warp on the bass">⏩ Warp</button>
 			<button class="btn-sm pl-btn" class:active={vrHue} onclick={onToggleVrHue} title="Hue rotate on the beat">🌈 Hue</button>
 		</div>
+	{/if}
+	<div class="btn-row" style="margin-top:0.2rem">
+		<button class="btn-sm pl-btn" class:active={liveActive} onclick={onToggleLiveCamera} disabled={ndiActive} title={liveActive ? `Live: ${liveLabel}` : 'Use a live camera as the video layer'}>
+			📷 {liveActive ? (liveLabel || 'Camera') : 'Camera'}
+		</button>
+		<button class="btn-sm pl-btn" class:active={ndiActive} onclick={() => ndiActive ? onClearNdiSource() : onFindNdiSources()} disabled={liveActive} title={ndiActive ? `NDI: ${ndiSourceLabel}` : 'Use an NDI source as the video layer'}>
+			🛰 {ndiActive ? (ndiSourceLabel || 'NDI') : 'NDI'}
+		</button>
+	</div>
+	{#if !ndiActive && ndiSources.length > 0}
+		<ul class="overlay-list">
+			{#each ndiSources as s (s.name)}
+				<li class="overlay-item">
+					<div class="overlay-row">
+						<button class="overlay-name" onclick={() => onSelectNdiSource(s.name, s.urlAddress)}>{s.name}</button>
+					</div>
+				</li>
+			{/each}
+		</ul>
 	{/if}
 	<div class="pl-header" style="margin-top:0.2rem">
 		<label class="btn-sm file-label" title="Add a video">
@@ -90,7 +127,7 @@
 			<input type="file" accept="video/*" multiple onchange={onAddVideo} style="display:none" />
 		</label>
 	</div>
-	{#if allClips.length === 0}
+	{#if allClips.length === 0 && !liveActive && !ndiActive}
 		<p class="hint">Drag a video onto the visualizer or click + Video</p>
 	{/if}
 	<ul class="overlay-list">

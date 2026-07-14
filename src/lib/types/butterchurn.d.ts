@@ -1,6 +1,6 @@
 /**
- * Minimal type declarations for butterchurn and butterchurn-presets.
- * These packages ship no TypeScript definitions.
+ * Minimal type declarations for butterchurn, butterchurn-presets, and
+ * milkdrop-preset-converter. These packages ship no TypeScript definitions.
  */
 
 declare module 'butterchurn' {
@@ -66,4 +66,8 @@ declare module 'butterchurn-presets' {
 declare module 'butterchurn/lib/isSupported.min' {
 	const isSupported: () => boolean;
 	export default isSupported;
+}
+
+declare module 'milkdrop-preset-converter' {
+	export function convertPreset(text: string): Promise<object>;
 }

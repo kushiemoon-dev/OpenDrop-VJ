@@ -370,6 +370,69 @@ ipcMain.handle('ndi:stop', async () => {
   return { ok: true };
 });
 
+// ── NDI receive (NDI source → video layer, both windows) ───────────────────
+let ndiReceiver = null;
+let ndiReceiveActive = false;
+
+ipcMain.handle('ndi:find', async () => {
+  try {
+    if (!grandiose) grandiose = require('grandiose');
+    const sources = await grandiose.find({}, 3000);
+    return { ok: true, sources: sources.map((s) => ({ name: s.name, urlAddress: s.urlAddress })) };
+  } catch (e) {
+    return { ok: false, error: e.message, sources: [] };
+  }
+});
+
+ipcMain.handle('ndi:receiveStart', async (_, { name, urlAddress }) => {
+  try {
+    if (!grandiose) grandiose = require('grandiose');
+    // Don't touch ndiReceiveActive/ndiReceiver until receive() below actually
+    // succeeds — flipping them first would kill a working prior receiver on a
+    // failed re-select (e.g. source went offline). The old loop already stops
+    // itself via the `ndiReceiver === receiver` check once we reassign below.
+    // RGBX_RGBA (not the BGRA the NDI-out sender uses) — matches Canvas
+    // ImageData's native byte order, avoiding a per-frame channel swap in
+    // the renderer. BANDWIDTH_LOWEST trades source resolution for keeping
+    // the control->output IPC relay (uncompressed frames, both windows)
+    // affordable; a quality toggle can raise this later if needed.
+    const receiver = await grandiose.receive({
+      source: { name, urlAddress },
+      colorFormat: grandiose.COLOR_FORMAT_RGBX_RGBA,
+      bandwidth: grandiose.BANDWIDTH_LOWEST,
+    });
+    ndiReceiver = receiver;
+    ndiReceiveActive = true;
+    (async () => {
+      while (ndiReceiveActive && ndiReceiver === receiver) {
+        try {
+          const frame = await receiver.video(1000);
+          if (!ndiReceiveActive || ndiReceiver !== receiver) break;
+          BrowserWindow.getAllWindows().forEach((w) => {
+            if (!w.isDestroyed()) {
+              w.webContents.send('ndi:frame', {
+                width: frame.xres,
+                height: frame.yres,
+                lineStrideBytes: frame.lineStrideBytes,
+                data: frame.data,
+              });
+            }
+          });
+        } catch { /* receive timeout — keep looping until stopped */ }
+      }
+    })();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ndi:receiveStop', async () => {
+  ndiReceiveActive = false;
+  ndiReceiver = null;
+  return { ok: true };
+});
+
 // ── Spout handlers ────────────────────────────────────────────────────────
 ipcMain.handle('spout:start', async (_, { name }) => {
   try {

@@ -20,6 +20,7 @@
 	} from '$lib/engine/beat-trigger.js';
 	import { visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
+	import { isMilkPresetFilename, convertMilkPreset } from '$lib/presets/milk-import.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
@@ -66,6 +67,7 @@
 	import { type ClipRef } from '$lib/engine/video-store.js';
 	import {
 		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoBeat, onVideoAudioTick,
+		setLiveCamera, clearLiveCamera, setNdiSource, clearNdiSource,
 	} from '$lib/video-loops/playback-store.svelte.js';
 
 	// — State —————————————————————————————————————————————
@@ -97,6 +99,8 @@
 	let vuLevel = $state(0);
 	let outputOpen = $state(false);
 	let outputWinRef: Window | null = null;
+	// Non-reactive: gates the one-shot full-state send in onOutputReady (see there).
+	let outputReadyOnce = false;
 	let outputCloseTimer: ReturnType<typeof setInterval> | null = null;
 	let sync: MainSync | null = null;
 	// Screen targeting (Electron)
@@ -368,11 +372,58 @@
 	const busPresetB = $derived(primaryPreset('B'));
 	const runningCount = $derived([0, 1, 2, 3].filter(i => manager.isRunning(i)).length);
 
+	// Order is load-bearing: `liveDeviceId` must short-circuit BEFORE `allClips`/
+	// `currentClipIndex` are read, so those two aren't tracked as dependencies while
+	// live — otherwise VideoLayer's live effect would re-run (re-acquire the camera,
+	// visible flicker) on every unrelated clip-index change.
 	const currentClip = $derived<ClipRef | null>(
-		videoState.enabled && allClips.length > 0 ? allClips[videoState.currentClipIndex % allClips.length].ref : null
+		!videoState.enabled ? null :
+		videoState.liveDeviceId ? { kind: 'live', deviceId: videoState.liveDeviceId, label: videoState.liveLabel } :
+		videoState.ndiSourceName ? { kind: 'ndi', sourceName: videoState.ndiSourceName, urlAddress: videoState.ndiUrlAddress } :
+		allClips.length > 0 ? allClips[videoState.currentClipIndex % allClips.length].ref : null
 	);
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoState.playbackRate * 20) / 20);
+
+	/** Toggle a live camera as the video layer source. Probes the default camera once
+	 * to resolve a stable deviceId/label, then immediately releases that probe stream —
+	 * VideoLayer re-acquires the same physical device by deviceId in whichever window
+	 * needs it (mirrors the mic 'source' sync pattern in output/+page.svelte). */
+	async function onToggleLiveCamera(): Promise<void> {
+		if (videoState.liveDeviceId) { clearLiveCamera(); return; }
+		// setLiveCamera() clears ndiSourceName store-side, but the store can't reach the
+		// Electron IPC bridge — stop the still-running main-process receiver here too,
+		// or it would keep broadcasting frames nobody's listening to.
+		if (videoState.ndiSourceName) await window.electronAPI?.ndiReceiveStop();
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+			const track = stream.getVideoTracks()[0];
+			const deviceId = track?.getSettings().deviceId ?? '';
+			const label = track?.label || 'Camera';
+			stream.getTracks().forEach((t) => t.stop());
+			if (deviceId) setLiveCamera(deviceId, label);
+		} catch { /* permission denied or no camera available */ }
+	}
+
+	// — NDI receive (Electron only) — unlike a camera, there's a single shared
+	// receiver in the main process, so ONLY this window drives start/stop;
+	// VideoLayer in both windows just listens for the broadcasted frames.
+	let ndiSources = $state<Array<{ name: string; urlAddress: string }>>([]);
+
+	async function onFindNdiSources(): Promise<void> {
+		const res = await window.electronAPI?.ndiFind();
+		ndiSources = res?.ok ? res.sources : [];
+	}
+
+	async function onSelectNdiSource(name: string, urlAddress: string): Promise<void> {
+		const res = await window.electronAPI?.ndiReceiveStart(name, urlAddress);
+		if (res?.ok) { setNdiSource(name, urlAddress); ndiSources = []; }
+	}
+
+	async function onClearNdiSource(): Promise<void> {
+		await window.electronAPI?.ndiReceiveStop();
+		clearNdiSource();
+	}
 
 	// — Wiring M2 commands (strobe/LFO) into the registry ——
 	registry.register({
@@ -946,6 +997,7 @@
 			}) ?? null;
 			outputWindowClosedUnlisten = window.electronAPI?.onOutputWindowClosed?.(() => {
 				outputOpen = false;
+				outputReadyOnce = false;
 				audio?.stopPcmCapture();
 			}) ?? null;
 			// Load the list of screens
@@ -1046,24 +1098,33 @@
 
 			sync = new MainSync();
 			sync.onOutputReady(async () => {
-				sync?.sendPreset('A', busPresetA);
-				sync?.sendPreset('B', busPresetB);
-				sync?.sendCrossfader(crossfader);
-				sync?.sendQuality(quality);
-				for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
-				for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
-				for (let i = 0; i < 4; i++) sync?.sendQVars(i, qVarParams[i]);
-				sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
-				sync?.sendOverlays(overlayState.overlays);
-				sync?.sendOverlayQueueIndex(overlayState.queueIndex);
-				sync?.sendVideo({ enabled: videoState.enabled, clip: currentClip, opacity: videoState.opacity, playbackRate: videoPlaybackRateStep, flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
-				if (currentDeviceId) sync?.sendSource(currentDeviceId);
-				if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
+				// Full state only goes out once per output-window lifetime — output's
+				// hello loop pings a few extra times after that (see its comment) purely
+				// to retry the PCM kick below, and re-sending preset/etc on every ping
+				// would restart their blend-in transition each time (visible flicker).
+				if (!outputReadyOnce) {
+					outputReadyOnce = true;
+					sync?.sendPreset('A', busPresetA);
+					sync?.sendPreset('B', busPresetB);
+					sync?.sendCrossfader(crossfader);
+					sync?.sendQuality(quality);
+					for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
+					for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
+					for (let i = 0; i < 4; i++) sync?.sendQVars(i, qVarParams[i]);
+					sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
+					sync?.sendOverlays(overlayState.overlays);
+					sync?.sendOverlayQueueIndex(overlayState.queueIndex);
+					sync?.sendVideo({ enabled: videoState.enabled, clip: currentClip, opacity: videoState.opacity, playbackRate: videoPlaybackRateStep, flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
+					if (currentDeviceId) sync?.sendSource(currentDeviceId);
+					if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
+				}
 				// Stream live PCM to the output window so it becomes audio-reactive
 				// regardless of source (device / mic / file). Electron-only: the output
 				// window cannot re-capture the same device independently (fragile on Linux).
-				// await + catch so a transient worklet failure is visible in the console
-				// and retried on the next hello (startPcmCapture is idempotent).
+				// await + catch so a transient worklet failure is visible in the console;
+				// retried on every hello (startPcmCapture is idempotent) since it can
+				// silently fail to activate on Linux with no other retry signal (README
+				// Known Limitations — "audio reactivity in output" / re-pick workaround).
 				if (isElectron) {
 					try {
 						await audio?.startPcmCapture((f) => window.electronAPI!.sendAudioFrame(f));
@@ -1289,6 +1350,13 @@
 		const x = (e.clientX - rect.left) / rect.width;
 		const y = (e.clientY - rect.top) / rect.height;
 		for (const f of Array.from(e.dataTransfer.files)) {
+			// .milk/.prjm have no reliable browser MIME type (f.type is ''),
+			// so this is checked by extension rather than f.type like the
+			// video/image branches below.
+			if (isMilkPresetFilename(f.name)) {
+				await loadImportedMilkPreset(f);
+				continue;
+			}
 			if (f.type.startsWith('video/')) {
 				await addVideoFromFile(f);
 				continue;
@@ -1304,6 +1372,30 @@
 				reader.readAsDataURL(f);
 			});
 		}
+	}
+
+	/** Import a dropped .milk/.prjm preset directly into activeSlot (mirrors selectPreset,
+	 * minus the loadPresetData lookup — the converted data is already in hand). */
+	async function loadImportedMilkPreset(file: File): Promise<void> {
+		let data: object;
+		try {
+			data = await convertMilkPreset(await file.text());
+		} catch {
+			return; // not a valid MilkDrop preset — silently skipped, like other unrecognized drop types
+		}
+		const name = file.name.replace(/\.(milk|prjm)$/i, '');
+		const slot = activeSlot;
+		if (slot === 0) presetA = name;
+		else if (slot === 1) presetB = name;
+		else if (slot === 2) preset2 = name;
+		else preset3 = name;
+		manager.loadPreset(slot, data, transitionTime);
+		_slotEpoch++;
+		const bus = deckBus[slot];
+		// Attach `data` only when this import is the bus's current primary preset —
+		// otherwise the synced name refers to some other, normally-resolvable preset.
+		if (bus === 'A') { const p = primaryPreset('A'); sync?.sendPreset('A', p, transitionTime, p === name ? data : undefined); }
+		else if (bus === 'B') { const p = primaryPreset('B'); sync?.sendPreset('B', p, transitionTime, p === name ? data : undefined); }
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
@@ -1619,6 +1711,7 @@
 			if (outputWinRef?.closed) {
 				audio?.stopPcmCapture();
 				outputOpen = false;
+				outputReadyOnce = false;
 				outputWinRef = null;
 				clearInterval(outputCloseTimer!);
 				outputCloseTimer = null;
@@ -1831,6 +1924,15 @@
     vrHue={videoState.reactHue}
     currentClipIndex={videoState.currentClipIndex}
     {allClips}
+    liveActive={!!videoState.liveDeviceId}
+    liveLabel={videoState.liveLabel}
+    {onToggleLiveCamera}
+    ndiActive={!!videoState.ndiSourceName}
+    ndiSourceLabel={videoState.ndiSourceName ?? ''}
+    {ndiSources}
+    {onFindNdiSources}
+    {onSelectNdiSource}
+    {onClearNdiSource}
     onToggleVideo={() => { videoState.enabled = !videoState.enabled }}
     onOpacityChange={(v) => { videoState.opacity = v }}
     onAdvanceChange={(v) => { videoState.advance = v }}
@@ -2210,6 +2312,15 @@
 			vrHue={videoState.reactHue}
 			currentClipIndex={videoState.currentClipIndex}
 			{allClips}
+			liveActive={!!videoState.liveDeviceId}
+			liveLabel={videoState.liveLabel}
+			{onToggleLiveCamera}
+			ndiActive={!!videoState.ndiSourceName}
+			ndiSourceLabel={videoState.ndiSourceName ?? ''}
+			{ndiSources}
+			{onFindNdiSources}
+			{onSelectNdiSource}
+			{onClearNdiSource}
 			onToggleVideo={() => { videoState.enabled = !videoState.enabled }}
 			onOpacityChange={(v) => { videoState.opacity = v }}
 			onAdvanceChange={(v) => { videoState.advance = v }}

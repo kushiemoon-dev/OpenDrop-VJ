@@ -26,6 +26,7 @@
 		openDevicePicker as openDevicePickerAction, connectDevice as connectDeviceAction,
 		connectLoopback as connectLoopbackAction, connectFile as connectFileAction,
 	} from '$lib/engine/audio-source-actions.js';
+	import { toggleMidi as toggleMidiAction } from '$lib/engine/midi-connection-actions.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -47,7 +48,7 @@
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
 	import { isMilkPresetFilename, convertMilkPreset } from '$lib/presets/milk-import.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
-	import { MidiEngine, triggerKey, type MidiTriggerKey } from '$lib/engine/midi.js';
+	import { MidiEngine } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
 	import { loadKeymap, saveKeymap, DEFAULT_KEYMAP } from '$lib/engine/keymap.js';
 	import { Clock } from '$lib/engine/clock.js';
@@ -136,8 +137,7 @@
 	const midiSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
 	let midi: MidiEngine | null = null;
 	// midiConnected/midiDeviceNames/midiClockBpm — state extracted into midi-connection-store.svelte.ts
-	// midiMappings/keymap — state extracted into midi-mapping-store.svelte.ts
-	let learningAction = $state<CommandId | null>(null);
+	// midiMappings/keymap/learningAction — state extracted into midi-mapping-store.svelte.ts
 	let learningKey = $state<CommandId | null>(null);
 
 	// — Clock + LFO + Strobe ———————————————————————————————
@@ -1239,111 +1239,15 @@
 		clock.setBpm(0);
 	}
 
+	// toggleMidi's connection/dispatch/clock-IN logic moved into midi-connection-actions.ts.
 	async function toggleMidi() {
-		if (midiConnectionState.connected) {
-			midi?.destroy();
-			midi = null;
-			midiConnectionState.connected = false;
-			midiConnectionState.deviceNames = [];
-			learningAction = null;
-			midiConnectionState.clockBpm = 0;
-			return;
-		}
-		try {
-			midi = new MidiEngine();
-			await midi.connect();
-			midiConnectionState.connected = true;
-			midiConnectionState.deviceNames = midi.deviceNames;
-			midi.onOutputReconnect(() => pushLedStates());
-			pushLedStates(); // initial LED state at connection time
-
-			// Soft-takeover: Set<key> of controls already in phase with the app value
-			const takenOver = new Set<MidiTriggerKey>();
-
-			midi.onMessage((msg) => {
-				const key = triggerKey(msg);
-
-				if (learningAction !== null) {
-					if (msg.type === 'note_off') return;
-					setMidiMapping(learningAction, key);
-					takenOver.add(key); // immediately in phase after learn
-					learningAction = null;
-					return;
-				}
-
-				for (const [action, mapped] of Object.entries(midiMappingState.midiMappings) as [CommandId, MidiTriggerKey][]) {
-					if (mapped !== key) continue;
-					if (msg.type === 'note_off') break;
-
-					// Normalize: 14-bit over 0..16383, otherwise 7-bit over 0..127
-					const value01 = msg.is14bit ? msg.value / 16383 : msg.value / 127;
-
-					// Soft-takeover only applies to range commands
-					const cmd = registry.get(action);
-					if (cmd?.kind === 'range' && !takenOver.has(key)) {
-						const current = getCommandCurrentValue(action);
-						if (current !== null && Math.abs(value01 - current) > 0.08) break;
-						takenOver.add(key);
-					}
-
-					if (runStatusState.status === 'running') {
-						registry.dispatch(action, value01, commandCtx);
-						// Confirmation flash — excluded for commands with persistent state
-						// (strobe-toggle, playlist-toggle-*): without this guard, the setTimeout
-						// below would wrongly overwrite the state that pushLedStates() just
-						// updated on the same tick (see Global Constraints).
-						if (cmd?.kind === 'trigger' && getCommandLedState(action) === null) {
-							midi?.sendFeedback(key, true);
-							setTimeout(() => midi?.sendFeedback(key, false), 120);
-						}
-					}
-					break;
-				}
-			});
-
-			// MIDI clock IN → feeds the Clock (24 pulses per quarter note)
-			let _clockPulses = 0;
-			let _clockTsRing: number[] = [];
-			let _clockTimer: ReturnType<typeof setTimeout> | null = null;
-
-			midi.onClock(() => {
-				const now = performance.now();
-				_clockPulses++;
-				_clockTsRing.push(now);
-				if (_clockTsRing.length > 49) _clockTsRing.shift();
-
-				// BPM update every 6 pulses (≈4× per beat at 120 BPM)
-				if (_clockPulses % 6 === 0 && _clockTsRing.length >= 7) {
-					const recent = _clockTsRing.slice(-7);
-					const intervals = recent.slice(1).map((t, i) => t - recent[i]);
-					const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-					const bpm = Math.round(60000 / (avg * 24) * 10) / 10;
-					if (bpm >= 40 && bpm <= 300) {
-						midiConnectionState.clockBpm = bpm;
-						clock.setBpm(bpm);
-					}
-				}
-
-				// Beat on every quarter note (24 pulses)
-				if (_clockPulses % 24 === 0) clock.pulse();
-
-				// Inactivity timeout: MIDI clock stopped for 2s
-				if (_clockTimer !== null) clearTimeout(_clockTimer);
-				_clockTimer = setTimeout(() => {
-					midiConnectionState.clockBpm = 0;
-					_clockPulses = 0;
-					_clockTsRing = [];
-					_clockTimer = null;
-				}, 2000);
-			});
-		} catch (e) {
-			midiConnectionState.connected = false;
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+		midi = await toggleMidiAction(midi, {
+			registry, commandCtx, clock, getCommandCurrentValue, getCommandLedState, pushLedStates,
+		});
 	}
 
 	function startLearn(action: CommandId) {
-		learningAction = learningAction === action ? null : action;
+		midiMappingState.learningAction = midiMappingState.learningAction === action ? null : action;
 	}
 
 	function clearMapping(action: CommandId) {
@@ -1712,7 +1616,7 @@
 		midiConnected={midiConnectionState.connected}
 		midiDeviceNames={midiConnectionState.deviceNames}
 		midiClockBpm={midiConnectionState.clockBpm}
-		{learningAction}
+		learningAction={midiMappingState.learningAction}
 		midiMappings={midiMappingState.midiMappings}
 		{registry}
 		onToggleMidi={toggleMidi}

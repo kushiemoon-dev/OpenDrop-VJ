@@ -27,6 +27,7 @@
 		connectLoopback as connectLoopbackAction, connectFile as connectFileAction,
 	} from '$lib/engine/audio-source-actions.js';
 	import { toggleMidi as toggleMidiAction } from '$lib/engine/midi-connection-actions.js';
+	import { deckState } from '$lib/engine/deck-store.svelte.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -105,11 +106,8 @@
 
 	let presetList: PresetMeta[] = $state([]);
 
-	let activeSlot = $state(0); // 0=A 1=B 2=C 3=D — cible du preset browser
-	let presetA = $state('');
-	let presetB = $state('');
-	let crossfader = $state(0); // 0 = 100% A, 1 = 100% B
-	let transitionTime = $state(2.0); // secondes de fondu preset (0 = hard cut)
+	// activeSlot/presetA/presetB/preset2/preset3/deckBus/crossfader/transitionTime/slotEpoch
+	// — state extracted into deck-store.svelte.ts
 
 	// sourceLabel/currentDeviceId/currentLoopbackDeviceId/audioDevices — state extracted into audio-source-store.svelte.ts
 	// status/errorMsg/sourceError — state extracted into run-status-store.svelte.ts
@@ -253,33 +251,29 @@
 	const nonShareableOverlayCount = $derived(overlayState.overlays.filter((o) => o.kind !== 'text').length);
 
 	// — Cloud presets (Track 2) — state + actions extracted into cloud-presets-store.svelte.ts
-	let deckBus = $state<Array<'A' | 'B' | 'off'>>(['A', 'B', 'off', 'off']);
-	const activeDeck = $derived<'A' | 'B'>(deckBus[activeSlot] === 'B' ? 'B' : 'A');
-	let activePreset = $derived(activeDeck === 'A' ? presetA : presetB);
-	let _slotEpoch = $state(0);
-	let preset2 = $state('');
-	let preset3 = $state('');
-	const presets4 = $derived([presetA, presetB, preset2, preset3]);
+	const activeDeck = $derived<'A' | 'B'>(deckState.deckBus[deckState.activeSlot] === 'B' ? 'B' : 'A');
+	let activePreset = $derived(activeDeck === 'A' ? deckState.presetA : deckState.presetB);
+	const presets4 = $derived([deckState.presetA, deckState.presetB, deckState.preset2, deckState.preset3]);
 
 	function busGain(bus: 'A' | 'B' | 'off', x: number): number {
 		if (bus === 'A') return 1 - x;
 		if (bus === 'B') return x;
 		return 0;
 	}
-	const opacities = $derived(deckBus.map((bus) => busGain(bus, crossfader)));
+	const opacities = $derived(deckState.deckBus.map((bus) => busGain(bus, deckState.crossfader)));
 	const opacityA = $derived(opacities[0]);
 	const opacityB = $derived(opacities[1]);
-	let presetIdxA = $derived(presetList.findIndex((p) => p.name === presetA));
-	let presetIdxB = $derived(presetList.findIndex((p) => p.name === presetB));
+	let presetIdxA = $derived(presetList.findIndex((p) => p.name === deckState.presetA));
+	let presetIdxB = $derived(presetList.findIndex((p) => p.name === deckState.presetB));
 	const allClips = $derived([...builtinClips, ...videoState.userClips]);
 
 	/** Returns the preset of the first running deck on a given bus, or the last known preset if none running. */
 	function primaryPreset(bus: 'A' | 'B'): string {
-		void _slotEpoch; // force reactive tracking
+		void deckState.slotEpoch; // force reactive tracking
 		for (let i = 0; i < 4; i++) {
-			if (deckBus[i] === bus && isRunning(i)) return presets4[i];
+			if (deckState.deckBus[i] === bus && isRunning(i)) return presets4[i];
 		}
-		return bus === 'A' ? presetA : presetB;
+		return bus === 'A' ? deckState.presetA : deckState.presetB;
 	}
 
 	const busPresetA = $derived(primaryPreset('A'));
@@ -416,10 +410,10 @@
 
 	// — Command context (injected into registry.dispatch) ——
 	const commandCtx: CommandContext = {
-		getCrossfader: () => crossfader,
-		setCrossfader: (v) => { crossfader = v; },
+		getCrossfader: () => deckState.crossfader,
+		setCrossfader: (v) => { deckState.crossfader = v; },
 		getActiveDeck: () => activeDeck,
-		switchActiveDeck: () => { activeSlot = activeSlot === 0 ? 1 : 0; },
+		switchActiveDeck: () => { deckState.activeSlot = deckState.activeSlot === 0 ? 1 : 0; },
 		navigatePreset(deck, direction) {
 			if (presetList.length === 0) return;
 			if (deck === 'A') {
@@ -479,7 +473,7 @@
 	// is async → sync is assigned late). Without this, ?. short-circuits the
 	// argument evaluation → crossfader is never tracked → effect never re-runs.
 	$effect(() => {
-		const x = crossfader;
+		const x = deckState.crossfader;
 		sync?.sendCrossfader(x);
 	});
 
@@ -584,9 +578,9 @@
 		localStorage.setItem('od-target-fps', String(perfState.targetFps));
 		localStorage.setItem('od-invisible-mode', perfState.invisibleMode);
 		localStorage.setItem('od-overlays', JSON.stringify(overlayState.overlays));
-		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
+		localStorage.setItem('od-deck-bus', JSON.stringify(deckState.deckBus));
 		localStorage.setItem('od-layout', layout);
-		localStorage.setItem('od-transition', String(transitionTime));
+		localStorage.setItem('od-transition', String(deckState.transitionTime));
 		localStorage.setItem('od-composite', JSON.stringify(compositingState.slotComposites));
 		localStorage.setItem('od-snapshots', JSON.stringify(snapshotsState.snapshots));
 		localStorage.setItem('od-snapshot-duration', String(snapshotsState.recallDuration));
@@ -657,7 +651,7 @@
 	// Pushes color params to the Compositor — by assigned bus (same
 	// mapping as the old per-canvas style:filter: off → neutral).
 	$effect(() => {
-		const bus = deckBus;
+		const bus = deckState.deckBus;
 		const paramsA = colorState.a;
 		const paramsB = colorState.b;
 		if (!compositor) return;
@@ -784,7 +778,7 @@
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') perfState.quality = savedQuality;
 			const savedTransition = localStorage.getItem('od-transition');
-			if (savedTransition) transitionTime = Number(savedTransition);
+			if (savedTransition) deckState.transitionTime = Number(savedTransition);
 			const savedComposite = localStorage.getItem('od-composite');
 			if (savedComposite) {
 				try {
@@ -889,7 +883,7 @@
 			if (savedVideoClips) { try { videoState.userClips = JSON.parse(savedVideoClips); } catch {} }
 			const savedDeckBus = localStorage.getItem('od-deck-bus');
 			if (savedDeckBus) {
-				try { deckBus = JSON.parse(savedDeckBus); } catch {}
+				try { deckState.deckBus = JSON.parse(savedDeckBus); } catch {}
 			}
 			const savedLayout = localStorage.getItem('od-layout');
 			if (savedLayout === 'stage' || savedLayout === 'mixer') layout = savedLayout;
@@ -926,8 +920,8 @@
 		await initPresets();
 		await initVideoLoops();
 		presetList = buildPresetList();
-		if (presetList.length > 0) presetA = presetList[0].name;
-		if (presetList.length > 1) presetB = presetList[1].name;
+		if (presetList.length > 0) deckState.presetA = presetList[0].name;
+		if (presetList.length > 1) deckState.presetB = presetList[1].name;
 
 		await initCloudPresets();
 	});
@@ -986,26 +980,26 @@
 			// the $state values it reads changes (compositor isn't one of those).
 			for (let i = 0; i < 4; i++) {
 				compositor.setLayer(i, opacities[i], compositingState.slotComposites[i]);
-				const color = deckBus[i] === 'A' ? colorState.a : deckBus[i] === 'B' ? colorState.b : DEFAULT_COLOR_PARAMS;
+				const color = deckState.deckBus[i] === 'A' ? colorState.a : deckState.deckBus[i] === 'B' ? colorState.b : DEFAULT_COLOR_PARAMS;
 				compositor.setColor(i, color);
 			}
 			compositor.start();
 
-			const d0 = presetA ? await loadPresetData(presetA) : null;
-			const d1 = presetB ? await loadPresetData(presetB) : null;
+			const d0 = deckState.presetA ? await loadPresetData(deckState.presetA) : null;
+			const d1 = deckState.presetB ? await loadPresetData(deckState.presetB) : null;
 			await manager.start(0, audio.ctx, audio.gainNode, q, d0);
 			await manager.start(1, audio.ctx, audio.gainNode, q, d1);
 
 			const newPlaylistA = new PlaylistEngine(playlistState.aItems, playlistState.mode, playlistState.intervalSec * 1000, async (name) => {
-				presetA = name;
-				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, transitionTime);
-				sync?.sendPreset('A', name, transitionTime);
+				deckState.presetA = name;
+				const d = await loadPresetData(name); if (d) manager.loadPreset(0, d, deckState.transitionTime);
+				sync?.sendPreset('A', name, deckState.transitionTime);
 				playlistState.aPlaying = newPlaylistA.playing;
 			});
 			const newPlaylistB = new PlaylistEngine(playlistState.bItems, playlistState.mode, playlistState.intervalSec * 1000, async (name) => {
-				presetB = name;
-				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, transitionTime);
-				sync?.sendPreset('B', name, transitionTime);
+				deckState.presetB = name;
+				const d = await loadPresetData(name); if (d) manager.loadPreset(1, d, deckState.transitionTime);
+				sync?.sendPreset('B', name, deckState.transitionTime);
 				playlistState.bPlaying = newPlaylistB.playing;
 			});
 			setPlaylistEngines(newPlaylistA, newPlaylistB);
@@ -1020,7 +1014,7 @@
 					outputReadyOnce = true;
 					sync?.sendPreset('A', busPresetA);
 					sync?.sendPreset('B', busPresetB);
-					sync?.sendCrossfader(crossfader);
+					sync?.sendCrossfader(deckState.crossfader);
 					sync?.sendQuality(perfState.quality);
 					for (let i = 0; i < 4; i++) sync?.sendComposite(i, compositingState.slotComposites[i]);
 					for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParamsState.params[i]);
@@ -1111,16 +1105,16 @@
 	async function selectPreset(name: string) {
 		const d = await loadPresetData(name);
 		if (!d) return;
-		const slot = activeSlot;
-		if (slot === 0) presetA = name;
-		else if (slot === 1) presetB = name;
-		else if (slot === 2) preset2 = name;
-		else preset3 = name;
-		manager.loadPreset(slot, d, transitionTime);
-		_slotEpoch++;
-		const bus = deckBus[slot];
-		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'), transitionTime);
-		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'), transitionTime);
+		const slot = deckState.activeSlot;
+		if (slot === 0) deckState.presetA = name;
+		else if (slot === 1) deckState.presetB = name;
+		else if (slot === 2) deckState.preset2 = name;
+		else deckState.preset3 = name;
+		manager.loadPreset(slot, d, deckState.transitionTime);
+		deckState.slotEpoch++;
+		const bus = deckState.deckBus[slot];
+		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'), deckState.transitionTime);
+		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'), deckState.transitionTime);
 	}
 
 	function onBeat() {
@@ -1134,8 +1128,8 @@
 		if (autoXfade) {
 			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
 			if (autoXfadeCount === 0) {
-				crossfader = crossfader < 0.5 ? 1 : 0;
-				sync?.sendCrossfader(crossfader);
+				deckState.crossfader = deckState.crossfader < 0.5 ? 1 : 0;
+				sync?.sendCrossfader(deckState.crossfader);
 			}
 		}
 		if (beatSyncA && !lockA && shouldTriggerOnBeat(clock.beatCount, beatTriggerA)) {
@@ -1195,18 +1189,18 @@
 			return; // not a valid MilkDrop preset — silently skipped, like other unrecognized drop types
 		}
 		const name = file.name.replace(/\.(milk|prjm)$/i, '');
-		const slot = activeSlot;
-		if (slot === 0) presetA = name;
-		else if (slot === 1) presetB = name;
-		else if (slot === 2) preset2 = name;
-		else preset3 = name;
-		manager.loadPreset(slot, data, transitionTime);
-		_slotEpoch++;
-		const bus = deckBus[slot];
+		const slot = deckState.activeSlot;
+		if (slot === 0) deckState.presetA = name;
+		else if (slot === 1) deckState.presetB = name;
+		else if (slot === 2) deckState.preset2 = name;
+		else deckState.preset3 = name;
+		manager.loadPreset(slot, data, deckState.transitionTime);
+		deckState.slotEpoch++;
+		const bus = deckState.deckBus[slot];
 		// Attach `data` only when this import is the bus's current primary preset —
 		// otherwise the synced name refers to some other, normally-resolvable preset.
-		if (bus === 'A') { const p = primaryPreset('A'); sync?.sendPreset('A', p, transitionTime, p === name ? data : undefined); }
-		else if (bus === 'B') { const p = primaryPreset('B'); sync?.sendPreset('B', p, transitionTime, p === name ? data : undefined); }
+		if (bus === 'A') { const p = primaryPreset('A'); sync?.sendPreset('A', p, deckState.transitionTime, p === name ? data : undefined); }
+		else if (bus === 'B') { const p = primaryPreset('B'); sync?.sendPreset('B', p, deckState.transitionTime, p === name ? data : undefined); }
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
@@ -1271,7 +1265,7 @@
 
 	/** Read the current value (0..1) of a range command, for soft-takeover. */
 	function getCommandCurrentValue(id: CommandId): number | null {
-		if (id === 'crossfader') return crossfader;
+		if (id === 'crossfader') return deckState.crossfader;
 		const colorMatch = id.match(/^color-(\w+)-([ab])$/);
 		if (colorMatch) {
 			const e = COLOR_CMDS.find(([s]) => s === colorMatch[1]);
@@ -1328,13 +1322,13 @@
 		const d = await loadPresetData(name);
 		if (!d) return;
 		if (deck === 'A') {
-			presetA = name;
-			manager.loadPreset(0, d, transitionTime);
-			sync?.sendPreset('A', name, transitionTime);
+			deckState.presetA = name;
+			manager.loadPreset(0, d, deckState.transitionTime);
+			sync?.sendPreset('A', name, deckState.transitionTime);
 		} else {
-			presetB = name;
-			manager.loadPreset(1, d, transitionTime);
-			sync?.sendPreset('B', name, transitionTime);
+			deckState.presetB = name;
+			manager.loadPreset(1, d, deckState.transitionTime);
+			sync?.sendPreset('B', name, deckState.transitionTime);
 		}
 	}
 
@@ -1347,9 +1341,9 @@
 		return {
 			version: 1,
 			name: shareSetName,
-			presetA, presetB,
-			deckBus,
-			crossfader, transitionTime,
+			presetA: deckState.presetA, presetB: deckState.presetB,
+			deckBus: deckState.deckBus,
+			crossfader: deckState.crossfader, transitionTime: deckState.transitionTime,
 			colorParamsA: colorState.a, colorParamsB: colorState.b,
 			slotComposites: compositingState.slotComposites,
 			timeParams: timeParamsState.params,
@@ -1379,8 +1373,8 @@
 	async function applyPendingSharedSet() {
 		if (!pendingSharedSet) return;
 		const s = pendingSharedSet;
-		deckBus = s.deckBus;
-		crossfader = s.crossfader; transitionTime = s.transitionTime;
+		deckState.deckBus = s.deckBus;
+		deckState.crossfader = s.crossfader; deckState.transitionTime = s.transitionTime;
 		colorState.a = s.colorParamsA; colorState.b = s.colorParamsB;
 		compositingState.slotComposites = s.slotComposites;
 		timeParamsState.params = s.timeParams as typeof timeParamsState.params;
@@ -1398,8 +1392,8 @@
 			await selectPresetForDeck('A', s.presetA);
 			await selectPresetForDeck('B', s.presetB);
 		} else {
-			presetA = s.presetA;
-			presetB = s.presetB;
+			deckState.presetA = s.presetA;
+			deckState.presetB = s.presetB;
 		}
 		pendingSharedSet = null;
 	}
@@ -1415,7 +1409,7 @@
 		setTimeout(() => {
 			sync?.sendPreset('A', busPresetA);
 			sync?.sendPreset('B', busPresetB);
-			sync?.sendCrossfader(crossfader);
+			sync?.sendCrossfader(deckState.crossfader);
 			if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
 		}, 800);
 		// Poll for output window closure to stop PCM capture and release resources.
@@ -1446,7 +1440,7 @@
 			setTimeout(() => {
 				sync?.sendPreset('A', busPresetA);
 				sync?.sendPreset('B', busPresetB);
-				sync?.sendCrossfader(crossfader);
+				sync?.sendCrossfader(deckState.crossfader);
 				if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
 			}, 800);
 		}
@@ -1474,18 +1468,18 @@
 		const name = presets4[slot];
 		const presetData = name ? await loadPresetData(name) : null;
 		await manager.start(slot, audio.ctx, audio.gainNode, q, presetData);
-		_slotEpoch++;
+		deckState.slotEpoch++;
 	}
 
 	function pauseSlot(slot: number) {
 		manager.pause(slot);
-		_slotEpoch++;
+		deckState.slotEpoch++;
 	}
 
 	function cycleBus(slot: number) {
 		const order: Array<'A' | 'B' | 'off'> = ['A', 'B', 'off'];
-		const next = order[(order.indexOf(deckBus[slot]) + 1) % order.length];
-		deckBus = deckBus.map((b, i) => (i === slot ? next : b)) as Array<'A' | 'B' | 'off'>;
+		const next = order[(order.indexOf(deckState.deckBus[slot]) + 1) % order.length];
+		deckState.deckBus = deckState.deckBus.map((b, i) => (i === slot ? next : b)) as Array<'A' | 'B' | 'off'>;
 	}
 
 	function isRunning(slot: number): boolean {
@@ -1823,26 +1817,26 @@
 						{letter}
 						canvas={canvases[i]}
 						presetName={presets4[i]}
-						isActive={activeSlot === i}
+						isActive={deckState.activeSlot === i}
 						isLive={opacities[i] > 0.5}
-						bus={deckBus[i]}
+						bus={deckState.deckBus[i]}
 						running={isRunning(i)}
-						onSelect={() => { activeSlot = i }}
+						onSelect={() => { deckState.activeSlot = i }}
 						onCycleBus={() => cycleBus(i)}
 						onToggleRun={() => isRunning(i) ? pauseSlot(i) : startSlot(i)}
 					/>
 				{/each}
 			</div>
 			<div class="crossfader-row">
-				<span class="cf-label" class:bright={crossfader < 0.2}>A</span>
-				<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={crossfader} />
-				<span class="cf-label" class:bright={crossfader > 0.8}>B</span>
+				<span class="cf-label" class:bright={deckState.crossfader < 0.2}>A</span>
+				<input class="crossfader" type="range" min="0" max="1" step="0.01" bind:value={deckState.crossfader} />
+				<span class="cf-label" class:bright={deckState.crossfader > 0.8}>B</span>
 			</div>
 			<div class="transition-row">
 				<span class="transition-label">Fade</span>
-				<input class="transition-slider" type="range" min="0" max="5" step="0.1" bind:value={transitionTime} title="Preset transition duration (s)" />
-				<span class="transition-value">{transitionTime.toFixed(1)}s</span>
-				<button class="btn-sm" onclick={() => { transitionTime = 0 }} title="Hard cut">Hard Cut</button>
+				<input class="transition-slider" type="range" min="0" max="5" step="0.1" bind:value={deckState.transitionTime} title="Preset transition duration (s)" />
+				<span class="transition-value">{deckState.transitionTime.toFixed(1)}s</span>
+				<button class="btn-sm" onclick={() => { deckState.transitionTime = 0 }} title="Hard cut">Hard Cut</button>
 			</div>
 			<button
 				class="btn-sm preset-browser-toggle"
@@ -1871,8 +1865,8 @@
 			playlistAPlaying={playlistState.aPlaying}
 			playlistBPlaying={playlistState.bPlaying}
 			audioRunning={runStatusState.status === 'running'}
-			{presetA}
-			{presetB}
+			presetA={deckState.presetA}
+			presetB={deckState.presetB}
 			{lockA}
 			{lockB}
 			onModeChange={(m) => { playlistState.mode = m }}
@@ -1983,7 +1977,7 @@
 		presets={presetList}
 		isOpen={showPresetBrowser}
 		{activeDeck}
-		targetSlot={activeSlot}
+		targetSlot={deckState.activeSlot}
 		playlistAItems={playlistState.aItems}
 		playlistBItems={playlistState.bItems}
 		onClose={() => { showPresetBrowser = false }}
@@ -1994,12 +1988,12 @@
   <MixerLayout
     {canvases}
     {presets4}
-    {deckBus}
+    deckBus={deckState.deckBus}
     {runningCount}
     {isRunning}
     selectedSlot={mixerSelectedSlot}
-    {crossfader}
-    {transitionTime}
+    crossfader={deckState.crossfader}
+    transitionTime={deckState.transitionTime}
     {presetList}
     playlistAItems={playlistState.aItems}
     playlistBItems={playlistState.bItems}
@@ -2008,8 +2002,8 @@
     onPauseSlot={pauseSlot}
     onSelectSlot={(s) => { mixerSelectedSlot = s }}
     onCycleBus={cycleBus}
-    onCrossfaderChange={(v) => { crossfader = v }}
-    onTransitionChange={(v) => { transitionTime = v }}
+    onCrossfaderChange={(v) => { deckState.crossfader = v }}
+    onTransitionChange={(v) => { deckState.transitionTime = v }}
     onLoadPreset={selectPreset}
     onAddToPlaylist={addToPlaylist}
     onLayoutToggle={(l) => { layout = l }}

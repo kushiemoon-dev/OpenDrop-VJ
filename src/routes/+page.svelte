@@ -31,12 +31,18 @@
 	import { beatSyncState, updateBeatTriggerA, updateBeatTriggerB } from '$lib/engine/beat-sync-store.svelte.js';
 	import { selectPreset as selectPresetAction, loadImportedMilkPreset as loadImportedMilkPresetAction } from '$lib/engine/deck-preset-actions.js';
 	import {
+		selectPresetForDeck as selectPresetForDeckAction, buildCurrentSharedSet as buildCurrentSharedSetAction,
+		copyShareLink as copyShareLinkAction, applyPendingSharedSet as applyPendingSharedSetAction,
+		cancelPendingSharedSet as cancelPendingSharedSetAction,
+	} from '$lib/engine/share-set-actions.js';
+	import { shareSetState } from '$lib/engine/share-set-store.svelte.js';
+	import {
 		onBeat as onBeatAction, toggleBeatSync as toggleBeatSyncAction, tapTempo as tapTempoAction, clearManualBpm as clearManualBpmAction,
 		resetAutoXfadeCount,
 	} from '$lib/engine/beat-tempo-actions.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
-	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
+	import { type SharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
 	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
 	import { defaultQVarParams, getGlobalQVarParams } from '$lib/engine/q-vars.js';
 	import { timeParamsState, updateTimeParams } from '$lib/engine/time-params-store.svelte.js';
@@ -725,7 +731,7 @@
 			const encoded = location.hash.slice('#share='.length);
 			history.replaceState(null, '', location.pathname + location.search);
 			const decoded = await decodeSharedSet(encoded);
-			if (decoded) pendingSharedSet = decoded;
+			if (decoded) shareSetState.pending = decoded;
 		}
 		if (isElectron) {
 			platform = await window.electronAPI!.getPlatform();
@@ -1236,88 +1242,22 @@
 		if (kActive) midi.sendFeedback(kActive, active === 'A' ? plA : plB);
 	}
 
-	async function selectPresetForDeck(deck: 'A' | 'B', name: string) {
-		const d = await loadPresetData(name);
-		if (!d) return;
-		if (deck === 'A') {
-			deckState.presetA = name;
-			manager.loadPreset(0, d, deckState.transitionTime);
-			sync?.sendPreset('A', name, deckState.transitionTime);
-		} else {
-			deckState.presetB = name;
-			manager.loadPreset(1, d, deckState.transitionTime);
-			sync?.sendPreset('B', name, deckState.transitionTime);
-		}
+	// selectPresetForDeck/buildCurrentSharedSet/copyShareLink/applyPendingSharedSet/
+	// cancelPendingSharedSet moved into share-set-actions.ts.
+	function selectPresetForDeck(deck: 'A' | 'B', name: string): Promise<void> {
+		return selectPresetForDeckAction(deck, name, manager, sync);
 	}
-
-
-	// — Partage de set par URL (Track 2) ————————————————————
-	let shareSetName = $state('');
-	let shareCopyLabel = $state('Copier le lien');
-
 	function buildCurrentSharedSet(): SharedSet {
-		return {
-			version: 1,
-			name: shareSetName,
-			presetA: deckState.presetA, presetB: deckState.presetB,
-			deckBus: deckState.deckBus,
-			crossfader: deckState.crossfader, transitionTime: deckState.transitionTime,
-			colorParamsA: colorState.a, colorParamsB: colorState.b,
-			slotComposites: compositingState.slotComposites,
-			timeParams: timeParamsState.params,
-			qVarParams: qvarState.params,
-			snapshots: snapshotsState.snapshots,
-			snapshotRecallDuration: snapshotsState.recallDuration,
-			timelineKeyframes: timelineState.keyframes,
-			overlays: overlayState.overlays,
-			beatTriggerA: beatSyncState.beatTriggerA, beatTriggerB: beatSyncState.beatTriggerB,
-			beatSyncA: beatSyncState.beatSyncA, beatSyncB: beatSyncState.beatSyncB,
-			overlayQueueEnabled: overlayState.queueEnabled, overlayQueueTrigger: overlayState.queueTrigger,
-		};
+		return buildCurrentSharedSetAction();
 	}
-
-	async function copyShareLink() {
-		const set = buildCurrentSharedSet();
-		set.overlays = filterShareableOverlays(set.overlays);
-		const encoded = await encodeSharedSet(set);
-		const url = `${location.origin}${location.pathname}#share=${encoded}`;
-		await navigator.clipboard.writeText(url);
-		shareCopyLabel = 'Copied!';
-		setTimeout(() => { shareCopyLabel = 'Copy link'; }, 1500);
+	function copyShareLink(): Promise<void> {
+		return copyShareLinkAction();
 	}
-
-	let pendingSharedSet = $state<SharedSet | null>(null);
-
-	async function applyPendingSharedSet() {
-		if (!pendingSharedSet) return;
-		const s = pendingSharedSet;
-		deckState.deckBus = s.deckBus;
-		deckState.crossfader = s.crossfader; deckState.transitionTime = s.transitionTime;
-		colorState.a = s.colorParamsA; colorState.b = s.colorParamsB;
-		compositingState.slotComposites = s.slotComposites;
-		timeParamsState.params = s.timeParams as typeof timeParamsState.params;
-		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParamsState.params[slot]);
-		qvarState.params = s.qVarParams as typeof qvarState.params;
-		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qvarState.params[slot].enabled], value: [...qvarState.params[slot].value] });
-		snapshotsState.snapshots = s.snapshots; snapshotsState.recallDuration = s.snapshotRecallDuration;
-		timelineState.keyframes = s.timelineKeyframes;
-		overlayState.overlays = s.overlays;
-		beatSyncState.beatTriggerA = s.beatTriggerA; beatSyncState.beatTriggerB = s.beatTriggerB;
-		beatSyncState.beatSyncA = s.beatSyncA; beatSyncState.beatSyncB = s.beatSyncB;
-		overlayState.queueEnabled = s.overlayQueueEnabled; overlayState.queueTrigger = s.overlayQueueTrigger;
-
-		if (runStatusState.status === 'running') {
-			await selectPresetForDeck('A', s.presetA);
-			await selectPresetForDeck('B', s.presetB);
-		} else {
-			deckState.presetA = s.presetA;
-			deckState.presetB = s.presetB;
-		}
-		pendingSharedSet = null;
+	function applyPendingSharedSet(): Promise<void> {
+		return applyPendingSharedSetAction(manager, sync);
 	}
-
-	function cancelPendingSharedSet() {
-		pendingSharedSet = null;
+	function cancelPendingSharedSet(): void {
+		cancelPendingSharedSetAction();
 	}
 
 	function openOutput() {
@@ -1600,10 +1540,10 @@
 {/snippet}
 {#snippet shareSection()}
 	<SidebarShare
-		{shareSetName}
-		{shareCopyLabel}
+		shareSetName={shareSetState.name}
+		shareCopyLabel={shareSetState.copyLabel}
 		{nonShareableOverlayCount}
-		onNameChange={(name) => { shareSetName = name; }}
+		onNameChange={(name) => { shareSetState.name = name; }}
 		onCopyShareLink={copyShareLink}
 	/>
 {/snippet}
@@ -1642,9 +1582,9 @@
 		onToggleLink={toggleLink}
 	/>
 {/snippet}
-{#if pendingSharedSet}
+{#if shareSetState.pending}
 	<div class="overlay share-confirm-overlay">
-		<p class="tagline">Load the shared set « {pendingSharedSet.name || 'Unnamed'} » ?</p>
+		<p class="tagline">Load the shared set « {shareSetState.pending.name || 'Unnamed'} » ?</p>
 		<p style="font-size:11px;color:#aaa;max-width:320px;text-align:center">
 			Replaces your current visual state (presets, color, snapshots, timeline...).
 		</p>
@@ -1679,7 +1619,7 @@
 		<div class="strobe-flash" style="background:{strobeState.color};opacity:{strobeState.intensity}"></div>
 	{/if}
 
-	{#if runStatusState.status === 'idle' && !pendingSharedSet}
+	{#if runStatusState.status === 'idle' && !shareSetState.pending}
 		<div class="overlay">
 			<h1 class="logo">OpenDrop</h1>
 			<p class="tagline">Milkdrop visualizer — web-first</p>

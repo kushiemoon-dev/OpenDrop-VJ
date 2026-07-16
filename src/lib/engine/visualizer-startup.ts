@@ -17,10 +17,14 @@
  * (onOutputWindowClosed, the outputCloseTimer poller) that aren't moving, so
  * it's threaded through as a get/set pair rather than owned here.
  *
- * `opacities`/`busPresetA`/`busPresetB`/`currentClip`/`videoPlaybackRateStep`
- * are $derived values computed in +page.svelte — passed in as snapshots,
- * since $derived can't live in a plain module (same reasoning documented in
- * every store file tonight).
+ * `opacities` is a $derived snapshot (safe — only read synchronously, before
+ * any `await` has a chance to let it go stale). `busPresetA`/`busPresetB`/
+ * `currentClip`/`videoPlaybackRateStep` are $derived values ALSO read inside
+ * the async `onOutputReady` callback, which can fire long after this
+ * function returns (whenever the output window actually connects) — passing
+ * those as frozen snapshots would push stale data, so they're threaded
+ * through as getters instead, read live at fire time (same reasoning as
+ * `primaryPreset` in deck-preset-actions.ts).
  *
  * `lastStrobeVal` is module-private cross-tick bookkeeping, same category as
  * `autoXfadeCount`/`tapTimes` in beat-tempo-actions.ts.
@@ -63,10 +67,10 @@ export interface StartVisualizerDeps {
 	registry: CommandRegistry;
 	commandCtx: CommandContext;
 	opacities: number[];
-	busPresetA: string;
-	busPresetB: string;
-	currentClip: ClipRef | null;
-	videoPlaybackRateStep: number;
+	getBusPresetA: () => string;
+	getBusPresetB: () => string;
+	getCurrentClip: () => ClipRef | null;
+	getVideoPlaybackRateStep: () => number;
 	isElectron: boolean;
 	onBeat: () => void;
 	getOutputReadyOnce: () => boolean;
@@ -83,7 +87,7 @@ export interface StartVisualizerResult {
 export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartVisualizerResult | null> {
 	const {
 		canvases, compositorCanvas, manager, clock, lfoEngine, registry, commandCtx,
-		opacities, busPresetA, busPresetB, currentClip, videoPlaybackRateStep, isElectron,
+		opacities, getBusPresetA, getBusPresetB, getCurrentClip, getVideoPlaybackRateStep, isElectron,
 		onBeat, getOutputReadyOnce, setOutputReadyOnce,
 	} = deps;
 	if (!canvases[0] || !canvases[1]) return null;
@@ -151,8 +155,8 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 			// would restart their blend-in transition each time (visible flicker).
 			if (!getOutputReadyOnce()) {
 				setOutputReadyOnce(true);
-				sync.sendPreset('A', busPresetA);
-				sync.sendPreset('B', busPresetB);
+				sync.sendPreset('A', getBusPresetA());
+				sync.sendPreset('B', getBusPresetB());
 				sync.sendCrossfader(deckState.crossfader);
 				sync.sendQuality(perfState.quality);
 				for (let i = 0; i < 4; i++) sync.sendComposite(i, compositingState.slotComposites[i]);
@@ -161,7 +165,7 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 				sync.sendPerf({ targetFps: perfState.targetFps, invisibleMode: perfState.invisibleMode, invisibleFps: perfState.invisibleFps });
 				sync.sendOverlays(overlayState.overlays);
 				sync.sendOverlayQueueIndex(overlayState.queueIndex);
-				sync.sendVideo({ enabled: videoState.enabled, clip: currentClip, opacity: videoState.opacity, playbackRate: videoPlaybackRateStep, flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
+				sync.sendVideo({ enabled: videoState.enabled, clip: getCurrentClip(), opacity: videoState.opacity, playbackRate: getVideoPlaybackRateStep(), flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
 				if (audioSourceState.currentDeviceId) sync.sendSource(audioSourceState.currentDeviceId);
 				if (audioSourceState.currentLoopbackDeviceId) sync.sendLoopback(audioSourceState.currentLoopbackDeviceId);
 			}
@@ -205,7 +209,15 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 		});
 		clock.start();
 
-		runStatusState.status = 'running';
+		// status is NOT set to 'running' here — the caller does that, after
+		// assigning `audio`/`compositor`/`sync`/`beatDetector` from the returned
+		// result. Setting it here would flip runStatusState.status (a $state)
+		// before those page-local (non-$state) variables are actually assigned;
+		// Svelte 5 flushes the resulting effect run on a microtask that can beat
+		// this async function's `await`-continuation back to the caller — the
+		// VU-meter $effect (which gates on `status === 'running' && audio`) would
+		// then see a still-null `audio`, bail out, and never re-check it since
+		// `audio` isn't reactive. Confirmed via live testing, not hypothetical.
 		return { audio, compositor, sync, beatDetector };
 	} catch (e) {
 		runStatusState.status = 'error';

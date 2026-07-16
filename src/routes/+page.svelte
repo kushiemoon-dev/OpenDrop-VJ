@@ -951,7 +951,11 @@
 	async function startVisualizer() {
 		const result = await startVisualizerAction({
 			canvases, compositorCanvas, manager, clock, lfoEngine, registry, commandCtx,
-			opacities, busPresetA, busPresetB, currentClip, videoPlaybackRateStep, isElectron,
+			opacities, isElectron,
+			getBusPresetA: () => busPresetA,
+			getBusPresetB: () => busPresetB,
+			getCurrentClip: () => currentClip,
+			getVideoPlaybackRateStep: () => videoPlaybackRateStep,
 			onBeat,
 			getOutputReadyOnce: () => outputReadyOnce,
 			setOutputReadyOnce: (v) => { outputReadyOnce = v; },
@@ -961,6 +965,10 @@
 		compositor = result.compositor;
 		sync = result.sync;
 		beatDetector = result.beatDetector;
+		// Set status only after the assignments above — the VU-meter $effect
+		// gates on `status === 'running' && audio`, and audio isn't reactive,
+		// so it must already be non-null by the time status flips.
+		runStatusState.status = 'running';
 	}
 
 	// captureSystemAudio/connectMic/openDevicePicker/connectDevice/connectLoopback/connectFile
@@ -1183,7 +1191,7 @@
 
 	// openOutputFullscreen/onResize moved into output-window-actions.ts.
 	function openOutputFullscreen(): Promise<void> {
-		return openOutputFullscreenAction(isElectron, selectedDisplayId, sync, busPresetA, busPresetB, (v) => { outputOpen = v; });
+		return openOutputFullscreenAction(isElectron, selectedDisplayId, sync, () => busPresetA, () => busPresetB, (v) => { outputOpen = v; });
 	}
 	function onResize(): void {
 		onResizeAction(canvases, compositorCanvas, manager, compositor);

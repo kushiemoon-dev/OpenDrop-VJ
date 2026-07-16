@@ -2,12 +2,24 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { AudioEngine } from '$lib/engine/audio.js';
 	import { MainSync, type ColorParams, DEFAULT_COLOR_PARAMS, colorParamsToFilter, type SlotComposite, DEFAULT_SLOT_COMPOSITE } from '$lib/engine/sync.js';
-	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01, withSlotComposite } from '$lib/engine/compositor.js';
+	import { Compositor, migrateBlendModeString, blendModeFromValue01, blendModeToValue01 } from '$lib/engine/compositor.js';
+	import { compositingState, updateComposite } from '$lib/engine/compositing-store.svelte.js';
+	import { colorState } from '$lib/engine/color-store.svelte.js';
+	import { snapshotsState, setSnapshotValues, renameSnapshot, clearSnapshot } from '$lib/engine/snapshots-store.svelte.js';
+	import {
+		timelineState, toggleTimelinePlay, addTimelineKeyframe, removeTimelineKeyframe, updateTimelineKeyframe,
+	} from '$lib/engine/timeline-store.svelte.js';
+	import {
+		midiMappingState, setMidiMapping, clearMidiMapping, removeKeyBinding, resetMidiKeymap,
+	} from '$lib/engine/midi-mapping-store.svelte.js';
+	import { strobeState } from '$lib/engine/strobe-store.svelte.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
-	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams, withTimeParams } from '$lib/engine/time-params.js';
-	import { type DeckQVarParams, defaultQVarParams, getGlobalQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch } from '$lib/engine/q-vars.js';
+	import { type DeckTimeParams, defaultTimeParams, getGlobalTimeParams } from '$lib/engine/time-params.js';
+	import { defaultQVarParams, getGlobalQVarParams } from '$lib/engine/q-vars.js';
+	import { timeParamsState, updateTimeParams } from '$lib/engine/time-params-store.svelte.js';
+	import { qvarState, updateQVarValue, addQVarWatch, removeQVarWatch } from '$lib/engine/q-vars-store.svelte.js';
 	import { PlaylistEngine } from '$lib/engine/playlist.js';
 	import {
 		playlistState, setPlaylistEngines, destroyPlaylistEngines, addToPlaylist, removeFromPlaylist,
@@ -24,7 +36,7 @@
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine, triggerKey, type MidiTriggerKey } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
-	import { loadKeymap, saveKeymap, resetKeymap, DEFAULT_KEYMAP, type KeyBinding } from '$lib/engine/keymap.js';
+	import { loadKeymap, saveKeymap, DEFAULT_KEYMAP } from '$lib/engine/keymap.js';
 	import { Clock } from '$lib/engine/clock.js';
 	import { LfoEngine, defaultSlot } from '$lib/engine/lfo.js';
 	import { BeatDetector } from '$lib/engine/bpm.js';
@@ -118,9 +130,8 @@
 	let midi: MidiEngine | null = null;
 	let midiConnected = $state(false);
 	let midiDeviceNames = $state<string[]>([]);
-	let midiMappings = $state<Partial<Record<CommandId, MidiTriggerKey>>>({});
+	// midiMappings/keymap — state extracted into midi-mapping-store.svelte.ts
 	let learningAction = $state<CommandId | null>(null);
-	let keymap = $state<KeyBinding>({ ...DEFAULT_KEYMAP });
 	let learningKey = $state<CommandId | null>(null);
 
 	// — Clock + LFO + Strobe ———————————————————————————————
@@ -128,30 +139,22 @@
 	const lfoEngine = new LfoEngine();
 	const lfoSlots = $state(lfoEngine.slots);
 	let midiClockBpm = $state(0);   // BPM detected via MIDI clock IN (0 = inactive)
-	let strobeOn = $state(false);
-	/** Strobe rate: beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
-	let strobeRate = $state(1);
-	let strobeIntensity = $state(0.8);
-	let strobeColor = $state('#ffffff');
-	let strobeFlash = $state(false);
+	// strobeOn/Rate/Intensity/Color/Flash — state extracted into strobe-store.svelte.ts
 	let _lastStrobeVal = 0;
 
-	// — Color controls per deck (M3) ——————————————————————
-	let colorParamsA = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
-	let colorParamsB = $state<ColorParams>({ ...DEFAULT_COLOR_PARAMS });
-
+	// — Color controls per deck (M3) — state extracted into color-store.svelte.ts
 	type ColorCmd = [sfx: string, field: keyof ColorParams, lbl: string];
 	const COLOR_CMDS: ColorCmd[] = [
 		['hue','hueRotate','Hue'],['sat','saturate','Saturation'],
 		['bright','brightness','Brightness'],['contrast','contrast','Contrast'],['invert','invert','Invert'],
 	];
-	const colorFilterA = $derived(colorParamsToFilter(colorParamsA));
-	const colorFilterB = $derived(colorParamsToFilter(colorParamsB));
+	const colorFilterA = $derived(colorParamsToFilter(colorState.a));
+	const colorFilterB = $derived(colorParamsToFilter(colorState.b));
 
 	// Inverted index: commandId → assigned key string
 	const keyById = $derived(
 		new Map<CommandId, string>(
-			(Object.entries(keymap) as [string, CommandId][]).map(([k, v]) => [v, k])
+			(Object.entries(midiMappingState.keymap) as [string, CommandId][]).map(([k, v]) => [v, k])
 		)
 	);
 
@@ -232,53 +235,12 @@
 	let quality = $state<QualityTier>(DEFAULT_TIER);
 	let fps = $state(0);
 
-	// — Compositing par slot (blend + lumaKey + colorKey) ——————
-	let slotComposites = $state<[SlotComposite, SlotComposite, SlotComposite, SlotComposite]>([
-		{ ...DEFAULT_SLOT_COMPOSITE },
-		{ ...DEFAULT_SLOT_COMPOSITE },
-		{ ...DEFAULT_SLOT_COMPOSITE },
-		{ ...DEFAULT_SLOT_COMPOSITE },
-	]);
-	function updateComposite(slot: number, patch: Partial<SlotComposite>) {
-		slotComposites = withSlotComposite(slotComposites, slot, patch);
-	}
+	// — Compositing par slot (blend + lumaKey + colorKey) — state/actions extracted into compositing-store.svelte.ts
 
-	// — Time param sliders per deck (1.4) ————————————————————
-	let timeParams = $state<[DeckTimeParams, DeckTimeParams, DeckTimeParams, DeckTimeParams]>([
-		defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams(),
-	]);
-	function updateTimeParams(slot: number, patch: Partial<DeckTimeParams>) {
-		timeParams = withTimeParams(timeParams, slot, patch);
-		// Write-through: this is what Butterchurn's injected preset code actually
-		// reads every frame — the $state above is only for the UI to bind to.
-		Object.assign(getGlobalTimeParams()[slot], patch);
-	}
+	// — Time param sliders per deck (1.4) — state/actions extracted into time-params-store.svelte.ts
+	// — Q-var live editing per deck (Track 2) — state/actions extracted into q-vars-store.svelte.ts
 
-	// — Q-var live editing per deck (Track 2) ————————————————
-	// Generic q1-q32 knobs (like NestDrop) — no per-preset meaning known, so no
-	// neutral default: a q-var only has an effect once explicitly watchlisted
-	// (enabled=true). Watching a MIDI-mapped qvar-N-slot command alone does NOT
-	// enable it — see updateQVarValue vs addQVarWatch below.
-	let qVarParams = $state<[DeckQVarParams, DeckQVarParams, DeckQVarParams, DeckQVarParams]>([
-		defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams(),
-	]);
-	function updateQVarValue(slot: number, n: number, value: number) {
-		qVarParams = withQVarValue(qVarParams, slot, n, value);
-		getGlobalQVarParams()[slot].value[n - 1] = value;
-	}
-	function addQVarWatch(slot: number, n: number) {
-		qVarParams = withQVarWatch(qVarParams, slot, n);
-		getGlobalQVarParams()[slot].enabled[n - 1] = true;
-		getGlobalQVarParams()[slot].value[n - 1] = 0;
-	}
-	function removeQVarWatch(slot: number, n: number) {
-		qVarParams = withoutQVarWatch(qVarParams, slot, n);
-		getGlobalQVarParams()[slot].enabled[n - 1] = false;
-	}
-
-	// — Snapshots / macros (1.3) ————————————————————————————
-	let snapshots = $state<(Snapshot | null)[]>(new Array(8).fill(null));
-	let snapshotRecallDuration = $state(2); // seconds, global, shared by all slots
+	// — Snapshots / macros (1.3) — state extracted into snapshots-store.svelte.ts
 	const snapshotEngine = new SnapshotEngine();
 	function saveSnapshot(slot: number) {
 		const values: Partial<Record<CommandId, number>> = {};
@@ -286,43 +248,11 @@
 			const v = getCommandCurrentValue(id);
 			if (v !== null) values[id] = v;
 		}
-		snapshots[slot] = { name: snapshots[slot]?.name ?? `Slot ${slot}`, values };
-	}
-	function renameSnapshot(slot: number, name: string) {
-		const s = snapshots[slot];
-		if (s) snapshots[slot] = { ...s, name };
-	}
-	function clearSnapshot(slot: number) {
-		snapshots[slot] = null;
+		setSnapshotValues(slot, values);
 	}
 
-	// — Timeline (Track 2 — keyframe playback) ————————————————
-	let timelineKeyframes = $state<TimelineKeyframe[]>([]);
-	let timelinePlaying = $state(false);
+	// — Timeline (Track 2 — keyframe playback) — state/actions extracted into timeline-store.svelte.ts
 	const timelineEngine = new TimelineEngine();
-	function toggleTimelinePlay() {
-		if (timelinePlaying) {
-			timelinePlaying = false;
-			return;
-		}
-		if (timelineLoopDuration(timelineKeyframes) <= 0) return; // nothing to interpolate, silent no-op
-		timelinePlaying = true;
-	}
-	function addTimelineKeyframe() {
-		const firstFilledSlot = snapshots.findIndex((s) => s !== null);
-		const lastTime = timelineKeyframes.length > 0
-			? timelineKeyframes[timelineKeyframes.length - 1].timeSec
-			: -5;
-		timelineKeyframes = [...timelineKeyframes, { slot: firstFilledSlot >= 0 ? firstFilledSlot : 0, timeSec: lastTime + 5 }]
-			.sort((a, b) => a.timeSec - b.timeSec);
-	}
-	function removeTimelineKeyframe(index: number) {
-		timelineKeyframes = timelineKeyframes.filter((_, i) => i !== index);
-	}
-	function updateTimelineKeyframe(index: number, patch: Partial<TimelineKeyframe>) {
-		timelineKeyframes = timelineKeyframes.map((kf, i) => (i === index ? { ...kf, ...patch } : kf))
-			.sort((a, b) => a.timeSec - b.timeSec);
-	}
 
 	// — Performance decks ——————————————————————————————————
 	let targetFps = $state(DEFAULT_PERF.targetFps);
@@ -428,22 +358,22 @@
 	// — Wiring M2 commands (strobe/LFO) into the registry ——
 	registry.register({
 		id: 'strobe-toggle', label: 'Strobe ON/OFF', kind: 'trigger',
-		run() { strobeOn = !strobeOn; },
+		run() { strobeState.on = !strobeState.on; },
 	});
 	registry.register({
 		id: 'lfo-rate-up', label: 'LFO Rate +', kind: 'trigger',
-		run() { strobeRate = Math.min(4, strobeRate * 2); },
+		run() { strobeState.rate = Math.min(4, strobeState.rate * 2); },
 	});
 	registry.register({
 		id: 'lfo-rate-down', label: 'LFO Rate −', kind: 'trigger',
-		run() { strobeRate = Math.max(0.25, strobeRate / 2); },
+		run() { strobeState.rate = Math.max(0.25, strobeState.rate / 2); },
 	});
 
 	// — Wiring M3 commands (color controls) ——————————————
 	for (const [sfx, field, lbl] of COLOR_CMDS)
 		for (const deck of ['a', 'b'] as const)
 			registry.register({ id: `color-${sfx}-${deck}` as CommandId, label: `${lbl} ${deck.toUpperCase()}`, kind: 'range',
-				run(v) { if (deck === 'a') colorParamsA = {...colorParamsA, [field]: v}; else colorParamsB = {...colorParamsB, [field]: v}; },
+				run(v) { if (deck === 'a') colorState.a = {...colorState.a, [field]: v}; else colorState.b = {...colorState.b, [field]: v}; },
 			});
 
 	// — Wiring 1.1 commands (compositing: blend + lumaKey + colorKey, 4 slots) —
@@ -469,7 +399,7 @@
 	for (const [prefix, lbl, apply] of COMPOSITE_CMDS)
 		for (const slot of [0, 1, 2, 3] as const)
 			registry.register({ id: `${prefix}-${slot}` as CommandId, label: `${lbl} ${slot}`, kind: 'range',
-				run(v) { updateComposite(slot, apply(slotComposites[slot], v)); },
+				run(v) { updateComposite(slot, apply(compositingState.slotComposites[slot], v)); },
 			});
 
 	// — Wiring 1.4 commands (time param sliders) ——————————
@@ -533,7 +463,7 @@
 			label: `Recall Snapshot ${slot}`,
 			kind: 'trigger',
 			run() {
-				const snap = snapshots[slot];
+				const snap = snapshotsState.snapshots[slot];
 				if (!snap) return; // slot vide → inerte, pas de rappel
 				// Re-read live (never cached): a restart mid-recall must
 				// always start from the actual visual state at that moment, not a stale value.
@@ -542,7 +472,7 @@
 					const v = getCommandCurrentValue(id);
 					if (v !== null) start[id] = v;
 				}
-				snapshotEngine.recall(start, snap.values, snapshotRecallDuration * 1000, (values) => {
+				snapshotEngine.recall(start, snap.values, snapshotsState.recallDuration * 1000, (values) => {
 					for (const key in values)
 						registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
 				});
@@ -576,16 +506,16 @@
 	});
 
 	// — Pilote TimelineEngine.play()/.pause() ————————————————
-	// Read timelineKeyframes and timelinePlaying unconditionally before any logic: both
+	// Read timelineState.keyframes and timelineState.playing unconditionally before any logic: both
 	// are $state, so any change (editing a keyframe mid-playback,
 	// toggling play/pause) re-triggers this effect — never an orphaned RAF loop on a stale
 	// array after an edit/remove during playback (see design note above).
 	$effect(() => {
-		const kfs = timelineKeyframes;
-		const playing = timelinePlaying;
+		const kfs = timelineState.keyframes;
+		const playing = timelineState.playing;
 		if (!playing) { timelineEngine.pause(); return; }
-		if (timelineLoopDuration(kfs) <= 0) { timelinePlaying = false; return; } // guard (also covers the degenerate case: all keyframes at the same instant)
-		timelineEngine.play(kfs, snapshots, (values) => {
+		if (timelineLoopDuration(kfs) <= 0) { timelineState.playing = false; return; } // guard (also covers the degenerate case: all keyframes at the same instant)
+		timelineEngine.play(kfs, snapshotsState.snapshots, (values) => {
 			for (const key in values)
 				registry.dispatch(key as CommandId, values[key as CommandId]!, commandCtx);
 		});
@@ -664,8 +594,8 @@
 		localStorage.setItem('od-overlay-queue', JSON.stringify({
 			enabled: overlayState.queueEnabled, trigger: overlayState.queueTrigger, mode: overlayState.queueMode,
 		}));
-		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappings));
-		localStorage.setItem('od-keymap', JSON.stringify(keymap));
+		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappingState.midiMappings));
+		localStorage.setItem('od-keymap', JSON.stringify(midiMappingState.keymap));
 		localStorage.setItem('od-quality', quality);
 		localStorage.setItem('od-target-fps', String(targetFps));
 		localStorage.setItem('od-invisible-mode', invisibleMode);
@@ -673,12 +603,12 @@
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
 		localStorage.setItem('od-transition', String(transitionTime));
-		localStorage.setItem('od-composite', JSON.stringify(slotComposites));
-		localStorage.setItem('od-snapshots', JSON.stringify(snapshots));
-		localStorage.setItem('od-snapshot-duration', String(snapshotRecallDuration));
-		localStorage.setItem('od-time-params', JSON.stringify(timeParams));
-		localStorage.setItem('od-qvars', JSON.stringify(qVarParams));
-		localStorage.setItem('od-timeline', JSON.stringify(timelineKeyframes));
+		localStorage.setItem('od-composite', JSON.stringify(compositingState.slotComposites));
+		localStorage.setItem('od-snapshots', JSON.stringify(snapshotsState.snapshots));
+		localStorage.setItem('od-snapshot-duration', String(snapshotsState.recallDuration));
+		localStorage.setItem('od-time-params', JSON.stringify(timeParamsState.params));
+		localStorage.setItem('od-qvars', JSON.stringify(qvarState.params));
+		localStorage.setItem('od-timeline', JSON.stringify(timelineState.keyframes));
 	});
 
 	// — Video localStorage persistence ———————————————————
@@ -713,21 +643,21 @@
 
 	// — Sync compositing (blend + lumaKey + colorKey) vers output, par slot —
 	$effect(() => {
-		const composites = slotComposites;
+		const composites = compositingState.slotComposites;
 		if (!sync) return;
 		for (let i = 0; i < 4; i++) sync.sendComposite(i, composites[i]);
 	});
 
 	// — Sync time params vers output, par slot —
 	$effect(() => {
-		const params = timeParams;
+		const params = timeParamsState.params;
 		if (!sync) return;
 		for (let i = 0; i < 4; i++) sync.sendTime(i, params[i]);
 	});
 
 	// — Sync Q-vars vers output, par slot —
 	$effect(() => {
-		const params = qVarParams;
+		const params = qvarState.params;
 		if (!sync) return;
 		for (let i = 0; i < 4; i++) sync.sendQVars(i, params[i]);
 	});
@@ -735,7 +665,7 @@
 	// Pushes opacity + compositing config to the local Compositor (Stage).
 	$effect(() => {
 		const ops = opacities;
-		const composites = slotComposites;
+		const composites = compositingState.slotComposites;
 		if (!compositor) return;
 		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i], composites[i]);
 	});
@@ -744,8 +674,8 @@
 	// mapping as the old per-canvas style:filter: off → neutral).
 	$effect(() => {
 		const bus = deckBus;
-		const paramsA = colorParamsA;
-		const paramsB = colorParamsB;
+		const paramsA = colorState.a;
+		const paramsB = colorState.b;
 		if (!compositor) return;
 		for (let i = 0; i < 4; i++) {
 			const color = bus[i] === 'A' ? paramsA : bus[i] === 'B' ? paramsB : DEFAULT_COLOR_PARAMS;
@@ -755,10 +685,10 @@
 
 	// — Sync strobe vers output ———————————————————————————
 	$effect(() => {
-		const on = strobeOn;
-		const rate = strobeRate;
-		const intensity = strobeIntensity;
-		const color = strobeColor;
+		const on = strobeState.on;
+		const rate = strobeState.rate;
+		const intensity = strobeState.intensity;
+		const color = strobeState.color;
 		sync?.sendStrobe(on, rate, intensity, color);
 	});
 
@@ -769,11 +699,11 @@
 
 	// — Sync color params vers output ————————————————————
 	$effect(() => {
-		const paramsA = colorParamsA;
+		const paramsA = colorState.a;
 		sync?.sendColor('A', paramsA);
 	});
 	$effect(() => {
-		const paramsB = colorParamsB;
+		const paramsB = colorState.b;
 		sync?.sendColor('B', paramsB);
 	});
 
@@ -864,9 +794,9 @@
 				} catch { /* ignore corrupt od-beat-trigger-b */ }
 			}
 			const savedMidi = localStorage.getItem('od-midi-mappings');
-			if (savedMidi) midiMappings = JSON.parse(savedMidi);
+			if (savedMidi) midiMappingState.midiMappings = JSON.parse(savedMidi);
 			const savedKeymap = localStorage.getItem('od-keymap');
-			if (savedKeymap) try { keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
+			if (savedKeymap) try { midiMappingState.keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
 			const savedQuality = localStorage.getItem('od-quality');
 			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
 			const savedTransition = localStorage.getItem('od-transition');
@@ -876,7 +806,7 @@
 				try {
 					const parsed = JSON.parse(savedComposite);
 					if (Array.isArray(parsed) && parsed.length === 4) {
-						slotComposites = parsed.map((c) => ({ ...DEFAULT_SLOT_COMPOSITE, ...c })) as typeof slotComposites;
+						compositingState.slotComposites = parsed.map((c) => ({ ...DEFAULT_SLOT_COMPOSITE, ...c })) as typeof compositingState.slotComposites;
 					}
 				} catch { /* ignore corrupt od-composite */ }
 			} else {
@@ -884,7 +814,7 @@
 				const savedBlendMode = localStorage.getItem('od-blendmode');
 				if (savedBlendMode) {
 					const migrated = migrateBlendModeString(savedBlendMode);
-					slotComposites = slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof slotComposites;
+					compositingState.slotComposites = compositingState.slotComposites.map((c) => ({ ...c, blend: migrated })) as typeof compositingState.slotComposites;
 				}
 			}
 			const savedSnapshots = localStorage.getItem('od-snapshots');
@@ -898,22 +828,22 @@
 							if (s && typeof s.name === 'string' && s.values && typeof s.values === 'object')
 								arr[i] = { name: s.name, values: s.values };
 						}
-						snapshots = arr;
+						snapshotsState.snapshots = arr;
 					}
 				} catch { /* ignore corrupt od-snapshots */ }
 			}
 			const savedSnapDuration = localStorage.getItem('od-snapshot-duration');
 			if (savedSnapDuration) {
 				const v = Number(savedSnapDuration);
-				if (v >= 0.1 && v <= 10) snapshotRecallDuration = v;
+				if (v >= 0.1 && v <= 10) snapshotsState.recallDuration = v;
 			}
 			const savedTimeParams = localStorage.getItem('od-time-params');
 			if (savedTimeParams) {
 				try {
 					const parsed = JSON.parse(savedTimeParams);
 					if (Array.isArray(parsed) && parsed.length === 4) {
-						timeParams = parsed.map((p) => ({ ...defaultTimeParams(), ...p })) as typeof timeParams;
-						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
+						timeParamsState.params = parsed.map((p) => ({ ...defaultTimeParams(), ...p })) as typeof timeParamsState.params;
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParamsState.params[slot]);
 					}
 				} catch { /* ignore corrupt od-time-params */ }
 			}
@@ -922,8 +852,8 @@
 				try {
 					const parsed = JSON.parse(savedQVars);
 					if (Array.isArray(parsed) && parsed.length === 4) {
-						qVarParams = parsed.map((p) => ({ ...defaultQVarParams(), ...p })) as typeof qVarParams;
-						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qVarParams[slot].enabled], value: [...qVarParams[slot].value] });
+						qvarState.params = parsed.map((p) => ({ ...defaultQVarParams(), ...p })) as typeof qvarState.params;
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qvarState.params[slot].enabled], value: [...qvarState.params[slot].value] });
 					}
 				} catch { /* ignore corrupt od-qvars */ }
 			}
@@ -932,7 +862,7 @@
 				try {
 					const parsed = JSON.parse(savedTimeline);
 					if (Array.isArray(parsed)) {
-						timelineKeyframes = parsed
+						timelineState.keyframes = parsed
 							.filter((kf): kf is TimelineKeyframe => kf && typeof kf.slot === 'number' && typeof kf.timeSec === 'number')
 							.sort((a, b) => a.timeSec - b.timeSec);
 					}
@@ -1071,8 +1001,8 @@
 			// Explicit initial push — the $effect won't re-trigger until one of
 			// the $state values it reads changes (compositor isn't one of those).
 			for (let i = 0; i < 4; i++) {
-				compositor.setLayer(i, opacities[i], slotComposites[i]);
-				const color = deckBus[i] === 'A' ? colorParamsA : deckBus[i] === 'B' ? colorParamsB : DEFAULT_COLOR_PARAMS;
+				compositor.setLayer(i, opacities[i], compositingState.slotComposites[i]);
+				const color = deckBus[i] === 'A' ? colorState.a : deckBus[i] === 'B' ? colorState.b : DEFAULT_COLOR_PARAMS;
 				compositor.setColor(i, color);
 			}
 			compositor.start();
@@ -1108,9 +1038,9 @@
 					sync?.sendPreset('B', busPresetB);
 					sync?.sendCrossfader(crossfader);
 					sync?.sendQuality(quality);
-					for (let i = 0; i < 4; i++) sync?.sendComposite(i, slotComposites[i]);
-					for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParams[i]);
-					for (let i = 0; i < 4; i++) sync?.sendQVars(i, qVarParams[i]);
+					for (let i = 0; i < 4; i++) sync?.sendComposite(i, compositingState.slotComposites[i]);
+					for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParamsState.params[i]);
+					for (let i = 0; i < 4; i++) sync?.sendQVars(i, qvarState.params[i]);
 					sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
 					sync?.sendOverlays(overlayState.overlays);
 					sync?.sendOverlayQueueIndex(overlayState.queueIndex);
@@ -1145,13 +1075,13 @@
 				for (const { target, value01 } of lfoEngine.tick(phase)) {
 					if (target) registry.dispatch(target, value01, commandCtx);
 				}
-				// Strobe: detect rising edge of a square LFO at strobeRate
-				if (strobeOn) {
-					const p = (phase * strobeRate) % 1;
+				// Strobe: detect rising edge of a square LFO at strobeState.rate
+				if (strobeState.on) {
+					const p = (phase * strobeState.rate) % 1;
 					const val = p < 0.5 ? 1 : 0;
 					if (val === 1 && _lastStrobeVal === 0) {
-						strobeFlash = true;
-						setTimeout(() => { strobeFlash = false; }, 50);
+						strobeState.flash = true;
+						setTimeout(() => { strobeState.flash = false; }, 50);
 					}
 					_lastStrobeVal = val;
 				}
@@ -1454,13 +1384,13 @@
 
 				if (learningAction !== null) {
 					if (msg.type === 'note_off') return;
-					midiMappings = { ...midiMappings, [learningAction]: key };
+					setMidiMapping(learningAction, key);
 					takenOver.add(key); // immediately in phase after learn
 					learningAction = null;
 					return;
 				}
 
-				for (const [action, mapped] of Object.entries(midiMappings) as [CommandId, MidiTriggerKey][]) {
+				for (const [action, mapped] of Object.entries(midiMappingState.midiMappings) as [CommandId, MidiTriggerKey][]) {
 					if (mapped !== key) continue;
 					if (msg.type === 'note_off') break;
 
@@ -1536,19 +1466,17 @@
 	}
 
 	function clearMapping(action: CommandId) {
-		const { [action]: _, ...rest } = midiMappings;
-		midiMappings = rest as Partial<Record<CommandId, MidiTriggerKey>>;
+		clearMidiMapping(action);
 	}
 
 	function clearKeyBinding(cmdId: CommandId) {
 		const key = keyById.get(cmdId);
 		if (!key) return;
-		const { [key]: _, ...rest } = keymap;
-		keymap = rest as KeyBinding;
+		removeKeyBinding(key);
 	}
 
 	function doResetKeymap() {
-		keymap = resetKeymap();
+		resetMidiKeymap();
 	}
 
 	function applyMidiAction(action: CommandId, value: number) {
@@ -1562,48 +1490,48 @@
 		const colorMatch = id.match(/^color-(\w+)-([ab])$/);
 		if (colorMatch) {
 			const e = COLOR_CMDS.find(([s]) => s === colorMatch[1]);
-			return e ? (colorMatch[2] === 'a' ? colorParamsA : colorParamsB)[e[1]] : null;
+			return e ? (colorMatch[2] === 'a' ? colorState.a : colorState.b)[e[1]] : null;
 		}
 		const compositeMatch = id.match(/^(composite-blend|lumakey-black|lumakey-white|colorkey-hue|colorkey-tolerance)-([0-3])$/);
 		if (compositeMatch) {
 			const e = COMPOSITE_CMDS.find(([prefix]) => prefix === compositeMatch[1]);
-			return e ? e[3](slotComposites[Number(compositeMatch[2])]) : null;
+			return e ? e[3](compositingState.slotComposites[Number(compositeMatch[2])]) : null;
 		}
 		const timeMatch = id.match(/^(time-speed|time-zoom|time-rot|time-warp|time-dx|time-dy|time-stretch|time-wave)-([0-3])$/);
 		if (timeMatch) {
 			const e = TIME_CMDS.find(([prefix]) => prefix === timeMatch[1]);
-			return e ? timeParams[Number(timeMatch[2])][e[2]] / 2 : null;
+			return e ? timeParamsState.params[Number(timeMatch[2])][e[2]] / 2 : null;
 		}
 		const qvarMatch = id.match(/^qvar-(\d+)-([0-3])$/);
 		if (qvarMatch) {
 			const n = Number(qvarMatch[1]);
 			if (n < 1 || n > 32) return null;
-			return (qVarParams[Number(qvarMatch[2])].value[n - 1] + 2) / 4;
+			return (qvarState.params[Number(qvarMatch[2])].value[n - 1] + 2) / 4;
 		}
 		return null;
 	}
 
 	function getCommandLedState(id: CommandId): boolean | null {
-		if (id === 'strobe-toggle') return strobeOn;
+		if (id === 'strobe-toggle') return strobeState.on;
 		if (id === 'playlist-toggle-a') return playlistState.aPlaying;
 		if (id === 'playlist-toggle-b') return playlistState.bPlaying;
 		if (id === 'playlist-toggle-active') return activeDeck === 'A' ? playlistState.aPlaying : playlistState.bPlaying;
 		return null;
 	}
 
-	// Reads strobeOn/playlistState.aPlaying/bPlaying/activeDeck/midiMappings BEFORE checking
+	// Reads strobeState.on/playlistState.aPlaying/bPlaying/activeDeck/midiMappingState.midiMappings BEFORE checking
 	// `midi` (non-reactive variable) — otherwise an $effect calling this function would never
 	// track those $state values if it first ran before the MIDI connection (the same
 	// Svelte 5 gotcha documented for optional chaining in an $effect).
 	function pushLedStates() {
-		const strobe = strobeOn;
+		const strobe = strobeState.on;
 		const plA = playlistState.aPlaying;
 		const plB = playlistState.bPlaying;
 		const active = activeDeck;
-		const kStrobe = midiMappings['strobe-toggle'];
-		const kA = midiMappings['playlist-toggle-a'];
-		const kB = midiMappings['playlist-toggle-b'];
-		const kActive = midiMappings['playlist-toggle-active'];
+		const kStrobe = midiMappingState.midiMappings['strobe-toggle'];
+		const kA = midiMappingState.midiMappings['playlist-toggle-a'];
+		const kB = midiMappingState.midiMappings['playlist-toggle-b'];
+		const kActive = midiMappingState.midiMappings['playlist-toggle-active'];
 		if (!midi) return;
 		if (kStrobe) midi.sendFeedback(kStrobe, strobe);
 		if (kA) midi.sendFeedback(kA, plA);
@@ -1637,13 +1565,13 @@
 			presetA, presetB,
 			deckBus,
 			crossfader, transitionTime,
-			colorParamsA, colorParamsB,
-			slotComposites,
-			timeParams,
-			qVarParams,
-			snapshots,
-			snapshotRecallDuration,
-			timelineKeyframes,
+			colorParamsA: colorState.a, colorParamsB: colorState.b,
+			slotComposites: compositingState.slotComposites,
+			timeParams: timeParamsState.params,
+			qVarParams: qvarState.params,
+			snapshots: snapshotsState.snapshots,
+			snapshotRecallDuration: snapshotsState.recallDuration,
+			timelineKeyframes: timelineState.keyframes,
 			overlays: overlayState.overlays,
 			beatTriggerA, beatTriggerB,
 			beatSyncA, beatSyncB,
@@ -1668,14 +1596,14 @@
 		const s = pendingSharedSet;
 		deckBus = s.deckBus;
 		crossfader = s.crossfader; transitionTime = s.transitionTime;
-		colorParamsA = s.colorParamsA; colorParamsB = s.colorParamsB;
-		slotComposites = s.slotComposites;
-		timeParams = s.timeParams as typeof timeParams;
-		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParams[slot]);
-		qVarParams = s.qVarParams as typeof qVarParams;
-		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qVarParams[slot].enabled], value: [...qVarParams[slot].value] });
-		snapshots = s.snapshots; snapshotRecallDuration = s.snapshotRecallDuration;
-		timelineKeyframes = s.timelineKeyframes;
+		colorState.a = s.colorParamsA; colorState.b = s.colorParamsB;
+		compositingState.slotComposites = s.slotComposites;
+		timeParamsState.params = s.timeParams as typeof timeParamsState.params;
+		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParamsState.params[slot]);
+		qvarState.params = s.qVarParams as typeof qvarState.params;
+		for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qvarState.params[slot].enabled], value: [...qvarState.params[slot].value] });
+		snapshotsState.snapshots = s.snapshots; snapshotsState.recallDuration = s.snapshotRecallDuration;
+		timelineState.keyframes = s.timelineKeyframes;
 		overlayState.overlays = s.overlays;
 		beatTriggerA = s.beatTriggerA; beatTriggerB = s.beatTriggerB;
 		beatSyncA = s.beatSyncA; beatSyncB = s.beatSyncB;
@@ -1870,13 +1798,13 @@
 
 		if (learningKey !== null) {
 			if (e.key === 'Escape') { learningKey = null; e.preventDefault(); return; }
-			keymap = { ...keymap, [e.key]: learningKey };
+			midiMappingState.keymap = { ...midiMappingState.keymap, [e.key]: learningKey };
 			learningKey = null;
 			e.preventDefault();
 			return;
 		}
 
-		const action = keymap[e.key];
+		const action = midiMappingState.keymap[e.key];
 		if (!action) return;
 		e.preventDefault();
 		if (status !== 'running') return;
@@ -1989,7 +1917,7 @@
 		{midiDeviceNames}
 		{midiClockBpm}
 		{learningAction}
-		{midiMappings}
+		midiMappings={midiMappingState.midiMappings}
 		{registry}
 		onToggleMidi={toggleMidi}
 		onStartLearn={startLearn}
@@ -2008,14 +1936,14 @@
 {/snippet}
 {#snippet strobeSection()}
 	<SidebarStrobe
-		{strobeOn}
-		{strobeRate}
-		{strobeIntensity}
-		{strobeColor}
-		onToggleStrobe={() => { strobeOn = !strobeOn; }}
-		onRateChange={(r) => { strobeRate = r; }}
-		onIntensityChange={(v) => { strobeIntensity = v; }}
-		onColorChange={(c) => { strobeColor = c; }}
+		strobeOn={strobeState.on}
+		strobeRate={strobeState.rate}
+		strobeIntensity={strobeState.intensity}
+		strobeColor={strobeState.color}
+		onToggleStrobe={() => { strobeState.on = !strobeState.on; }}
+		onRateChange={(r) => { strobeState.rate = r; }}
+		onIntensityChange={(v) => { strobeState.intensity = v; }}
+		onColorChange={(c) => { strobeState.color = c; }}
 	/>
 {/snippet}
 {#snippet lfoSection()}
@@ -2023,24 +1951,24 @@
 {/snippet}
 {#snippet colorSection()}
 	<SidebarColor
-		{colorParamsA}
-		{colorParamsB}
-		onUpdateA={(p) => { colorParamsA = p; }}
-		onUpdateB={(p) => { colorParamsB = p; }}
+		colorParamsA={colorState.a}
+		colorParamsB={colorState.b}
+		onUpdateA={(p) => { colorState.a = p; }}
+		onUpdateB={(p) => { colorState.b = p; }}
 	/>
 {/snippet}
 {#snippet compositeSection()}
 	<SidebarComposite
 		{mixerSelectedSlot}
-		composite={slotComposites[mixerSelectedSlot]}
+		composite={compositingState.slotComposites[mixerSelectedSlot]}
 		onUpdate={(patch) => updateComposite(mixerSelectedSlot, patch)}
 	/>
 {/snippet}
 {#snippet snapshotSection()}
 	<SidebarSnapshot
-		{snapshotRecallDuration}
-		{snapshots}
-		onDurationChange={(v) => { snapshotRecallDuration = v; }}
+		snapshotRecallDuration={snapshotsState.recallDuration}
+		snapshots={snapshotsState.snapshots}
+		onDurationChange={(v) => { snapshotsState.recallDuration = v; }}
 		onRenameSnapshot={renameSnapshot}
 		onSaveSnapshot={saveSnapshot}
 		onRecallSnapshot={recallSnapshot}
@@ -2049,9 +1977,9 @@
 {/snippet}
 {#snippet timelineSection()}
 	<SidebarTimeline
-		{timelinePlaying}
-		{timelineKeyframes}
-		{snapshots}
+		timelinePlaying={timelineState.playing}
+		timelineKeyframes={timelineState.keyframes}
+		snapshots={snapshotsState.snapshots}
 		onTogglePlay={toggleTimelinePlay}
 		onUpdateKeyframe={updateTimelineKeyframe}
 		onRemoveKeyframe={removeTimelineKeyframe}
@@ -2070,7 +1998,7 @@
 {#snippet timeSection()}
 	<SidebarTime
 		{mixerSelectedSlot}
-		timeParams={timeParams[mixerSelectedSlot]}
+		timeParams={timeParamsState.params[mixerSelectedSlot]}
 		onUpdate={(patch) => updateTimeParams(mixerSelectedSlot, patch)}
 		onReset={() => updateTimeParams(mixerSelectedSlot, defaultTimeParams())}
 	/>
@@ -2078,7 +2006,7 @@
 {#snippet qvarSection()}
 	<SidebarQvar
 		{mixerSelectedSlot}
-		qvar={qVarParams[mixerSelectedSlot]}
+		qvar={qvarState.params[mixerSelectedSlot]}
 		onAddWatch={(n) => addQVarWatch(mixerSelectedSlot, n)}
 		onUpdateValue={(n, value) => updateQVarValue(mixerSelectedSlot, n, value)}
 		onRemoveWatch={(n) => removeQVarWatch(mixerSelectedSlot, n)}
@@ -2135,8 +2063,8 @@
 	<!-- Overlay sprites -->
 	<OverlayLayer overlays={overlayState.overlays} {beat} visibleIds={overlayVisibleIds} />
 	<!-- Strobe flash — top z-index, pointer-events none -->
-	{#if strobeOn && strobeFlash}
-		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
+	{#if strobeState.on && strobeState.flash}
+		<div class="strobe-flash" style="background:{strobeState.color};opacity:{strobeState.intensity}"></div>
 	{/if}
 
 	{#if status === 'idle' && !pendingSharedSet}

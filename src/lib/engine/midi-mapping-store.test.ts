@@ -7,6 +7,7 @@ import {
 function resetState() {
 	midiMappingState.midiMappings = {};
 	midiMappingState.keymap = { ...DEFAULT_KEYMAP };
+	midiMappingState.learningAction = null;
 }
 
 describe('midi-mapping-store', () => {
@@ -18,9 +19,10 @@ describe('midi-mapping-store', () => {
 	});
 	afterEach(() => vi.unstubAllGlobals());
 
-	it('starts with no MIDI mappings and the default keymap', () => {
+	it('starts with no MIDI mappings, the default keymap, and no learn in progress', () => {
 		expect(midiMappingState.midiMappings).toEqual({});
 		expect(midiMappingState.keymap).toEqual(DEFAULT_KEYMAP);
+		expect(midiMappingState.learningAction).toBeNull();
 	});
 
 	it('setMidiMapping assigns a key to an action without touching other mappings', () => {

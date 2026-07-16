@@ -5,6 +5,18 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-16
+
+### Added
+- Live video input as a deck source: webcam and NDI network sources (Electron)
+- Runtime `.milk`/`.prjm` MilkDrop preset import via drag-and-drop — no rebuild needed
+
+### Fixed
+- Linux output-window audio reactivity: PCM capture retry decoupled from the one-shot state resync (previously required re-picking the audio device once per session)
+
+### Changed
+- `+page.svelte` (2,570+ lines) further split — 15 new engine stores and action modules extracted (deck/mixer state, beat-sync, MIDI connection/mapping, audio source, Electron feature toggles, run status, share-set, the visualizer startup sequence, output-window management); down to ~1,900 lines
+
 ## [0.7.0] - 2026-07-11
 
 ### Added

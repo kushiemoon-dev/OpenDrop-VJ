@@ -9,4 +9,11 @@ describe('audio-source-store', () => {
 		expect(audioSourceState.manualBpm).toBe(0);
 		expect(audioSourceState.detectedBpm).toBe(0);
 	});
+
+	it('starts with source label "none", pickers/help hidden, and no output devices', () => {
+		expect(audioSourceState.sourceLabel).toBe('none');
+		expect(audioSourceState.showDevicePicker).toBe(false);
+		expect(audioSourceState.showSystemAudioHelp).toBe(false);
+		expect(audioSourceState.outputDevices).toEqual([]);
+	});
 });

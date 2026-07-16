@@ -18,6 +18,14 @@
 	import { midiConnectionState } from '$lib/engine/midi-connection-store.svelte.js';
 	import { audioSourceState } from '$lib/engine/audio-source-store.svelte.js';
 	import { runStatusState } from '$lib/engine/run-status-store.svelte.js';
+	import {
+		toggleNdi, toggleV4l2, toggleSpout, toggleOsc, toggleRemote, toggleLink as toggleLinkAction,
+	} from '$lib/engine/electron-features-actions.js';
+	import {
+		stopLoopbackIpc, captureSystemAudio as captureSystemAudioAction, connectMic as connectMicAction,
+		openDevicePicker as openDevicePickerAction, connectDevice as connectDeviceAction,
+		connectLoopback as connectLoopbackAction, connectFile as connectFileAction,
+	} from '$lib/engine/audio-source-actions.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -102,13 +110,11 @@
 	let crossfader = $state(0); // 0 = 100% A, 1 = 100% B
 	let transitionTime = $state(2.0); // secondes de fondu preset (0 = hard cut)
 
-	let sourceLabel = $state('none');
-	// currentDeviceId/currentLoopbackDeviceId/audioDevices — state extracted into audio-source-store.svelte.ts
+	// sourceLabel/currentDeviceId/currentLoopbackDeviceId/audioDevices — state extracted into audio-source-store.svelte.ts
 	// status/errorMsg/sourceError — state extracted into run-status-store.svelte.ts
 	let audioEl: HTMLAudioElement | undefined = $state();
-	let outputDevices = $state<Array<{id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}>>([]);
-	let showDevicePicker = $state(false);
-	let loopbackUnlisten: (() => void) | null = null;
+	// outputDevices/showDevicePicker — state extracted into audio-source-store.svelte.ts
+	// loopbackUnlisten — moved into audio-source-actions.ts (private to it)
 	let vuLevel = $state(0);
 	let outputOpen = $state(false);
 	let outputWinRef: Window | null = null;
@@ -160,7 +166,7 @@
 	// — Electron ——————————————————————————————————————————
 	const isElectron = typeof window !== 'undefined' && !!window.electronAPI?.isElectron;
 	let platform = $state('');
-	let showSystemAudioHelp = $state(false);
+	// showSystemAudioHelp — state extracted into audio-source-store.svelte.ts
 	let showPresetBrowser = $state(false);
 	let showStreamPanel = $state(false);
 	// ndiActive/Error, oscActive/Port/Error, remoteActive/Url/Error, linkActive/Peers/Error,
@@ -927,7 +933,7 @@
 	});
 
 	onDestroy(() => {
-		_stopLoopbackIpc();
+		stopLoopbackIpc();
 		if (outputCloseTimer !== null) clearInterval(outputCloseTimer);
 		destroyPlaylistEngines();
 		manager.destroyAll();
@@ -1073,129 +1079,26 @@
 		}
 	}
 
-	async function captureSystemAudio() {
-		if (!audio) return;
-		runStatusState.sourceError = '';
-		_stopLoopbackIpc();
-		try {
-			await audio.resume();
-			if (isElectron && platform === 'win32') {
-				// Electron Windows: setDisplayMediaRequestHandler → native loopback, no picker
-				await audio.connectDisplay();
-				sourceLabel = 'system audio';
-			} else if (effectiveOS === 'linux' || effectiveOS === 'darwin') {
-				// Linux (Electron ou web) / macOS (Electron) : chercher .monitor ou BlackHole
-				const devices = await AudioEngine.listAudioDevices();
-				const monitors = devices.filter((d) =>
-					/monitor|blackhole|loopback|cable|opendrop/i.test(d.label)
-				);
-				if (monitors.length === 1) {
-					await audio.connectDevice(monitors[0].deviceId);
-					audioSourceState.currentDeviceId = monitors[0].deviceId;
-					sourceLabel = monitors[0].label || 'system audio';
-					sync?.sendSource(monitors[0].deviceId);
-				} else if (monitors.length > 1) {
-					audioSourceState.devices = monitors;
-					showDevicePicker = true;
-				} else {
-					showSystemAudioHelp = true;
-				}
-			} else {
-				// Web Windows / unknown browser: getDisplayMedia with honest guidance
-				await audio.connectDisplay();
-				sourceLabel = 'system audio';
-			}
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+	// captureSystemAudio/connectMic/openDevicePicker/connectDevice/connectLoopback/connectFile
+	// — moved into audio-source-actions.ts. Thin wrappers below supply this page's local
+	// instances/derived flags (audio-source-actions.ts has no access to +page.svelte locals).
+	function captureSystemAudio(): Promise<void> {
+		return captureSystemAudioAction(audio, sync, isElectron, platform, effectiveOS);
 	}
-
-	async function connectMic() {
-		if (!audio) return;
-		runStatusState.sourceError = '';
-		_stopLoopbackIpc();
-		try {
-			await audio.resume();
-			await audio.connectMic();
-			sourceLabel = 'microphone';
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+	function connectMic(): Promise<void> {
+		return connectMicAction(audio);
 	}
-
-	async function openDevicePicker() {
-		runStatusState.sourceError = '';
-		try {
-			audioSourceState.devices = await AudioEngine.listAudioDevices();
-			if (loopbackSupported) {
-				const res = await window.electronAPI!.listOutputDevices();
-				outputDevices = res.ok ? res.devices : [];
-			} else {
-				outputDevices = [];
-			}
-			showDevicePicker = true;
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+	function openDevicePicker(): Promise<void> {
+		return openDevicePickerAction(loopbackSupported);
 	}
-
-	function _stopLoopbackIpc() {
-		loopbackUnlisten?.();
-		loopbackUnlisten = null;
-		audioSourceState.currentLoopbackDeviceId = 0;
-		window.electronAPI?.stopLoopback();
+	function connectDevice(device: MediaDeviceInfo): Promise<void> {
+		return connectDeviceAction(device, audio, sync);
 	}
-
-	async function connectDevice(device: MediaDeviceInfo) {
-		if (!audio) return;
-		runStatusState.sourceError = '';
-		showDevicePicker = false;
-		_stopLoopbackIpc();
-		try {
-			await audio.resume();
-			await audio.connectDevice(device.deviceId);
-			audioSourceState.currentDeviceId = device.deviceId;
-			sourceLabel = device.label || device.deviceId;
-			sync?.sendSource(device.deviceId);
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+	function connectLoopback(device: {id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}): Promise<void> {
+		return connectLoopbackAction(device, audio, sync, manager);
 	}
-
-	async function connectLoopback(device: {id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}) {
-		if (!audio) return;
-		runStatusState.sourceError = '';
-		showDevicePicker = false;
-		_stopLoopbackIpc();
-		try {
-			await audio.resume();
-			await audio.connectLoopbackPcm();
-			manager.connectAudio(audio.gainNode);
-			loopbackUnlisten = window.electronAPI!.onLoopbackData((data) => {
-				audio?.pushLoopbackPcm(data);
-			});
-			const res = await window.electronAPI!.startLoopback(device.id);
-			if (!res.ok) throw new Error(res.error ?? 'loopback start failed');
-			audioSourceState.currentLoopbackDeviceId = device.id;
-			audioSourceState.currentDeviceId = '';
-			sourceLabel = device.name;
-			sync?.sendLoopback(device.id);
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
-	}
-
-	async function connectFile() {
-		if (!audio || !audioEl) return;
-		runStatusState.sourceError = '';
-		try {
-			await audio.resume();
-			audio.connectMediaElement(audioEl);
-			audioEl.play();
-			sourceLabel = 'file';
-		} catch (e) {
-			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
-		}
+	function connectFile(): Promise<void> {
+		return connectFileAction(audio, audioEl);
 	}
 
 	function onFileChange(e: Event) {
@@ -1656,94 +1559,9 @@
 		}
 	}
 
-	async function toggleNdi() {
-		electronFeaturesState.ndi.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.ndi.active) {
-			await eAPI?.ndiStop();
-			electronFeaturesState.ndi.active = false;
-		} else {
-			const w = window.screen.width;
-			const h = window.screen.height;
-			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
-			if (res?.ok) electronFeaturesState.ndi.active = true;
-			else electronFeaturesState.ndi.error = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
-		}
-	}
-
-	async function toggleV4l2() {
-		electronFeaturesState.v4l2.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.v4l2.active) {
-			await eAPI?.v4l2Stop();
-			electronFeaturesState.v4l2.active = false;
-		} else {
-			const res = await eAPI?.v4l2Start();
-			if (res?.ok) electronFeaturesState.v4l2.active = true;
-			else electronFeaturesState.v4l2.error = res?.error ?? 'Erreur v4l2 inconnue.';
-		}
-	}
-
-	async function toggleSpout() {
-		electronFeaturesState.spout.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.spout.active) {
-			await eAPI?.spoutStop();
-			electronFeaturesState.spout.active = false;
-		} else {
-			const res = await eAPI?.spoutStart('OpenDrop VJ');
-			if (res?.ok) electronFeaturesState.spout.active = true;
-			else electronFeaturesState.spout.error = res?.error ?? 'Spout indisponible.';
-		}
-	}
-
-	async function toggleOsc() {
-		electronFeaturesState.osc.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.osc.active) {
-			await eAPI?.stopOsc?.();
-			electronFeaturesState.osc.active = false;
-		} else {
-			const res = await eAPI?.startOsc?.(electronFeaturesState.osc.port);
-			if (res?.ok) electronFeaturesState.osc.active = true;
-			else electronFeaturesState.osc.error = res?.error ?? 'Erreur OSC.';
-		}
-	}
-
-	async function toggleRemote() {
-		electronFeaturesState.remote.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.remote.active) {
-			await eAPI?.stopRemote?.();
-			electronFeaturesState.remote.active = false;
-			electronFeaturesState.remote.url = '';
-		} else {
-			const res = await eAPI?.startRemote?.();
-			if (res?.ok) {
-				electronFeaturesState.remote.active = true;
-				electronFeaturesState.remote.url = `https://opendrop.kushie.dev/remote?host=${res.ip}&port=${res.port}&token=${res.token}`;
-			} else {
-				electronFeaturesState.remote.error = res?.error ?? 'Erreur Remote.';
-			}
-		}
-	}
-
-	async function toggleLink() {
-		electronFeaturesState.link.error = '';
-		const eAPI = window.electronAPI;
-		if (electronFeaturesState.link.active) {
-			await eAPI?.stopLink?.();
-			electronFeaturesState.link.active = false;
-			electronFeaturesState.link.peers = 0;
-		} else {
-			const res = await eAPI?.startLink?.(audioSourceState.manualBpm || clock.bpm || 120);
-			if (res?.ok) {
-				electronFeaturesState.link.active = true;
-				if (res.tempo) clock.setBpm(res.tempo);
-			} else {
-				electronFeaturesState.link.error = res?.error ?? 'Ableton Link non disponible.';
-			}
-		}
+	// toggleNdi/V4l2/Spout/Osc/Remote/Link — moved into electron-features-actions.ts
+	function toggleLink(): Promise<void> {
+		return toggleLinkAction(clock);
 	}
 
 	async function startSlot(slot: number) {
@@ -1796,15 +1614,15 @@
 <main>
 {#snippet audioSection()}
   <SidebarAudio
-    {sourceLabel}
+    sourceLabel={audioSourceState.sourceLabel}
     status={runStatusState.status}
     {effectiveOS}
     {vuLevel}
     sourceError={runStatusState.sourceError}
-    {showSystemAudioHelp}
-    {showDevicePicker}
+    showSystemAudioHelp={audioSourceState.showSystemAudioHelp}
+    showDevicePicker={audioSourceState.showDevicePicker}
     audioDevices={audioSourceState.devices}
-    {outputDevices}
+    outputDevices={audioSourceState.outputDevices}
     {loopbackSupported}
     audioElHasSrc={!!audioEl?.src}
     onConnectMic={connectMic}
@@ -1814,8 +1632,8 @@
     {onFileChange}
     onConnectDevice={connectDevice}
     onConnectLoopback={connectLoopback}
-    onDismissSystemAudioHelp={() => { showSystemAudioHelp = false }}
-    onDismissDevicePicker={() => { showDevicePicker = false }}
+    onDismissSystemAudioHelp={() => { audioSourceState.showSystemAudioHelp = false }}
+    onDismissDevicePicker={() => { audioSourceState.showDevicePicker = false }}
   />
 {/snippet}
 {#snippet videoSection()}
@@ -2070,15 +1888,15 @@
 
 		<!-- Audio source -->
 		<SidebarAudio
-			{sourceLabel}
+			sourceLabel={audioSourceState.sourceLabel}
 			status={runStatusState.status}
 			{effectiveOS}
 			{vuLevel}
 			sourceError={runStatusState.sourceError}
-			{showSystemAudioHelp}
-			{showDevicePicker}
+			showSystemAudioHelp={audioSourceState.showSystemAudioHelp}
+			showDevicePicker={audioSourceState.showDevicePicker}
 			audioDevices={audioSourceState.devices}
-			{outputDevices}
+			outputDevices={audioSourceState.outputDevices}
 			{loopbackSupported}
 			audioElHasSrc={!!audioEl?.src}
 			onConnectMic={connectMic}
@@ -2088,8 +1906,8 @@
 			{onFileChange}
 			onConnectDevice={connectDevice}
 			onConnectLoopback={connectLoopback}
-			onDismissSystemAudioHelp={() => showSystemAudioHelp = false}
-			onDismissDevicePicker={() => showDevicePicker = false}
+			onDismissSystemAudioHelp={() => { audioSourceState.showSystemAudioHelp = false; }}
+			onDismissDevicePicker={() => { audioSourceState.showDevicePicker = false; }}
 		/>
 
 		<!-- Mixer -->

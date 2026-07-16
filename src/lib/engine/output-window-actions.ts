@@ -10,6 +10,11 @@
  * on-display) stays in +page.svelte — its outputWinRef/outputCloseTimer
  * handles are also read by onDestroy's cleanup, which isn't moving, and
  * threading both through get/set pairs here wasn't worth it for ~25 lines.
+ *
+ * `busPresetA`/`busPresetB` are $derived values read inside the setTimeout
+ * callback below (800ms later) — passed as getters, not frozen snapshots,
+ * so a preset change in that window is still reflected (same reasoning as
+ * visualizer-startup.ts).
  */
 
 import type { DeckManager } from './deck-manager.js';
@@ -23,7 +28,7 @@ import { runStatusState } from './run-status-store.svelte.js';
 
 export async function openOutputFullscreen(
 	isElectron: boolean, selectedDisplayId: number | null, sync: MainSync | null,
-	busPresetA: string, busPresetB: string, setOutputOpen: (v: boolean) => void,
+	getBusPresetA: () => string, getBusPresetB: () => string, setOutputOpen: (v: boolean) => void,
 ): Promise<void> {
 	if (!isElectron) {
 		// Web fallback: fullscreen the visualizer area
@@ -36,8 +41,8 @@ export async function openOutputFullscreen(
 		setOutputOpen(true);
 		// Push current state after the window loads
 		setTimeout(() => {
-			sync?.sendPreset('A', busPresetA);
-			sync?.sendPreset('B', busPresetB);
+			sync?.sendPreset('A', getBusPresetA());
+			sync?.sendPreset('B', getBusPresetB());
 			sync?.sendCrossfader(deckState.crossfader);
 			if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
 		}, 800);

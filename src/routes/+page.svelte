@@ -29,6 +29,11 @@
 	import { toggleMidi as toggleMidiAction } from '$lib/engine/midi-connection-actions.js';
 	import { deckState } from '$lib/engine/deck-store.svelte.js';
 	import { beatSyncState, updateBeatTriggerA, updateBeatTriggerB } from '$lib/engine/beat-sync-store.svelte.js';
+	import { selectPreset as selectPresetAction, loadImportedMilkPreset as loadImportedMilkPresetAction } from '$lib/engine/deck-preset-actions.js';
+	import {
+		onBeat as onBeatAction, toggleBeatSync as toggleBeatSyncAction, tapTempo as tapTempoAction, clearManualBpm as clearManualBpmAction,
+		resetAutoXfadeCount,
+	} from '$lib/engine/beat-tempo-actions.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -39,16 +44,16 @@
 	import { PlaylistEngine } from '$lib/engine/playlist.js';
 	import {
 		playlistState, setPlaylistEngines, destroyPlaylistEngines, addToPlaylist, removeFromPlaylist,
-		togglePlaylist, playlistNext, playlistPrev, setPlaylistBeatSyncInterval, exportPlaylists, importPlaylists,
+		togglePlaylist, playlistNext, playlistPrev, exportPlaylists, importPlaylists,
 	} from '$lib/engine/playlist-store.svelte.js';
 	import {
-		defaultBeatTriggerConfig, shouldTriggerOnBeat,
+		defaultBeatTriggerConfig,
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
 		clampBeatsPerChange, clampOffset,
 	} from '$lib/engine/beat-trigger.js';
 	import { visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
-	import { isMilkPresetFilename, convertMilkPreset } from '$lib/presets/milk-import.js';
+	import { isMilkPresetFilename } from '$lib/presets/milk-import.js';
 	import PresetBrowser from '$lib/components/PresetBrowser.svelte';
 	import { MidiEngine } from '$lib/engine/midi.js';
 	import { createDefaultRegistry, type CommandId, type CommandContext } from '$lib/engine/commands.js';
@@ -94,7 +99,7 @@
 	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
 	import { type ClipRef } from '$lib/engine/video-store.js';
 	import {
-		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoBeat, onVideoAudioTick,
+		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoAudioTick,
 		setLiveCamera, clearLiveCamera, setNdiSource, clearNdiSource,
 	} from '$lib/video-loops/playback-store.svelte.js';
 
@@ -197,10 +202,7 @@
 	// beatSyncA/B/beatsPerChange/beatTriggerA/B/autoXfade/lockA/B — state extracted into beat-sync-store.svelte.ts
 	let volumePeakStateA: VolumePeakState = defaultVolumePeakState();
 	let volumePeakStateB: VolumePeakState = defaultVolumePeakState();
-	let autoXfadeCount = 0;
-
-	// — Tap tempo ——————————————————————————————————————————
-	let tapTimes: number[] = [];
+	// autoXfadeCount/tapTimes — moved into beat-tempo-actions.ts (module-private)
 
 	// — Render quality — state extracted into perf-store.svelte.ts
 	let fps = $state(0);
@@ -1087,47 +1089,14 @@
 		if (runStatusState.status === 'running') connectFile();
 	}
 
-	async function selectPreset(name: string) {
-		const d = await loadPresetData(name);
-		if (!d) return;
-		const slot = deckState.activeSlot;
-		if (slot === 0) deckState.presetA = name;
-		else if (slot === 1) deckState.presetB = name;
-		else if (slot === 2) deckState.preset2 = name;
-		else deckState.preset3 = name;
-		manager.loadPreset(slot, d, deckState.transitionTime);
-		deckState.slotEpoch++;
-		const bus = deckState.deckBus[slot];
-		if (bus === 'A') sync?.sendPreset('A', primaryPreset('A'), deckState.transitionTime);
-		else if (bus === 'B') sync?.sendPreset('B', primaryPreset('B'), deckState.transitionTime);
+	// selectPreset/loadImportedMilkPreset moved into deck-preset-actions.ts.
+	function selectPreset(name: string): Promise<void> {
+		return selectPresetAction(name, manager, sync, primaryPreset);
 	}
 
+	// onBeat/toggleBeatSync/tapTempo/clearManualBpm moved into beat-tempo-actions.ts.
 	function onBeat() {
-		// Pulse overlay beat-reactive
-		beatSyncState.beat = true;
-		setTimeout(() => { beatSyncState.beat = false; }, 80);
-		sync?.sendBeat(clock.bpm || audioSourceState.detectedBpm);
-
-		onVideoBeat();
-
-		if (beatSyncState.autoXfade) {
-			autoXfadeCount = (autoXfadeCount + 1) % beatSyncState.beatsPerChange;
-			if (autoXfadeCount === 0) {
-				deckState.crossfader = deckState.crossfader < 0.5 ? 1 : 0;
-				sync?.sendCrossfader(deckState.crossfader);
-			}
-		}
-		if (beatSyncState.beatSyncA && !beatSyncState.lockA && shouldTriggerOnBeat(clock.beatCount, beatSyncState.beatTriggerA)) {
-			if (playlistState.aItems.length > 0) playlistNext('A');
-			else applyMidiAction('preset-next-a', 127);
-		}
-		if (beatSyncState.beatSyncB && !beatSyncState.lockB && shouldTriggerOnBeat(clock.beatCount, beatSyncState.beatTriggerB)) {
-			if (playlistState.bItems.length > 0) playlistNext('B');
-			else applyMidiAction('preset-next-b', 127);
-		}
-		if (overlayState.queueEnabled && shouldTriggerOnBeat(clock.beatCount, overlayState.queueTrigger)) {
-			advanceOverlayQueue(1);
-		}
+		onBeatAction(sync, clock, applyMidiAction);
 	}
 
 	// — Overlay helpers — extracted into overlay-store.svelte.ts (addOverlayFromFile,
@@ -1166,56 +1135,20 @@
 
 	/** Import a dropped .milk/.prjm preset directly into activeSlot (mirrors selectPreset,
 	 * minus the loadPresetData lookup — the converted data is already in hand). */
-	async function loadImportedMilkPreset(file: File): Promise<void> {
-		let data: object;
-		try {
-			data = await convertMilkPreset(await file.text());
-		} catch {
-			return; // not a valid MilkDrop preset — silently skipped, like other unrecognized drop types
-		}
-		const name = file.name.replace(/\.(milk|prjm)$/i, '');
-		const slot = deckState.activeSlot;
-		if (slot === 0) deckState.presetA = name;
-		else if (slot === 1) deckState.presetB = name;
-		else if (slot === 2) deckState.preset2 = name;
-		else deckState.preset3 = name;
-		manager.loadPreset(slot, data, deckState.transitionTime);
-		deckState.slotEpoch++;
-		const bus = deckState.deckBus[slot];
-		// Attach `data` only when this import is the bus's current primary preset —
-		// otherwise the synced name refers to some other, normally-resolvable preset.
-		if (bus === 'A') { const p = primaryPreset('A'); sync?.sendPreset('A', p, deckState.transitionTime, p === name ? data : undefined); }
-		else if (bus === 'B') { const p = primaryPreset('B'); sync?.sendPreset('B', p, deckState.transitionTime, p === name ? data : undefined); }
+	function loadImportedMilkPreset(file: File): Promise<void> {
+		return loadImportedMilkPresetAction(file, manager, sync, primaryPreset);
 	}
 
 	function toggleBeatSync(deck: 'A' | 'B') {
-		if (deck === 'A') {
-			beatSyncState.beatSyncA = !beatSyncState.beatSyncA;
-			setPlaylistBeatSyncInterval('A', beatSyncState.beatSyncA ? Infinity : playlistState.intervalSec * 1000);
-		} else {
-			beatSyncState.beatSyncB = !beatSyncState.beatSyncB;
-			setPlaylistBeatSyncInterval('B', beatSyncState.beatSyncB ? Infinity : playlistState.intervalSec * 1000);
-		}
+		toggleBeatSyncAction(deck);
 	}
 
 	function tapTempo() {
-		const now = performance.now();
-		tapTimes.push(now);
-		if (tapTimes.length > 4) tapTimes = tapTimes.slice(-4);
-		if (tapTimes.length < 2) return;
-		const intervals = tapTimes.slice(1).map((t, i) => t - tapTimes[i]);
-		const avg = intervals.reduce((s, v) => s + v, 0) / intervals.length;
-		const bpm = Math.round(60000 / avg);
-		if (bpm < 40 || bpm > 300) return;
-		audioSourceState.manualBpm = bpm;
-		clock.setBpm(bpm);
-		clock.pulse();
+		tapTempoAction(clock);
 	}
 
 	function clearManualBpm() {
-		audioSourceState.manualBpm = 0;
-		tapTimes = [];
-		clock.setBpm(0);
+		clearManualBpmAction(clock);
 	}
 
 	// toggleMidi's connection/dispatch/clock-IN logic moved into midi-connection-actions.ts.
@@ -1863,7 +1796,7 @@
 			onClearManualBpm={clearManualBpm}
 			onToggleBeatSyncA={() => toggleBeatSync('A')}
 			onToggleBeatSyncB={() => toggleBeatSync('B')}
-			onToggleAutoXfade={() => { beatSyncState.autoXfade = !beatSyncState.autoXfade; autoXfadeCount = 0; }}
+			onToggleAutoXfade={() => { beatSyncState.autoXfade = !beatSyncState.autoXfade; resetAutoXfadeCount(); }}
 			onTogglePlaylistA={() => togglePlaylist('A')}
 			onTogglePlaylistB={() => togglePlaylist('B')}
 			onPlaylistNext={(deck) => playlistNext(deck)}

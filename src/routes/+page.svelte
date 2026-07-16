@@ -28,6 +28,7 @@
 	} from '$lib/engine/audio-source-actions.js';
 	import { toggleMidi as toggleMidiAction } from '$lib/engine/midi-connection-actions.js';
 	import { deckState } from '$lib/engine/deck-store.svelte.js';
+	import { beatSyncState, updateBeatTriggerA, updateBeatTriggerB } from '$lib/engine/beat-sync-store.svelte.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -41,9 +42,9 @@
 		togglePlaylist, playlistNext, playlistPrev, setPlaylistBeatSyncInterval, exportPlaylists, importPlaylists,
 	} from '$lib/engine/playlist-store.svelte.js';
 	import {
-		type BeatTriggerConfig, defaultBeatTriggerConfig, shouldTriggerOnBeat,
+		defaultBeatTriggerConfig, shouldTriggerOnBeat,
 		type VolumePeakState, defaultVolumePeakState, detectVolumePeak,
-		clampBeatsPerChange, clampOffset, applyBeatTriggerPatch,
+		clampBeatsPerChange, clampOffset,
 	} from '$lib/engine/beat-trigger.js';
 	import { visibleOverlayIds } from '$lib/engine/overlay-queue.js';
 	import { initPresets, buildPresetList, loadPresetData, type PresetMeta } from '$lib/presets/index.js';
@@ -193,29 +194,13 @@
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
 	// detectedBpm/manualBpm — state extracted into audio-source-store.svelte.ts
-	let beatSyncA = $state(false);
-	let beatSyncB = $state(false);
-	let beatsPerChange = $state(8);
-	let beatTriggerA = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
-	let beatTriggerB = $state<BeatTriggerConfig>(defaultBeatTriggerConfig());
+	// beatSyncA/B/beatsPerChange/beatTriggerA/B/autoXfade/lockA/B — state extracted into beat-sync-store.svelte.ts
 	let volumePeakStateA: VolumePeakState = defaultVolumePeakState();
 	let volumePeakStateB: VolumePeakState = defaultVolumePeakState();
-
-	function updateBeatTriggerA(patch: Partial<BeatTriggerConfig>) {
-		beatTriggerA = applyBeatTriggerPatch(beatTriggerA, patch);
-	}
-	function updateBeatTriggerB(patch: Partial<BeatTriggerConfig>) {
-		beatTriggerB = applyBeatTriggerPatch(beatTriggerB, patch);
-	}
-	let autoXfade = $state(false);
 	let autoXfadeCount = 0;
 
 	// — Tap tempo ——————————————————————————————————————————
 	let tapTimes: number[] = [];
-
-	// — Lock deck ——————————————————————————————————————————
-	let lockA = $state(false);
-	let lockB = $state(false);
 
 	// — Render quality — state extracted into perf-store.svelte.ts
 	let fps = $state(0);
@@ -244,7 +229,7 @@
 	let lastFps = [0, 0, 0, 0];            // non-reactive: cross-run anti-churn for the eco $effect
 
 	// — Overlays ——————————————————————————————————————————
-	let beat = $state(false);
+	// beat — state extracted into beat-sync-store.svelte.ts
 	// overlays + overlay auto-cycle queue state/actions extracted into overlay-store.svelte.ts
 	let overlayQueueVolumeState: VolumePeakState = defaultVolumePeakState();
 	const overlayVisibleIds = $derived(visibleOverlayIds(overlayState.overlays, overlayState.queueIndex));
@@ -522,16 +507,16 @@
 			// VU meter + video warp
 			const lv = audio!.getLevels();
 			vuLevel = lv.rms;
-			if (beatSyncA && !lockA && beatTriggerA.mode === 'volume-peak') {
-				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateA, beatTriggerA.sensitivity, t);
+			if (beatSyncState.beatSyncA && !beatSyncState.lockA && beatSyncState.beatTriggerA.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateA, beatSyncState.beatTriggerA.sensitivity, t);
 				volumePeakStateA = next;
 				if (triggered) {
 					if (playlistState.aItems.length > 0) playlistNext('A');
 					else applyMidiAction('preset-next-a', 127);
 				}
 			}
-			if (beatSyncB && !lockB && beatTriggerB.mode === 'volume-peak') {
-				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateB, beatTriggerB.sensitivity, t);
+			if (beatSyncState.beatSyncB && !beatSyncState.lockB && beatSyncState.beatTriggerB.mode === 'volume-peak') {
+				const { triggered, next } = detectVolumePeak(lv.rms, volumePeakStateB, beatSyncState.beatTriggerB.sensitivity, t);
 				volumePeakStateB = next;
 				if (triggered) {
 					if (playlistState.bItems.length > 0) playlistNext('B');
@@ -567,8 +552,8 @@
 		localStorage.setItem('od-pl-b', JSON.stringify(playlistState.bItems));
 		localStorage.setItem('od-pl-interval', String(playlistState.intervalSec));
 		localStorage.setItem('od-pl-mode', playlistState.mode);
-		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatTriggerA));
-		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatTriggerB));
+		localStorage.setItem('od-beat-trigger-a', JSON.stringify(beatSyncState.beatTriggerA));
+		localStorage.setItem('od-beat-trigger-b', JSON.stringify(beatSyncState.beatTriggerB));
 		localStorage.setItem('od-overlay-queue', JSON.stringify({
 			enabled: overlayState.queueEnabled, trigger: overlayState.queueTrigger, mode: overlayState.queueMode,
 		}));
@@ -759,7 +744,7 @@
 					const raw = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerA) };
 					raw.beatsPerChange = clampBeatsPerChange(raw.beatsPerChange);
 					raw.offset = clampOffset(raw.offset, raw.beatsPerChange);
-					beatTriggerA = raw;
+					beatSyncState.beatTriggerA = raw;
 				} catch { /* ignore corrupt od-beat-trigger-a */ }
 			}
 			const savedTriggerB = localStorage.getItem('od-beat-trigger-b');
@@ -768,7 +753,7 @@
 					const raw = { ...defaultBeatTriggerConfig(), ...JSON.parse(savedTriggerB) };
 					raw.beatsPerChange = clampBeatsPerChange(raw.beatsPerChange);
 					raw.offset = clampOffset(raw.offset, raw.beatsPerChange);
-					beatTriggerB = raw;
+					beatSyncState.beatTriggerB = raw;
 				} catch { /* ignore corrupt od-beat-trigger-b */ }
 			}
 			const savedMidi = localStorage.getItem('od-midi-mappings');
@@ -1119,24 +1104,24 @@
 
 	function onBeat() {
 		// Pulse overlay beat-reactive
-		beat = true;
-		setTimeout(() => { beat = false; }, 80);
+		beatSyncState.beat = true;
+		setTimeout(() => { beatSyncState.beat = false; }, 80);
 		sync?.sendBeat(clock.bpm || audioSourceState.detectedBpm);
 
 		onVideoBeat();
 
-		if (autoXfade) {
-			autoXfadeCount = (autoXfadeCount + 1) % beatsPerChange;
+		if (beatSyncState.autoXfade) {
+			autoXfadeCount = (autoXfadeCount + 1) % beatSyncState.beatsPerChange;
 			if (autoXfadeCount === 0) {
 				deckState.crossfader = deckState.crossfader < 0.5 ? 1 : 0;
 				sync?.sendCrossfader(deckState.crossfader);
 			}
 		}
-		if (beatSyncA && !lockA && shouldTriggerOnBeat(clock.beatCount, beatTriggerA)) {
+		if (beatSyncState.beatSyncA && !beatSyncState.lockA && shouldTriggerOnBeat(clock.beatCount, beatSyncState.beatTriggerA)) {
 			if (playlistState.aItems.length > 0) playlistNext('A');
 			else applyMidiAction('preset-next-a', 127);
 		}
-		if (beatSyncB && !lockB && shouldTriggerOnBeat(clock.beatCount, beatTriggerB)) {
+		if (beatSyncState.beatSyncB && !beatSyncState.lockB && shouldTriggerOnBeat(clock.beatCount, beatSyncState.beatTriggerB)) {
 			if (playlistState.bItems.length > 0) playlistNext('B');
 			else applyMidiAction('preset-next-b', 127);
 		}
@@ -1205,11 +1190,11 @@
 
 	function toggleBeatSync(deck: 'A' | 'B') {
 		if (deck === 'A') {
-			beatSyncA = !beatSyncA;
-			setPlaylistBeatSyncInterval('A', beatSyncA ? Infinity : playlistState.intervalSec * 1000);
+			beatSyncState.beatSyncA = !beatSyncState.beatSyncA;
+			setPlaylistBeatSyncInterval('A', beatSyncState.beatSyncA ? Infinity : playlistState.intervalSec * 1000);
 		} else {
-			beatSyncB = !beatSyncB;
-			setPlaylistBeatSyncInterval('B', beatSyncB ? Infinity : playlistState.intervalSec * 1000);
+			beatSyncState.beatSyncB = !beatSyncState.beatSyncB;
+			setPlaylistBeatSyncInterval('B', beatSyncState.beatSyncB ? Infinity : playlistState.intervalSec * 1000);
 		}
 	}
 
@@ -1352,8 +1337,8 @@
 			snapshotRecallDuration: snapshotsState.recallDuration,
 			timelineKeyframes: timelineState.keyframes,
 			overlays: overlayState.overlays,
-			beatTriggerA, beatTriggerB,
-			beatSyncA, beatSyncB,
+			beatTriggerA: beatSyncState.beatTriggerA, beatTriggerB: beatSyncState.beatTriggerB,
+			beatSyncA: beatSyncState.beatSyncA, beatSyncB: beatSyncState.beatSyncB,
 			overlayQueueEnabled: overlayState.queueEnabled, overlayQueueTrigger: overlayState.queueTrigger,
 		};
 	}
@@ -1384,8 +1369,8 @@
 		snapshotsState.snapshots = s.snapshots; snapshotsState.recallDuration = s.snapshotRecallDuration;
 		timelineState.keyframes = s.timelineKeyframes;
 		overlayState.overlays = s.overlays;
-		beatTriggerA = s.beatTriggerA; beatTriggerB = s.beatTriggerB;
-		beatSyncA = s.beatSyncA; beatSyncB = s.beatSyncB;
+		beatSyncState.beatTriggerA = s.beatTriggerA; beatSyncState.beatTriggerB = s.beatTriggerB;
+		beatSyncState.beatSyncA = s.beatSyncA; beatSyncState.beatSyncB = s.beatSyncB;
 		overlayState.queueEnabled = s.overlayQueueEnabled; overlayState.queueTrigger = s.overlayQueueTrigger;
 
 		if (runStatusState.status === 'running') {
@@ -1747,7 +1732,7 @@
 	aria-label="Visualizer"
 >
 	<!-- Video loop — first child = behind the decks -->
-	<VideoLayer clip={currentClip} opacity={videoState.opacity} {beat} playbackRate={videoState.playbackRate} flashOn={videoState.reactFlash} hueOn={videoState.reactHue} />
+	<VideoLayer clip={currentClip} opacity={videoState.opacity} beat={beatSyncState.beat} playbackRate={videoState.playbackRate} flashOn={videoState.reactFlash} hueOn={videoState.reactHue} />
 	<!-- Deck canvases — 4 slots, texture sources for the Compositor (hidden) -->
 	{#each [0, 1, 2, 3] as i}
 		<canvas bind:this={canvases[i]} class="deck-src"></canvas>
@@ -1755,7 +1740,7 @@
 	<!-- Composited render (blend + lumaKey + colorKey per slot) -->
 	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoState.enabled ? 'screen' : 'normal'}></canvas>
 	<!-- Overlay sprites -->
-	<OverlayLayer overlays={overlayState.overlays} {beat} visibleIds={overlayVisibleIds} />
+	<OverlayLayer overlays={overlayState.overlays} beat={beatSyncState.beat} visibleIds={overlayVisibleIds} />
 	<!-- Strobe flash — top z-index, pointer-events none -->
 	{#if strobeState.on && strobeState.flash}
 		<div class="strobe-flash" style="background:{strobeState.color};opacity:{strobeState.intensity}"></div>
@@ -1852,12 +1837,12 @@
 		<SidebarPlaylist
 			playlistMode={playlistState.mode}
 			playlistIntervalSec={playlistState.intervalSec}
-			{beatSyncA}
-			{beatSyncB}
-			{autoXfade}
-			{beatsPerChange}
-			{beatTriggerA}
-			{beatTriggerB}
+			beatSyncA={beatSyncState.beatSyncA}
+			beatSyncB={beatSyncState.beatSyncB}
+			autoXfade={beatSyncState.autoXfade}
+			beatsPerChange={beatSyncState.beatsPerChange}
+			beatTriggerA={beatSyncState.beatTriggerA}
+			beatTriggerB={beatSyncState.beatTriggerB}
 			detectedBpm={audioSourceState.detectedBpm}
 			manualBpm={audioSourceState.manualBpm}
 			playlistAItems={playlistState.aItems}
@@ -1867,26 +1852,26 @@
 			audioRunning={runStatusState.status === 'running'}
 			presetA={deckState.presetA}
 			presetB={deckState.presetB}
-			{lockA}
-			{lockB}
+			lockA={beatSyncState.lockA}
+			lockB={beatSyncState.lockB}
 			onModeChange={(m) => { playlistState.mode = m }}
 			onIntervalChange={(s) => { playlistState.intervalSec = s }}
-			onBeatsPerChangeChange={(n) => { beatsPerChange = n }}
+			onBeatsPerChangeChange={(n) => { beatSyncState.beatsPerChange = n }}
 			onBeatTriggerAChange={updateBeatTriggerA}
 			onBeatTriggerBChange={updateBeatTriggerB}
 			onTapTempo={tapTempo}
 			onClearManualBpm={clearManualBpm}
 			onToggleBeatSyncA={() => toggleBeatSync('A')}
 			onToggleBeatSyncB={() => toggleBeatSync('B')}
-			onToggleAutoXfade={() => { autoXfade = !autoXfade; autoXfadeCount = 0; }}
+			onToggleAutoXfade={() => { beatSyncState.autoXfade = !beatSyncState.autoXfade; autoXfadeCount = 0; }}
 			onTogglePlaylistA={() => togglePlaylist('A')}
 			onTogglePlaylistB={() => togglePlaylist('B')}
 			onPlaylistNext={(deck) => playlistNext(deck)}
 			onPlaylistPrev={(deck) => playlistPrev(deck)}
 			onRemoveFromPlaylistA={(name) => removeFromPlaylist('A', name)}
 			onRemoveFromPlaylistB={(name) => removeFromPlaylist('B', name)}
-			onToggleLockA={() => { lockA = !lockA }}
-			onToggleLockB={() => { lockB = !lockB }}
+			onToggleLockA={() => { beatSyncState.lockA = !beatSyncState.lockA }}
+			onToggleLockB={() => { beatSyncState.lockB = !beatSyncState.lockB }}
 			onExportPlaylists={exportPlaylists}
 			onImportPlaylists={importPlaylists}
 		/>

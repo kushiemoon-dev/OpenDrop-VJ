@@ -13,6 +13,11 @@
 		midiMappingState, setMidiMapping, clearMidiMapping, removeKeyBinding, resetMidiKeymap,
 	} from '$lib/engine/midi-mapping-store.svelte.js';
 	import { strobeState } from '$lib/engine/strobe-store.svelte.js';
+	import { perfState } from '$lib/engine/perf-store.svelte.js';
+	import { electronFeaturesState } from '$lib/engine/electron-features-store.svelte.js';
+	import { midiConnectionState } from '$lib/engine/midi-connection-store.svelte.js';
+	import { audioSourceState } from '$lib/engine/audio-source-store.svelte.js';
+	import { runStatusState } from '$lib/engine/run-status-store.svelte.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
 	import { TimelineEngine, timelineLoopDuration, type TimelineKeyframe } from '$lib/engine/timeline.js';
 	import { type SharedSet, filterShareableOverlays, encodeSharedSet, decodeSharedSet } from '$lib/engine/share-set.js';
@@ -98,16 +103,12 @@
 	let transitionTime = $state(2.0); // secondes de fondu preset (0 = hard cut)
 
 	let sourceLabel = $state('none');
-	let currentDeviceId = $state('');
-	let status = $state<'idle' | 'running' | 'error'>('idle');
-	let errorMsg = $state('');
-	let sourceError = $state('');
+	// currentDeviceId/currentLoopbackDeviceId/audioDevices — state extracted into audio-source-store.svelte.ts
+	// status/errorMsg/sourceError — state extracted into run-status-store.svelte.ts
 	let audioEl: HTMLAudioElement | undefined = $state();
-	let audioDevices = $state<MediaDeviceInfo[]>([]);
 	let outputDevices = $state<Array<{id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}>>([]);
 	let showDevicePicker = $state(false);
 	let loopbackUnlisten: (() => void) | null = null;
-	let currentLoopbackDeviceId = $state(0);
 	let vuLevel = $state(0);
 	let outputOpen = $state(false);
 	let outputWinRef: Window | null = null;
@@ -128,8 +129,7 @@
 
 	const midiSupported = typeof navigator !== 'undefined' && 'requestMIDIAccess' in navigator;
 	let midi: MidiEngine | null = null;
-	let midiConnected = $state(false);
-	let midiDeviceNames = $state<string[]>([]);
+	// midiConnected/midiDeviceNames/midiClockBpm — state extracted into midi-connection-store.svelte.ts
 	// midiMappings/keymap — state extracted into midi-mapping-store.svelte.ts
 	let learningAction = $state<CommandId | null>(null);
 	let learningKey = $state<CommandId | null>(null);
@@ -138,7 +138,6 @@
 	const clock = new Clock();
 	const lfoEngine = new LfoEngine();
 	const lfoSlots = $state(lfoEngine.slots);
-	let midiClockBpm = $state(0);   // BPM detected via MIDI clock IN (0 = inactive)
 	// strobeOn/Rate/Intensity/Color/Flash — state extracted into strobe-store.svelte.ts
 	let _lastStrobeVal = 0;
 
@@ -164,27 +163,11 @@
 	let showSystemAudioHelp = $state(false);
 	let showPresetBrowser = $state(false);
 	let showStreamPanel = $state(false);
-	let ndiActive = $state(false);
-	let ndiError = $state('');
-	// OSC
-	let oscActive = $state(false);
-	let oscPort = $state(7000);
-	let oscError = $state('');
+	// ndiActive/Error, oscActive/Port/Error, remoteActive/Url/Error, linkActive/Peers/Error,
+	// v4l2Active/Error, spoutActive/Error — state extracted into electron-features-store.svelte.ts
 	let oscUnlisten: (() => void) | null = null;
-	// Remote control WS
-	let remoteActive = $state(false);
-	let remoteUrl = $state('');
-	let remoteError = $state('');
 	let remoteUnlisten: (() => void) | null = null;
-	// Ableton Link
-	let linkActive = $state(false);
-	let linkPeers = $state(0);
-	let linkError = $state('');
 	let linkUnlisten: (() => void) | null = null;
-	let v4l2Active = $state(false);
-	let v4l2Error = $state('');
-	let spoutActive = $state(false);
-	let spoutError = $state('');
 	let layout = $state<'stage' | 'mixer'>('stage');
 	let mixerSelectedSlot = $state(0);
 
@@ -205,7 +188,7 @@
 
 	// — Beat detection ————————————————————————————————————
 	let beatDetector: BeatDetector | null = null;
-	let detectedBpm = $state(0);
+	// detectedBpm/manualBpm — state extracted into audio-source-store.svelte.ts
 	let beatSyncA = $state(false);
 	let beatSyncB = $state(false);
 	let beatsPerChange = $state(8);
@@ -225,14 +208,12 @@
 
 	// — Tap tempo ——————————————————————————————————————————
 	let tapTimes: number[] = [];
-	let manualBpm = $state(0);
 
 	// — Lock deck ——————————————————————————————————————————
 	let lockA = $state(false);
 	let lockB = $state(false);
 
-	// — Render quality ——————————————————————————————————————
-	let quality = $state<QualityTier>(DEFAULT_TIER);
+	// — Render quality — state extracted into perf-store.svelte.ts
 	let fps = $state(0);
 
 	// — Compositing par slot (blend + lumaKey + colorKey) — state/actions extracted into compositing-store.svelte.ts
@@ -254,10 +235,7 @@
 	// — Timeline (Track 2 — keyframe playback) — state/actions extracted into timeline-store.svelte.ts
 	const timelineEngine = new TimelineEngine();
 
-	// — Performance decks ——————————————————————————————————
-	let targetFps = $state(DEFAULT_PERF.targetFps);
-	let invisibleMode = $state<InvisibleMode>(DEFAULT_PERF.invisibleMode);
-	let invisibleFps = $state(DEFAULT_PERF.invisibleFps);
+	// — Performance decks — state extracted into perf-store.svelte.ts
 	let pausedSlots = new Set<number>();   // non-reactive: cross-run memory for the eco $effect
 	let lastFps = [0, 0, 0, 0];            // non-reactive: cross-run anti-churn for the eco $effect
 
@@ -530,13 +508,13 @@
 	// tracking if the 1st run happens while the guard is true).
 	$effect(() => {
 		const l = layout;
-		const s = status;
+		const s = runStatusState.status;
 		if (s === 'running') requestAnimationFrame(onResize);
 	});
 
 	// — VU meter polling + FPS counter + video speed warp —
 	$effect(() => {
-		if (status !== 'running' || !audio) return;
+		if (runStatusState.status !== 'running' || !audio) return;
 		let rafId: number;
 		let fpsLast = performance.now();
 		let lastRenderCount = 0;
@@ -596,9 +574,9 @@
 		}));
 		localStorage.setItem('od-midi-mappings', JSON.stringify(midiMappingState.midiMappings));
 		localStorage.setItem('od-keymap', JSON.stringify(midiMappingState.keymap));
-		localStorage.setItem('od-quality', quality);
-		localStorage.setItem('od-target-fps', String(targetFps));
-		localStorage.setItem('od-invisible-mode', invisibleMode);
+		localStorage.setItem('od-quality', perfState.quality);
+		localStorage.setItem('od-target-fps', String(perfState.targetFps));
+		localStorage.setItem('od-invisible-mode', perfState.invisibleMode);
 		localStorage.setItem('od-overlays', JSON.stringify(overlayState.overlays));
 		localStorage.setItem('od-deck-bus', JSON.stringify(deckBus));
 		localStorage.setItem('od-layout', layout);
@@ -709,29 +687,29 @@
 
 	// — Apply quality to decks + sync output ———————
 	$effect(() => {
-		if (status !== 'running') return;
-		const settings = getQualitySettings(quality);
+		if (runStatusState.status !== 'running') return;
+		const settings = getQualitySettings(perfState.quality);
 		manager.applyQuality(settings);
-		sync?.sendQuality(quality);
+		sync?.sendQuality(perfState.quality);
 	});
 
 	// — Apply target FPS to decks + sync output ————
 	$effect(() => {
-		if (status !== 'running') return;
-		const fps = targetFps;    // read before sync?. to force tracking
-		const mode = invisibleMode;
-		const eco = invisibleFps;
+		if (runStatusState.status !== 'running') return;
+		const fps = perfState.targetFps;    // read before sync?. to force tracking
+		const mode = perfState.invisibleMode;
+		const eco = perfState.invisibleFps;
 		manager.setTargetFps(fps);
 		sync?.sendPerf({ targetFps: fps, invisibleMode: mode, invisibleFps: eco });
 	});
 
 	// — Throttle invisible decks (eco) ——————————————
 	$effect(() => {
-		if (status !== 'running') return;
+		if (runStatusState.status !== 'running') return;
 		const ops = opacities;          // read first → tracked
-		const mode = invisibleMode;
-		const target = targetFps;
-		const eco = invisibleFps;
+		const mode = perfState.invisibleMode;
+		const target = perfState.targetFps;
+		const eco = perfState.invisibleFps;
 		for (let i = 0; i < 4; i++) {
 			if (!manager.isRunning(i)) continue;
 			const visible = ops[i] > 0.001;
@@ -798,7 +776,7 @@
 			const savedKeymap = localStorage.getItem('od-keymap');
 			if (savedKeymap) try { midiMappingState.keymap = { ...DEFAULT_KEYMAP, ...JSON.parse(savedKeymap) }; } catch {}
 			const savedQuality = localStorage.getItem('od-quality');
-			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') quality = savedQuality;
+			if (savedQuality === 'low' || savedQuality === 'medium' || savedQuality === 'high') perfState.quality = savedQuality;
 			const savedTransition = localStorage.getItem('od-transition');
 			if (savedTransition) transitionTime = Number(savedTransition);
 			const savedComposite = localStorage.getItem('od-composite');
@@ -871,11 +849,11 @@
 			const savedFps = localStorage.getItem('od-target-fps');
 			if (savedFps) {
 				const v = Number(savedFps);
-				if (v === 30 || v === 45 || v === 60) targetFps = v;
+				if (v === 30 || v === 45 || v === 60) perfState.targetFps = v;
 			}
 			const savedInvisibleMode = localStorage.getItem('od-invisible-mode');
 			if (savedInvisibleMode === 'eco' || savedInvisibleMode === 'pause' || savedInvisibleMode === 'off') {
-				invisibleMode = savedInvisibleMode;
+				perfState.invisibleMode = savedInvisibleMode;
 			}
 			const savedOverlays = localStorage.getItem('od-overlays');
 			if (savedOverlays) overlayState.overlays = JSON.parse(savedOverlays);
@@ -923,7 +901,7 @@
 			linkUnlisten = window.electronAPI?.onLinkState?.((state) => {
 				// Link's phase is on quantum=4 → normalize to 0..1
 				clock.syncExternal(state.tempo, state.phase / 4.0);
-				linkPeers = state.peers;
+				electronFeaturesState.link.peers = state.peers;
 			}) ?? null;
 			outputWindowClosedUnlisten = window.electronAPI?.onOutputWindowClosed?.(() => {
 				outputOpen = false;
@@ -965,9 +943,9 @@
 		remoteUnlisten?.();
 		linkUnlisten?.();
 		outputWindowClosedUnlisten?.();
-		if (oscActive) window.electronAPI?.stopOsc?.();
-		if (remoteActive) window.electronAPI?.stopRemote?.();
-		if (linkActive) window.electronAPI?.stopLink?.();
+		if (electronFeaturesState.osc.active) window.electronAPI?.stopOsc?.();
+		if (electronFeaturesState.remote.active) window.electronAPI?.stopRemote?.();
+		if (electronFeaturesState.link.active) window.electronAPI?.stopLink?.();
 	});
 
 	// — Actions ————————————————————————————————————————————
@@ -990,7 +968,7 @@
 				if (c) manager.attachCanvas(i, c);
 			}
 
-			const q = getQualitySettings(quality);
+			const q = getQualitySettings(perfState.quality);
 
 			compositor = new Compositor(compositorCanvas!);
 			for (let i = 0; i < 4; i++) {
@@ -1037,16 +1015,16 @@
 					sync?.sendPreset('A', busPresetA);
 					sync?.sendPreset('B', busPresetB);
 					sync?.sendCrossfader(crossfader);
-					sync?.sendQuality(quality);
+					sync?.sendQuality(perfState.quality);
 					for (let i = 0; i < 4; i++) sync?.sendComposite(i, compositingState.slotComposites[i]);
 					for (let i = 0; i < 4; i++) sync?.sendTime(i, timeParamsState.params[i]);
 					for (let i = 0; i < 4; i++) sync?.sendQVars(i, qvarState.params[i]);
-					sync?.sendPerf({ targetFps, invisibleMode, invisibleFps });
+					sync?.sendPerf({ targetFps: perfState.targetFps, invisibleMode: perfState.invisibleMode, invisibleFps: perfState.invisibleFps });
 					sync?.sendOverlays(overlayState.overlays);
 					sync?.sendOverlayQueueIndex(overlayState.queueIndex);
 					sync?.sendVideo({ enabled: videoState.enabled, clip: currentClip, opacity: videoState.opacity, playbackRate: videoPlaybackRateStep, flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
-					if (currentDeviceId) sync?.sendSource(currentDeviceId);
-					if (currentLoopbackDeviceId) sync?.sendLoopback(currentLoopbackDeviceId);
+					if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
+					if (audioSourceState.currentLoopbackDeviceId) sync?.sendLoopback(audioSourceState.currentLoopbackDeviceId);
 				}
 				// Stream live PCM to the output window so it becomes audio-reactive
 				// regardless of source (device / mic / file). Electron-only: the output
@@ -1066,8 +1044,8 @@
 
 			beatDetector = new BeatDetector(audio.analyser);
 			beatDetector.start(() => {
-				detectedBpm = beatDetector?.bpm ?? 0;
-				if (!manualBpm) clock.pulse(detectedBpm);
+				audioSourceState.detectedBpm = beatDetector?.bpm ?? 0;
+				if (!audioSourceState.manualBpm) clock.pulse(audioSourceState.detectedBpm);
 			});
 			clock.onBeat(onBeat);
 			clock.onTick((phase) => {
@@ -1088,16 +1066,16 @@
 			});
 			clock.start();
 
-			status = 'running';
+			runStatusState.status = 'running';
 		} catch (e) {
-			status = 'error';
-			errorMsg = e instanceof Error ? e.message : String(e);
+			runStatusState.status = 'error';
+			runStatusState.errorMsg = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	async function captureSystemAudio() {
 		if (!audio) return;
-		sourceError = '';
+		runStatusState.sourceError = '';
 		_stopLoopbackIpc();
 		try {
 			await audio.resume();
@@ -1113,11 +1091,11 @@
 				);
 				if (monitors.length === 1) {
 					await audio.connectDevice(monitors[0].deviceId);
-					currentDeviceId = monitors[0].deviceId;
+					audioSourceState.currentDeviceId = monitors[0].deviceId;
 					sourceLabel = monitors[0].label || 'system audio';
 					sync?.sendSource(monitors[0].deviceId);
 				} else if (monitors.length > 1) {
-					audioDevices = monitors;
+					audioSourceState.devices = monitors;
 					showDevicePicker = true;
 				} else {
 					showSystemAudioHelp = true;
@@ -1128,27 +1106,27 @@
 				sourceLabel = 'system audio';
 			}
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	async function connectMic() {
 		if (!audio) return;
-		sourceError = '';
+		runStatusState.sourceError = '';
 		_stopLoopbackIpc();
 		try {
 			await audio.resume();
 			await audio.connectMic();
 			sourceLabel = 'microphone';
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	async function openDevicePicker() {
-		sourceError = '';
+		runStatusState.sourceError = '';
 		try {
-			audioDevices = await AudioEngine.listAudioDevices();
+			audioSourceState.devices = await AudioEngine.listAudioDevices();
 			if (loopbackSupported) {
 				const res = await window.electronAPI!.listOutputDevices();
 				outputDevices = res.ok ? res.devices : [];
@@ -1157,36 +1135,36 @@
 			}
 			showDevicePicker = true;
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	function _stopLoopbackIpc() {
 		loopbackUnlisten?.();
 		loopbackUnlisten = null;
-		currentLoopbackDeviceId = 0;
+		audioSourceState.currentLoopbackDeviceId = 0;
 		window.electronAPI?.stopLoopback();
 	}
 
 	async function connectDevice(device: MediaDeviceInfo) {
 		if (!audio) return;
-		sourceError = '';
+		runStatusState.sourceError = '';
 		showDevicePicker = false;
 		_stopLoopbackIpc();
 		try {
 			await audio.resume();
 			await audio.connectDevice(device.deviceId);
-			currentDeviceId = device.deviceId;
+			audioSourceState.currentDeviceId = device.deviceId;
 			sourceLabel = device.label || device.deviceId;
 			sync?.sendSource(device.deviceId);
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	async function connectLoopback(device: {id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number}) {
 		if (!audio) return;
-		sourceError = '';
+		runStatusState.sourceError = '';
 		showDevicePicker = false;
 		_stopLoopbackIpc();
 		try {
@@ -1198,25 +1176,25 @@
 			});
 			const res = await window.electronAPI!.startLoopback(device.id);
 			if (!res.ok) throw new Error(res.error ?? 'loopback start failed');
-			currentLoopbackDeviceId = device.id;
-			currentDeviceId = '';
+			audioSourceState.currentLoopbackDeviceId = device.id;
+			audioSourceState.currentDeviceId = '';
 			sourceLabel = device.name;
 			sync?.sendLoopback(device.id);
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
 	async function connectFile() {
 		if (!audio || !audioEl) return;
-		sourceError = '';
+		runStatusState.sourceError = '';
 		try {
 			await audio.resume();
 			audio.connectMediaElement(audioEl);
 			audioEl.play();
 			sourceLabel = 'file';
 		} catch (e) {
-			sourceError = e instanceof Error ? e.message : String(e);
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
@@ -1224,7 +1202,7 @@
 		const file = (e.target as HTMLInputElement).files?.[0];
 		if (!file || !audioEl) return;
 		audioEl.src = URL.createObjectURL(file);
-		if (status === 'running') connectFile();
+		if (runStatusState.status === 'running') connectFile();
 	}
 
 	async function selectPreset(name: string) {
@@ -1246,7 +1224,7 @@
 		// Pulse overlay beat-reactive
 		beat = true;
 		setTimeout(() => { beat = false; }, 80);
-		sync?.sendBeat(clock.bpm || detectedBpm);
+		sync?.sendBeat(clock.bpm || audioSourceState.detectedBpm);
 
 		onVideoBeat();
 
@@ -1347,32 +1325,32 @@
 		const avg = intervals.reduce((s, v) => s + v, 0) / intervals.length;
 		const bpm = Math.round(60000 / avg);
 		if (bpm < 40 || bpm > 300) return;
-		manualBpm = bpm;
+		audioSourceState.manualBpm = bpm;
 		clock.setBpm(bpm);
 		clock.pulse();
 	}
 
 	function clearManualBpm() {
-		manualBpm = 0;
+		audioSourceState.manualBpm = 0;
 		tapTimes = [];
 		clock.setBpm(0);
 	}
 
 	async function toggleMidi() {
-		if (midiConnected) {
+		if (midiConnectionState.connected) {
 			midi?.destroy();
 			midi = null;
-			midiConnected = false;
-			midiDeviceNames = [];
+			midiConnectionState.connected = false;
+			midiConnectionState.deviceNames = [];
 			learningAction = null;
-			midiClockBpm = 0;
+			midiConnectionState.clockBpm = 0;
 			return;
 		}
 		try {
 			midi = new MidiEngine();
 			await midi.connect();
-			midiConnected = true;
-			midiDeviceNames = midi.deviceNames;
+			midiConnectionState.connected = true;
+			midiConnectionState.deviceNames = midi.deviceNames;
 			midi.onOutputReconnect(() => pushLedStates());
 			pushLedStates(); // initial LED state at connection time
 
@@ -1405,7 +1383,7 @@
 						takenOver.add(key);
 					}
 
-					if (status === 'running') {
+					if (runStatusState.status === 'running') {
 						registry.dispatch(action, value01, commandCtx);
 						// Confirmation flash — excluded for commands with persistent state
 						// (strobe-toggle, playlist-toggle-*): without this guard, the setTimeout
@@ -1438,7 +1416,7 @@
 					const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
 					const bpm = Math.round(60000 / (avg * 24) * 10) / 10;
 					if (bpm >= 40 && bpm <= 300) {
-						midiClockBpm = bpm;
+						midiConnectionState.clockBpm = bpm;
 						clock.setBpm(bpm);
 					}
 				}
@@ -1449,15 +1427,15 @@
 				// Inactivity timeout: MIDI clock stopped for 2s
 				if (_clockTimer !== null) clearTimeout(_clockTimer);
 				_clockTimer = setTimeout(() => {
-					midiClockBpm = 0;
+					midiConnectionState.clockBpm = 0;
 					_clockPulses = 0;
 					_clockTsRing = [];
 					_clockTimer = null;
 				}, 2000);
 			});
 		} catch (e) {
-			midiConnected = false;
-			sourceError = e instanceof Error ? e.message : String(e);
+			midiConnectionState.connected = false;
+			runStatusState.sourceError = e instanceof Error ? e.message : String(e);
 		}
 	}
 
@@ -1480,7 +1458,7 @@
 	}
 
 	function applyMidiAction(action: CommandId, value: number) {
-		if (status !== 'running') return;
+		if (runStatusState.status !== 'running') return;
 		registry.dispatch(action, value / 127, commandCtx);
 	}
 
@@ -1609,7 +1587,7 @@
 		beatSyncA = s.beatSyncA; beatSyncB = s.beatSyncB;
 		overlayState.queueEnabled = s.overlayQueueEnabled; overlayState.queueTrigger = s.overlayQueueTrigger;
 
-		if (status === 'running') {
+		if (runStatusState.status === 'running') {
 			await selectPresetForDeck('A', s.presetA);
 			await selectPresetForDeck('B', s.presetB);
 		} else {
@@ -1631,7 +1609,7 @@
 			sync?.sendPreset('A', busPresetA);
 			sync?.sendPreset('B', busPresetB);
 			sync?.sendCrossfader(crossfader);
-			if (currentDeviceId) sync?.sendSource(currentDeviceId);
+			if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
 		}, 800);
 		// Poll for output window closure to stop PCM capture and release resources.
 		if (outputCloseTimer !== null) clearInterval(outputCloseTimer);
@@ -1662,115 +1640,115 @@
 				sync?.sendPreset('A', busPresetA);
 				sync?.sendPreset('B', busPresetB);
 				sync?.sendCrossfader(crossfader);
-				if (currentDeviceId) sync?.sendSource(currentDeviceId);
+				if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
 			}, 800);
 		}
 	}
 
 	function onResize() {
-		if (status !== 'running') return;
+		if (runStatusState.status !== 'running') return;
 		for (let i = 0; i < 4; i++) {
 			const c = canvases[i];
 			if (c) manager.resize(i, c.clientWidth, c.clientHeight);
 		}
 		if (compositorCanvas) {
-			compositor?.resize(compositorCanvas.clientWidth, compositorCanvas.clientHeight, getQualitySettings(quality).pixelRatio);
+			compositor?.resize(compositorCanvas.clientWidth, compositorCanvas.clientHeight, getQualitySettings(perfState.quality).pixelRatio);
 		}
 	}
 
 	async function toggleNdi() {
-		ndiError = '';
+		electronFeaturesState.ndi.error = '';
 		const eAPI = window.electronAPI;
-		if (ndiActive) {
+		if (electronFeaturesState.ndi.active) {
 			await eAPI?.ndiStop();
-			ndiActive = false;
+			electronFeaturesState.ndi.active = false;
 		} else {
 			const w = window.screen.width;
 			const h = window.screen.height;
 			const res = await eAPI?.ndiStart('OpenDrop VJ', w, h);
-			if (res?.ok) ndiActive = true;
-			else ndiError = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
+			if (res?.ok) electronFeaturesState.ndi.active = true;
+			else electronFeaturesState.ndi.error = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
 		}
 	}
 
 	async function toggleV4l2() {
-		v4l2Error = '';
+		electronFeaturesState.v4l2.error = '';
 		const eAPI = window.electronAPI;
-		if (v4l2Active) {
+		if (electronFeaturesState.v4l2.active) {
 			await eAPI?.v4l2Stop();
-			v4l2Active = false;
+			electronFeaturesState.v4l2.active = false;
 		} else {
 			const res = await eAPI?.v4l2Start();
-			if (res?.ok) v4l2Active = true;
-			else v4l2Error = res?.error ?? 'Erreur v4l2 inconnue.';
+			if (res?.ok) electronFeaturesState.v4l2.active = true;
+			else electronFeaturesState.v4l2.error = res?.error ?? 'Erreur v4l2 inconnue.';
 		}
 	}
 
 	async function toggleSpout() {
-		spoutError = '';
+		electronFeaturesState.spout.error = '';
 		const eAPI = window.electronAPI;
-		if (spoutActive) {
+		if (electronFeaturesState.spout.active) {
 			await eAPI?.spoutStop();
-			spoutActive = false;
+			electronFeaturesState.spout.active = false;
 		} else {
 			const res = await eAPI?.spoutStart('OpenDrop VJ');
-			if (res?.ok) spoutActive = true;
-			else spoutError = res?.error ?? 'Spout indisponible.';
+			if (res?.ok) electronFeaturesState.spout.active = true;
+			else electronFeaturesState.spout.error = res?.error ?? 'Spout indisponible.';
 		}
 	}
 
 	async function toggleOsc() {
-		oscError = '';
+		electronFeaturesState.osc.error = '';
 		const eAPI = window.electronAPI;
-		if (oscActive) {
+		if (electronFeaturesState.osc.active) {
 			await eAPI?.stopOsc?.();
-			oscActive = false;
+			electronFeaturesState.osc.active = false;
 		} else {
-			const res = await eAPI?.startOsc?.(oscPort);
-			if (res?.ok) oscActive = true;
-			else oscError = res?.error ?? 'Erreur OSC.';
+			const res = await eAPI?.startOsc?.(electronFeaturesState.osc.port);
+			if (res?.ok) electronFeaturesState.osc.active = true;
+			else electronFeaturesState.osc.error = res?.error ?? 'Erreur OSC.';
 		}
 	}
 
 	async function toggleRemote() {
-		remoteError = '';
+		electronFeaturesState.remote.error = '';
 		const eAPI = window.electronAPI;
-		if (remoteActive) {
+		if (electronFeaturesState.remote.active) {
 			await eAPI?.stopRemote?.();
-			remoteActive = false;
-			remoteUrl = '';
+			electronFeaturesState.remote.active = false;
+			electronFeaturesState.remote.url = '';
 		} else {
 			const res = await eAPI?.startRemote?.();
 			if (res?.ok) {
-				remoteActive = true;
-				remoteUrl = `https://opendrop.kushie.dev/remote?host=${res.ip}&port=${res.port}&token=${res.token}`;
+				electronFeaturesState.remote.active = true;
+				electronFeaturesState.remote.url = `https://opendrop.kushie.dev/remote?host=${res.ip}&port=${res.port}&token=${res.token}`;
 			} else {
-				remoteError = res?.error ?? 'Erreur Remote.';
+				electronFeaturesState.remote.error = res?.error ?? 'Erreur Remote.';
 			}
 		}
 	}
 
 	async function toggleLink() {
-		linkError = '';
+		electronFeaturesState.link.error = '';
 		const eAPI = window.electronAPI;
-		if (linkActive) {
+		if (electronFeaturesState.link.active) {
 			await eAPI?.stopLink?.();
-			linkActive = false;
-			linkPeers = 0;
+			electronFeaturesState.link.active = false;
+			electronFeaturesState.link.peers = 0;
 		} else {
-			const res = await eAPI?.startLink?.(manualBpm || clock.bpm || 120);
+			const res = await eAPI?.startLink?.(audioSourceState.manualBpm || clock.bpm || 120);
 			if (res?.ok) {
-				linkActive = true;
+				electronFeaturesState.link.active = true;
 				if (res.tempo) clock.setBpm(res.tempo);
 			} else {
-				linkError = res?.error ?? 'Ableton Link non disponible.';
+				electronFeaturesState.link.error = res?.error ?? 'Ableton Link non disponible.';
 			}
 		}
 	}
 
 	async function startSlot(slot: number) {
-		if (!audio || status !== 'running') return;
-		const q = getQualitySettings(quality);
+		if (!audio || runStatusState.status !== 'running') return;
+		const q = getQualitySettings(perfState.quality);
 		const name = presets4[slot];
 		const presetData = name ? await loadPresetData(name) : null;
 		await manager.start(slot, audio.ctx, audio.gainNode, q, presetData);
@@ -1807,7 +1785,7 @@
 		const action = midiMappingState.keymap[e.key];
 		if (!action) return;
 		e.preventDefault();
-		if (status !== 'running') return;
+		if (runStatusState.status !== 'running') return;
 		registry.dispatch(action, 1, commandCtx);
 	}
 </script>
@@ -1819,13 +1797,13 @@
 {#snippet audioSection()}
   <SidebarAudio
     {sourceLabel}
-    {status}
+    status={runStatusState.status}
     {effectiveOS}
     {vuLevel}
-    {sourceError}
+    sourceError={runStatusState.sourceError}
     {showSystemAudioHelp}
     {showDevicePicker}
-    {audioDevices}
+    audioDevices={audioSourceState.devices}
     {outputDevices}
     {loopbackSupported}
     audioElHasSrc={!!audioEl?.src}
@@ -1876,31 +1854,31 @@
 {/snippet}
 {#snippet qualitySection()}
 	<SidebarQuality
-		{quality}
-		{targetFps}
-		{invisibleMode}
-		{status}
+		quality={perfState.quality}
+		targetFps={perfState.targetFps}
+		invisibleMode={perfState.invisibleMode}
+		status={runStatusState.status}
 		{fps}
-		onQualityChange={(q) => { quality = q; }}
-		onTargetFpsChange={(n) => { targetFps = n; }}
-		onInvisibleModeChange={(m) => { invisibleMode = m; }}
+		onQualityChange={(q) => { perfState.quality = q; }}
+		onTargetFpsChange={(n) => { perfState.targetFps = n; }}
+		onInvisibleModeChange={(m) => { perfState.invisibleMode = m; }}
 	/>
 {/snippet}
 {#snippet outputSection()}
 	<SidebarOutput
-		{status}
+		status={runStatusState.status}
 		{isElectron}
 		{outputOpen}
 		{displays}
 		{selectedDisplayId}
 		{showStreamPanel}
 		{platform}
-		{ndiActive}
-		{v4l2Active}
-		{spoutActive}
-		{ndiError}
-		{v4l2Error}
-		{spoutError}
+		ndiActive={electronFeaturesState.ndi.active}
+		v4l2Active={electronFeaturesState.v4l2.active}
+		spoutActive={electronFeaturesState.spout.active}
+		ndiError={electronFeaturesState.ndi.error}
+		v4l2Error={electronFeaturesState.v4l2.error}
+		spoutError={electronFeaturesState.spout.error}
 		onOpenOutput={openOutput}
 		onOpenOutputFullscreen={openOutputFullscreen}
 		onToggleStreamPanel={() => { showStreamPanel = !showStreamPanel; }}
@@ -1913,9 +1891,9 @@
 {#snippet midiSection()}
 	<SidebarMidi
 		{midiSupported}
-		{midiConnected}
-		{midiDeviceNames}
-		{midiClockBpm}
+		midiConnected={midiConnectionState.connected}
+		midiDeviceNames={midiConnectionState.deviceNames}
+		midiClockBpm={midiConnectionState.clockBpm}
 		{learningAction}
 		midiMappings={midiMappingState.midiMappings}
 		{registry}
@@ -2015,17 +1993,17 @@
 {#snippet electronSection()}
 	<SidebarElectron
 		{isElectron}
-		{oscActive}
-		{oscPort}
-		{oscError}
-		{remoteActive}
-		{remoteUrl}
-		{remoteError}
-		{linkActive}
-		{linkPeers}
-		{linkError}
+		oscActive={electronFeaturesState.osc.active}
+		oscPort={electronFeaturesState.osc.port}
+		oscError={electronFeaturesState.osc.error}
+		remoteActive={electronFeaturesState.remote.active}
+		remoteUrl={electronFeaturesState.remote.url}
+		remoteError={electronFeaturesState.remote.error}
+		linkActive={electronFeaturesState.link.active}
+		linkPeers={electronFeaturesState.link.peers}
+		linkError={electronFeaturesState.link.error}
 		onToggleOsc={toggleOsc}
-		onOscPortChange={(port) => { oscPort = port; }}
+		onOscPortChange={(port) => { electronFeaturesState.osc.port = port; }}
 		onToggleRemote={toggleRemote}
 		onToggleLink={toggleLink}
 	/>
@@ -2067,7 +2045,7 @@
 		<div class="strobe-flash" style="background:{strobeState.color};opacity:{strobeState.intensity}"></div>
 	{/if}
 
-	{#if status === 'idle' && !pendingSharedSet}
+	{#if runStatusState.status === 'idle' && !pendingSharedSet}
 		<div class="overlay">
 			<h1 class="logo">OpenDrop</h1>
 			<p class="tagline">Milkdrop visualizer — web-first</p>
@@ -2075,10 +2053,10 @@
 		</div>
 	{/if}
 
-	{#if status === 'error'}
+	{#if runStatusState.status === 'error'}
 		<div class="overlay error">
-			<p>⚠ {errorMsg}</p>
-			<button class="btn-secondary" onclick={() => { status = 'idle'; errorMsg = ''; }}>Retry</button>
+			<p>⚠ {runStatusState.errorMsg}</p>
+			<button class="btn-secondary" onclick={() => { runStatusState.status = 'idle'; runStatusState.errorMsg = ''; }}>Retry</button>
 		</div>
 	{/if}
 </div>
@@ -2093,13 +2071,13 @@
 		<!-- Audio source -->
 		<SidebarAudio
 			{sourceLabel}
-			{status}
+			status={runStatusState.status}
 			{effectiveOS}
 			{vuLevel}
-			{sourceError}
+			sourceError={runStatusState.sourceError}
 			{showSystemAudioHelp}
 			{showDevicePicker}
-			{audioDevices}
+			audioDevices={audioSourceState.devices}
 			{outputDevices}
 			{loopbackSupported}
 			audioElHasSrc={!!audioEl?.src}
@@ -2164,13 +2142,13 @@
 			{beatsPerChange}
 			{beatTriggerA}
 			{beatTriggerB}
-			{detectedBpm}
-			{manualBpm}
+			detectedBpm={audioSourceState.detectedBpm}
+			manualBpm={audioSourceState.manualBpm}
 			playlistAItems={playlistState.aItems}
 			playlistBItems={playlistState.bItems}
 			playlistAPlaying={playlistState.aPlaying}
 			playlistBPlaying={playlistState.bPlaying}
-			audioRunning={status === 'running'}
+			audioRunning={runStatusState.status === 'running'}
 			{presetA}
 			{presetB}
 			{lockA}

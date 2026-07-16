@@ -38,6 +38,9 @@
 	import { shareSetState } from '$lib/engine/share-set-store.svelte.js';
 	import { startVisualizer as startVisualizerAction } from '$lib/engine/visualizer-startup.js';
 	import {
+		openOutputFullscreen as openOutputFullscreenAction, onResize as onResizeAction,
+	} from '$lib/engine/output-window-actions.js';
+	import {
 		onBeat as onBeatAction, toggleBeatSync as toggleBeatSyncAction, tapTempo as tapTempoAction, clearManualBpm as clearManualBpmAction,
 		resetAutoXfadeCount,
 	} from '$lib/engine/beat-tempo-actions.js';
@@ -1178,35 +1181,12 @@
 		}, 1500);
 	}
 
-	async function openOutputFullscreen() {
-		if (!isElectron) {
-			// Web fallback: fullscreen the visualizer area
-			const el = document.querySelector('.visualizer-wrap') as HTMLElement | null;
-			el?.requestFullscreen?.();
-			return;
-		}
-		const res = await window.electronAPI!.openOutputOnDisplay(selectedDisplayId);
-		if (res?.ok) {
-			outputOpen = true;
-			// Push current state after the window loads
-			setTimeout(() => {
-				sync?.sendPreset('A', busPresetA);
-				sync?.sendPreset('B', busPresetB);
-				sync?.sendCrossfader(deckState.crossfader);
-				if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
-			}, 800);
-		}
+	// openOutputFullscreen/onResize moved into output-window-actions.ts.
+	function openOutputFullscreen(): Promise<void> {
+		return openOutputFullscreenAction(isElectron, selectedDisplayId, sync, busPresetA, busPresetB, (v) => { outputOpen = v; });
 	}
-
-	function onResize() {
-		if (runStatusState.status !== 'running') return;
-		for (let i = 0; i < 4; i++) {
-			const c = canvases[i];
-			if (c) manager.resize(i, c.clientWidth, c.clientHeight);
-		}
-		if (compositorCanvas) {
-			compositor?.resize(compositorCanvas.clientWidth, compositorCanvas.clientHeight, getQualitySettings(perfState.quality).pixelRatio);
-		}
+	function onResize(): void {
+		onResizeAction(canvases, compositorCanvas, manager, compositor);
 	}
 
 	// toggleNdi/V4l2/Spout/Osc/Remote/Link — moved into electron-features-actions.ts

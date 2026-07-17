@@ -3,6 +3,9 @@ node_modules
 # Git worktrees (isolated implementation workspaces)
 /.worktrees
 
+# Subagent-driven-development scratch (progress ledger, task briefs, review packages)
+/.superpowers
+
 # Presets générés (lancé par pnpm presets:build ou pnpm build)
 /static/presets
 

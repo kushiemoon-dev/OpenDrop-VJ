@@ -21,6 +21,9 @@ declare global {
 			ndiReceiveStart: (name: string, urlAddress: string) => Promise<{ ok: boolean; error?: string }>;
 			ndiReceiveStop: () => Promise<{ ok: boolean }>;
 			onNdiFrame: (cb: (frame: { width: number; height: number; lineStrideBytes: number; data: Uint8Array<ArrayBuffer> }) => void) => () => void;
+			ndiDeckStart: (slot: number, name: string) => Promise<{ ok: boolean; error?: string }>;
+			ndiDeckStop: (slot: number) => Promise<{ ok: boolean }>;
+			sendDeckFrame: (slot: number, width: number, height: number, buffer: ArrayBuffer) => void;
 			v4l2Start: () => Promise<{ ok: boolean; error?: string }>;
 			v4l2Stop: () => Promise<{ ok: boolean }>;
 			spoutStart: (name: string) => Promise<{ ok: boolean; error?: string }>;

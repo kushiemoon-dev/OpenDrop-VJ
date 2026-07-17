@@ -6,7 +6,7 @@
  */
 
 import { chatPollState } from './chat-poll-store.svelte.js';
-import { createPoll, castVote, resolveWinner, parseVote, type PollState } from './chat-poll-engine.js';
+import { createPoll, castVote, resolveWinner, parseVote, tally, type PollState } from './chat-poll-engine.js';
 
 export function namespacedVoterId(platform: 'twitch' | 'kick', userId: string): string {
 	return `${platform}:${userId}`;
@@ -54,13 +54,24 @@ export function registerChatMessageHandler(): void {
 		const optionIndex = parseVote(msg.content, currentPoll.optionCount);
 		if (optionIndex === null) return;
 		currentPoll = castVote(currentPoll, namespacedVoterId(msg.platform, msg.userId), optionIndex);
+		if (chatPollState.poll) chatPollState.poll.tally = tally(currentPoll);
 	});
 }
 
+// Re-entrancy guard (Task 12 review carryover): `currentPoll` is only ever non-null
+// while a poll is running (resolvePoll() always clears it back to null on resolution).
+// Without this, a second startPoll() call while one is running would overwrite
+// `currentPoll`/`chatPollState.poll` and start a second, independent tick() chain —
+// both chains decrementing the same shared `secondsLeft`, so the first chain to reach
+// zero resolves and clears `currentPoll`, then the second chain's resolvePoll() fires
+// with `currentPoll` already null, silently resetting the just-set winnerIndex back to
+// null. A no-op here (same shape as connectKick's `kickConnectPending` above) closes
+// that window entirely — a second call while running never gets to touch state.
 export function startPoll(options: string[], durationSeconds: number, onDone: (winnerIndex: number | null) => void): void {
+	if (currentPoll) return;
 	currentPoll = createPoll(options.length);
 	onResolved = onDone;
-	chatPollState.poll = { status: 'running', options, secondsLeft: durationSeconds, winnerIndex: null };
+	chatPollState.poll = { status: 'running', options, secondsLeft: durationSeconds, winnerIndex: null, tally: tally(currentPoll) };
 
 	const tick = () => {
 		if (!chatPollState.poll) return;

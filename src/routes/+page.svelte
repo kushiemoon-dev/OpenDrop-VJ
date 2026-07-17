@@ -36,6 +36,7 @@
 	import { loadFavColors } from '$lib/presets/favorites.js';
 	import { frontSlotIndex } from '$lib/engine/front-slot.js';
 	import { registerChatMessageHandler, startPoll } from '$lib/engine/chat-poll-actions.js';
+	import { chatPollState } from '$lib/engine/chat-poll-store.svelte.js';
 	import {
 		selectPresetForDeck as selectPresetForDeckAction, buildCurrentSharedSet as buildCurrentSharedSetAction,
 		copyShareLink as copyShareLinkAction, applyPendingSharedSet as applyPendingSharedSetAction,
@@ -1273,12 +1274,27 @@
 	registerChatMessageHandler();
 
 	function startPresetVote(): void {
-		// Frame 3 candidate presets from the active deck's playlist/favorites — exact source
-		// of the 3 option preset names is a UI decision for Task 13, not fabricated here.
-		const options = ['<preset A name>', '<preset B name>', '<preset C name>'];
-		const targetSlot = frontSlotIndex(opacities);
+		// 3 candidate presets: favorites first (curated by the user), falling back to the
+		// full library if fewer than 2 favorites exist yet.
+		const favoriteNames = Object.keys(loadFavColors());
+		const pool = (favoriteNames.length >= 2 ? favoriteNames : presetList.map((p) => p.name))
+			.filter((name, i, arr) => arr.indexOf(name) === i);
+		if (pool.length < 2) return; // not enough distinct presets to run a meaningful vote
+
+		const remaining = [...pool];
+		const options: string[] = [];
+		while (options.length < 3 && remaining.length > 0) {
+			const idx = Math.floor(Math.random() * remaining.length);
+			options.push(remaining.splice(idx, 1)[0]);
+		}
+
 		startPoll(options, 30, (winnerIndex) => {
 			if (winnerIndex === null) return; // nobody voted — leave the current preset as-is
+			// Recomputed here, not before startPoll: the front slot can change mid-poll
+			// (user swaps decks) — using the value captured at poll-start would load the
+			// winner onto a slot that's no longer front by the time the poll resolves
+			// (Task 12 review carryover).
+			const targetSlot = frontSlotIndex(opacities);
 			// Reuse Task 8's slot-parameterized selectPreset — do not add a second preset-load path.
 			selectPresetAction(targetSlot, options[winnerIndex], manager, sync, primaryPreset);
 		});
@@ -1407,6 +1423,7 @@
 		slots={ndiDeckState.slots}
 		slotLabels={['A', 'B', 'C', 'D']}
 		{toggleNdiDeck}
+		onStartPoll={startPresetVote}
 	/>
 {/snippet}
 {#snippet midiSection()}
@@ -1560,7 +1577,7 @@
 	<!-- Composited render (blend + lumaKey + colorKey per slot) -->
 	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoState.enabled ? 'screen' : 'normal'}></canvas>
 	<!-- Overlay sprites -->
-	<OverlayLayer overlays={overlayState.overlays} beat={beatSyncState.beat} visibleIds={overlayVisibleIds} />
+	<OverlayLayer overlays={overlayState.overlays} beat={beatSyncState.beat} visibleIds={overlayVisibleIds} poll={chatPollState.poll} />
 	<!-- Strobe flash — top z-index, pointer-events none -->
 	{#if strobeState.on && strobeState.flash}
 		<div class="strobe-flash" style="background:{strobeState.color};opacity:{strobeState.intensity}"></div>

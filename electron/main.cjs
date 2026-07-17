@@ -301,6 +301,54 @@ ipcMain.handle('link:set-tempo', async (_, { bpm }) => {
   catch (err) { return { ok: false, error: err.message }; }
 });
 
+// ── OBS WebSocket (bidirectional scene ⇄ deck/preset link) ─────────────────
+const OBSWebSocket = require('obs-websocket-js').default;
+const obs = new OBSWebSocket();
+let obsConnected = false;
+
+obs.on('ConnectionClosed', () => { obsConnected = false; });
+
+ipcMain.handle('obs:connect', async (_, { host, port }) => {
+  try {
+    const password = secretsStore.getSecret('obs-password') || undefined;
+    await obs.connect(`ws://${host}:${port}`, password);
+    obsConnected = true;
+    obs.on('CurrentProgramSceneChanged', (data) => {
+      BrowserWindow.getAllWindows().forEach((w) => {
+        if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName);
+      });
+    });
+    return { ok: true };
+  } catch (e) {
+    obsConnected = false;
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('obs:disconnect', async () => {
+  if (obsConnected) await obs.disconnect();
+  obsConnected = false;
+  return { ok: true };
+});
+
+ipcMain.handle('obs:get-scenes', async () => {
+  try {
+    const { scenes } = await obs.call('GetSceneList');
+    return { ok: true, scenes: scenes.map((s) => s.sceneName) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('obs:set-scene', async (_, sceneName) => {
+  try {
+    await obs.call('SetCurrentProgramScene', { sceneName });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // ── Relay BroadcastChannel messages between renderer processes ─────────────
 ipcMain.on('bc-post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {

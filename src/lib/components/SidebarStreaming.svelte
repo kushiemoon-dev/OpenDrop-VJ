@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { obsLinkState } from '$lib/engine/obs-link-store.svelte.js';
+	import { obsLinkState, saveObsConfig } from '$lib/engine/obs-link-store.svelte.js';
 	import { connectObs, disconnectObs } from '$lib/engine/obs-link-actions.js';
 	import { findTargetForScene, type MappingTarget } from '$lib/engine/obs-mapping.js';
 	import { FAV_COLORS, loadMoodLabels, saveMoodLabels } from '$lib/presets/favorites.js';
@@ -46,6 +46,12 @@
 		const rest = obsLinkState.mapping.filter((entry) => entry.sceneName !== sceneName);
 		const target = valueToTarget(value);
 		obsLinkState.mapping = target ? [...rest, { sceneName, target }] : rest;
+		saveObsConfig();
+	}
+
+	async function handleConnectObs(): Promise<void> {
+		await connectObs(obsHost, obsPort);
+		saveObsConfig();
 	}
 </script>
 
@@ -68,7 +74,7 @@
 		<div class="midi-row">
 			<input class="obs-input" type="text" bind:value={obsHost} placeholder="localhost" />
 			<input class="obs-input obs-input-port" type="number" bind:value={obsPort} placeholder="4455" />
-			<button class="btn-sm" onclick={() => connectObs(obsHost, obsPort)}>Connecter</button>
+			<button class="btn-sm" onclick={handleConnectObs}>Connecter</button>
 		</div>
 	{:else}
 		<button class="btn-sm" onclick={disconnectObs}>Déconnecter</button>

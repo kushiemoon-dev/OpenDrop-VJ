@@ -8,20 +8,70 @@
 
 	type NdiSlot = { active: boolean; error: string };
 
+	type PollSource = 'playlistA' | 'playlistB' | 'favorites';
+
 	interface Props {
 		slots: NdiSlot[];
 		slotLabels: string[];
 		toggleNdiDeck: (slot: number) => void;
+		pollSource: PollSource;
 		onStartPoll: () => void;
 	}
 
-	let { slots, slotLabels, toggleNdiDeck, onStartPoll }: Props = $props();
+	let { slots, slotLabels, toggleNdiDeck, pollSource = $bindable(), onStartPoll }: Props = $props();
 
 	let moodLabels = $state(loadMoodLabels());
 	let obsHost = $state(obsLinkState.host);
 	let obsPort = $state(obsLinkState.port);
 	let twitchChannel = $state('');
 	let kickChannel = $state('');
+
+	let twitchTokenInput = $state('');
+	let kickBearerTokenInput = $state('');
+	let kickXsrfTokenInput = $state('');
+	let kickCookiesInput = $state('');
+
+	let obsPasswordInput = $state('');
+	let hasObsPassword = $state(false);
+	let hasTwitchToken = $state(false);
+	let hasKickCreds = $state(false);
+
+	async function refreshSecretStatus(): Promise<void> {
+		hasObsPassword = (await window.electronAPI?.hasSecret('obs-password')) ?? false;
+		hasTwitchToken = (await window.electronAPI?.hasSecret('twitch-oauth-token')) ?? false;
+		const kickFields = await Promise.all([
+			window.electronAPI?.hasSecret('kick-bearer-token'),
+			window.electronAPI?.hasSecret('kick-xsrf-token'),
+			window.electronAPI?.hasSecret('kick-cookies'),
+		]);
+		hasKickCreds = kickFields.every(Boolean);
+	}
+	refreshSecretStatus();
+
+	async function saveObsPassword(): Promise<void> {
+		if (!obsPasswordInput) return;
+		await window.electronAPI?.setSecret('obs-password', obsPasswordInput);
+		obsPasswordInput = '';
+		await refreshSecretStatus();
+	}
+
+	async function saveTwitchToken(): Promise<void> {
+		if (!twitchTokenInput) return;
+		await window.electronAPI?.setSecret('twitch-oauth-token', twitchTokenInput);
+		twitchTokenInput = '';
+		await refreshSecretStatus();
+	}
+
+	async function saveKickCreds(): Promise<void> {
+		if (!kickBearerTokenInput || !kickXsrfTokenInput || !kickCookiesInput) return;
+		await window.electronAPI?.setSecret('kick-bearer-token', kickBearerTokenInput);
+		await window.electronAPI?.setSecret('kick-xsrf-token', kickXsrfTokenInput);
+		await window.electronAPI?.setSecret('kick-cookies', kickCookiesInput);
+		kickBearerTokenInput = '';
+		kickXsrfTokenInput = '';
+		kickCookiesInput = '';
+		await refreshSecretStatus();
+	}
 
 	function updateMoodLabel(colorIndex: number, label: string): void {
 		moodLabels = { ...moodLabels, [colorIndex]: label };
@@ -74,22 +124,27 @@
 		<div class="midi-row">
 			<input class="obs-input" type="text" bind:value={obsHost} placeholder="localhost" />
 			<input class="obs-input obs-input-port" type="number" bind:value={obsPort} placeholder="4455" />
-			<button class="btn-sm" onclick={handleConnectObs}>Connecter</button>
+			<button class="btn-sm" onclick={handleConnectObs}>Connect</button>
+		</div>
+		<div class="midi-row">
+			<input class="obs-input" type="password" bind:value={obsPasswordInput} placeholder="OBS WebSocket password (if any)" />
+			<button class="btn-sm" onclick={saveObsPassword}>Save</button>
+			{#if hasObsPassword}<span class="secret-ok" title="Password saved">✓</span>{/if}
 		</div>
 		<p class="hint">
-			Si l'instance OBS a un mot de passe (Outils → Paramètres du serveur WebSocket
-			dans OBS, activé par défaut depuis OBS 28), enregistre-le avant de connecter,
-			dans la console devtools de OpenDrop : <code>window.electronAPI.setSecret('obs-password', '...')</code>.
+			If the OBS instance has a password (Tools → WebSocket Server Settings in
+			OBS, enabled by default since OBS 28), paste it above and Save before
+			connecting.
 		</p>
 	{:else}
-		<button class="btn-sm" onclick={disconnectObs}>Déconnecter</button>
+		<button class="btn-sm" onclick={disconnectObs}>Disconnect</button>
 	{/if}
 	{#if obsLinkState.error}<div class="ndi-error">{obsLinkState.error}</div>{/if}
 </div>
 
 {#if obsLinkState.connected}
 	<div class="controls-section">
-		<span class="label">Mapping scène → slot/mood</span>
+		<span class="label">Scene → slot/mood mapping</span>
 		{#each obsLinkState.scenes as scene (scene)}
 			<div class="midi-row">
 				<span class="obs-scene-label" title={scene}>{scene}</span>
@@ -114,7 +169,7 @@
 	</div>
 
 	<div class="controls-section">
-		<span class="label">Labels des moods</span>
+		<span class="label">Mood labels</span>
 		{#each FAV_COLORS.slice(1) as color, i (i)}
 			<div class="midi-row">
 				<span class="mood-swatch" style:background={color}></span>
@@ -135,34 +190,55 @@
 	<div class="midi-row">
 		<input class="obs-input" type="text" bind:value={twitchChannel} placeholder="Twitch channel" />
 		<button class="btn-sm" class:active={chatPollState.twitch.connected} onclick={() => connectTwitch(twitchChannel)}>
-			{chatPollState.twitch.connected ? 'Connecté' : 'Connecter'}
+			{chatPollState.twitch.connected ? 'Connected' : 'Connect'}
 		</button>
 	</div>
 	{#if chatPollState.twitch.error}<div class="ndi-error">{chatPollState.twitch.error}</div>{/if}
 
+	<div class="midi-row">
+		<input class="obs-input" type="password" bind:value={twitchTokenInput} placeholder="Twitch OAuth token (chat:read)" />
+		<button class="btn-sm" onclick={saveTwitchToken}>Save</button>
+		{#if hasTwitchToken}<span class="secret-ok" title="Token saved">✓</span>{/if}
+	</div>
 	<p class="hint">
-		Twitch nécessite un token OAuth avec le scope <code>chat:read</code> — génère-le
-		via twitchtokengenerator.com ou la console développeur Twitch, puis dans la console
-		devtools de OpenDrop enregistre-le : <code>window.electronAPI.setSecret('twitch-oauth-token', '...')</code>.
+		Generate a token with the <code>chat:read</code> scope via twitchtokengenerator.com
+		or the Twitch developer console, paste it above, then Save.
 	</p>
 
 	<div class="midi-row">
 		<input class="obs-input" type="text" bind:value={kickChannel} placeholder="Kick channel" />
 		<button class="btn-sm" class:active={chatPollState.kick.connected} onclick={() => connectKick(kickChannel)}>
-			{chatPollState.kick.connected ? 'Connecté' : 'Connecter'}
+			{chatPollState.kick.connected ? 'Connected' : 'Connect'}
 		</button>
 	</div>
 	{#if chatPollState.kick.error}<div class="ndi-error">{chatPollState.kick.error}</div>{/if}
 
+	<div class="midi-row">
+		<input class="obs-input" type="password" bind:value={kickBearerTokenInput} placeholder="Kick bearer token" />
+	</div>
+	<div class="midi-row">
+		<input class="obs-input" type="password" bind:value={kickXsrfTokenInput} placeholder="Kick XSRF token" />
+	</div>
+	<div class="midi-row">
+		<input class="obs-input" type="password" bind:value={kickCookiesInput} placeholder="Kick cookies" />
+		<button class="btn-sm" onclick={saveKickCreds}>Save</button>
+		{#if hasKickCreds}<span class="secret-ok" title="Credentials saved">✓</span>{/if}
+	</div>
 	<p class="hint">
-		Kick n'a pas d'API publique de lecture du chat — connecte-toi à kick.com dans un
-		navigateur, ouvre les devtools (onglet Application → Cookies pour le cookie de
-		session, Network pour le bearer token et le token XSRF), puis dans la console de
-		OpenDrop enregistre les trois valeurs : <code>window.electronAPI.setSecret('kick-bearer-token', '...')</code>,
-		<code>window.electronAPI.setSecret('kick-xsrf-token', '...')</code> et
-		<code>window.electronAPI.setSecret('kick-cookies', '...')</code>. Méthode non
-		officielle, peut cesser de fonctionner sans préavis.
+		Kick has no public chat-read API — log into kick.com in a browser, open devtools
+		(Application tab → Cookies for the session cookie, Network for the bearer token
+		and the XSRF token), paste the three values above, then Save. Unofficial method,
+		may stop working without notice.
 	</p>
+
+	<div class="midi-row">
+		<span class="midi-label">Vote from</span>
+		<select class="obs-select" bind:value={pollSource} disabled={chatPollState.poll?.status === 'running'}>
+			<option value="favorites">Favorites</option>
+			<option value="playlistA">Playlist A</option>
+			<option value="playlistB">Playlist B</option>
+		</select>
+	</div>
 
 	<button
 		class="btn-sm poll-trigger"
@@ -170,8 +246,8 @@
 		disabled={chatPollState.poll?.status === 'running'}
 	>
 		{chatPollState.poll?.status === 'running'
-			? `Vote en cours… ${chatPollState.poll.secondsLeft}s`
-			: 'Lancer un vote de preset'}
+			? `Vote running… ${chatPollState.poll.secondsLeft}s`
+			: 'Start a preset vote'}
 	</button>
 </div>
 
@@ -217,6 +293,12 @@
 		font-size: 10px;
 		color: var(--error);
 		margin-top: 2px;
+	}
+
+	.secret-ok {
+		color: var(--accent);
+		font-size: 12px;
+		flex-shrink: 0;
 	}
 
 	.obs-input {

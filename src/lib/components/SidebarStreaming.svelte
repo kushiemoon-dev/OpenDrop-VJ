@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { obsLinkState } from '$lib/engine/obs-link-store.svelte.js';
+	import { connectObs, disconnectObs } from '$lib/engine/obs-link-actions.js';
+	import { findTargetForScene, type MappingTarget } from '$lib/engine/obs-mapping.js';
+	import { FAV_COLORS, loadMoodLabels, saveMoodLabels } from '$lib/presets/favorites.js';
+
 	type NdiSlot = { active: boolean; error: string };
 
 	interface Props {
@@ -8,6 +13,35 @@
 	}
 
 	let { slots, slotLabels, toggleNdiDeck }: Props = $props();
+
+	let moodLabels = $state(loadMoodLabels());
+	let obsHost = $state(obsLinkState.host);
+	let obsPort = $state(obsLinkState.port);
+
+	function updateMoodLabel(colorIndex: number, label: string): void {
+		moodLabels = { ...moodLabels, [colorIndex]: label };
+		saveMoodLabels(moodLabels);
+	}
+
+	function targetToValue(target: MappingTarget | undefined): string {
+		if (!target) return '';
+		return target.type === 'slot' ? `slot:${target.slot}` : `mood:${target.colorIndex}`;
+	}
+
+	function valueToTarget(value: string): MappingTarget | null {
+		if (!value) return null;
+		const [type, n] = value.split(':');
+		const num = Number(n);
+		if (type === 'slot') return { type: 'slot', slot: num as 0 | 1 | 2 | 3 };
+		if (type === 'mood') return { type: 'mood', colorIndex: num as 1 | 2 | 3 | 4 | 5 };
+		return null;
+	}
+
+	function updateSceneMapping(sceneName: string, value: string): void {
+		const rest = obsLinkState.mapping.filter((entry) => entry.sceneName !== sceneName);
+		const target = valueToTarget(value);
+		obsLinkState.mapping = target ? [...rest, { sceneName, target }] : rest;
+	}
 </script>
 
 <div class="controls-section">
@@ -22,6 +56,63 @@
 		{#if slot.error}<div class="ndi-error">{slot.error}</div>{/if}
 	{/each}
 </div>
+
+<div class="controls-section">
+	<span class="label">OBS WebSocket</span>
+	{#if !obsLinkState.connected}
+		<div class="midi-row">
+			<input class="obs-input" type="text" bind:value={obsHost} placeholder="localhost" />
+			<input class="obs-input obs-input-port" type="number" bind:value={obsPort} placeholder="4455" />
+			<button class="btn-sm" onclick={() => connectObs(obsHost, obsPort)}>Connecter</button>
+		</div>
+	{:else}
+		<button class="btn-sm" onclick={disconnectObs}>Déconnecter</button>
+	{/if}
+	{#if obsLinkState.error}<div class="ndi-error">{obsLinkState.error}</div>{/if}
+</div>
+
+{#if obsLinkState.connected}
+	<div class="controls-section">
+		<span class="label">Mapping scène → slot/mood</span>
+		{#each obsLinkState.scenes as scene (scene)}
+			<div class="midi-row">
+				<span class="obs-scene-label" title={scene}>{scene}</span>
+				<select
+					class="obs-select"
+					value={targetToValue(findTargetForScene(obsLinkState.mapping, scene))}
+					onchange={(e) => updateSceneMapping(scene, e.currentTarget.value)}
+				>
+					<option value="">—</option>
+					<option value="slot:0">Slot A</option>
+					<option value="slot:1">Slot B</option>
+					<option value="slot:2">Slot C</option>
+					<option value="slot:3">Slot D</option>
+					<option value="mood:1">Mood 1</option>
+					<option value="mood:2">Mood 2</option>
+					<option value="mood:3">Mood 3</option>
+					<option value="mood:4">Mood 4</option>
+					<option value="mood:5">Mood 5</option>
+				</select>
+			</div>
+		{/each}
+	</div>
+
+	<div class="controls-section">
+		<span class="label">Labels des moods</span>
+		{#each FAV_COLORS.slice(1) as color, i (i)}
+			<div class="midi-row">
+				<span class="mood-swatch" style:background={color}></span>
+				<input
+					class="obs-input"
+					type="text"
+					value={moodLabels[i + 1] ?? ''}
+					oninput={(e) => updateMoodLabel(i + 1, e.currentTarget.value)}
+					placeholder={`Mood ${i + 1}`}
+				/>
+			</div>
+		{/each}
+	</div>
+{/if}
 
 <style>
 	.controls-section {
@@ -57,5 +148,33 @@
 		font-size: 10px;
 		color: var(--error);
 		margin-top: 2px;
+	}
+
+	.obs-input {
+		flex: 1; min-width: 0;
+		background: var(--bg-elevated); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
+		padding: 0.25rem 0.5rem; font-size: 11px;
+	}
+
+	.obs-input:focus { outline: none; border-color: var(--accent); }
+
+	.obs-input-port { flex: 0 0 70px; }
+
+	.obs-select {
+		flex: 1;
+		background: var(--bg-elevated); color: var(--text-secondary);
+		border: 1px solid var(--border); border-radius: var(--r-sm);
+		padding: 0.25rem 0.4rem; font-size: 11px; cursor: pointer;
+	}
+
+	.obs-scene-label {
+		font-size: 10px; color: var(--text-muted); flex: 1;
+		white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+	}
+
+	.mood-swatch {
+		width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+		border: 1px solid var(--border);
 	}
 </style>

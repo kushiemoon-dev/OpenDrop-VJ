@@ -403,21 +403,23 @@ ipcMain.handle('ndi-deck:stop', async (_, { slot }) => {
 ipcMain.on('deckframe:post', (_, { slot, width, height, buffer }) => {
   const sender = ndiDeckSenders[slot];
   if (!sender || !width || !height) return;
-  sender.video({
-    xres: width,
-    yres: height,
-    frameRateN: 30000,
-    frameRateD: 1001,
-    pictureAspectRatio: width / height,
-    type: grandiose.FRAME_TYPE_VIDEO,
-    lineStrideBytes: width * 4,
-    // RGBA to match getImageData()'s native byte order (see ndi-deck-actions.ts) — avoids a
-    // per-frame channel swap. If Task 4's live validation shows swapped R/B channels on the
-    // NDI receiver, switch this to grandiose.FOURCC_BGRA and swap channels before sending.
-    fourCC: grandiose.FOURCC_RGBA,
-    data: Buffer.from(buffer),
-    timestamp: BigInt(0),
-  }).catch(() => {});
+  try {
+    sender.video({
+      xres: width,
+      yres: height,
+      frameRateN: 30000,
+      frameRateD: 1001,
+      pictureAspectRatio: width / height,
+      type: grandiose.FRAME_TYPE_VIDEO,
+      lineStrideBytes: width * 4,
+      // RGBA to match getImageData()'s native byte order (see ndi-deck-actions.ts) — avoids a
+      // per-frame channel swap. If Task 4's live validation shows swapped R/B channels on the
+      // NDI receiver, switch this to grandiose.FOURCC_BGRA and swap channels before sending.
+      fourCC: grandiose.FOURCC_RGBA,
+      data: Buffer.from(buffer),
+      timestamp: BigInt(0),
+    }).catch(() => {});
+  } catch { /* skip frame on error */ }
 });
 
 // ── NDI receive (NDI source → video layer, both windows) ───────────────────

@@ -72,6 +72,7 @@ export type SyncMessage =
 	| { type: 'time'; slot: number; params: DeckTimeParams }
 	| { type: 'qvars'; slot: number; params: DeckQVarParams }
 	| { type: 'overlays'; list: Overlay[] }
+	| { type: 'poll'; poll: { status: 'running' | 'resolved'; options: string[]; secondsLeft: number; winnerIndex: number | null; tally: number[] } | null }
 	| { type: 'overlay-queue-index'; index: number }
 	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
 	| { type: 'beat'; bpm: number }
@@ -163,6 +164,16 @@ export class MainSync {
 
 	sendOverlayQueueIndex(index: number) {
 		sendMsg(this.bc, { type: 'overlay-queue-index', index });
+	}
+
+	sendPoll(poll: { status: 'running' | 'resolved'; options: string[]; secondsLeft: number; winnerIndex: number | null; tally: number[] } | null) {
+		// Same DataCloneError class of bug as sendOverlays/sendQVars: chatPollState.poll's
+		// `options`/`tally` arrays are Svelte 5 $state-proxied — a raw `{ ...poll }` would
+		// keep them by reference and throw on postMessage. Rebuild both explicitly.
+		sendMsg(this.bc, {
+			type: 'poll',
+			poll: poll ? { ...poll, options: [...poll.options], tally: [...poll.tally] } : null,
+		});
 	}
 
 	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {

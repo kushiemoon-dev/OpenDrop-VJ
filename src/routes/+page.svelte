@@ -32,6 +32,9 @@
 	import { deckState } from '$lib/engine/deck-store.svelte.js';
 	import { beatSyncState, updateBeatTriggerA, updateBeatTriggerB } from '$lib/engine/beat-sync-store.svelte.js';
 	import { selectPreset as selectPresetAction, loadImportedMilkPreset as loadImportedMilkPresetAction } from '$lib/engine/deck-preset-actions.js';
+	import { watchFrontSlotForObs, onIncomingObsTarget } from '$lib/engine/obs-link-actions.js';
+	import { loadFavColors } from '$lib/presets/favorites.js';
+	import { frontSlotIndex } from '$lib/engine/front-slot.js';
 	import {
 		selectPresetForDeck as selectPresetForDeckAction, buildCurrentSharedSet as buildCurrentSharedSetAction,
 		copyShareLink as copyShareLinkAction, applyPendingSharedSet as applyPendingSharedSetAction,
@@ -1005,7 +1008,7 @@
 
 	// selectPreset/loadImportedMilkPreset moved into deck-preset-actions.ts.
 	function selectPreset(name: string): Promise<void> {
-		return selectPresetAction(name, manager, sync, primaryPreset);
+		return selectPresetAction(deckState.activeSlot, name, manager, sync, primaryPreset);
 	}
 
 	// onBeat/toggleBeatSync/tapTempo/clearManualBpm moved into beat-tempo-actions.ts.
@@ -1237,6 +1240,33 @@
 	function isRunning(slot: number): boolean {
 		return manager.isRunning(slot);
 	}
+
+	// — OBS link (Task 8): sense-1 (OpenDrop → OBS) watcher + sense-2 (OBS → OpenDrop) handler —
+	$effect(() => {
+		watchFrontSlotForObs(opacities, presets4, loadFavColors());
+	});
+
+	/** Assigns `slot` to whichever bus currently has the dominant crossfader gain — only
+	 * this slot's bus entry changes, no other slot or the crossfader position is touched. */
+	function bringSlotToFront(slot: number): void {
+		deckState.deckBus[slot] = deckState.crossfader < 0.5 ? 'A' : 'B';
+		deckState.slotEpoch++;
+	}
+
+	onIncomingObsTarget((target) => {
+		if (target.type === 'slot') {
+			bringSlotToFront(target.slot);
+		} else {
+			// Mood target: load a favorite preset tagged with this color onto the front slot.
+			// Picking WHICH favorite preset among possibly several sharing that color is a
+			// UI-level decision (e.g. cycle, or most-recently-tagged) — resolve it here by
+			// reading loadFavColors() for entries matching target.colorIndex; if more than
+			// one preset shares the color, pick the first by insertion order for now.
+			const favColors = loadFavColors();
+			const presetName = Object.keys(favColors).find((name) => favColors[name] === target.colorIndex);
+			if (presetName) selectPresetAction(frontSlotIndex(opacities), presetName, manager, sync, primaryPreset);
+		}
+	});
 
 	function onKeydown(e: KeyboardEvent) {
 		const tag = (e.target as HTMLElement).tagName;

@@ -24,11 +24,10 @@ function setSlotPreset(slot: number, name: string): void {
 }
 
 export async function selectPreset(
-	name: string, manager: DeckManager, sync: MainSync | null, primaryPreset: (bus: 'A' | 'B') => string,
+	slot: number, name: string, manager: DeckManager, sync: MainSync | null, primaryPreset: (bus: 'A' | 'B') => string,
 ): Promise<void> {
 	const d = await loadPresetData(name);
 	if (!d) return;
-	const slot = deckState.activeSlot;
 	setSlotPreset(slot, name);
 	manager.loadPreset(slot, d, deckState.transitionTime);
 	deckState.slotEpoch++;

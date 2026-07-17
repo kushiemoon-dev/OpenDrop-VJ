@@ -76,6 +76,11 @@
 			<input class="obs-input obs-input-port" type="number" bind:value={obsPort} placeholder="4455" />
 			<button class="btn-sm" onclick={handleConnectObs}>Connecter</button>
 		</div>
+		<p class="hint">
+			Si l'instance OBS a un mot de passe (Outils → Paramètres du serveur WebSocket
+			dans OBS, activé par défaut depuis OBS 28), enregistre-le avant de connecter,
+			dans la console devtools de OpenDrop : <code>window.electronAPI.setSecret('obs-password', '...')</code>.
+		</p>
 	{:else}
 		<button class="btn-sm" onclick={disconnectObs}>Déconnecter</button>
 	{/if}
@@ -134,6 +139,12 @@
 		</button>
 	</div>
 	{#if chatPollState.twitch.error}<div class="ndi-error">{chatPollState.twitch.error}</div>{/if}
+
+	<p class="hint">
+		Twitch nécessite un token OAuth avec le scope <code>chat:read</code> — génère-le
+		via twitchtokengenerator.com ou la console développeur Twitch, puis dans la console
+		devtools de OpenDrop enregistre-le : <code>window.electronAPI.setSecret('twitch-oauth-token', '...')</code>.
+	</p>
 
 	<div class="midi-row">
 		<input class="obs-input" type="text" bind:value={kickChannel} placeholder="Kick channel" />

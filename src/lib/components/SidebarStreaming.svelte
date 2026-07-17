@@ -3,6 +3,8 @@
 	import { connectObs, disconnectObs } from '$lib/engine/obs-link-actions.js';
 	import { findTargetForScene, type MappingTarget } from '$lib/engine/obs-mapping.js';
 	import { FAV_COLORS, loadMoodLabels, saveMoodLabels } from '$lib/presets/favorites.js';
+	import { chatPollState } from '$lib/engine/chat-poll-store.svelte.js';
+	import { connectTwitch, connectKick } from '$lib/engine/chat-poll-actions.js';
 
 	type NdiSlot = { active: boolean; error: string };
 
@@ -10,13 +12,16 @@
 		slots: NdiSlot[];
 		slotLabels: string[];
 		toggleNdiDeck: (slot: number) => void;
+		onStartPoll: () => void;
 	}
 
-	let { slots, slotLabels, toggleNdiDeck }: Props = $props();
+	let { slots, slotLabels, toggleNdiDeck, onStartPoll }: Props = $props();
 
 	let moodLabels = $state(loadMoodLabels());
 	let obsHost = $state(obsLinkState.host);
 	let obsPort = $state(obsLinkState.port);
+	let twitchChannel = $state('');
+	let kickChannel = $state('');
 
 	function updateMoodLabel(colorIndex: number, label: string): void {
 		moodLabels = { ...moodLabels, [colorIndex]: label };
@@ -114,6 +119,45 @@
 	</div>
 {/if}
 
+<div class="controls-section">
+	<span class="label">Chat poll (Twitch + Kick)</span>
+	<div class="midi-row">
+		<input class="obs-input" type="text" bind:value={twitchChannel} placeholder="Twitch channel" />
+		<button class="btn-sm" class:active={chatPollState.twitch.connected} onclick={() => connectTwitch(twitchChannel)}>
+			{chatPollState.twitch.connected ? 'Connecté' : 'Connecter'}
+		</button>
+	</div>
+	{#if chatPollState.twitch.error}<div class="ndi-error">{chatPollState.twitch.error}</div>{/if}
+
+	<div class="midi-row">
+		<input class="obs-input" type="text" bind:value={kickChannel} placeholder="Kick channel" />
+		<button class="btn-sm" class:active={chatPollState.kick.connected} onclick={() => connectKick(kickChannel)}>
+			{chatPollState.kick.connected ? 'Connecté' : 'Connecter'}
+		</button>
+	</div>
+	{#if chatPollState.kick.error}<div class="ndi-error">{chatPollState.kick.error}</div>{/if}
+
+	<p class="hint">
+		Kick n'a pas d'API publique de lecture du chat — connecte-toi à kick.com dans un
+		navigateur, ouvre les devtools (onglet Application → Cookies pour le cookie de
+		session, Network pour le bearer token et le token XSRF), puis dans la console de
+		OpenDrop enregistre les trois valeurs : <code>window.electronAPI.setSecret('kick-bearer-token', '...')</code>,
+		<code>window.electronAPI.setSecret('kick-xsrf-token', '...')</code> et
+		<code>window.electronAPI.setSecret('kick-cookies', '...')</code>. Méthode non
+		officielle, peut cesser de fonctionner sans préavis.
+	</p>
+
+	<button
+		class="btn-sm poll-trigger"
+		onclick={onStartPoll}
+		disabled={chatPollState.poll?.status === 'running'}
+	>
+		{chatPollState.poll?.status === 'running'
+			? `Vote en cours… ${chatPollState.poll.secondsLeft}s`
+			: 'Lancer un vote de preset'}
+	</button>
+</div>
+
 <style>
 	.controls-section {
 		padding: var(--sp-3);
@@ -143,6 +187,14 @@
 		background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
 		box-shadow: 0 0 8px var(--accent-dim);
 	}
+
+	.btn-sm:disabled { opacity: 0.3; cursor: not-allowed; }
+
+	.poll-trigger { width: 100%; text-align: center; margin-top: 0.2rem; }
+
+	.hint { margin: 0.2rem 0; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+
+	.hint code { background: var(--bg-hover); padding: 0.1rem 0.3rem; border-radius: var(--r-sm); font-size: 10px; }
 
 	.ndi-error {
 		font-size: 10px;

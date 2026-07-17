@@ -2,13 +2,32 @@
 	import type { Overlay } from '$lib/engine/overlay.js';
 	import { loadAsset } from '$lib/engine/overlay.js';
 
+	// Local structural type, same convention as SidebarStreaming.svelte's `NdiSlot` —
+	// mirrors chat-poll-store.svelte.ts's poll shape without importing the store here
+	// (this component has no other dependency on chat-poll state).
+	type ChatPoll = {
+		status: 'running' | 'resolved';
+		options: string[];
+		secondsLeft: number;
+		winnerIndex: number | null;
+		tally: number[];
+	};
+
 	interface Props {
 		overlays: Overlay[];
 		beat: boolean;
 		visibleIds: Set<string>;
+		/** Current chat poll (Task 13), if one is running or just resolved. Optional —
+		 * callers that don't wire chat polls (e.g. the output window, until Task 14) can omit it. */
+		poll?: ChatPoll | null;
 	}
 
-	let { overlays, beat, visibleIds }: Props = $props();
+	let { overlays, beat, visibleIds, poll = null }: Props = $props();
+
+	function pollPercent(t: number[], i: number): number {
+		const total = t.reduce((a, b) => a + b, 0);
+		return total === 0 ? 0 : (t[i] / total) * 100;
+	}
 
 	// id → data URL, loaded from IndexedDB
 	let srcs = $state<Record<string, string>>({});
@@ -91,6 +110,22 @@
 	</div>
 {/each}
 
+{#if poll}
+	<div class="poll-hud">
+		<div class="poll-header">
+			{poll.status === 'running' ? `Vote — ${poll.secondsLeft}s` : 'Vote terminé'}
+		</div>
+		{#each poll.options as option, i (i)}
+			<div class="poll-row" class:poll-winner={poll.status === 'resolved' && poll.winnerIndex === i}>
+				<span class="poll-rank">{i + 1}</span>
+				<span class="poll-name">{option}</span>
+				<span class="poll-count">{poll.tally[i] ?? 0}</span>
+				<div class="poll-bar" style="width:{pollPercent(poll.tally, i)}%"></div>
+			</div>
+		{/each}
+	</div>
+{/if}
+
 <style>
 	.overlay-anchor {
 		position: absolute;
@@ -142,5 +177,66 @@
 	@keyframes od-drift {
 		from { transform: translate(0, 0); }
 		to { transform: translate(var(--drift-x, 0), var(--drift-y, 0)); }
+	}
+
+	/* Chat poll HUD (Task 13) — same corner-card treatment as the rest of the app's
+	   HUD-ish surfaces, kept self-contained (no shared class names) since this isn't
+	   an Overlay asset, just ephemeral poll state rendered in the same layer. */
+	.poll-hud {
+		position: absolute;
+		top: 16px;
+		right: 16px;
+		z-index: 5;
+		min-width: 180px;
+		padding: 0.6rem 0.8rem;
+		background: rgba(7, 7, 26, 0.82);
+		border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+		border-radius: var(--r-md, 6px);
+		font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+		color: var(--text-primary, #e0e0ff);
+		pointer-events: none;
+		user-select: none;
+	}
+
+	.poll-header {
+		font-size: 10px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--accent, #ff2d78);
+		margin-bottom: 0.4rem;
+	}
+
+	.poll-row {
+		position: relative;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.2rem 0;
+		font-size: 12px;
+		overflow: hidden;
+	}
+
+	.poll-rank { opacity: 0.6; width: 1em; flex-shrink: 0; }
+
+	.poll-name {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.poll-count { font-weight: 700; min-width: 1.4em; text-align: right; flex-shrink: 0; }
+
+	.poll-winner { color: var(--ok, #4ade80); }
+
+	.poll-bar {
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		height: 2px;
+		background: currentColor;
+		opacity: 0.5;
+		transition: width 200ms ease-out;
 	}
 </style>

@@ -11,3 +11,14 @@ export function loadFavColors(): Record<string, number> {
 export function saveFavColors(favs: Record<string, number>): void {
   localStorage.setItem(FAV_KEY, JSON.stringify(favs))
 }
+
+const MOOD_LABELS_KEY = 'od-mood-labels'
+
+export function loadMoodLabels(): Record<number, string> {
+  try { return JSON.parse(localStorage.getItem(MOOD_LABELS_KEY) ?? '{}') }
+  catch { return {} }
+}
+
+export function saveMoodLabels(labels: Record<number, string>): void {
+  localStorage.setItem(MOOD_LABELS_KEY, JSON.stringify(labels))
+}

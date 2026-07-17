@@ -16,10 +16,15 @@ let currentPoll: PollState | null = null;
 let resolveTimer: ReturnType<typeof setTimeout> | null = null;
 let onResolved: ((winnerIndex: number | null) => void) | null = null;
 
+// How long the resolved-poll HUD stays visible (operator overlay + output window,
+// both driven by chatPollState.poll) before it auto-clears.
+const RESOLVED_HUD_DISMISS_MS = 8000;
+let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+
 export async function connectTwitch(channel: string): Promise<void> {
 	chatPollState.twitch.error = '';
 	const res = await window.electronAPI?.twitchConnect(channel);
-	if (!res?.ok) { chatPollState.twitch.error = res?.error ?? 'Connexion Twitch impossible.'; return; }
+	if (!res?.ok) { chatPollState.twitch.error = res?.error ?? 'Twitch connection failed.'; return; }
 	chatPollState.twitch.connected = true;
 }
 
@@ -40,7 +45,7 @@ export async function connectKick(channel: string): Promise<void> {
 	try {
 		chatPollState.kick.error = '';
 		const res = await window.electronAPI?.kickConnect(channel);
-		if (!res?.ok) { chatPollState.kick.error = res?.error ?? 'Connexion Kick impossible.'; return; }
+		if (!res?.ok) { chatPollState.kick.error = res?.error ?? 'Kick connection failed.'; return; }
 		chatPollState.kick.connected = true;
 	} finally {
 		kickConnectPending = false;
@@ -69,6 +74,9 @@ export function registerChatMessageHandler(): void {
 // that window entirely — a second call while running never gets to touch state.
 export function startPoll(options: string[], durationSeconds: number, onDone: (winnerIndex: number | null) => void): void {
 	if (currentPoll) return;
+	// A previous poll's auto-dismiss timer must not fire mid-way through this new
+	// poll and null out its state.
+	if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
 	currentPoll = createPoll(options.length);
 	onResolved = onDone;
 	chatPollState.poll = { status: 'running', options, secondsLeft: durationSeconds, winnerIndex: null, tally: tally(currentPoll) };
@@ -94,11 +102,17 @@ function resolvePoll(): void {
 	onResolved?.(winnerIndex);
 	onResolved = null;
 	currentPoll = null;
+	dismissTimer = setTimeout(() => {
+		chatPollState.poll = null;
+		dismissTimer = null;
+	}, RESOLVED_HUD_DISMISS_MS);
 }
 
 export function cancelPoll(): void {
 	if (resolveTimer) clearTimeout(resolveTimer);
+	if (dismissTimer) clearTimeout(dismissTimer);
 	resolveTimer = null;
+	dismissTimer = null;
 	currentPoll = null;
 	onResolved = null;
 	chatPollState.poll = null;

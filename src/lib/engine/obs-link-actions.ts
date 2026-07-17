@@ -43,7 +43,7 @@ export async function connectObs(host: string, port: number): Promise<void> {
 	obsLinkState.error = '';
 	const res = await window.electronAPI?.obsConnect(host, port);
 	if (!res?.ok) {
-		obsLinkState.error = res?.error ?? 'Connexion OBS impossible.';
+		obsLinkState.error = res?.error ?? 'OBS connection failed.';
 		return;
 	}
 	obsLinkState.connected = true;

@@ -1,5 +1,8 @@
 node_modules
 
+# Git worktrees (isolated implementation workspaces)
+/.worktrees
+
 # Presets générés (lancé par pnpm presets:build ou pnpm build)
 /static/presets
 

@@ -1,38 +1,37 @@
 /**
  * obs-link-actions.ts — connect/disconnect, sense-1 (OpenDrop → OBS) watcher,
  * sense-2 (OBS → OpenDrop) handler, and the anti-echo guard preventing the two
- * from ping-ponging. The guard is the one pure piece, exported and tested
- * directly; connect/disconnect/watch are thin orchestration over
- * window.electronAPI, same untested-boundary precedent as Task 1-2-5.
+ * from ping-ponging.
+ *
+ * OBS fires `CurrentProgramSceneChanged` for every scene change, including
+ * ones OpenDrop itself just caused via `obsSetScene` — so every successful
+ * sense-1 emission inevitably triggers sense-2 for the very same scene
+ * shortly after. A one-shot suppression flag consumed by the sense-1 $effect
+ * re-running doesn't work here: when the echo maps to a target OpenDrop is
+ * already in (the common case), re-applying it is a same-value write to a
+ * Svelte 5 $state field, which the reactive proxy doesn't mark dirty — so
+ * the $effect never re-runs, the flag is never consumed, and it lingers to
+ * wrongly swallow the next unrelated, real outbound change.
+ *
+ * Fixed with a direct scene-name comparison instead: `lastOutboundScene`
+ * records the scene name OpenDrop itself last told OBS to switch to.
+ * `isOwnEcho` (the one pure piece, exported and tested directly) checks the
+ * incoming scene name against it synchronously, with no dependency on any
+ * reactive effect re-running — it can't be starved by equality-gated
+ * reactivity because it isn't reactive at all.
  */
 
 import { obsLinkState } from './obs-link-store.svelte.js';
 import { findSceneForTarget, findTargetForScene } from './obs-mapping.js';
 import { frontSlotIndex, frontSlotMood } from './front-slot.js';
 
-/**
- * One-shot suppression flag: markIncoming() is called right before applying a
- * scene change that came FROM OBS; the very next shouldSuppressOutbound() call
- * (made by the sense-1 watcher reacting to that same state change) reads true
- * exactly once, then resets — so the watcher skips re-emitting SetCurrentProgramScene
- * for a change that OBS itself just caused, without suppressing any later,
- * independently-caused change.
- */
-export function createAntiEchoGuard() {
-	let suppressNext = false;
-	return {
-		shouldSuppressOutbound(): boolean {
-			const value = suppressNext;
-			suppressNext = false;
-			return value;
-		},
-		markIncoming(): void {
-			suppressNext = true;
-		},
-	};
+/** True when `sceneName` is the scene OpenDrop itself last set on OBS — i.e. this
+ * incoming CurrentProgramSceneChanged is our own echo, not an externally-initiated change. */
+export function isOwnEcho(sceneName: string, lastOutboundScene: string | null): boolean {
+	return sceneName === lastOutboundScene;
 }
 
-const guard = createAntiEchoGuard();
+let lastOutboundScene: string | null = null;
 let lastFrontSlot = -1;
 let lastMood: number | null = null;
 
@@ -50,9 +49,9 @@ export async function connectObs(host: string, port: number): Promise<void> {
 	if (scenesRes?.ok) obsLinkState.scenes = scenesRes.scenes ?? [];
 
 	window.electronAPI?.onObsSceneChanged((sceneName) => {
+		if (isOwnEcho(sceneName, lastOutboundScene)) return;
 		const target = findTargetForScene(obsLinkState.mapping, sceneName);
 		if (!target) return;
-		guard.markIncoming();
 		applyIncomingTarget(target);
 	});
 }
@@ -106,10 +105,11 @@ export async function watchFrontSlotForObs(
 	lastFrontSlot = front;
 	lastMood = mood;
 
-	if (guard.shouldSuppressOutbound()) return;
-
 	const sceneBySlot = findSceneForTarget(obsLinkState.mapping, { type: 'slot', slot: front as 0 | 1 | 2 | 3 });
 	const sceneByMood = mood ? findSceneForTarget(obsLinkState.mapping, { type: 'mood', colorIndex: mood as 1 | 2 | 3 | 4 | 5 }) : undefined;
 	const scene = sceneByMood ?? sceneBySlot;
-	if (scene) await window.electronAPI?.obsSetScene(scene);
+	if (scene) {
+		lastOutboundScene = scene;
+		await window.electronAPI?.obsSetScene(scene);
+	}
 }

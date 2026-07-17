@@ -32,6 +32,7 @@
     videoSection: Snippet
     qualitySection: Snippet
     outputSection: Snippet
+    streamingSection: Snippet
     midiSection: Snippet
     keyboardSection: Snippet
     strobeSection: Snippet
@@ -52,7 +53,7 @@
     onStartSlot, onPauseSlot, onSelectSlot, onCycleBus, onCrossfaderChange, onTransitionChange,
     onLoadPreset, onAddToPlaylist, onLayoutToggle,
     audioSection, videoSection,
-    qualitySection, outputSection, midiSection, keyboardSection,
+    qualitySection, outputSection, streamingSection, midiSection, keyboardSection,
     strobeSection, lfoSection, colorSection, compositeSection, snapshotSection, timelineSection, shareSection, timeSection, qvarSection, electronSection,
   }: Props = $props()
 
@@ -143,6 +144,7 @@
     {@render strobeSection()}
     {@render lfoSection()}
     {@render outputSection()}
+    {@render streamingSection()}
     {@render midiSection()}
     {@render keyboardSection()}
     {@render electronSection()}

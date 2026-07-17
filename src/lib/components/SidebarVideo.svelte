@@ -12,6 +12,8 @@
 		vrHue: boolean;
 		currentClipIndex: number;
 		allClips: VideoClipMeta[];
+		selectedClipKeys: string[];
+		clipKey: (clip: VideoClipMeta) => string;
 		liveActive: boolean;
 		liveLabel: string;
 		ndiActive: boolean;
@@ -32,6 +34,8 @@
 		onSelectClip: (i: number) => void;
 		onRemoveClip: (index: number) => void;
 		onAddVideo: (e: Event) => void;
+		onToggleClipSelection: (key: string) => void;
+		onClearClipSelection: () => void;
 	}
 
 	let {
@@ -45,6 +49,8 @@
 		vrHue,
 		currentClipIndex,
 		allClips,
+		selectedClipKeys,
+		clipKey,
 		liveActive,
 		liveLabel,
 		ndiActive,
@@ -65,6 +71,8 @@
 		onSelectClip,
 		onRemoveClip,
 		onAddVideo,
+		onToggleClipSelection,
+		onClearClipSelection,
 	}: Props = $props();
 </script>
 
@@ -130,10 +138,23 @@
 	{#if allClips.length === 0 && !liveActive && !ndiActive}
 		<p class="hint">Drag a video onto the visualizer or click + Video</p>
 	{/if}
+	{#if selectedClipKeys.length > 0}
+		<div class="pl-header">
+			<span class="hint" style="margin:0">{selectedClipKeys.length} in rotation</span>
+			<button class="btn-sm pl-btn" onclick={onClearClipSelection}>Clear</button>
+		</div>
+	{/if}
 	<ul class="overlay-list">
 		{#each allClips as clip, i (clip.ref.kind === 'user' ? clip.ref.id : clip.ref.src)}
 			<li class="overlay-item">
 				<div class="overlay-row">
+					<input
+						type="checkbox"
+						class="pl-checkbox"
+						checked={selectedClipKeys.includes(clipKey(clip))}
+						onchange={() => onToggleClipSelection(clipKey(clip))}
+						title="Include in auto-cut rotation"
+					/>
 					<button
 						class="overlay-name"
 						class:pl-active={i === currentClipIndex % allClips.length}
@@ -260,4 +281,6 @@
 	}
 	.overlay-name:hover { color: var(--violet); }
 	.overlay-name.pl-active { color: var(--cyan); text-shadow: 0 0 6px rgba(0,229,255,0.5); }
+
+	.pl-checkbox { flex-shrink: 0; cursor: pointer; accent-color: var(--accent); }
 </style>

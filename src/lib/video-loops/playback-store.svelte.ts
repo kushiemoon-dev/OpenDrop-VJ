@@ -26,6 +26,10 @@ export const videoState = $state({
 	reactWarp: true,
 	reactHue: false,
 	userClips: [] as VideoClipMeta[],
+	// Which clips (builtin + user, keyed by clipKey()) participate in onVideoBeat()'s
+	// auto-cut rotation. Empty = no filter, every clip participates (default,
+	// matches pre-selection behavior — existing users see no change).
+	selectedClipKeys: [] as string[],
 	currentClipIndex: 0,
 	playbackRate: 1,
 	liveDeviceId: null as string | null,
@@ -39,42 +43,94 @@ export const videoState = $state({
 // inside onVideoBeat itself.
 let beatCount = 0;
 
-export async function addVideoFromFile(file: File): Promise<void> {
-	if (file.size > 50 * 1024 * 1024) return;
+/** Stable identity for a clip, independent of its position in allClips (which shifts
+ * as clips are added/removed) — used to key selectedClipKeys. */
+export function clipKey(clip: VideoClipMeta): string {
+	return clip.ref.kind === 'builtin' ? clip.ref.src : clip.ref.id;
+}
+
+/** Returns the new clip's key, or null if the file was skipped (over the size cap). */
+export async function addVideoFromFile(file: File): Promise<string | null> {
+	if (file.size > 50 * 1024 * 1024) return null;
 	const id = crypto.randomUUID();
 	await saveVideo(id, file);
 	videoState.userClips = [...videoState.userClips, { ref: { kind: 'user', id }, name: file.name.replace(/\.[^.]+$/, '') }];
 	if (!videoState.enabled) videoState.enabled = true;
+	return id;
+}
+
+/** Marks the given clip keys as selected for onVideoBeat()'s auto-cut rotation
+ * (additive — existing selection is preserved). */
+export function selectClips(keys: string[]): void {
+	videoState.selectedClipKeys = [...new Set([...videoState.selectedClipKeys, ...keys])];
+}
+
+export function toggleClipSelection(key: string): void {
+	videoState.selectedClipKeys = videoState.selectedClipKeys.includes(key)
+		? videoState.selectedClipKeys.filter((k) => k !== key)
+		: [...videoState.selectedClipKeys, key];
+}
+
+export function clearClipSelection(): void {
+	videoState.selectedClipKeys = [];
 }
 
 export async function onVideoFilePick(e: Event): Promise<void> {
-	const files = (e.target as HTMLInputElement).files;
-	if (!files) return;
-	for (const f of Array.from(files)) await addVideoFromFile(f);
+	const files = Array.from((e.target as HTMLInputElement).files ?? []);
+	if (files.length === 0) return;
+	// Sequential, not Promise.all — addVideoFromFile does a read-then-spread
+	// (`[...videoState.userClips, newClip]`) that isn't safe to run concurrently,
+	// concurrent calls would race and silently drop an added clip.
+	const addedIds: string[] = [];
+	for (const f of files) {
+		const id = await addVideoFromFile(f);
+		if (id !== null) addedIds.push(id);
+	}
+	// Importing 2+ clips at once is exactly the "prepare a playlist on import" case —
+	// group them into the auto-cut rotation immediately instead of leaving the user
+	// to select each one by hand afterward.
+	if (addedIds.length > 1) selectClips(addedIds);
 	(e.target as HTMLInputElement).value = '';
 }
 
 export async function removeVideoClip(index: number): Promise<void> {
 	const clip = videoState.userClips[index - builtinClips.length];
-	if (clip?.ref.kind === 'user') await deleteVideo(clip.ref.id);
+	if (clip?.ref.kind === 'user') {
+		const removedId = clip.ref.id;
+		await deleteVideo(removedId);
+		videoState.selectedClipKeys = videoState.selectedClipKeys.filter((k) => k !== removedId);
+	}
 	videoState.userClips = videoState.userClips.filter((_, i) => i !== index - builtinClips.length);
 	const totalClips = builtinClips.length + videoState.userClips.length;
 	if (videoState.currentClipIndex >= totalClips) videoState.currentClipIndex = 0;
 }
 
 /** Beat-driven clip cut (call from the page's clock.onBeat handler). */
+/** Indices into [...builtinClips, ...userClips] that participate in the auto-cut
+ * rotation — every clip if selectedClipKeys is empty (no filter applied yet). */
+function activeClipIndices(): number[] {
+	const all = [...builtinClips, ...videoState.userClips];
+	if (videoState.selectedClipKeys.length === 0) return all.map((_, i) => i);
+	return all.reduce<number[]>((acc, clip, i) => {
+		if (videoState.selectedClipKeys.includes(clipKey(clip))) acc.push(i);
+		return acc;
+	}, []);
+}
+
 export function onVideoBeat(): void {
 	// A live camera or NDI source is a single feed, not a cycling library —
 	// also avoids currentClipIndex drifting while live, which would jump the
 	// clip on exit.
 	if (videoState.liveDeviceId || videoState.ndiSourceName) return;
-	const totalClips = builtinClips.length + videoState.userClips.length;
-	if (!(videoState.enabled && videoState.reactCut && videoState.advance !== 'manual' && totalClips > 1)) return;
+	const active = activeClipIndices();
+	if (!(videoState.enabled && videoState.reactCut && videoState.advance !== 'manual' && active.length > 1)) return;
 	beatCount = (beatCount + 1) % videoState.beatsPerCut;
 	if (beatCount === 0) {
-		videoState.currentClipIndex = videoState.advance === 'shuffle'
-			? Math.floor(Math.random() * totalClips)
-			: (videoState.currentClipIndex + 1) % totalClips;
+		const pos = active.indexOf(videoState.currentClipIndex);
+		const nextPos = videoState.advance === 'shuffle'
+			? Math.floor(Math.random() * active.length)
+			: (pos === -1 ? 0 : (pos + 1) % active.length);
+		videoState.currentClipIndex = active[nextPos];
 	}
 }
 

@@ -377,6 +377,49 @@ ipcMain.handle('ndi:stop', async () => {
   return { ok: true };
 });
 
+// ── NDI per-deck output (one named stream per slot, fed by renderer canvas readback) ──
+const ndiDeckSenders = {}; // { [slot: number]: sender }
+
+ipcMain.handle('ndi-deck:start', async (_, { slot, name }) => {
+  try {
+    if (!grandiose) grandiose = require('grandiose');
+    if (ndiDeckSenders[slot]) { ndiDeckSenders[slot].destroy?.(); delete ndiDeckSenders[slot]; }
+    ndiDeckSenders[slot] = await grandiose.send({ name, clockVideo: false, clockAudio: false });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ndi-deck:stop', async (_, { slot }) => {
+  ndiDeckSenders[slot]?.destroy?.();
+  delete ndiDeckSenders[slot];
+  return { ok: true };
+});
+
+// Renderer pushes one already-rendered RGBA frame per slot per sample tick (paced by its
+// own rAF loop, see ndi-deck-actions.ts) — no main-side timer needed, unlike the composite
+// NDI-out sender which pulls via capturePage() on its own interval.
+ipcMain.on('deckframe:post', (_, { slot, width, height, buffer }) => {
+  const sender = ndiDeckSenders[slot];
+  if (!sender || !width || !height) return;
+  sender.video({
+    xres: width,
+    yres: height,
+    frameRateN: 30000,
+    frameRateD: 1001,
+    pictureAspectRatio: width / height,
+    type: grandiose.FRAME_TYPE_VIDEO,
+    lineStrideBytes: width * 4,
+    // RGBA to match getImageData()'s native byte order (see ndi-deck-actions.ts) — avoids a
+    // per-frame channel swap. If Task 4's live validation shows swapped R/B channels on the
+    // NDI receiver, switch this to grandiose.FOURCC_BGRA and swap channels before sending.
+    fourCC: grandiose.FOURCC_RGBA,
+    data: Buffer.from(buffer),
+    timestamp: BigInt(0),
+  }).catch(() => {});
+});
+
 // ── NDI receive (NDI source → video layer, both windows) ───────────────────
 let ndiReceiver = null;
 let ndiReceiveActive = false;

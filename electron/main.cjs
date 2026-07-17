@@ -324,6 +324,13 @@ ipcMain.on('audioframe:post', (event, data) => {
 // ── Platform info ───────────────────────────────────────────────────────────
 ipcMain.handle('get-platform', () => process.platform);
 
+// ── Secrets (OS-keychain-encrypted, main process only — never returned raw to renderer) ──
+const secretsStore = require('./secrets-store.cjs');
+
+ipcMain.handle('secrets:has', (_, key) => secretsStore.hasSecret(key));
+ipcMain.handle('secrets:set', (_, { key, value }) => { secretsStore.setSecret(key, value); return { ok: true }; });
+ipcMain.handle('secrets:clear', (_, key) => { secretsStore.clearSecret(key); return { ok: true }; });
+
 // ── NDI handlers ─────────────────────────────────────────────────────────────
 ipcMain.handle('ndi:start', async (_, { name, width, height }) => {
   try {

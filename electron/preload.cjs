@@ -91,4 +91,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('output:window-closed', handler);
     return () => ipcRenderer.off('output:window-closed', handler);
   },
+
+  // Secrets (OBS password, Twitch/Kick credentials) — write-only from the renderer's side.
+  hasSecret: (key) => ipcRenderer.invoke('secrets:has', key),
+  setSecret: (key, value) => ipcRenderer.invoke('secrets:set', { key, value }),
+  clearSecret: (key) => ipcRenderer.invoke('secrets:clear', key),
 });

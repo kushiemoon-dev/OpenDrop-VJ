@@ -113,7 +113,7 @@
 {#if poll}
 	<div class="poll-hud">
 		<div class="poll-header">
-			{poll.status === 'running' ? `Vote — ${poll.secondsLeft}s` : 'Vote terminé'}
+			{poll.status === 'running' ? `Vote — ${poll.secondsLeft}s` : 'Vote closed'}
 		</div>
 		{#each poll.options as option, i (i)}
 			<div class="poll-row" class:poll-winner={poll.status === 'resolved' && poll.winnerIndex === i}>

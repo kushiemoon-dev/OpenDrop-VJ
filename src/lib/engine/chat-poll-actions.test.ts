@@ -57,12 +57,36 @@ describe('startPoll', () => {
 		expect(onDoneSecond).not.toHaveBeenCalled();
 		expect(chatPollState.poll?.status).toBe('resolved');
 
-		// No phantom second tick chain left running — advancing further must not
-		// call either callback again or corrupt the resolved state.
-		vi.advanceTimersByTime(10000);
+		// No phantom second tick chain left running — advancing further (but still
+		// within the auto-dismiss window, see the dismiss test below) must not call
+		// either callback again or corrupt the resolved state.
+		vi.advanceTimersByTime(3000);
 		expect(onDoneFirst).toHaveBeenCalledTimes(1);
 		expect(onDoneSecond).not.toHaveBeenCalled();
 		expect(chatPollState.poll?.status).toBe('resolved');
+	});
+
+	it('auto-dismisses the resolved poll HUD after the dismiss delay', () => {
+		startPoll(['A', 'B'], 5, vi.fn());
+		vi.advanceTimersByTime(5000);
+		expect(chatPollState.poll?.status).toBe('resolved');
+
+		vi.advanceTimersByTime(8000);
+		expect(chatPollState.poll).toBeNull();
+	});
+
+	it('a new poll started during the dismiss window is not nulled out by the stale dismiss timer', () => {
+		startPoll(['A', 'B'], 5, vi.fn());
+		vi.advanceTimersByTime(5000); // t=5000: resolved, dismiss timer armed for t=13000
+		expect(chatPollState.poll?.status).toBe('resolved');
+
+		vi.advanceTimersByTime(2000); // t=7000: still within the dismiss window
+		const onDoneSecond = vi.fn();
+		startPoll(['X', 'Y'], 100, onDoneSecond); // long duration — stays 'running' through this test
+
+		vi.advanceTimersByTime(6000); // t=13000: the first poll's stale dismiss timer would fire here
+		expect(chatPollState.poll?.status).toBe('running');
+		expect(chatPollState.poll?.options).toEqual(['X', 'Y']);
 	});
 
 	it('allows starting a new poll once the previous one has resolved', () => {

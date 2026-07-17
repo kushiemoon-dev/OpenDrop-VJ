@@ -371,7 +371,7 @@ function broadcastChatMessage(msg) {
 ipcMain.handle('twitch:connect', async (_, { channel }) => {
   try {
     const oauthToken = secretsStore.getSecret('twitch-oauth-token');
-    if (!oauthToken) return { ok: false, error: 'Aucun token Twitch enregistré.' };
+    if (!oauthToken) return { ok: false, error: 'No Twitch token registered.' };
     if (twitchClient) { try { await twitchClient.disconnect(); } catch {} twitchClient = null; }
     twitchClient = new tmi.Client({
       connection: { reconnect: true },
@@ -407,7 +407,7 @@ ipcMain.handle('kick:connect', async (_, { channel }) => {
     const bearerToken = secretsStore.getSecret('kick-bearer-token');
     const xsrfToken = secretsStore.getSecret('kick-xsrf-token');
     const cookies = secretsStore.getSecret('kick-cookies');
-    if (!bearerToken || !xsrfToken || !cookies) return { ok: false, error: 'Identifiants Kick manquants (token + xsrf + cookies).' };
+    if (!bearerToken || !xsrfToken || !cookies) return { ok: false, error: 'Missing Kick credentials (token + xsrf + cookies).' };
     // Not committed to kickGeneration until login() succeeds, so a failed reconnect
     // attempt can't silence a still-working previous connection (see below).
     const myGeneration = kickGeneration + 1;

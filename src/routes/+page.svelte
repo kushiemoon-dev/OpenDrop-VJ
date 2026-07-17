@@ -610,6 +610,12 @@
 		sync?.sendOverlays(list);
 	});
 
+	// — Sync chat poll vers output ——————————————————————————
+	$effect(() => {
+		const poll = chatPollState.poll; // force tracking (same pattern as overlays above)
+		sync?.sendPoll(poll);
+	});
+
 	// — Video sync to output ————————————————————————————
 	$effect(() => {
 		const payload = { // force tracking of all fields before sync?.

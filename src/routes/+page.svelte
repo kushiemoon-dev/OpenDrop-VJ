@@ -91,6 +91,7 @@
 	import SidebarVideo from '$lib/components/SidebarVideo.svelte';
 	import SidebarQuality from '$lib/components/SidebarQuality.svelte';
 	import SidebarOutput from '$lib/components/SidebarOutput.svelte';
+	import SidebarStreaming from '$lib/components/SidebarStreaming.svelte';
 	import SidebarMidi from '$lib/components/SidebarMidi.svelte';
 	import SidebarKeymap from '$lib/components/SidebarKeymap.svelte';
 	import SidebarStrobe from '$lib/components/SidebarStrobe.svelte';
@@ -1355,6 +1356,13 @@
 		onToggleSpout={toggleSpout}
 	/>
 {/snippet}
+{#snippet streamingSection()}
+	<SidebarStreaming
+		slots={ndiDeckState.slots}
+		slotLabels={['A', 'B', 'C', 'D']}
+		{toggleNdiDeck}
+	/>
+{/snippet}
 {#snippet midiSection()}
 	<SidebarMidi
 		{midiSupported}
@@ -1711,6 +1719,8 @@
 
 		{@render outputSection()}
 
+		{@render streamingSection()}
+
 		{@render midiSection()}
 
 		{@render keyboardSection()}
@@ -1762,6 +1772,7 @@
     {videoSection}
     {qualitySection}
     {outputSection}
+    {streamingSection}
     {midiSection}
     {keyboardSection}
     {strobeSection}

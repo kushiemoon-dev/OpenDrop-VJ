@@ -19,6 +19,25 @@ const loopHandles: Record<number, number> = {};
 const lastSampleAt: Record<number, number> = {};
 const helperCanvases: Record<number, HTMLCanvasElement> = {};
 
+// Per-slot in-flight guard, separate from `active` — closes the start/stop
+// interleaving race (Task 3 review carryover): `active` flips synchronously
+// while the IPC round-trip (ndiDeckStart/ndiDeckStop) is still pending, so a
+// second toggle arriving mid-transition must be ignored instead of racing the
+// first call's await. Pure array, no DOM/window access.
+const pendingSlots: boolean[] = [false, false, false, false];
+
+/** Marks `slot` as mid-transition. Returns false (no-op) if already pending. */
+export function beginNdiTransition(slot: number): boolean {
+	if (pendingSlots[slot]) return false;
+	pendingSlots[slot] = true;
+	return true;
+}
+
+/** Clears the in-flight guard for `slot`. */
+export function endNdiTransition(slot: number): void {
+	pendingSlots[slot] = false;
+}
+
 /**
  * Copies `source` into a scratch 2D canvas and reads it back as RGBA bytes.
  * Works regardless of source's own context type (2D or WebGL) — drawImage()
@@ -59,27 +78,37 @@ function tick(slot: number, canvas: HTMLCanvasElement): void {
 
 export async function startNdiDeck(slot: number, canvas: HTMLCanvasElement): Promise<void> {
 	if (ndiDeckState.slots[slot].active) return;
-	// Set synchronously, before the await below — this is what actually closes the
-	// re-entrancy window. A second call arriving while the IPC round-trip is in
-	// flight must see `active` already true; setting it only after `res.ok` (as
-	// before) would leave `active` false for the whole await, so the guard above
-	// would never trip and two tick() chains could still start.
-	ndiDeckState.slots[slot].active = true;
-	ndiDeckState.slots[slot].error = '';
-	const res = await window.electronAPI?.ndiDeckStart(slot, SLOT_NAMES[slot]);
-	if (!res?.ok) {
-		ndiDeckState.slots[slot].active = false;
-		ndiDeckState.slots[slot].error = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
-		return;
+	if (!beginNdiTransition(slot)) return;
+	try {
+		// Set synchronously, before the await below — this is what actually closes the
+		// re-entrancy window. A second call arriving while the IPC round-trip is in
+		// flight must see `active` already true; setting it only after `res.ok` (as
+		// before) would leave `active` false for the whole await, so the guard above
+		// would never trip and two tick() chains could still start.
+		ndiDeckState.slots[slot].active = true;
+		ndiDeckState.slots[slot].error = '';
+		const res = await window.electronAPI?.ndiDeckStart(slot, SLOT_NAMES[slot]);
+		if (!res?.ok) {
+			ndiDeckState.slots[slot].active = false;
+			ndiDeckState.slots[slot].error = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
+			return;
+		}
+		tick(slot, canvas);
+	} finally {
+		endNdiTransition(slot);
 	}
-	tick(slot, canvas);
 }
 
 export async function stopNdiDeck(slot: number): Promise<void> {
-	if (loopHandles[slot] !== undefined) {
-		cancelAnimationFrame(loopHandles[slot]);
-		delete loopHandles[slot];
+	if (!beginNdiTransition(slot)) return;
+	try {
+		if (loopHandles[slot] !== undefined) {
+			cancelAnimationFrame(loopHandles[slot]);
+			delete loopHandles[slot];
+		}
+		await window.electronAPI?.ndiDeckStop(slot);
+		ndiDeckState.slots[slot].active = false;
+	} finally {
+		endNdiTransition(slot);
 	}
-	await window.electronAPI?.ndiDeckStop(slot);
-	ndiDeckState.slots[slot].active = false;
 }

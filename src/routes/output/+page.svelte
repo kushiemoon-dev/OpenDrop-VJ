@@ -47,6 +47,8 @@
 	let overlays = $state<Overlay[]>([]);
 	let overlayQueueIndex = $state(0);
 	const overlayVisibleIds = $derived(visibleOverlayIds(overlays, overlayQueueIndex));
+	// Mirrors chat-poll-store.svelte.ts's poll shape (see sync.ts's `poll` SyncMessage).
+	let poll = $state<{ status: 'running' | 'resolved'; options: string[]; secondsLeft: number; winnerIndex: number | null; tally: number[] } | null>(null);
 	let beat = $state(false);
 	let beatTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -236,6 +238,8 @@
 					invisibleFps = msg.invisibleFps;
 				} else if (msg.type === 'overlays') {
 					overlays = msg.list;
+				} else if (msg.type === 'poll') {
+					poll = msg.poll;
 				} else if (msg.type === 'overlay-queue-index') {
 					overlayQueueIndex = msg.index;
 				} else if (msg.type === 'video') {
@@ -350,7 +354,7 @@
 	<canvas bind:this={canvas2} class="deck-src"></canvas>
 	<canvas bind:this={canvas3} class="deck-src"></canvas>
 	<canvas bind:this={compositorCanvas} class="layer" style="mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
-	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} />
+	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} {poll} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>
 	{/if}

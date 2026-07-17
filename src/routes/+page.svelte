@@ -15,12 +15,14 @@
 	import { strobeState } from '$lib/engine/strobe-store.svelte.js';
 	import { perfState } from '$lib/engine/perf-store.svelte.js';
 	import { electronFeaturesState } from '$lib/engine/electron-features-store.svelte.js';
+	import { ndiDeckState } from '$lib/engine/ndi-deck-store.svelte.js';
 	import { midiConnectionState } from '$lib/engine/midi-connection-store.svelte.js';
 	import { audioSourceState } from '$lib/engine/audio-source-store.svelte.js';
 	import { runStatusState } from '$lib/engine/run-status-store.svelte.js';
 	import {
 		toggleNdi, toggleV4l2, toggleSpout, toggleOsc, toggleRemote, toggleLink as toggleLinkAction,
 	} from '$lib/engine/electron-features-actions.js';
+	import { startNdiDeck, stopNdiDeck } from '$lib/engine/ndi-deck-actions.js';
 	import {
 		stopLoopbackIpc, captureSystemAudio as captureSystemAudioAction, connectMic as connectMicAction,
 		openDevicePicker as openDevicePickerAction, connectDevice as connectDeviceAction,
@@ -1200,6 +1202,15 @@
 	// toggleNdi/V4l2/Spout/Osc/Remote/Link — moved into electron-features-actions.ts
 	function toggleLink(): Promise<void> {
 		return toggleLinkAction(clock);
+	}
+
+	async function toggleNdiDeck(slot: number): Promise<void> {
+		if (ndiDeckState.slots[slot].active) {
+			await stopNdiDeck(slot);
+		} else {
+			const canvas = canvases[slot];
+			if (canvas) await startNdiDeck(slot, canvas);
+		}
 	}
 
 	async function startSlot(slot: number) {

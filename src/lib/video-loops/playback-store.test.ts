@@ -17,6 +17,7 @@ import { builtinClips } from './index.js';
 import {
 	videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoBeat, onVideoAudioTick,
 	setLiveCamera, clearLiveCamera, setNdiSource, clearNdiSource,
+	clipKey, selectClips, toggleClipSelection, clearClipSelection,
 } from './playback-store.svelte.js';
 
 function resetState() {
@@ -29,6 +30,7 @@ function resetState() {
 	videoState.reactWarp = true;
 	videoState.reactHue = false;
 	videoState.userClips = [];
+	videoState.selectedClipKeys = [];
 	videoState.currentClipIndex = 0;
 	videoState.playbackRate = 1;
 	videoState.liveDeviceId = null;
@@ -158,6 +160,92 @@ describe('video playback-store', () => {
 			videoState.userClips = [{ ref: { kind: 'user', id: 'u1' }, name: 'c1' }, { ref: { kind: 'user', id: 'u2' }, name: 'c2' }];
 			for (let i = 0; i < 5; i++) onVideoBeat();
 			expect(videoState.currentClipIndex).toBe(0);
+		});
+
+		it('cycles only over selected clips when a selection is set', () => {
+			videoState.enabled = true;
+			videoState.advance = 'sequential';
+			videoState.reactCut = true;
+			videoState.beatsPerCut = 1;
+			videoState.userClips = [
+				{ ref: { kind: 'user', id: 'u1' }, name: 'c1' },
+				{ ref: { kind: 'user', id: 'u2' }, name: 'c2' },
+				{ ref: { kind: 'user', id: 'u3' }, name: 'c3' },
+			];
+			// Only u1 (builtinClips index 0/1 = a.mp4/b.mp4, so u1 is global index 2) and
+			// u3 (global index 4) are selected — u2 (index 3) must never be visited.
+			selectClips(['u1', 'u3']);
+			videoState.currentClipIndex = 2; // starts on u1
+
+			onVideoBeat();
+			expect(videoState.currentClipIndex).toBe(4); // advances straight to u3, skipping u2
+
+			onVideoBeat();
+			expect(videoState.currentClipIndex).toBe(2); // wraps back to u1
+		});
+
+		it('does not advance when fewer than 2 clips are selected', () => {
+			videoState.enabled = true;
+			videoState.advance = 'sequential';
+			videoState.reactCut = true;
+			videoState.beatsPerCut = 1;
+			videoState.userClips = [{ ref: { kind: 'user', id: 'u1' }, name: 'c1' }, { ref: { kind: 'user', id: 'u2' }, name: 'c2' }];
+			selectClips(['u1']);
+			videoState.currentClipIndex = 2; // u1
+			for (let i = 0; i < 5; i++) onVideoBeat();
+			expect(videoState.currentClipIndex).toBe(2);
+		});
+	});
+
+	describe('clip selection', () => {
+		it('clipKey returns the builtin src for builtin clips and the id for user clips', () => {
+			expect(clipKey(builtinClips[0])).toBe('a.mp4');
+			expect(clipKey({ ref: { kind: 'user', id: 'u1' }, name: 'c1' })).toBe('u1');
+		});
+
+		it('selectClips is additive and de-duplicates', () => {
+			selectClips(['u1', 'u2']);
+			selectClips(['u2', 'u3']);
+			expect(videoState.selectedClipKeys.sort()).toEqual(['u1', 'u2', 'u3']);
+		});
+
+		it('toggleClipSelection adds when absent, removes when present', () => {
+			toggleClipSelection('u1');
+			expect(videoState.selectedClipKeys).toEqual(['u1']);
+			toggleClipSelection('u1');
+			expect(videoState.selectedClipKeys).toEqual([]);
+		});
+
+		it('clearClipSelection empties the selection', () => {
+			selectClips(['u1', 'u2']);
+			clearClipSelection();
+			expect(videoState.selectedClipKeys).toEqual([]);
+		});
+
+		it('onVideoFilePick selects all newly-added clips when importing 2+ files at once', async () => {
+			const files = [
+				{ size: 100, name: 'clip1.mp4' } as unknown as File,
+				{ size: 100, name: 'clip2.mp4' } as unknown as File,
+			];
+			const event = { target: { files, value: '' } } as unknown as Event;
+			await onVideoFilePick(event);
+			expect(videoState.userClips).toHaveLength(2);
+			const addedKeys = videoState.userClips.map((c) => clipKey(c));
+			expect(videoState.selectedClipKeys.sort()).toEqual(addedKeys.sort());
+		});
+
+		it('onVideoFilePick does not auto-select when importing a single file', async () => {
+			const files = [{ size: 100, name: 'clip1.mp4' } as unknown as File];
+			const event = { target: { files, value: '' } } as unknown as Event;
+			await onVideoFilePick(event);
+			expect(videoState.selectedClipKeys).toEqual([]);
+		});
+
+		it('removeVideoClip drops the removed clip from the selection', async () => {
+			videoState.userClips = [{ ref: { kind: 'user', id: 'u1' }, name: 'c1' }, { ref: { kind: 'user', id: 'u2' }, name: 'c2' }];
+			selectClips(['u1', 'u2']);
+			await removeVideoClip(builtinClips.length); // removes u1 (first user clip)
+			expect(videoState.selectedClipKeys).toEqual(['u2']);
 		});
 	});
 

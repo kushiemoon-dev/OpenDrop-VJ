@@ -112,4 +112,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('obs:scene-changed', handler);
     return () => ipcRenderer.off('obs:scene-changed', handler);
   },
+
+  // Chat poll sources
+  twitchConnect: (channel) => ipcRenderer.invoke('twitch:connect', { channel }),
+  twitchDisconnect: () => ipcRenderer.invoke('twitch:disconnect'),
+  kickConnect: (channel) => ipcRenderer.invoke('kick:connect', { channel }),
+  kickDisconnect: () => ipcRenderer.invoke('kick:disconnect'),
+  onChatMessage: (cb) => {
+    const handler = (_, msg) => cb(msg);
+    ipcRenderer.on('chat:message', handler);
+    return () => ipcRenderer.off('chat:message', handler);
+  },
 });

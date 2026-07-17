@@ -25,9 +25,11 @@
 	},
 	"dependencies": {
 		"@fontsource-variable/inter": "^5.2.8",
+		"@retconned/kick-js": "^0.5.4",
 		"butterchurn": "^2.6.7",
 		"milkdrop-preset-converter": "^0.1.2",
 		"obs-websocket-js": "^5.0.8",
+		"tmi.js": "^1.8.5",
 		"ws": "^8.21.0"
 	},
 	"optionalDependencies": {

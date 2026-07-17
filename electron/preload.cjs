@@ -101,4 +101,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   hasSecret: (key) => ipcRenderer.invoke('secrets:has', key),
   setSecret: (key, value) => ipcRenderer.invoke('secrets:set', { key, value }),
   clearSecret: (key) => ipcRenderer.invoke('secrets:clear', key),
+
+  // OBS WebSocket link
+  obsConnect: (host, port) => ipcRenderer.invoke('obs:connect', { host, port }),
+  obsDisconnect: () => ipcRenderer.invoke('obs:disconnect'),
+  obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
+  obsSetScene: (sceneName) => ipcRenderer.invoke('obs:set-scene', sceneName),
+  onObsSceneChanged: (cb) => {
+    const handler = (_, sceneName) => cb(sceneName);
+    ipcRenderer.on('obs:scene-changed', handler);
+    return () => ipcRenderer.off('obs:scene-changed', handler);
+  },
 });

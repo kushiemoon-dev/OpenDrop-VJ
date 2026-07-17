@@ -10,6 +10,9 @@ allowBuilds:
   grandiose: true
   spout-addon: true
   '@ktamas77/abletonlink': true
+  # false: postinstall only downloads a Chromium binary for kick-js's username/password
+  # browser-login path, which Task 10 doesn't use (bearer-token + cookies + xsrf path only).
+  puppeteer: false
 
 overrides:
   shell-quote: ">=1.8.4"

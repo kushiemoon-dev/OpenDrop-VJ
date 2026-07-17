@@ -307,17 +307,17 @@ const obs = new OBSWebSocket();
 let obsConnected = false;
 
 obs.on('ConnectionClosed', () => { obsConnected = false; });
+obs.on('CurrentProgramSceneChanged', (data) => {
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName);
+  });
+});
 
 ipcMain.handle('obs:connect', async (_, { host, port }) => {
   try {
     const password = secretsStore.getSecret('obs-password') || undefined;
     await obs.connect(`ws://${host}:${port}`, password);
     obsConnected = true;
-    obs.on('CurrentProgramSceneChanged', (data) => {
-      BrowserWindow.getAllWindows().forEach((w) => {
-        if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName);
-      });
-    });
     return { ok: true };
   } catch (e) {
     obsConnected = false;
@@ -326,9 +326,14 @@ ipcMain.handle('obs:connect', async (_, { host, port }) => {
 });
 
 ipcMain.handle('obs:disconnect', async () => {
-  if (obsConnected) await obs.disconnect();
-  obsConnected = false;
-  return { ok: true };
+  try {
+    if (obsConnected) await obs.disconnect();
+    obsConnected = false;
+    return { ok: true };
+  } catch (e) {
+    obsConnected = false;
+    return { ok: false, error: e.message };
+  }
 });
 
 ipcMain.handle('obs:get-scenes', async () => {

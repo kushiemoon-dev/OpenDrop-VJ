@@ -354,6 +354,86 @@ ipcMain.handle('obs:set-scene', async (_, sceneName) => {
   }
 });
 
+// ── Chat poll sources — Twitch (tmi.js) + Kick (@retconned/kick-js, unofficial) ─────
+const tmi = require('tmi.js');
+const { createClient: createKickClient } = require('@retconned/kick-js');
+
+let twitchClient = null;
+let kickClient = null;
+let kickGeneration = 0; // guards stale listeners — kick-js exposes no disconnect()/off(), see kick:disconnect below
+
+function broadcastChatMessage(msg) {
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) w.webContents.send('chat:message', msg);
+  });
+}
+
+ipcMain.handle('twitch:connect', async (_, { channel }) => {
+  try {
+    const oauthToken = secretsStore.getSecret('twitch-oauth-token');
+    if (!oauthToken) return { ok: false, error: 'Aucun token Twitch enregistré.' };
+    if (twitchClient) { try { await twitchClient.disconnect(); } catch {} twitchClient = null; }
+    twitchClient = new tmi.Client({
+      connection: { reconnect: true },
+      identity: { username: channel, password: oauthToken },
+      channels: [channel],
+    });
+    twitchClient.on('message', (_channel, tags, content) => {
+      broadcastChatMessage({ platform: 'twitch', userId: tags['user-id'], username: tags['display-name'] || tags.username, content });
+    });
+    await twitchClient.connect();
+    return { ok: true };
+  } catch (e) {
+    twitchClient = null;
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('twitch:disconnect', async () => {
+  if (twitchClient) { try { await twitchClient.disconnect(); } catch {} }
+  twitchClient = null;
+  return { ok: true };
+});
+
+// @retconned/kick-js is an unofficial, reverse-engineered library — no OAuth, real Kick
+// account credentials only. Do NOT pass { readOnly: true } here: createClient() connects
+// immediately on creation when readOnly is true, and login() *also* triggers its own
+// connect — combining the two opens two sockets and double-fires every chat message.
+// Omitting readOnly (defaults to false) means the login() call below is the only thing
+// that connects. Its TokenCredentials shape requires bearerToken + xsrfToken + cookies
+// (three fields, not two — verified against the installed package's compiled source).
+ipcMain.handle('kick:connect', async (_, { channel }) => {
+  try {
+    const bearerToken = secretsStore.getSecret('kick-bearer-token');
+    const xsrfToken = secretsStore.getSecret('kick-xsrf-token');
+    const cookies = secretsStore.getSecret('kick-cookies');
+    if (!bearerToken || !xsrfToken || !cookies) return { ok: false, error: 'Identifiants Kick manquants (token + xsrf + cookies).' };
+    // Not committed to kickGeneration until login() succeeds, so a failed reconnect
+    // attempt can't silence a still-working previous connection (see below).
+    const myGeneration = kickGeneration + 1;
+    const client = createKickClient(channel, { logger: false });
+    client.on('ChatMessage', (message) => {
+      // kick-js exposes no way to unsubscribe or close its socket, so a listener from a
+      // prior connect/disconnect cycle would otherwise keep forwarding forever — guard by
+      // generation instead (see kick:disconnect).
+      if (myGeneration !== kickGeneration) return;
+      broadcastChatMessage({ platform: 'kick', userId: String(message.sender.id), username: message.sender.username, content: message.content });
+    });
+    await client.login({ type: 'tokens', credentials: { bearerToken, xsrfToken, cookies } });
+    kickGeneration = myGeneration;
+    kickClient = client;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('kick:disconnect', async () => {
+  kickGeneration++; // invalidate any listener still attached to the (unclosable) socket
+  kickClient = null;
+  return { ok: true };
+});
+
 // ── Relay BroadcastChannel messages between renderer processes ─────────────
 ipcMain.on('bc-post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {

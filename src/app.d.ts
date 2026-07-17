@@ -52,6 +52,11 @@ declare global {
 			obsGetScenes: () => Promise<{ ok: boolean; scenes?: string[]; error?: string }>;
 			obsSetScene: (sceneName: string) => Promise<{ ok: boolean; error?: string }>;
 			onObsSceneChanged: (cb: (sceneName: string) => void) => () => void;
+			twitchConnect: (channel: string) => Promise<{ ok: boolean; error?: string }>;
+			twitchDisconnect: () => Promise<{ ok: boolean }>;
+			kickConnect: (channel: string) => Promise<{ ok: boolean; error?: string }>;
+			kickDisconnect: () => Promise<{ ok: boolean }>;
+			onChatMessage: (cb: (msg: { platform: 'twitch' | 'kick'; userId: string; username: string; content: string }) => void) => () => void;
 		};
 	}
 }

@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('ndi:frame', handler);
   },
 
+  // NDI per-deck output — one named stream per slot (A/B/C/D)
+  ndiDeckStart: (slot, name) => ipcRenderer.invoke('ndi-deck:start', { slot, name }),
+  ndiDeckStop: (slot) => ipcRenderer.invoke('ndi-deck:stop', { slot }),
+  sendDeckFrame: (slot, width, height, buffer) => ipcRenderer.send('deckframe:post', { slot, width, height, buffer }),
+
   // v4l2loopback virtual webcam (Linux — requires ffmpeg + v4l2loopback kernel module)
   v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
   v4l2Stop: () => ipcRenderer.invoke('v4l2:stop'),

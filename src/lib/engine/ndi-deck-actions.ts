@@ -58,13 +58,20 @@ function tick(slot: number, canvas: HTMLCanvasElement): void {
 }
 
 export async function startNdiDeck(slot: number, canvas: HTMLCanvasElement): Promise<void> {
+	if (ndiDeckState.slots[slot].active) return;
+	// Set synchronously, before the await below — this is what actually closes the
+	// re-entrancy window. A second call arriving while the IPC round-trip is in
+	// flight must see `active` already true; setting it only after `res.ok` (as
+	// before) would leave `active` false for the whole await, so the guard above
+	// would never trip and two tick() chains could still start.
+	ndiDeckState.slots[slot].active = true;
 	ndiDeckState.slots[slot].error = '';
 	const res = await window.electronAPI?.ndiDeckStart(slot, SLOT_NAMES[slot]);
 	if (!res?.ok) {
+		ndiDeckState.slots[slot].active = false;
 		ndiDeckState.slots[slot].error = res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.';
 		return;
 	}
-	ndiDeckState.slots[slot].active = true;
 	tick(slot, canvas);
 }
 

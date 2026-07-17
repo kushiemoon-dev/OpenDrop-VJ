@@ -35,6 +35,10 @@ let lastOutboundScene: string | null = null;
 let lastFrontSlot = -1;
 let lastMood: number | null = null;
 
+/** Unsubscribe for the renderer-side onObsSceneChanged listener registered by
+ * connectObs — torn down in disconnectObs so reconnecting never stacks listeners. */
+let unsubObsSceneChanged: (() => void) | null = null;
+
 export async function connectObs(host: string, port: number): Promise<void> {
 	obsLinkState.error = '';
 	const res = await window.electronAPI?.obsConnect(host, port);
@@ -48,15 +52,18 @@ export async function connectObs(host: string, port: number): Promise<void> {
 	const scenesRes = await window.electronAPI?.obsGetScenes();
 	if (scenesRes?.ok) obsLinkState.scenes = scenesRes.scenes ?? [];
 
-	window.electronAPI?.onObsSceneChanged((sceneName) => {
-		if (isOwnEcho(sceneName, lastOutboundScene)) return;
-		const target = findTargetForScene(obsLinkState.mapping, sceneName);
-		if (!target) return;
-		applyIncomingTarget(target);
-	});
+	unsubObsSceneChanged =
+		window.electronAPI?.onObsSceneChanged((sceneName) => {
+			if (isOwnEcho(sceneName, lastOutboundScene)) return;
+			const target = findTargetForScene(obsLinkState.mapping, sceneName);
+			if (!target) return;
+			applyIncomingTarget(target);
+		}) ?? null;
 }
 
 export async function disconnectObs(): Promise<void> {
+	unsubObsSceneChanged?.();
+	unsubObsSceneChanged = null;
 	await window.electronAPI?.obsDisconnect();
 	obsLinkState.connected = false;
 }

@@ -113,11 +113,12 @@
 	import LayoutToggle from '$lib/components/LayoutToggle.svelte';
 	import MixerLayout from '$lib/components/MixerLayout.svelte';
 	import { DeckManager } from '$lib/engine/deck-manager.js';
-	import { initVideoLoops, builtinClips } from '$lib/video-loops/index.js';
-	import { type ClipRef } from '$lib/engine/video-store.js';
+	import { initVideoLoops, builtinClips as builtinClipsInitial } from '$lib/video-loops/index.js';
+	import { type ClipRef, type VideoClipMeta } from '$lib/engine/video-store.js';
 	import {
 		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoAudioTick,
 		setLiveCamera, clearLiveCamera, setNdiSource, clearNdiSource,
+		clipKey, selectClips, toggleClipSelection, clearClipSelection,
 	} from '$lib/video-loops/playback-store.svelte.js';
 
 	// — State —————————————————————————————————————————————
@@ -269,6 +270,12 @@
 	const opacityB = $derived(opacities[1]);
 	let presetIdxA = $derived(presetList.findIndex((p) => p.name === deckState.presetA));
 	let presetIdxB = $derived(presetList.findIndex((p) => p.name === deckState.presetB));
+	// $state mirror of video-loops/index.ts's plain (non-reactive) `builtinClips` export —
+	// that module is a plain .ts file, so reassigning it inside initVideoLoops() is
+	// invisible to Svelte's reactivity; without this mirror, allClips below would stay
+	// stuck at its initial (pre-CDN-fetch) value forever, even after initVideoLoops()
+	// resolves with real data.
+	let builtinClips = $state<VideoClipMeta[]>(builtinClipsInitial);
 	const allClips = $derived([...builtinClips, ...videoState.userClips]);
 
 	/** Returns the preset of the first running deck on a given bus, or the last known preset if none running. */
@@ -928,7 +935,7 @@
 		}
 
 		await initPresets();
-		await initVideoLoops();
+		builtinClips = await initVideoLoops();
 		presetList = buildPresetList();
 		if (presetList.length > 0) deckState.presetA = presetList[0].name;
 		if (presetList.length > 1) deckState.presetB = presetList[1].name;
@@ -1033,6 +1040,7 @@
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 		const x = (e.clientX - rect.left) / rect.width;
 		const y = (e.clientY - rect.top) / rect.height;
+		const addedVideoIds: string[] = [];
 		for (const f of Array.from(e.dataTransfer.files)) {
 			// .milk/.prjm have no reliable browser MIME type (f.type is ''),
 			// so this is checked by extension rather than f.type like the
@@ -1042,7 +1050,8 @@
 				continue;
 			}
 			if (f.type.startsWith('video/')) {
-				await addVideoFromFile(f);
+				const id = await addVideoFromFile(f);
+				if (id !== null) addedVideoIds.push(id);
 				continue;
 			}
 			if (!f.type.startsWith('image/')) continue;
@@ -1056,6 +1065,7 @@
 				reader.readAsDataURL(f);
 			});
 		}
+		if (addedVideoIds.length > 1) selectClips(addedVideoIds);
 	}
 
 	/** Import a dropped .milk/.prjm preset directly into activeSlot (mirrors selectPreset,
@@ -1279,12 +1289,16 @@
 	// — Chat poll (Task 12): routes Twitch/Kick chat into the active poll —
 	registerChatMessageHandler();
 
+	// Where startPresetVote() draws its 3 candidate presets from — user-selectable
+	// in SidebarStreaming, not persisted (a live-session choice, not a preference).
+	let pollSource = $state<'playlistA' | 'playlistB' | 'favorites'>('favorites');
+
 	function startPresetVote(): void {
-		// 3 candidate presets: favorites first (curated by the user), falling back to the
-		// full library if fewer than 2 favorites exist yet.
-		const favoriteNames = Object.keys(loadFavColors());
-		const pool = (favoriteNames.length >= 2 ? favoriteNames : presetList.map((p) => p.name))
-			.filter((name, i, arr) => arr.indexOf(name) === i);
+		const pool = (
+			pollSource === 'playlistA' ? playlistState.aItems
+			: pollSource === 'playlistB' ? playlistState.bItems
+			: Object.keys(loadFavColors())
+		).filter((name, i, arr) => arr.indexOf(name) === i);
 		if (pool.length < 2) return; // not enough distinct presets to run a meaningful vote
 
 		const remaining = [...pool];
@@ -1366,6 +1380,10 @@
     vrHue={videoState.reactHue}
     currentClipIndex={videoState.currentClipIndex}
     {allClips}
+    selectedClipKeys={videoState.selectedClipKeys}
+    {clipKey}
+    onToggleClipSelection={toggleClipSelection}
+    onClearClipSelection={clearClipSelection}
     liveActive={!!videoState.liveDeviceId}
     liveLabel={videoState.liveLabel}
     {onToggleLiveCamera}
@@ -1429,6 +1447,7 @@
 		slots={ndiDeckState.slots}
 		slotLabels={['A', 'B', 'C', 'D']}
 		{toggleNdiDeck}
+		bind:pollSource
 		onStartPoll={startPresetVote}
 	/>
 {/snippet}
@@ -1762,6 +1781,10 @@
 			vrHue={videoState.reactHue}
 			currentClipIndex={videoState.currentClipIndex}
 			{allClips}
+			selectedClipKeys={videoState.selectedClipKeys}
+			{clipKey}
+			onToggleClipSelection={toggleClipSelection}
+			onClearClipSelection={clearClipSelection}
 			liveActive={!!videoState.liveDeviceId}
 			liveLabel={videoState.liveLabel}
 			{onToggleLiveCamera}

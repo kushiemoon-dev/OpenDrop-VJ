@@ -47,6 +47,9 @@ declare global {
 			listScreens: () => Promise<Array<{ id: number; label: string; isPrimary: boolean; bounds: { x: number; y: number; width: number; height: number } }>>;
 			openOutputOnDisplay: (displayId: number | null) => Promise<{ ok: boolean; error?: string }>;
 			onOutputWindowClosed: (cb: () => void) => () => void;
+			hasSecret: (key: string) => Promise<boolean>;
+			setSecret: (key: string, value: string) => Promise<{ ok: boolean; error?: string }>;
+			clearSecret: (key: string) => Promise<{ ok: boolean; error?: string }>;
 			obsConnect: (host: string, port: number) => Promise<{ ok: boolean; error?: string }>;
 			obsDisconnect: () => Promise<{ ok: boolean }>;
 			obsGetScenes: () => Promise<{ ok: boolean; scenes?: string[]; error?: string }>;

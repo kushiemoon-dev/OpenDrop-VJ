@@ -35,6 +35,7 @@
 	import { watchFrontSlotForObs, onIncomingObsTarget } from '$lib/engine/obs-link-actions.js';
 	import { loadFavColors } from '$lib/presets/favorites.js';
 	import { frontSlotIndex } from '$lib/engine/front-slot.js';
+	import { registerChatMessageHandler, startPoll } from '$lib/engine/chat-poll-actions.js';
 	import {
 		selectPresetForDeck as selectPresetForDeckAction, buildCurrentSharedSet as buildCurrentSharedSetAction,
 		copyShareLink as copyShareLinkAction, applyPendingSharedSet as applyPendingSharedSetAction,
@@ -1267,6 +1268,21 @@
 			if (presetName) selectPresetAction(frontSlotIndex(opacities), presetName, manager, sync, primaryPreset);
 		}
 	});
+
+	// — Chat poll (Task 12): routes Twitch/Kick chat into the active poll —
+	registerChatMessageHandler();
+
+	function startPresetVote(): void {
+		// Frame 3 candidate presets from the active deck's playlist/favorites — exact source
+		// of the 3 option preset names is a UI decision for Task 13, not fabricated here.
+		const options = ['<preset A name>', '<preset B name>', '<preset C name>'];
+		const targetSlot = frontSlotIndex(opacities);
+		startPoll(options, 30, (winnerIndex) => {
+			if (winnerIndex === null) return; // nobody voted — leave the current preset as-is
+			// Reuse Task 8's slot-parameterized selectPreset — do not add a second preset-load path.
+			selectPresetAction(targetSlot, options[winnerIndex], manager, sync, primaryPreset);
+		});
+	}
 
 	function onKeydown(e: KeyboardEvent) {
 		const tag = (e.target as HTMLElement).tagName;

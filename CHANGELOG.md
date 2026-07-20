@@ -5,6 +5,26 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-20
+
+### Added
+- Per-deck NDI sender management (main process), per-slot canvas readback, and toggle UI
+- OBS WebSocket connection management (main process), scene/slot/mood mapping, bidirectional scene link with anti-echo guard, and mood-label config UI
+- Twitch and Kick chat connections (main process), chat-poll vote parsing/tally/resolution, lifecycle wiring, overlay UI, and relay to the output window
+- `safeStorage`-backed secrets store for streaming credentials, with dedicated secret input fields for OBS/Twitch/Kick (configurable poll source, auto-dismiss)
+
+### Fixed
+- CDN video loops never reactive in the UI; added clip selection for auto-cut rotation
+- Renderer-side OBS listener leak
+- OBS host/port/scene-mapping now persisted across restarts
+- `startNdiDeck` guarded against re-entrant calls for the same slot
+- `deckframe:post` guarded against synchronous NDI send errors
+- OBS scene-change listener now registered once; disconnect errors guarded
+- One-shot anti-echo flag replaced with direct scene-name comparison
+
+### Security
+- Pinned `axios` to `>=1.18.0` via pnpm override (transitive dependency of `@retconned/kick-js`, `wait-on`, `audify`) — resolves 3 moderate DoS advisories
+
 ## [0.8.0] - 2026-07-16
 
 ### Added

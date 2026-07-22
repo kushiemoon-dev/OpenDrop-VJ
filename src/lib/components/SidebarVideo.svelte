@@ -256,6 +256,7 @@
 		border: 1px solid #161640;
 		border-radius: 5px;
 		overflow: hidden;
+		flex-shrink: 0;
 	}
 
 	.overlay-row {

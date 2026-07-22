@@ -4,16 +4,12 @@
 
 	interface Props {
 		clip: ClipRef | null;
-		opacity: number;
-		beat: boolean;
 		playbackRate: number;
-		flashOn: boolean;
-		hueOn: boolean;
+		videoEl?: HTMLVideoElement;
 	}
 
-	let { clip, opacity, beat, playbackRate, flashOn, hueOn }: Props = $props();
+	let { clip, playbackRate, videoEl = $bindable() }: Props = $props();
 
-	let videoEl: HTMLVideoElement | undefined = $state();
 	let resolvedSrc = $state('');
 	// Holds whichever external MediaStream is currently active — a live camera
 	// (getUserMedia) or an NDI source (canvas.captureStream of received frames).
@@ -121,18 +117,18 @@
 		};
 	});
 
-	const scale = $derived(beat && flashOn ? 1.04 : 1);
-	const brightness = $derived(beat && flashOn ? 1.4 : 1);
-	const hueRotate = $derived(beat && hueOn ? 35 : 0);
-	const filterStr = $derived(`brightness(${brightness}) hue-rotate(${hueRotate}deg)`);
+	// Beat-reactive brightness/hue-rotate moved to the parent page (+page.svelte /
+	// output/+page.svelte) — it now drives Compositor.setVideoLayer() instead of a
+	// CSS filter here (see 2026-07-20-video-compositor-integration-design.md). The
+	// old CSS `scale` zoom-on-beat has no compositor equivalent and is dropped for v1.
 </script>
 
 {#if resolvedSrc || isStreamKind(clip?.kind)}
 	<video
 		bind:this={videoEl}
 		src={isStreamKind(clip?.kind) ? undefined : resolvedSrc}
+		crossorigin="anonymous"
 		class="video-layer"
-		style="opacity:{opacity}; transform:scale({scale}); filter:{filterStr};"
 		loop
 		muted
 		autoplay
@@ -149,6 +145,9 @@
 		height: 100%;
 		object-fit: cover;
 		pointer-events: none;
-		transition: transform 80ms ease-out, filter 80ms ease-out;
+		/* Invisible in the DOM — the Compositor draws this element as a WebGL texture
+		   instead (see compositor.ts attachVideoSource/setVideoLayer). opacity:0, not
+		   display:none, so the browser keeps decoding frames. */
+		opacity: 0;
 	}
 </style>

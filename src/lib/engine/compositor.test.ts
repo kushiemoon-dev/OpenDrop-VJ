@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { blendStateFor, blendModeFromValue01, blendModeToValue01, migrateBlendModeString, GLBlend, withSlotComposite, type SlotComposites } from './compositor.js';
+import {
+	blendStateFor, blendModeFromValue01, blendModeToValue01, migrateBlendModeString, GLBlend,
+	withSlotComposite, type SlotComposites, isVideoLayerActive, shouldForceNormalForLowestSlot,
+} from './compositor.js';
 import { DEFAULT_SLOT_COMPOSITE } from './sync.js';
 
 describe('blendStateFor', () => {
@@ -100,5 +103,39 @@ describe('withSlotComposite', () => {
 		expect(next).not.toBe(composites);
 		expect(next[2]).not.toBe(composites[2]);
 		expect(composites[2].colorKey).toBe(false);
+	});
+});
+
+describe('isVideoLayerActive', () => {
+	it('false without a source', () => {
+		expect(isVideoLayerActive(false, 1, 4)).toBe(false);
+	});
+
+	it('false at opacity 0 (or below the 0.001 floor decks use)', () => {
+		expect(isVideoLayerActive(true, 0, 4)).toBe(false);
+		expect(isVideoLayerActive(true, 0.0005, 4)).toBe(false);
+	});
+
+	it('false below the readyState floor (HAVE_CURRENT_DATA = 2) — no decoded frame yet', () => {
+		expect(isVideoLayerActive(true, 1, 0)).toBe(false);
+		expect(isVideoLayerActive(true, 1, 1)).toBe(false);
+	});
+
+	it('true with a source, opacity above the floor, and a decoded frame available', () => {
+		expect(isVideoLayerActive(true, 0.6, 2)).toBe(true);
+		expect(isVideoLayerActive(true, 0.6, 4)).toBe(true);
+	});
+});
+
+describe('shouldForceNormalForLowestSlot', () => {
+	// Video draws last, on top of the deck stack (see compositor.ts header comment) — deck
+	// compositing among themselves is independent of the video layer, so this no longer takes
+	// a videoActive parameter.
+	it('forces normal on the lowest active slot', () => {
+		expect(shouldForceNormalForLowestSlot(0, 0)).toBe(true);
+	});
+
+	it('never forces a non-lowest slot', () => {
+		expect(shouldForceNormalForLowestSlot(1, 0)).toBe(false);
 	});
 });

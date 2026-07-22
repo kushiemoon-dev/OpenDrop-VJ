@@ -100,6 +100,12 @@
 	let videoPlaybackRate = $state(1);
 	let vrFlash = $state(true);
 	let vrHue = $state(false);
+	let videoEl: HTMLVideoElement | undefined = $state();
+	// Beat-reactive video params for the Compositor's video layer — mirrors
+	// +page.svelte's videoBrightness/videoHueRotateDeg (same formulas), using this
+	// window's own local beat/vrFlash/vrHue instead of the shared store.
+	const videoBrightness = $derived(beat && vrFlash ? 1.4 : 1);
+	const videoHueRotateDeg = $derived(beat && vrHue ? 35 : 0);
 
 	let manager: DeckManager | null = null;
 	let audio: AudioEngine | null = null;
@@ -145,6 +151,23 @@
 		for (let i = 0; i < 4; i++) compositor.setColor(i, colors[i]);
 	});
 
+	// Pushes the <video> element as the Compositor's bottom texture layer whenever
+	// it mounts/unmounts (VideoLayer only renders <video> when a clip is resolved).
+	$effect(() => {
+		const el = videoEl;
+		if (!compositor) return;
+		compositor.attachVideoSource(el ?? null);
+	});
+
+	// Pushes video opacity + beat-reactive brightness/hue to the Compositor.
+	$effect(() => {
+		const opacity = videoOpacity;
+		const brightness = videoBrightness;
+		const hueRotateDeg = videoHueRotateDeg;
+		if (!compositor) return;
+		compositor.setVideoLayer(opacity, brightness, hueRotateDeg);
+	});
+
 	onMount(async () => {
 		try {
 			audio = new AudioEngine();
@@ -169,6 +192,11 @@
 				compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
 				compositor.setColor(i, slotColors[i]);
 			}
+			// videoEl is virtually always undefined this early (VideoLayer hasn't
+			// resolved a clip from the sync channel yet) — the $effects above take
+			// over as soon as it does; this mirrors the deck loop's explicit push.
+			compositor.attachVideoSource(videoEl ?? null);
+			compositor.setVideoLayer(videoOpacity, videoBrightness, videoHueRotateDeg);
 			compositor.start();
 
 			// Start slots 0 and 1 by default (A/B-compat equivalent)
@@ -348,12 +376,12 @@
 <svelte:window onresize={onResize} />
 
 <div class="output">
-	<VideoLayer clip={videoEnabled ? videoClip : null} opacity={videoOpacity} {beat} playbackRate={videoPlaybackRate} flashOn={vrFlash} hueOn={vrHue} />
+	<VideoLayer clip={videoEnabled ? videoClip : null} playbackRate={videoPlaybackRate} bind:videoEl />
 	<canvas bind:this={canvas0} class="deck-src"></canvas>
 	<canvas bind:this={canvas1} class="deck-src"></canvas>
 	<canvas bind:this={canvas2} class="deck-src"></canvas>
 	<canvas bind:this={canvas3} class="deck-src"></canvas>
-	<canvas bind:this={compositorCanvas} class="layer" style="mix-blend-mode:{videoEnabled ? 'screen' : 'normal'}"></canvas>
+	<canvas bind:this={compositorCanvas} class="layer"></canvas>
 	<OverlayLayer {overlays} {beat} visibleIds={overlayVisibleIds} {poll} />
 	{#if strobeOn && strobeFlash}
 		<div class="strobe-flash" style="background:{strobeColor};opacity:{strobeIntensity}"></div>

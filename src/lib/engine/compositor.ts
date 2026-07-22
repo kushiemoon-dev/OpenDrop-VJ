@@ -8,6 +8,20 @@
  * can see an already-cleared buffer, confirmed by a feasibility spike)
  * and composites the 4 layers with native GPU blend equations, no
  * framebuffer ping-pong.
+ *
+ * A 5th layer — the video-loop <video> element — draws LAST, on top of the 4
+ * deck layers, always in 'normal' (alpha-over) blend using its own opacity.
+ * This makes the video's own opacity slider the sole control of how much of
+ * it shows — independent of deck opacity/crossfader — since a deck slot at
+ * full opacity would otherwise fully occlude anything drawn underneath it
+ * (confirmed live: drawing video first/bottom made it disappear whenever a
+ * deck's own opacity reached 1, e.g. crossfader at either extreme). Replaces
+ * the old approach of compositing the <video> as a separate DOM layer behind
+ * this canvas via CSS `mix-blend-mode: screen`, found unreliable across two
+ * independently GPU-composited surfaces on some Chromium/Mesa/Wayland
+ * stacks (see 2026-07-20-video-compositor-integration-design.md). Same
+ * rAF-upload discipline applies: a <video> is a valid TexImageSource
+ * too, uploaded from inside drawFrame() like the deck canvases.
  */
 
 import type { BlendMode, SlotComposite, ColorParams } from './sync.js';
@@ -97,6 +111,26 @@ export function withSlotComposite(composites: SlotComposites, slot: number, patc
 	const next = [...composites] as SlotComposites;
 	next[slot] = { ...next[slot], ...patch };
 	return next;
+}
+
+/**
+ * Whether the video layer should draw this frame — opacity above the same 0.001
+ * floor the deck slots use, plus a minimum readyState (HAVE_CURRENT_DATA = 2) so a
+ * <video> with no decoded frame yet doesn't upload garbage or count as "already
+ * opaque" for shouldForceNormalForLowestSlot below.
+ */
+export function isVideoLayerActive(hasSource: boolean, opacity: number, readyState: number): boolean {
+	return hasSource && opacity > 0.001 && readyState >= 2;
+}
+
+/**
+ * Whether the lowest active deck slot should be forced to 'normal' blend — multiply/
+ * screen/additive against a still-transparent framebuffer reads wrong (e.g. multiply →
+ * black). Independent of the video layer, which now draws last, on top of the deck
+ * stack, not underneath it.
+ */
+export function shouldForceNormalForLowestSlot(slot: number, lowestActive: number): boolean {
+	return slot === lowestActive;
 }
 
 function glFactor(gl: WebGL2RenderingContext, f: GLBlendFactor): number {
@@ -252,6 +286,11 @@ export class Compositor {
 		config: DEFAULT_SLOT_COMPOSITE,
 		color: DEFAULT_COLOR_PARAMS,
 	}));
+	private videoTexture: WebGLTexture | null = null;
+	private videoSource: HTMLVideoElement | null = null;
+	private videoOpacity = 0;
+	private videoBrightness = 1;
+	private videoHueRotateDeg = 0;
 	private rafId: number | null = null;
 
 	constructor(canvas: HTMLCanvasElement) {
@@ -281,6 +320,19 @@ export class Compositor {
 		this.layers[slot].color = color;
 	}
 
+	/** Bind the DOM <video> element as the texture source for the bottom video layer (null = none/disabled). */
+	attachVideoSource(source: HTMLVideoElement | null): void {
+		this.videoSource = source;
+	}
+
+	/** Update the video layer's opacity + beat-reactive brightness/hue. Same uOpacity/
+	 * uBrightnessMul/uHueRotateDeg uniforms the 4 deck slots already use — no shader change. */
+	setVideoLayer(opacity: number, brightness: number, hueRotateDeg: number): void {
+		this.videoOpacity = opacity;
+		this.videoBrightness = brightness;
+		this.videoHueRotateDeg = hueRotateDeg;
+	}
+
 	/** Resize the drawing buffer. CSS sizing (100% via stylesheet) handles display scaling. */
 	resize(w: number, h: number, pixelRatio = 1): void {
 		this.canvas.width = Math.max(1, Math.round(w * pixelRatio));
@@ -290,7 +342,15 @@ export class Compositor {
 	start(): void {
 		if (this.rafId !== null) return;
 		const tick = () => {
-			this.drawFrame();
+			// A thrown drawFrame() (e.g. a tainted cross-origin video texture) would
+			// otherwise never reach the requestAnimationFrame(tick) below, permanently
+			// killing the render loop for the rest of the session — caught here so one
+			// bad frame is skipped instead of freezing everything.
+			try {
+				this.drawFrame();
+			} catch (e) {
+				console.error('Compositor: drawFrame failed, skipping this frame', e);
+			}
 			this.rafId = requestAnimationFrame(tick);
 		};
 		this.rafId = requestAnimationFrame(tick);
@@ -310,6 +370,8 @@ export class Compositor {
 		const gl = this.gl;
 		for (const tex of this.textures) gl.deleteTexture(tex);
 		this.textures = [];
+		if (this.videoTexture) gl.deleteTexture(this.videoTexture);
+		this.videoTexture = null;
 		gl.deleteProgram(this.program);
 	}
 
@@ -317,6 +379,7 @@ export class Compositor {
 		this.program = this.buildProgram();
 		this.uniforms = this.locateUniforms();
 		this.textures = this.createTextures();
+		this.videoTexture = this.createTextures(1)[0];
 	}
 
 	private buildProgram(): WebGLProgram {
@@ -364,10 +427,10 @@ export class Compositor {
 		};
 	}
 
-	private createTextures(): WebGLTexture[] {
+	private createTextures(count: number = SLOT_COUNT): WebGLTexture[] {
 		const gl = this.gl;
 		const textures: WebGLTexture[] = [];
-		for (let i = 0; i < SLOT_COUNT; i++) {
+		for (let i = 0; i < count; i++) {
 			const tex = gl.createTexture()!;
 			gl.bindTexture(gl.TEXTURE_2D, tex);
 			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -386,6 +449,8 @@ export class Compositor {
 		gl.clear(gl.COLOR_BUFFER_BIT);
 		gl.useProgram(this.program);
 
+		// Deck slots first — composited among themselves exactly as before the video
+		// layer existed, independent of it (video draws last, on top — see below).
 		const lowestActive = this.layers.findIndex((l) => l.source && l.opacity > 0.001);
 
 		for (let slot = 0; slot < SLOT_COUNT; slot++) {
@@ -394,7 +459,7 @@ export class Compositor {
 
 			// Force normal on the lowest active layer — multiply against a
 			// transparent framebuffer would otherwise read as black.
-			const mode: BlendMode = slot === lowestActive ? 'normal' : layer.config.blend;
+			const mode: BlendMode = shouldForceNormalForLowestSlot(slot, lowestActive) ? 'normal' : layer.config.blend;
 			const bs = blendStateFor(mode);
 			gl.blendFuncSeparate(
 				glFactor(gl, bs.srcRGB), glFactor(gl, bs.dstRGB),
@@ -422,6 +487,40 @@ export class Compositor {
 			gl.uniform1f(this.uniforms.uBrightnessMul, layer.color.brightness * 2);
 			gl.uniform1f(this.uniforms.uContrastMul, layer.color.contrast * 2);
 			gl.uniform1f(this.uniforms.uInvertAmount, layer.color.invert);
+
+			gl.drawArrays(gl.TRIANGLES, 0, 6);
+		}
+
+		// Video layer last, on top — normal (alpha-over) blend using its own opacity, so
+		// it always shows at exactly its own slider strength over whatever the decks just
+		// produced, regardless of deck opacity/crossfader (see class header comment).
+		const videoActive = isVideoLayerActive(this.videoSource !== null, this.videoOpacity, this.videoSource?.readyState ?? 0);
+		if (videoActive) {
+			const vbs = blendStateFor('normal');
+			gl.blendFuncSeparate(
+				glFactor(gl, vbs.srcRGB), glFactor(gl, vbs.dstRGB),
+				glFactor(gl, vbs.srcA), glFactor(gl, vbs.dstA),
+			);
+			gl.blendEquation(gl.FUNC_ADD);
+
+			gl.activeTexture(gl.TEXTURE0);
+			gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
+			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.videoSource!);
+
+			gl.uniform1i(this.uniforms.uTex, 0);
+			gl.uniform1i(this.uniforms.uMultiply, 0);
+			gl.uniform1f(this.uniforms.uOpacity, this.videoOpacity);
+			gl.uniform1i(this.uniforms.uLumaOn, 0);
+			gl.uniform1f(this.uniforms.uLumaBlack, 0);
+			gl.uniform1f(this.uniforms.uLumaWhite, 1);
+			gl.uniform1i(this.uniforms.uColorOn, 0);
+			gl.uniform1f(this.uniforms.uKeyHue, 0);
+			gl.uniform1f(this.uniforms.uKeyTol, 0);
+			gl.uniform1f(this.uniforms.uHueRotateDeg, this.videoHueRotateDeg);
+			gl.uniform1f(this.uniforms.uSaturateMul, 1);
+			gl.uniform1f(this.uniforms.uBrightnessMul, this.videoBrightness);
+			gl.uniform1f(this.uniforms.uContrastMul, 1);
+			gl.uniform1f(this.uniforms.uInvertAmount, 0);
 
 			gl.drawArrays(gl.TRIANGLES, 0, 6);
 		}

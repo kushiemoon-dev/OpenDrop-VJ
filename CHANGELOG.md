@@ -5,6 +5,34 @@ All notable changes to OpenDrop will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-07-22
+
+First stable release — the 4-deck mixer, GPU compositor, automation (snapshots/timeline/LFO),
+preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro outputs
+(NDI/Spout/virtual-cam/OBS) described in the README are all in place and exercised end to end.
+
+### Added
+- Video loop composited as a real WebGL texture layer inside the GPU compositor (5th layer,
+  uploaded via `texImage2D` from the same rAF loop as the 4 deck canvases), replacing the old DOM
+  `<video>` + CSS `mix-blend-mode:screen` approach — unreliable across two independently
+  GPU-composited surfaces on some Chromium/Mesa/Wayland stacks, where the video stayed invisible
+  regardless of blend mode. Decks composite among themselves first, unchanged; the video layer
+  draws last, on top, at its own opacity — visible at exactly its own slider strength regardless of
+  deck opacity/crossfader position.
+
+### Fixed
+- Render loop could die permanently: a CDN-hosted video clip is cross-origin, and the `<video>`
+  element had no `crossorigin` attribute, so `texImage2D` threw an uncaught `SecurityError` that
+  broke the `requestAnimationFrame` chain — nothing rendered again until reload. Fixed the
+  attribute and wrapped the render tick in try/catch so no future per-frame error can freeze the
+  whole app again either.
+- `sendVideo` threw `DataCloneError` on `BroadcastChannel.postMessage` — a raw Svelte 5
+  `$state`-proxied clip object isn't structured-cloneable; same class of bug already handled for
+  `sendOverlays`/`sendQVars`/`sendPoll`, `sendVideo` was the one missed.
+- Video clip list rows collapsed to ~2px tall instead of scrolling normally once there were enough
+  clips to overflow the list's `max-height` — `overflow:hidden` (needed for name ellipsis) disables
+  flexbox's automatic minimum-size protection; `flex-shrink:0` restores it.
+
 ## [0.9.0] - 2026-07-20
 
 ### Added

@@ -64,6 +64,11 @@
 - **Remote control from a phone or tablet** over LAN, token-authenticated *(Electron)*
 - Fully **customizable keymap**
 
+**Streaming integrations** *(Electron)*
+- **OBS WebSocket** bidirectional scene link — map each OBS scene to a deck slot or a color-coded "mood", kept in sync both ways
+- **Twitch + Kick chat-poll voting** — connect your channel's chat as a live preset-vote source; a timed poll resolves and cuts to the winning preset (vote pool configurable: favorites, playlist A, or playlist B)
+- Streaming credentials (OBS password, Twitch OAuth token, Kick session credentials) stored via Electron's `safeStorage`, never in plaintext
+
 **Output & capture**
 - **Output window** — detached fullscreen canvas for a second monitor or an OBS Browser Source
 - **NDI** output *(Electron, requires the NDI SDK)*
@@ -242,8 +247,10 @@ src/
 
 electron/
 ├── main.cjs                  Main process — IPC relay, PCM audio bridge, NDI/Spout/v4l2, OSC,
-│                              Ableton Link, remote WS server, multi-display targeting
-└── preload.cjs               contextBridge → window.electronAPI
+│                              Ableton Link, OBS WebSocket link, Twitch/Kick chat, remote WS
+│                              server, multi-display targeting
+├── preload.cjs                contextBridge → window.electronAPI
+└── secrets-store.cjs          safeStorage-backed secrets (OBS password, Twitch/Kick credentials)
 
 workers/
 └── presets-cloud/             Standalone Cloudflare Worker + R2 backing the presets cloud
@@ -270,6 +277,7 @@ e2e/
 | Spout input (receive) | Not implemented — the native addon only sends; receive would need new Windows-only DirectX 11 code |
 | Virtual webcam output | Linux only |
 | NDI input (receive) | Electron only — no receive path on the web build |
+| Kick chat integration | Unofficial — Kick has no public chat-read API; needs a session cookie + bearer/XSRF token pulled from browser devtools, may break without notice |
 
 ---
 

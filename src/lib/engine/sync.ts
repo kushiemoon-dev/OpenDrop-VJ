@@ -177,7 +177,9 @@ export class MainSync {
 	}
 
 	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {
-		sendMsg(this.bc, { type: 'video', ...state });
+		// Shallow copy is load-bearing: a raw Svelte 5 $state-proxied object throws
+		// DataCloneError on postMessage (same class of bug as sendOverlays/sendQVars/sendPoll).
+		sendMsg(this.bc, { type: 'video', ...state, clip: state.clip ? { ...state.clip } : null });
 	}
 
 	sendBeat(bpm: number) {

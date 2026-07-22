@@ -124,6 +124,7 @@
 	// — State —————————————————————————————————————————————
 	let canvases = $state<(HTMLCanvasElement | undefined)[]>([undefined, undefined, undefined, undefined]);
 	let compositorCanvas: HTMLCanvasElement | undefined = $state();
+	let videoEl: HTMLVideoElement | undefined = $state();
 	let compositor: Compositor | null = null;
 	const manager = new DeckManager();
 	let audio: AudioEngine | null = null;
@@ -303,6 +304,11 @@
 	);
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoState.playbackRate * 20) / 20);
+	// Beat-reactive video params for the Compositor's video layer — same formulas
+	// VideoLayer.svelte used to apply via CSS filter (brightness/hue-rotate only;
+	// the old CSS `scale` transform has no compositor equivalent, skipped for v1).
+	const videoBrightness = $derived(beatSyncState.beat && videoState.reactFlash ? 1.4 : 1);
+	const videoHueRotateDeg = $derived(beatSyncState.beat && videoState.reactHue ? 35 : 0);
 
 	/** Toggle a live camera as the video layer source. Probes the default camera once
 	 * to resolve a stable deviceId/label, then immediately releases that probe stream —
@@ -678,6 +684,24 @@
 		}
 	});
 
+	// Pushes the <video> element as the Compositor's bottom texture layer whenever
+	// it mounts/unmounts (VideoLayer only renders <video> when a clip is resolved —
+	// see VideoLayer.svelte's {#if resolvedSrc || isStreamKind(...)}).
+	$effect(() => {
+		const el = videoEl;
+		if (!compositor) return;
+		compositor.attachVideoSource(el ?? null);
+	});
+
+	// Pushes video opacity + beat-reactive brightness/hue to the Compositor.
+	$effect(() => {
+		const opacity = videoState.opacity;
+		const brightness = videoBrightness;
+		const hueRotateDeg = videoHueRotateDeg;
+		if (!compositor) return;
+		compositor.setVideoLayer(opacity, brightness, hueRotateDeg);
+	});
+
 	// — Sync strobe vers output ———————————————————————————
 	$effect(() => {
 		const on = strobeState.on;
@@ -971,7 +995,7 @@
 	// assigning them itself, since +page.svelte reads/reassigns these elsewhere too.
 	async function startVisualizer() {
 		const result = await startVisualizerAction({
-			canvases, compositorCanvas, manager, clock, lfoEngine, registry, commandCtx,
+			canvases, compositorCanvas, videoEl: videoEl ?? null, manager, clock, lfoEngine, registry, commandCtx,
 			opacities, isElectron,
 			getBusPresetA: () => busPresetA,
 			getBusPresetB: () => busPresetB,
@@ -1593,14 +1617,16 @@
 	role="region"
 	aria-label="Visualizer"
 >
-	<!-- Video loop — first child = behind the decks -->
-	<VideoLayer clip={currentClip} opacity={videoState.opacity} beat={beatSyncState.beat} playbackRate={videoState.playbackRate} flashOn={videoState.reactFlash} hueOn={videoState.reactHue} />
+	<!-- Video loop — first child = behind the decks. Rendered fully transparent
+	     (see VideoLayer.svelte's .video-layer CSS) — the Compositor draws it as a
+	     WebGL texture instead (bind:videoEl feeds attachVideoSource above). -->
+	<VideoLayer clip={currentClip} playbackRate={videoState.playbackRate} bind:videoEl />
 	<!-- Deck canvases — 4 slots, texture sources for the Compositor (hidden) -->
 	{#each [0, 1, 2, 3] as i}
 		<canvas bind:this={canvases[i]} class="deck-src"></canvas>
 	{/each}
 	<!-- Composited render (blend + lumaKey + colorKey per slot) -->
-	<canvas bind:this={compositorCanvas} class="deck-canvas" style:mix-blend-mode={videoState.enabled ? 'screen' : 'normal'}></canvas>
+	<canvas bind:this={compositorCanvas} class="deck-canvas"></canvas>
 	<!-- Overlay sprites -->
 	<OverlayLayer overlays={overlayState.overlays} beat={beatSyncState.beat} visibleIds={overlayVisibleIds} poll={chatPollState.poll} />
 	<!-- Strobe flash — top z-index, pointer-events none -->

@@ -61,6 +61,7 @@ let lastStrobeVal = 0;
 export interface StartVisualizerDeps {
 	canvases: (HTMLCanvasElement | undefined)[];
 	compositorCanvas: HTMLCanvasElement | undefined;
+	videoEl: HTMLVideoElement | null;
 	manager: DeckManager;
 	clock: Clock;
 	lfoEngine: LfoEngine;
@@ -86,7 +87,7 @@ export interface StartVisualizerResult {
 
 export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartVisualizerResult | null> {
 	const {
-		canvases, compositorCanvas, manager, clock, lfoEngine, registry, commandCtx,
+		canvases, compositorCanvas, videoEl, manager, clock, lfoEngine, registry, commandCtx,
 		opacities, getBusPresetA, getBusPresetB, getCurrentClip, getVideoPlaybackRateStep, isElectron,
 		onBeat, getOutputReadyOnce, setOutputReadyOnce,
 	} = deps;
@@ -123,6 +124,12 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 			const color = deckState.deckBus[i] === 'A' ? colorState.a : deckState.deckBus[i] === 'B' ? colorState.b : DEFAULT_COLOR_PARAMS;
 			compositor.setColor(i, color);
 		}
+		// Same explicit-initial-push reasoning as setLayer/setColor above — the
+		// beat-reactive brightness/hue $effect in +page.svelte hasn't fired yet, but
+		// beat is always false this early (the clock starts further down), so
+		// neutral (1, 0) is correct until the first real beat lands.
+		compositor.attachVideoSource(videoEl);
+		compositor.setVideoLayer(videoState.opacity, 1, 0);
 		compositor.start();
 
 		const d0 = deckState.presetA ? await loadPresetData(deckState.presetA) : null;

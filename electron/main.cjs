@@ -820,8 +820,9 @@ function registerProtocol() {
     const { pathname } = new URL(request.url);
     const rel = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
     const ext = path.extname(rel).toLowerCase();
-    const candidate = path.join(BUILD_DIR, rel);
-    const filePath = (ext && fs.existsSync(candidate))
+    const candidate = path.resolve(BUILD_DIR, '.' + rel);
+    const inBounds = candidate === BUILD_DIR || candidate.startsWith(BUILD_DIR + path.sep);
+    const filePath = (ext && inBounds && fs.existsSync(candidate))
       ? candidate
       : path.join(BUILD_DIR, 'index.html');
     try {

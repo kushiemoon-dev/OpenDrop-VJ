@@ -44,7 +44,7 @@ export function endNdiTransition(slot: number): void {
  * accepts any canvas element as an image source, the same way compositor.ts
  * already treats deck canvases as opaque texture sources.
  */
-export function sampleCanvasRGBA(
+function sampleCanvasRGBA(
 	source: HTMLCanvasElement,
 	helper: HTMLCanvasElement,
 ): { width: number; height: number; buffer: ArrayBuffer } | null {

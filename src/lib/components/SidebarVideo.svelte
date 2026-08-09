@@ -6,6 +6,7 @@
 		videoOpacity: number;
 		videoAdvance: 'shuffle' | 'sequential' | 'manual';
 		videoBeatsPerCut: number;
+		videoSeparatorBeats: number;
 		vrCut: boolean;
 		vrFlash: boolean;
 		vrWarp: boolean;
@@ -27,6 +28,7 @@
 		onOpacityChange: (v: number) => void;
 		onAdvanceChange: (v: 'shuffle' | 'sequential' | 'manual') => void;
 		onBeatsPerCutChange: (v: number) => void;
+		onSeparatorBeatsChange: (v: number) => void;
 		onToggleVrCut: () => void;
 		onToggleVrFlash: () => void;
 		onToggleVrWarp: () => void;
@@ -36,6 +38,8 @@
 		onAddVideo: (e: Event) => void;
 		onToggleClipSelection: (key: string) => void;
 		onClearClipSelection: () => void;
+		onSelectAllClips: () => void;
+		onRemoveSelectedClips: () => void;
 	}
 
 	let {
@@ -43,6 +47,7 @@
 		videoOpacity,
 		videoAdvance,
 		videoBeatsPerCut,
+		videoSeparatorBeats,
 		vrCut,
 		vrFlash,
 		vrWarp,
@@ -64,6 +69,7 @@
 		onOpacityChange,
 		onAdvanceChange,
 		onBeatsPerCutChange,
+		onSeparatorBeatsChange,
 		onToggleVrCut,
 		onToggleVrFlash,
 		onToggleVrWarp,
@@ -73,6 +79,8 @@
 		onAddVideo,
 		onToggleClipSelection,
 		onClearClipSelection,
+		onSelectAllClips,
+		onRemoveSelectedClips,
 	}: Props = $props();
 </script>
 
@@ -101,6 +109,19 @@
 				<option value={8}>8</option>
 				<option value={16}>16</option>
 				<option value={32}>32</option>
+				<option value={64}>64</option>
+			</select>
+		</div>
+		<div class="btn-row">
+			<span class="cf-label bright" title="Flash the layer every N beats — marks each loop/cut restart">Sep</span>
+			<select class="beats-select" value={videoSeparatorBeats} onchange={(e) => onSeparatorBeatsChange(+(e.target as HTMLSelectElement).value)}>
+				<option value={0}>0</option>
+				<option value={1}>1</option>
+				<option value={4}>4</option>
+				<option value={8}>8</option>
+				<option value={16}>16</option>
+				<option value={32}>32</option>
+				<option value={64}>64</option>
 			</select>
 		</div>
 		<div class="btn-row">
@@ -138,10 +159,12 @@
 	{#if allClips.length === 0 && !liveActive && !ndiActive}
 		<p class="hint">Drag a video onto the visualizer or click + Video</p>
 	{/if}
-	{#if selectedClipKeys.length > 0}
+	{#if allClips.length > 0}
 		<div class="pl-header">
 			<span class="hint" style="margin:0">{selectedClipKeys.length} in rotation</span>
-			<button class="btn-sm pl-btn" onclick={onClearClipSelection}>Clear</button>
+			<button class="btn-sm pl-btn" onclick={onSelectAllClips}>Select All</button>
+			<button class="btn-sm pl-btn" onclick={onClearClipSelection} disabled={selectedClipKeys.length === 0}>Clear</button>
+			<button class="btn-sm pl-btn" onclick={onRemoveSelectedClips} disabled={selectedClipKeys.length === 0} title="Delete the checked clips from your library">🗑 Remove Selected</button>
 		</div>
 	{/if}
 	<ul class="overlay-list">

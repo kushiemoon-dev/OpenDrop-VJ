@@ -55,6 +55,24 @@ export async function toggleSpout(): Promise<void> {
 	}
 }
 
+export async function toggleRecord(): Promise<void> {
+	electronFeaturesState.record.error = '';
+	const eAPI = window.electronAPI;
+	if (electronFeaturesState.record.active) {
+		const res = await eAPI?.recordStop();
+		if (res?.path) electronFeaturesState.record.path = res.path;
+		electronFeaturesState.record.active = false;
+	} else {
+		const res = await eAPI?.recordStart();
+		if (res?.ok) {
+			electronFeaturesState.record.active = true;
+			electronFeaturesState.record.path = res.path ?? '';
+		} else {
+			electronFeaturesState.record.error = res?.error ?? 'Recording error.';
+		}
+	}
+}
+
 export async function toggleOsc(): Promise<void> {
 	electronFeaturesState.osc.error = '';
 	const eAPI = window.electronAPI;

@@ -172,7 +172,7 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 				sync.sendPerf({ targetFps: perfState.targetFps, invisibleMode: perfState.invisibleMode, invisibleFps: perfState.invisibleFps });
 				sync.sendOverlays(overlayState.overlays);
 				sync.sendOverlayQueueIndex(overlayState.queueIndex);
-				sync.sendVideo({ enabled: videoState.enabled, clip: getCurrentClip(), opacity: videoState.opacity, playbackRate: getVideoPlaybackRateStep(), flashOn: videoState.reactFlash, hueOn: videoState.reactHue });
+				sync.sendVideo({ enabled: videoState.enabled, clip: getCurrentClip(), opacity: videoState.opacity, playbackRate: getVideoPlaybackRateStep(), flashOn: videoState.reactFlash, hueOn: videoState.reactHue, separatorFlash: videoState.separatorFlash });
 				if (audioSourceState.currentDeviceId) sync.sendSource(audioSourceState.currentDeviceId);
 				if (audioSourceState.currentLoopbackDeviceId) sync.sendLoopback(audioSourceState.currentLoopbackDeviceId);
 			}
@@ -198,9 +198,14 @@ export async function startVisualizer(deps: StartVisualizerDeps): Promise<StartV
 			if (!audioSourceState.manualBpm) clock.pulse(audioSourceState.detectedBpm);
 		});
 		clock.onBeat(onBeat);
-		clock.onTick((phase) => {
-			// Route LFO values to registry commands
-			for (const { target, value01 } of lfoEngine.tick(phase)) {
+		clock.onTick((phase, beatCount) => {
+			// beatCount + phase (not phase alone) — phase resets to 0 every beat,
+			// so a sub-1 rate (e.g. 0.25 for a 4-beat cycle) would only ever climb
+			// from 0 to 0.25 before snapping back, never completing the sweep.
+			// Adding beatCount gives a continuously-increasing position instead;
+			// for rate >= 1 the extra integer part is stripped by `% 1` inside
+			// LfoEngine's _compute, so ×1/×2/×4 behave identically to before.
+			for (const { target, value01 } of lfoEngine.tick(beatCount + phase)) {
 				if (target) registry.dispatch(target, value01, commandCtx);
 			}
 			// Strobe: detect rising edge of a square LFO at strobeState.rate

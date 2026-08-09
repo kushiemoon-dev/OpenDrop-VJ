@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // v4l2loopback virtual webcam (Linux — requires ffmpeg + v4l2loopback kernel module)
   v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
   v4l2Stop: () => ipcRenderer.invoke('v4l2:stop'),
+  recordStart: () => ipcRenderer.invoke('record:start'),
+  recordStop: () => ipcRenderer.invoke('record:stop'),
 
   // Spout texture sharing (Windows — requires spout-addon + SpoutDX vendor sources)
   spoutStart: (name) => ipcRenderer.invoke('spout:start', { name }),
@@ -111,6 +113,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_, sceneName) => cb(sceneName);
     ipcRenderer.on('obs:scene-changed', handler);
     return () => ipcRenderer.off('obs:scene-changed', handler);
+  },
+  obsStartRecord: () => ipcRenderer.invoke('obs:start-record'),
+  obsStopRecord: () => ipcRenderer.invoke('obs:stop-record'),
+  obsGetRecordStatus: () => ipcRenderer.invoke('obs:get-record-status'),
+  onObsRecordStateChanged: (cb) => {
+    const handler = (_, recording) => cb(recording);
+    ipcRenderer.on('obs:record-state-changed', handler);
+    return () => ipcRenderer.off('obs:record-state-changed', handler);
   },
 
   // Chat poll sources

@@ -100,6 +100,7 @@
 	let videoPlaybackRate = $state(1);
 	let vrFlash = $state(true);
 	let vrHue = $state(false);
+	let videoSeparatorFlash = $state(false);
 	let videoEl: HTMLVideoElement | undefined = $state();
 	// Beat-reactive video params for the Compositor's video layer — mirrors
 	// +page.svelte's videoBrightness/videoHueRotateDeg (same formulas), using this
@@ -161,7 +162,7 @@
 
 	// Pushes video opacity + beat-reactive brightness/hue to the Compositor.
 	$effect(() => {
-		const opacity = videoOpacity;
+		const opacity = videoSeparatorFlash ? 0 : videoOpacity;
 		const brightness = videoBrightness;
 		const hueRotateDeg = videoHueRotateDeg;
 		if (!compositor) return;
@@ -278,6 +279,7 @@
 					videoPlaybackRate = msg.playbackRate;
 					vrFlash = msg.flashOn;
 					vrHue = msg.hueOn;
+					videoSeparatorFlash = msg.separatorFlash;
 				} else if (msg.type === 'beat') {
 					beat = true;
 					if (beatTimer !== null) clearTimeout(beatTimer);

@@ -24,7 +24,7 @@ export function defaultSlot(): LfoSlot {
 const LFO_SLOTS = 4;
 
 export class LfoEngine {
-	readonly slots: LfoSlot[];
+	slots: LfoSlot[];
 	/** S&H values — randomized per-slot on each downbeat. */
 	private readonly _shValues: number[];
 
@@ -41,7 +41,11 @@ export class LfoEngine {
 	}
 
 	/**
-	 * Compute all LFO values for the given clock phase (0..1 within a beat).
+	 * Compute all LFO values for the given clock position — beatCount + phase01
+	 * (a continuously-increasing beat position), NOT phase01 alone, so a
+	 * sub-1 rate (a multi-beat cycle, e.g. rate=0.25 for BPM/4) actually
+	 * completes instead of resetting every beat. See visualizer-startup.ts's
+	 * clock.onTick for why phase01 alone doesn't work here.
 	 * Returns an array of { target, value01 } for each enabled slot.
 	 */
 	tick(clockPhase01: number): Array<{ target: CommandId | null; value01: number }> {

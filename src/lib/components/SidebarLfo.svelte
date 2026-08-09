@@ -8,6 +8,21 @@
 	}
 
 	let { lfoSlots, registry }: Props = $props();
+
+	// slot.rate multiplies the clock's per-beat phase (lfo.ts), so a full
+	// cycle takes 1/rate beats — e.g. rate=0.25 completes once every 4 beats
+	// (BPM/4). Discrete musical divisions read far better here than a
+	// continuous slider, and let rate go slow enough for multi-bar sweeps.
+	const RATE_OPTIONS = [
+		{ rate: 4, label: '×4' },
+		{ rate: 2, label: '×2' },
+		{ rate: 1, label: '×1' },
+		{ rate: 0.5, label: '÷2' },
+		{ rate: 0.25, label: '÷4 (BPM/4)' },
+		{ rate: 0.125, label: '÷8 (BPM/8)' },
+		{ rate: 0.0625, label: '÷16 (BPM/16)' },
+		{ rate: 0.03125, label: '÷32 (BPM/32)' },
+	];
 </script>
 
 <div class="controls-section">
@@ -38,8 +53,13 @@
 				</div>
 				<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
 					<span class="midi-label">Rate</span>
-					<input type="range" min="0.25" max="4" step="0.25" bind:value={slot.rate} style="flex:1" />
-					<span style="font-size:10px;color:#aaa">{slot.rate}×</span>
+					<select style="flex:1;font-size:10px;background:#222;color:#ccc;border:1px solid #444;border-radius:3px"
+						value={slot.rate}
+						onchange={(e) => { slot.rate = parseFloat(e.currentTarget.value); }}>
+						{#each RATE_OPTIONS as opt}
+							<option value={opt.rate}>{opt.label}</option>
+						{/each}
+					</select>
 				</div>
 				<div class="midi-row" style="gap:6px;align-items:center;margin-top:2px">
 					<span class="midi-label">Amount</span>

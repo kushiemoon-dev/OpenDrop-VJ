@@ -29,6 +29,7 @@
 		onBeatTriggerAChange: (patch: Partial<BeatTriggerConfig>) => void;
 		onBeatTriggerBChange: (patch: Partial<BeatTriggerConfig>) => void;
 		onTapTempo: () => void;
+		onSetBpm: (bpm: number) => void;
 		onClearManualBpm: () => void;
 		onToggleBeatSyncA: () => void;
 		onToggleBeatSyncB: () => void;
@@ -71,6 +72,7 @@
 		onBeatTriggerAChange,
 		onBeatTriggerBChange,
 		onTapTempo,
+		onSetBpm,
 		onClearManualBpm,
 		onToggleBeatSyncA,
 		onToggleBeatSyncB,
@@ -86,6 +88,27 @@
 		onExportPlaylists,
 		onImportPlaylists,
 	}: Props = $props();
+
+	// BPM field: null = showing the live value (manual/detected); a string
+	// while the user is typing, so keystrokes don't get clobbered by props
+	// re-rendering mid-edit. Committed on Enter only, per the "don't guess,
+	// wait for confirmation" ask — blur/Escape just discards the edit.
+	let bpmEditValue: string | null = $state(null);
+
+	function startEditBpm(e: FocusEvent) {
+		bpmEditValue = String(manualBpm > 0 ? manualBpm : detectedBpm > 0 ? detectedBpm : '');
+		(e.currentTarget as HTMLInputElement).select();
+	}
+
+	function onBpmKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			const n = parseInt((e.currentTarget as HTMLInputElement).value, 10);
+			if (!Number.isNaN(n)) onSetBpm(n);
+			(e.currentTarget as HTMLInputElement).blur();
+		} else if (e.key === 'Escape') {
+			(e.currentTarget as HTMLInputElement).blur();
+		}
+	}
 </script>
 
 <!-- Playlist -->
@@ -110,7 +133,18 @@
 	<!-- Beat sync -->
 	{#if audioRunning}
 		<div class="beat-sync-row">
-			<span class="bpm-display" class:manual={manualBpm > 0}>♩ {manualBpm > 0 ? manualBpm : detectedBpm > 0 ? detectedBpm : '—'}</span>
+			<span class="bpm-note" class:manual={manualBpm > 0}>♩</span>
+			<input
+				class="bpm-display bpm-input"
+				class:manual={manualBpm > 0}
+				type="number" min="20" max="300"
+				placeholder="—"
+				value={bpmEditValue ?? (manualBpm > 0 ? manualBpm : detectedBpm > 0 ? detectedBpm : '')}
+				onfocus={startEditBpm}
+				onblur={() => { bpmEditValue = null; }}
+				oninput={(e) => { bpmEditValue = (e.currentTarget as HTMLInputElement).value; }}
+				onkeydown={onBpmKeydown}
+				title="Type a BPM and press Enter" />
 			<button class="btn-sm tap-btn" onclick={onTapTempo} title="Tap tempo">TAP</button>
 			{#if manualBpm > 0}
 				<button class="btn-sm" onclick={onClearManualBpm} title="Clear manual BPM">✕</button>
@@ -329,11 +363,27 @@
 		border-radius: 6px;
 	}
 
+	.bpm-note {
+		font-size: 12px; font-weight: 700; color: var(--text-muted);
+		flex-shrink: 0;
+	}
+	.bpm-note.manual { color: var(--violet); text-shadow: 0 0 8px rgba(180,79,255,0.5); }
+
 	.bpm-display {
 		font-size: 12px; font-weight: 700; color: var(--violet);
 		text-shadow: 0 0 10px rgba(180,79,255,0.6);
 		min-width: 48px; font-family: 'Courier New', monospace;
 		flex-shrink: 0;
+	}
+
+	.bpm-input {
+		background: transparent; border: 1px solid transparent; border-radius: 3px;
+		padding: 1px 3px; -moz-appearance: textfield; appearance: textfield;
+	}
+	.bpm-input:hover, .bpm-input:focus { border-color: #444; background: #111; }
+	.bpm-input:focus { outline: none; }
+	.bpm-input::-webkit-outer-spin-button, .bpm-input::-webkit-inner-spin-button {
+		-webkit-appearance: none; margin: 0;
 	}
 
 	.beats-select {

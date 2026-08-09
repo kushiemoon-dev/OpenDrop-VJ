@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { obsLinkState, saveObsConfig } from '$lib/engine/obs-link-store.svelte.js';
-	import { connectObs, disconnectObs } from '$lib/engine/obs-link-actions.js';
+	import { connectObs, disconnectObs, toggleObsRecord } from '$lib/engine/obs-link-actions.js';
 	import { findTargetForScene, type MappingTarget } from '$lib/engine/obs-mapping.js';
 	import { FAV_COLORS, loadMoodLabels, saveMoodLabels } from '$lib/presets/favorites.js';
 	import { chatPollState } from '$lib/engine/chat-poll-store.svelte.js';
@@ -32,6 +32,7 @@
 	let kickCookiesInput = $state('');
 
 	let obsPasswordInput = $state('');
+	let obsPasswordError = $state('');
 	let hasObsPassword = $state(false);
 	let hasTwitchToken = $state(false);
 	let hasKickCreds = $state(false);
@@ -50,9 +51,19 @@
 
 	async function saveObsPassword(): Promise<void> {
 		if (!obsPasswordInput) return;
-		await window.electronAPI?.setSecret('obs-password', obsPasswordInput);
-		obsPasswordInput = '';
-		await refreshSecretStatus();
+		obsPasswordError = '';
+		try {
+			await window.electronAPI?.setSecret('obs-password', obsPasswordInput);
+			obsPasswordInput = '';
+			await refreshSecretStatus();
+		} catch (e) {
+			// setSecret throws when the OS keyring backend is unavailable
+			// (safeStorage.isEncryptionAvailable() false) — was previously an
+			// unhandled rejection, silently leaving the password unsaved with
+			// no indication why, right up until a confusing auth failure on
+			// Connect. See main.cjs's password-store=basic switch for the fix.
+			obsPasswordError = e instanceof Error ? e.message : String(e);
+		}
 	}
 
 	async function saveTwitchToken(): Promise<void> {
@@ -131,15 +142,23 @@
 			<button class="btn-sm" onclick={saveObsPassword}>Save</button>
 			{#if hasObsPassword}<span class="secret-ok" title="Password saved">✓</span>{/if}
 		</div>
+		{#if obsPasswordError}<div class="ndi-error">{obsPasswordError}</div>{/if}
 		<p class="hint">
 			If the OBS instance has a password (Tools → WebSocket Server Settings in
 			OBS, enabled by default since OBS 28), paste it above and Save before
 			connecting.
 		</p>
 	{:else}
-		<button class="btn-sm" onclick={disconnectObs}>Disconnect</button>
+		<div class="midi-row">
+			<button class="btn-sm" onclick={disconnectObs}>Disconnect</button>
+			<button class="btn-sm" class:active={obsLinkState.recording} onclick={toggleObsRecord}
+				title={obsLinkState.recording ? 'Stop OBS recording' : 'Start OBS recording'}>
+				⏺ {obsLinkState.recording ? 'Recording ●' : 'Record ○'}
+			</button>
+		</div>
 	{/if}
 	{#if obsLinkState.error}<div class="ndi-error">{obsLinkState.error}</div>{/if}
+	{#if obsLinkState.recordError}<div class="ndi-error">{obsLinkState.recordError}</div>{/if}
 </div>
 
 {#if obsLinkState.connected}

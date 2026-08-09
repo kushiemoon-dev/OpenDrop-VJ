@@ -21,6 +21,11 @@ export const videoState = $state({
 	opacity: 0.6,
 	advance: 'shuffle' as 'shuffle' | 'sequential' | 'manual',
 	beatsPerCut: 8,
+	// How often (in beats) the layer flashes to mark a loop/cut boundary —
+	// independent of beatsPerCut, since a short clip can loop several times
+	// within one beatsPerCut window and those restarts need their own marker.
+	separatorBeats: 8,
+	separatorFlash: false,
 	reactCut: true,
 	reactFlash: true,
 	reactWarp: true,
@@ -105,6 +110,24 @@ export async function removeVideoClip(index: number): Promise<void> {
 	if (videoState.currentClipIndex >= totalClips) videoState.currentClipIndex = 0;
 }
 
+/** Removes every user clip currently checked into the auto-cut rotation
+ * (selectedClipKeys) — builtins can't be removed (same as removeVideoClip),
+ * so a builtin's key being selected is simply a no-op here. Useful for
+ * bulk-pruning a large imported library: check the ones you don't want,
+ * remove, repeat — instead of one-by-one via removeVideoClip. */
+export async function removeSelectedVideoClips(): Promise<void> {
+	const toRemove = new Set(videoState.selectedClipKeys);
+	const removedIds = videoState.userClips
+		.filter((c) => c.ref.kind === 'user' && toRemove.has(c.ref.id))
+		.map((c) => (c.ref as { kind: 'user'; id: string }).id);
+	await Promise.all(removedIds.map((id) => deleteVideo(id)));
+	const removedIdSet = new Set(removedIds);
+	videoState.userClips = videoState.userClips.filter((c) => !(c.ref.kind === 'user' && removedIdSet.has(c.ref.id)));
+	videoState.selectedClipKeys = videoState.selectedClipKeys.filter((k) => !removedIdSet.has(k));
+	const totalClips = builtinClips.length + videoState.userClips.length;
+	if (videoState.currentClipIndex >= totalClips) videoState.currentClipIndex = 0;
+}
+
 /** Beat-driven clip cut (call from the page's clock.onBeat handler). */
 /** Indices into [...builtinClips, ...userClips] that participate in the auto-cut
  * rotation — every clip if selectedClipKeys is empty (no filter applied yet). */
@@ -117,6 +140,20 @@ function activeClipIndices(): number[] {
 	}, []);
 }
 
+// Non-reactive: counts down the separator pause once a cut has fired, in
+// whole beats — 0 means "not currently pausing". Beat-counted rather than a
+// setTimeout so the gap is locked exactly to separatorBeats regardless of
+// tempo, and can't race a second cut firing before the first pause ends.
+let pauseBeatsRemaining = 0;
+
+function advanceToNextClip(active: number[]): void {
+	const pos = active.indexOf(videoState.currentClipIndex);
+	const nextPos = videoState.advance === 'shuffle'
+		? Math.floor(Math.random() * active.length)
+		: (pos === -1 ? 0 : (pos + 1) % active.length);
+	videoState.currentClipIndex = active[nextPos];
+}
+
 export function onVideoBeat(): void {
 	// A live camera or NDI source is a single feed, not a cycling library —
 	// also avoids currentClipIndex drifting while live, which would jump the
@@ -124,13 +161,29 @@ export function onVideoBeat(): void {
 	if (videoState.liveDeviceId || videoState.ndiSourceName) return;
 	const active = activeClipIndices();
 	if (!(videoState.enabled && videoState.reactCut && videoState.advance !== 'manual' && active.length > 1)) return;
+
+	// Mid-pause: hold the blank, don't advance beatCount, and only reveal the
+	// next clip once separatorBeats beats have elapsed since the cut.
+	if (pauseBeatsRemaining > 0) {
+		pauseBeatsRemaining--;
+		if (pauseBeatsRemaining === 0) {
+			advanceToNextClip(active);
+			videoState.separatorFlash = false;
+		}
+		return;
+	}
+
 	beatCount = (beatCount + 1) % videoState.beatsPerCut;
 	if (beatCount === 0) {
-		const pos = active.indexOf(videoState.currentClipIndex);
-		const nextPos = videoState.advance === 'shuffle'
-			? Math.floor(Math.random() * active.length)
-			: (pos === -1 ? 0 : (pos + 1) % active.length);
-		videoState.currentClipIndex = active[nextPos];
+		if (videoState.separatorBeats <= 0) {
+			// No gap: cut straight to the next clip, same beat, no blank flash.
+			advanceToNextClip(active);
+			return;
+		}
+		// Finish playing the current clip, then blank the layer for
+		// separatorBeats beats before the next clip appears.
+		videoState.separatorFlash = true;
+		pauseBeatsRemaining = videoState.separatorBeats;
 	}
 }
 

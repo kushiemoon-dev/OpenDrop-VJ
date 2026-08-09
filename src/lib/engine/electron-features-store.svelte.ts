@@ -16,4 +16,5 @@ export const electronFeaturesState = $state({
 	link: { active: false, peers: 0, error: '' },
 	v4l2: { active: false, error: '' },
 	spout: { active: false, error: '' },
+	record: { active: false, error: '', path: '' },
 });

@@ -38,6 +38,7 @@ let lastMood: number | null = null;
 /** Unsubscribe for the renderer-side onObsSceneChanged listener registered by
  * connectObs — torn down in disconnectObs so reconnecting never stacks listeners. */
 let unsubObsSceneChanged: (() => void) | null = null;
+let unsubObsRecordStateChanged: (() => void) | null = null;
 
 export async function connectObs(host: string, port: number): Promise<void> {
 	obsLinkState.error = '';
@@ -51,6 +52,8 @@ export async function connectObs(host: string, port: number): Promise<void> {
 	obsLinkState.port = port;
 	const scenesRes = await window.electronAPI?.obsGetScenes();
 	if (scenesRes?.ok) obsLinkState.scenes = scenesRes.scenes ?? [];
+	const recordRes = await window.electronAPI?.obsGetRecordStatus();
+	if (recordRes?.ok) obsLinkState.recording = recordRes.recording ?? false;
 
 	unsubObsSceneChanged =
 		window.electronAPI?.onObsSceneChanged((sceneName) => {
@@ -59,13 +62,36 @@ export async function connectObs(host: string, port: number): Promise<void> {
 			if (!target) return;
 			applyIncomingTarget(target);
 		}) ?? null;
+
+	// Reflects recording started/stopped from within OBS itself (hotkey, its
+	// own UI), not just the toggleObsRecord() button below — same reasoning
+	// as the scene-change listener above, just no echo-suppression needed
+	// since OpenDrop has no separate local "recording" concept to conflict with.
+	unsubObsRecordStateChanged =
+		window.electronAPI?.onObsRecordStateChanged((recording) => {
+			obsLinkState.recording = recording;
+		}) ?? null;
 }
 
 export async function disconnectObs(): Promise<void> {
 	unsubObsSceneChanged?.();
 	unsubObsSceneChanged = null;
+	unsubObsRecordStateChanged?.();
+	unsubObsRecordStateChanged = null;
 	await window.electronAPI?.obsDisconnect();
 	obsLinkState.connected = false;
+}
+
+export async function toggleObsRecord(): Promise<void> {
+	obsLinkState.recordError = '';
+	const res = obsLinkState.recording
+		? await window.electronAPI?.obsStopRecord()
+		: await window.electronAPI?.obsStartRecord();
+	if (!res?.ok) {
+		obsLinkState.recordError = res?.error ?? 'OBS record toggle failed.';
+		return;
+	}
+	obsLinkState.recording = !obsLinkState.recording;
 }
 
 /**

@@ -12,9 +12,12 @@
 		ndiActive: boolean;
 		v4l2Active: boolean;
 		spoutActive: boolean;
+		recordActive: boolean;
+		recordPath: string;
 		ndiError: string;
 		v4l2Error: string;
 		spoutError: string;
+		recordError: string;
 		onOpenOutput: () => void;
 		onOpenOutputFullscreen: () => void;
 		onToggleStreamPanel: () => void;
@@ -22,13 +25,14 @@
 		onToggleNdi: () => void;
 		onToggleV4l2: () => void;
 		onToggleSpout: () => void;
+		onToggleRecord: () => void;
 	}
 
 	let {
 		status, isElectron, outputOpen, displays, selectedDisplayId, showStreamPanel, platform,
-		ndiActive, v4l2Active, spoutActive, ndiError, v4l2Error, spoutError,
+		ndiActive, v4l2Active, spoutActive, recordActive, recordPath, ndiError, v4l2Error, spoutError, recordError,
 		onOpenOutput, onOpenOutputFullscreen, onToggleStreamPanel, onSelectDisplay,
-		onToggleNdi, onToggleV4l2, onToggleSpout,
+		onToggleNdi, onToggleV4l2, onToggleSpout, onToggleRecord,
 	}: Props = $props();
 </script>
 
@@ -38,10 +42,10 @@
 			⎋ Open output window
 		</button>
 		{#if isElectron && outputOpen}
-			<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive}
+			<button class="btn-stream" class:stream-active={ndiActive || v4l2Active || spoutActive || recordActive}
 				onclick={onToggleStreamPanel}
 				title="Stream output">
-				⏏ Stream {ndiActive || v4l2Active || spoutActive ? '●' : '○'}
+				⏏ Stream {ndiActive || v4l2Active || spoutActive || recordActive ? '●' : '○'}
 			</button>
 		{/if}
 	</div>
@@ -86,9 +90,15 @@
 					SPOUT {spoutActive ? '●' : '○'}
 				</button>
 			{/if}
+			<button class="stream-btn stream-btn--record" class:stream-btn--on={recordActive} onclick={onToggleRecord}
+				title={recordActive ? 'Stop recording' : 'Record output to a local file'}>
+				⏺ REC {recordActive ? '●' : '○'}
+			</button>
 			{#if v4l2Error}<div class="stream-error">{v4l2Error}</div>{/if}
 			{#if ndiError}<div class="stream-error">{ndiError}</div>{/if}
 			{#if spoutError}<div class="stream-error">{spoutError}</div>{/if}
+			{#if recordError}<div class="stream-error">{recordError}</div>{/if}
+			{#if recordActive && recordPath}<div class="stream-path" title={recordPath}>→ {recordPath}</div>{/if}
 		</div>
 	{/if}
 </div>
@@ -181,11 +191,31 @@
 	.stream-btn--ndi:hover, .stream-btn--ndi.stream-btn--on { border-color: var(--warn); color: var(--warn); background: var(--warn-dim, rgba(255,140,0,0.1)); }
 	.stream-btn--spout { color: var(--text-muted); }
 	.stream-btn--spout:hover, .stream-btn--spout.stream-btn--on { border-color: var(--violet); color: var(--violet); background: var(--violet-dim); }
-	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout) { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+	.stream-btn.stream-btn--on:not(.stream-btn--ndi):not(.stream-btn--spout):not(.stream-btn--record) { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+	.stream-btn--record { color: var(--text-muted); }
+	.stream-btn--record:hover { border-color: var(--error); color: var(--error); background: rgba(255,0,0,0.1); }
+	/* A color-only change is too easy to miss for "is it actually recording" —
+	   blink so it's unmistakable at a glance. */
+	.stream-btn--record.stream-btn--on {
+		border-color: var(--error); color: var(--error); background: rgba(255,0,0,0.15);
+		animation: rec-blink 1s step-start infinite;
+	}
+	@keyframes rec-blink {
+		50% { background: rgba(255,0,0,0.4); box-shadow: 0 0 10px rgba(255,0,0,0.6); }
+	}
 
 	.stream-error {
 		width: 100%;
 		font-size: 10px;
 		color: var(--error);
+	}
+
+	.stream-path {
+		width: 100%;
+		font-size: 10px;
+		color: var(--text-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

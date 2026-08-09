@@ -39,6 +39,8 @@ export const obsLinkState = $state({
 	port: persisted.port,
 	scenes: [] as string[],
 	mapping: persisted.mapping,
+	recording: false,
+	recordError: '',
 });
 
 export function saveObsConfig(): void {

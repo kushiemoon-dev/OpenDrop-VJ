@@ -17,6 +17,15 @@ process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
 // Must be set before app is ready.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// safeStorage (secrets-store.cjs — OBS/Twitch/Kick credentials) needs an
+// OS keyring backend (gnome-keyring/kwallet via libsecret) on Linux; without
+// one, isEncryptionAvailable() is false and every secret silently fails to
+// save. Minimal WM setups (Hyprland, COSMIC, ...) commonly have no keyring
+// daemon running at all, so fall back to Chromium's own local-file-backed
+// encryption instead of just breaking secret storage. Must be set before
+// app is ready.
+app.commandLine.appendSwitch('password-store', 'basic');
+
 // Must be called before app is ready — makes app:// behave like https://
 // (standard origin, secure context, fetch API, dynamic import support)
 protocol.registerSchemesAsPrivileged([{
@@ -66,6 +75,37 @@ let v4l2Draining = false;
 let v4l2W = 0;
 let v4l2H = 0;
 let v4l2Error = '';
+
+// Two independent problems, fixed in one pass:
+//  1. Row padding: nativeImage.toBitmap() isn't guaranteed tightly packed —
+//     the underlying GPU readback can align each row to a byte boundary
+//     wider than width*4 (padding at the end of every row). Assuming
+//     stride === width*4 when it's actually wider shifts every row's real
+//     data later and later down the buffer — the "TV static" corruption
+//     this produced, distinct from the plain black-frame bug fixed
+//     elsewhere (preserveDrawingBuffer/alpha:false on the compositor
+//     canvas). Deriving stride from the buffer's actual length instead of
+//     assuming it fixes this regardless of platform-specific alignment.
+//  2. Odd dimensions: yuv420p (what ffmpeg converts the BGRA capture to for
+//     the v4l2 sink) subsamples chroma by 2 in both axes, so it's undefined
+//     for odd width/height — an odd output-window size (common: DPI
+//     scaling, non-integer zoom) desyncs the declared frame size from what
+//     v4l2loopback's capture side reports, which surfaced as a straight-up
+//     `VIDIOC_STREAMON: Input/output error` for any real reader (mpv, OBS).
+//     Drop the last row/col instead of letting an odd dimension through —
+//     1px is imperceptible, a broken stream isn't.
+function cropToEvenBgra(buf, width, height) {
+  const srcStride = Math.floor(buf.length / height);
+  const w = width - (width % 2);
+  const h = height - (height % 2);
+  const dstStride = w * 4;
+  if (srcStride === dstStride && w === width && h === height) return { buf, width, height };
+  const out = Buffer.alloc(dstStride * h);
+  for (let y = 0; y < h; y++) {
+    buf.copy(out, y * dstStride, y * srcStride, y * srcStride + dstStride);
+  }
+  return { buf: out, width: w, height: h };
+}
 
 // Find the first v4l2loopback device whose label contains "OpenDrop".
 // Reads /sys/class/video4linux/videoN/name — pure fs, no exec.
@@ -312,6 +352,11 @@ obs.on('CurrentProgramSceneChanged', (data) => {
     if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName);
   });
 });
+obs.on('RecordStateChanged', (data) => {
+  BrowserWindow.getAllWindows().forEach((w) => {
+    if (!w.isDestroyed()) w.webContents.send('obs:record-state-changed', data.outputActive);
+  });
+});
 
 ipcMain.handle('obs:connect', async (_, { host, port }) => {
   try {
@@ -349,6 +394,33 @@ ipcMain.handle('obs:set-scene', async (_, sceneName) => {
   try {
     await obs.call('SetCurrentProgramScene', { sceneName });
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('obs:start-record', async () => {
+  try {
+    await obs.call('StartRecord');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('obs:stop-record', async () => {
+  try {
+    await obs.call('StopRecord');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('obs:get-record-status', async () => {
+  try {
+    const { outputActive } = await obs.call('GetRecordStatus');
+    return { ok: true, recording: outputActive };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -677,8 +749,9 @@ ipcMain.handle('v4l2:start', async () => {
   } catch (e) {
     return { ok: false, error: `Capture initiale échouée : ${e.message}` };
   }
-  v4l2W = firstImg.getSize().width;
-  v4l2H = firstImg.getSize().height;
+  const first = cropToEvenBgra(firstImg.toBitmap(), firstImg.getSize().width, firstImg.getSize().height);
+  v4l2W = first.width;
+  v4l2H = first.height;
   if (!v4l2W || !v4l2H) return { ok: false, error: 'Zero resolution — is the output window visible?' };
 
   // Spawn ffmpeg: read raw BGRA from stdin, emit YUV420p to the v4l2 device
@@ -704,31 +777,44 @@ ipcMain.handle('v4l2:start', async () => {
 
   v4l2Proc = proc;
 
-  // Allow ffmpeg a short moment to fail fast (ENOENT, bad device, etc.)
+  // Allow ffmpeg a short moment to fail fast (ENOENT, bad device, etc.).
+  // Gate on whether the process actually died (proc.on('exit') nulls it out),
+  // NOT on whether v4l2Error got set — ffmpeg always writes its version
+  // banner and startup info to stderr even on success, so treating any
+  // stderr output as failure made this report "failed" on every successful
+  // start (v4l2Error held onto a random benign banner line, e.g. the
+  // copyright notice, forever after).
   await new Promise((r) => setTimeout(r, 150));
-  if (!v4l2Proc || v4l2Error.length > 0) {
+  if (!v4l2Proc) {
     return { ok: false, error: v4l2Error || 'ffmpeg a quitté immédiatement.' };
   }
 
   // Push first frame right away so the stream starts immediately
-  const firstBuf = firstImg.toBitmap();
   if (!v4l2Draining) {
-    const ok = v4l2Proc.stdin.write(firstBuf);
+    const ok = v4l2Proc.stdin.write(first.buf);
     if (!ok) v4l2Draining = true;
   }
 
-  // Capture-and-write loop @30fps
+  // Capture-and-write loop @30fps. v4l2Capturing guards against setInterval
+  // firing again before the previous capturePage() (an async IPC
+  // round-trip) has resolved — see the identical fix/comment on
+  // record:start's loop below for why an in-flight guard matters here.
+  let v4l2Capturing = false;
   v4l2Timer = setInterval(async () => {
     const w = outputWin && !outputWin.isDestroyed() ? outputWin : null;
-    if (!w || !v4l2Proc || v4l2Draining) return;
+    if (!w || !v4l2Proc || v4l2Draining || v4l2Capturing) return;
+    v4l2Capturing = true;
     try {
       const img = await w.webContents.capturePage();
       const { width, height } = img.getSize();
+      const cropped = cropToEvenBgra(img.toBitmap(), width, height);
       // Drop frames whose size changed — rawvideo can't handle mid-stream resize
-      if (width !== v4l2W || height !== v4l2H) return;
-      const written = v4l2Proc.stdin.write(img.toBitmap());
+      if (cropped.width !== v4l2W || cropped.height !== v4l2H) return;
+      const written = v4l2Proc.stdin.write(cropped.buf);
       if (!written) v4l2Draining = true;
-    } catch { /* skip frame on error */ }
+    } catch { /* skip frame on error */ } finally {
+      v4l2Capturing = false;
+    }
   }, 1000 / 30);
 
   return { ok: true };
@@ -745,6 +831,171 @@ ipcMain.handle('v4l2:stop', async () => {
   v4l2H = 0;
   v4l2Draining = false;
   return { ok: true };
+});
+
+// ── Local recording (capturePage() → ffmpeg → mp4 file, no v4l2loopback
+// needed) — same capture loop as v4l2:start above, but ffmpeg encodes
+// straight to a file instead of writing to a loopback device. Uses
+// h264_nvenc (GPU hardware encode) rather than libx264 — the software
+// encoder alone was enough to peg all 8 CPU cores during a recording
+// session; NVENC moves that work onto the GPU's dedicated encode block.
+// Scales/pads to a fixed 1920x1080 16:9 frame (YouTube-friendly) instead of
+// whatever arbitrary aspect ratio the output window happens to be — the
+// live output window itself is untouched, this only affects the recorded
+// file. Video only for now — audio muxing was tried (fd 3, raw PCM from the
+// same signal driving output-window sync) but the result was glitchy
+// (clicks/dropouts) and got pulled rather than ship it half-working; add
+// audio in post for now.
+let recordProc = null;
+let recordTimer = null;
+let recordDraining = false;
+let recordW = 0;
+let recordH = 0;
+let recordError = '';
+let recordStartStamp = '';
+let recordOutPath = '';
+
+const RECORD_OUT_W = 1920;
+const RECORD_OUT_H = 1080;
+
+ipcMain.handle('record:start', async () => {
+  if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+  if (recordProc) { try { recordProc.stdin.end(); recordProc.kill('SIGTERM'); } catch {} recordProc = null; }
+  recordDraining = false;
+  recordError = '';
+
+  const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+  if (!win) return { ok: false, error: 'Output window not found.' };
+
+  let firstImg;
+  try {
+    firstImg = await win.webContents.capturePage();
+  } catch (e) {
+    return { ok: false, error: `Initial capture failed: ${e.message}` };
+  }
+  const first = cropToEvenBgra(firstImg.toBitmap(), firstImg.getSize().width, firstImg.getSize().height);
+  recordW = first.width;
+  recordH = first.height;
+  if (!recordW || !recordH) return { ok: false, error: 'Zero resolution — is the output window visible?' };
+
+  const videosDir = app.getPath('videos');
+  fs.mkdirSync(videosDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const outPath = path.join(videosDir, `opendrop-${stamp}.mp4`);
+  recordStartStamp = stamp;
+  recordOutPath = outPath;
+
+  const proc = spawn('ffmpeg', [
+    '-f', 'rawvideo',
+    '-pix_fmt', 'bgra',
+    '-s', `${recordW}x${recordH}`,
+    // The capture loop below targets 30fps but capturePage() is an async
+    // IPC round-trip and can fall behind (or drop a frame outright under
+    // stdin backpressure — see recordDraining) — real inter-frame gaps
+    // aren't exactly 33ms. -use_wallclock_as_timestamps stamps each frame
+    // with when it actually arrived instead of assuming a fixed 30fps
+    // input, so a session with a 17% average frame-drop rate encodes as an
+    // hour of real-time footage playing at normal speed, not 50 minutes
+    // sped up (the bug this replaced: fewer real frames stretched across
+    // assumed-uniform slots plays back faster than real time).
+    '-use_wallclock_as_timestamps', '1',
+    '-r', '30',
+    '-i', 'pipe:0',
+    '-vf', `scale=${RECORD_OUT_W}:${RECORD_OUT_H}:force_original_aspect_ratio=decrease,pad=${RECORD_OUT_W}:${RECORD_OUT_H}:(ow-iw)/2:(oh-ih)/2:color=black`,
+    '-fps_mode', 'cfr',
+    '-r', '30',
+    '-c:v', 'h264_nvenc',
+    '-preset', 'p4',
+    '-rc', 'vbr',
+    '-cq', '19',
+    '-pix_fmt', 'yuv420p',
+    outPath,
+  ], { stdio: ['pipe', 'ignore', 'pipe'] });
+
+  proc.on('error', (e) => { recordError = e.code === 'ENOENT' ? 'ffmpeg not found — install ffmpeg and try again.' : e.message; });
+  proc.stderr.on('data', (chunk) => { recordError = chunk.toString().trim().split('\n').pop() ?? recordError; });
+  proc.on('exit', (code) => {
+    if (code !== 0 && code !== null) recordError = recordError || `ffmpeg exited with code ${code}.`;
+    if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+    recordProc = null;
+  });
+  proc.stdin.on('drain', () => { recordDraining = false; });
+
+  recordProc = proc;
+
+  // Allow ffmpeg a short moment to fail fast (ENOENT, bad path, etc.). Gate
+  // on whether the process actually died, NOT whether recordError got set —
+  // see the identical fix/comment on v4l2:start above for why.
+  await new Promise((r) => setTimeout(r, 150));
+  if (!recordProc) {
+    return { ok: false, error: recordError || 'ffmpeg exited immediately.' };
+  }
+
+  // Push first frame right away so the recording starts immediately
+  if (!recordDraining) {
+    const ok = recordProc.stdin.write(first.buf);
+    if (!ok) recordDraining = true;
+  }
+
+  // Capture-and-write loop @30fps. recordCapturing guards against
+  // setInterval firing again before the previous capturePage() (an async
+  // IPC round-trip) has resolved — without it, overlapping captures can
+  // resolve out of call order and land in ffmpeg's stdin out of
+  // chronological order, which breaks -use_wallclock_as_timestamps'
+  // assumption that reads arrive in real time order and silently costs
+  // frames to -fps_mode cfr's non-monotonic-timestamp handling.
+  let recordCapturing = false;
+  recordTimer = setInterval(async () => {
+    const w = outputWin && !outputWin.isDestroyed() ? outputWin : null;
+    if (!w || !recordProc || recordDraining || recordCapturing) return;
+    recordCapturing = true;
+    try {
+      const img = await w.webContents.capturePage();
+      const { width, height } = img.getSize();
+      const cropped = cropToEvenBgra(img.toBitmap(), width, height);
+      // Drop frames whose size changed — rawvideo can't handle mid-stream resize
+      if (cropped.width !== recordW || cropped.height !== recordH) return;
+      const written = recordProc.stdin.write(cropped.buf);
+      if (!written) recordDraining = true;
+    } catch { /* skip frame on error */ } finally {
+      recordCapturing = false;
+    }
+  }, 1000 / 30);
+
+  return { ok: true, path: outPath };
+});
+
+ipcMain.handle('record:stop', async () => {
+  if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+  const proc = recordProc;
+  const outPath = recordOutPath;
+  recordProc = null;
+  recordW = 0;
+  recordH = 0;
+  recordDraining = false;
+  if (!proc || !outPath) return { ok: true };
+
+  // Wait for ffmpeg to actually exit (flushing the moov atom etc.) before
+  // touching the file, then rename in the stop time alongside the start
+  // time already in the name. Encoded video duration can be wrong (frame
+  // drops, clock drift) even with the wallclock-timestamp fix above — two
+  // timestamps baked into the filename itself give a real-elapsed-time
+  // fallback that isn't affected by that, and unlike mtime it survives the
+  // file being copied/backed up later.
+  await new Promise((resolve) => {
+    proc.once('exit', resolve);
+    try { proc.stdin.end(); } catch {}
+    try { proc.kill('SIGTERM'); } catch {}
+  });
+
+  const stopStamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const finalPath = outPath.replace(/\.mp4$/, `_to_${stopStamp}.mp4`);
+  try {
+    fs.renameSync(outPath, finalPath);
+    return { ok: true, path: finalPath };
+  } catch {
+    return { ok: true, path: outPath };
+  }
 });
 
 // ── Per-device output loopback handlers ────────────────────────────────────
@@ -885,6 +1136,15 @@ function createWindow() {
   // Track the output window for NDI capture
   win.webContents.on('did-create-window', (child) => {
     outputWin = child;
+    // Opens at 1280x720 (see overrideBrowserWindowOptions above) but is a
+    // normal resizable window with no aspect-ratio enforcement by default —
+    // an accidental drag-resize (e.g. 952x1014) breaks the 16:9 assumption
+    // baked into v4l2:start/record:start's capture pipeline (v4l2 passes
+    // captured dimensions straight through with no scale/pad, so a
+    // non-16:9 window shows up distorted in OBS/whatever reads the
+    // loopback device). Lock the aspect ratio, not the size, so it can
+    // still be resized to match a different target canvas.
+    child.setAspectRatio(16 / 9);
     child.on('closed', () => { if (outputWin === child) outputWin = null; });
   });
 
@@ -927,6 +1187,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
   if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
+  if (recordProc) { try { recordProc.stdin.end(); recordProc.kill('SIGTERM'); } catch {} recordProc = null; }
   if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
   if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
   if (linkTimer) { clearInterval(linkTimer); linkTimer = null; }

@@ -26,6 +26,8 @@ declare global {
 			sendDeckFrame: (slot: number, width: number, height: number, buffer: ArrayBuffer) => void;
 			v4l2Start: () => Promise<{ ok: boolean; error?: string }>;
 			v4l2Stop: () => Promise<{ ok: boolean }>;
+			recordStart: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+			recordStop: () => Promise<{ ok: boolean; path?: string }>;
 			spoutStart: (name: string) => Promise<{ ok: boolean; error?: string }>;
 			spoutStop: () => Promise<{ ok: boolean }>;
 			listOutputDevices: () => Promise<{ ok: boolean; devices: Array<{ id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number }>; error?: string }>;
@@ -55,6 +57,10 @@ declare global {
 			obsGetScenes: () => Promise<{ ok: boolean; scenes?: string[]; error?: string }>;
 			obsSetScene: (sceneName: string) => Promise<{ ok: boolean; error?: string }>;
 			onObsSceneChanged: (cb: (sceneName: string) => void) => () => void;
+			obsStartRecord: () => Promise<{ ok: boolean; error?: string }>;
+			obsStopRecord: () => Promise<{ ok: boolean; error?: string }>;
+			obsGetRecordStatus: () => Promise<{ ok: boolean; recording?: boolean; error?: string }>;
+			onObsRecordStateChanged: (cb: (recording: boolean) => void) => () => void;
 			twitchConnect: (channel: string) => Promise<{ ok: boolean; error?: string }>;
 			twitchDisconnect: () => Promise<{ ok: boolean }>;
 			kickConnect: (channel: string) => Promise<{ ok: boolean; error?: string }>;

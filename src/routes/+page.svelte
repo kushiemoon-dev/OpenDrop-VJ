@@ -20,7 +20,7 @@
 	import { audioSourceState } from '$lib/engine/audio-source-store.svelte.js';
 	import { runStatusState } from '$lib/engine/run-status-store.svelte.js';
 	import {
-		toggleNdi, toggleV4l2, toggleSpout, toggleOsc, toggleRemote, toggleLink as toggleLinkAction,
+		toggleNdi, toggleV4l2, toggleSpout, toggleRecord, toggleOsc, toggleRemote, toggleLink as toggleLinkAction,
 	} from '$lib/engine/electron-features-actions.js';
 	import { startNdiDeck, stopNdiDeck } from '$lib/engine/ndi-deck-actions.js';
 	import {
@@ -48,7 +48,7 @@
 		openOutputFullscreen as openOutputFullscreenAction, onResize as onResizeAction,
 	} from '$lib/engine/output-window-actions.js';
 	import {
-		onBeat as onBeatAction, toggleBeatSync as toggleBeatSyncAction, tapTempo as tapTempoAction, clearManualBpm as clearManualBpmAction,
+		onBeat as onBeatAction, toggleBeatSync as toggleBeatSyncAction, tapTempo as tapTempoAction, clearManualBpm as clearManualBpmAction, setManualBpm as setManualBpmAction,
 		resetAutoXfadeCount,
 	} from '$lib/engine/beat-tempo-actions.js';
 	import { SnapshotEngine, type Snapshot } from '$lib/engine/snapshot.js';
@@ -118,7 +118,7 @@
 	import {
 		videoState, addVideoFromFile, onVideoFilePick, removeVideoClip, onVideoAudioTick,
 		setLiveCamera, clearLiveCamera, setNdiSource, clearNdiSource,
-		clipKey, selectClips, toggleClipSelection, clearClipSelection,
+		clipKey, selectClips, toggleClipSelection, clearClipSelection, removeSelectedVideoClips,
 	} from '$lib/video-loops/playback-store.svelte.js';
 
 	// — State —————————————————————————————————————————————
@@ -166,7 +166,12 @@
 	// — Clock + LFO + Strobe ———————————————————————————————
 	const clock = new Clock();
 	const lfoEngine = new LfoEngine();
+	// $state(...) returns a new reactive proxy, not a live view of the array
+	// passed in — without this reassignment, the UI (bound to lfoSlots) and
+	// lfoEngine.tick() (reading this.slots) silently diverge: toggling a slot
+	// on/setting its target in SidebarLfo would update a copy tick() never sees.
 	const lfoSlots = $state(lfoEngine.slots);
+	lfoEngine.slots = lfoSlots;
 	// strobeOn/Rate/Intensity/Color/Flash — state extracted into strobe-store.svelte.ts
 	// _lastStrobeVal — moved into visualizer-startup.ts (module-private)
 
@@ -604,6 +609,8 @@
 		localStorage.setItem('od-time-params', JSON.stringify(timeParamsState.params));
 		localStorage.setItem('od-qvars', JSON.stringify(qvarState.params));
 		localStorage.setItem('od-timeline', JSON.stringify(timelineState.keyframes));
+		localStorage.setItem('od-color', JSON.stringify(colorState));
+		localStorage.setItem('od-lfo', JSON.stringify(lfoSlots));
 	});
 
 	// — Video localStorage persistence ———————————————————
@@ -613,6 +620,7 @@
 		localStorage.setItem('od-video-opacity', String(videoState.opacity));
 		localStorage.setItem('od-video-advance', videoState.advance);
 		localStorage.setItem('od-video-beats', String(videoState.beatsPerCut));
+		localStorage.setItem('od-video-separator-beats', String(videoState.separatorBeats));
 		localStorage.setItem('od-video-reactions', JSON.stringify({ cut: videoState.reactCut, flash: videoState.reactFlash, warp: videoState.reactWarp, hue: videoState.reactHue }));
 		localStorage.setItem('od-video-userclips', JSON.stringify(videoState.userClips));
 	});
@@ -638,6 +646,7 @@
 			playbackRate: videoPlaybackRateStep,
 			flashOn: videoState.reactFlash,
 			hueOn: videoState.reactHue,
+			separatorFlash: videoState.separatorFlash,
 		};
 		sync?.sendVideo(payload);
 	});
@@ -695,7 +704,7 @@
 
 	// Pushes video opacity + beat-reactive brightness/hue to the Compositor.
 	$effect(() => {
-		const opacity = videoState.opacity;
+		const opacity = videoState.separatorFlash ? 0 : videoState.opacity;
 		const brightness = videoBrightness;
 		const hueRotateDeg = videoHueRotateDeg;
 		if (!compositor) return;
@@ -918,6 +927,8 @@
 			if (savedVideoAdvance === 'shuffle' || savedVideoAdvance === 'sequential' || savedVideoAdvance === 'manual') videoState.advance = savedVideoAdvance;
 			const savedVideoBeats = localStorage.getItem('od-video-beats');
 			if (savedVideoBeats) videoState.beatsPerCut = Number(savedVideoBeats);
+			const savedVideoSeparatorBeats = localStorage.getItem('od-video-separator-beats');
+			if (savedVideoSeparatorBeats) videoState.separatorBeats = Number(savedVideoSeparatorBeats);
 			const savedVideoReactions = localStorage.getItem('od-video-reactions');
 			if (savedVideoReactions) { try { const r = JSON.parse(savedVideoReactions); videoState.reactCut = !!r.cut; videoState.reactFlash = !!r.flash; videoState.reactWarp = !!r.warp; videoState.reactHue = !!r.hue; } catch {} }
 			const savedVideoClips = localStorage.getItem('od-video-userclips');
@@ -928,6 +939,23 @@
 			}
 			const savedLayout = localStorage.getItem('od-layout');
 			if (savedLayout === 'stage' || savedLayout === 'mixer') layout = savedLayout;
+			const savedColor = localStorage.getItem('od-color');
+			if (savedColor) {
+				try {
+					const parsed = JSON.parse(savedColor);
+					if (parsed.a) colorState.a = { ...DEFAULT_COLOR_PARAMS, ...parsed.a };
+					if (parsed.b) colorState.b = { ...DEFAULT_COLOR_PARAMS, ...parsed.b };
+				} catch { /* ignore corrupt od-color */ }
+			}
+			const savedLfo = localStorage.getItem('od-lfo');
+			if (savedLfo) {
+				try {
+					const parsed = JSON.parse(savedLfo);
+					if (Array.isArray(parsed) && parsed.length === lfoSlots.length) {
+						parsed.forEach((s, i) => { lfoSlots[i] = { ...defaultSlot(), ...s }; });
+					}
+				} catch { /* ignore corrupt od-lfo */ }
+			}
 		} catch {}
 		_ready = true; // autorise les $effect de sauvegarde
 
@@ -1108,6 +1136,10 @@
 
 	function clearManualBpm() {
 		clearManualBpmAction(clock);
+	}
+
+	function setManualBpm(bpm: number) {
+		setManualBpmAction(clock, bpm);
 	}
 
 	// toggleMidi's connection/dispatch/clock-IN logic moved into midi-connection-actions.ts.
@@ -1398,6 +1430,7 @@
     videoOpacity={videoState.opacity}
     videoAdvance={videoState.advance}
     videoBeatsPerCut={videoState.beatsPerCut}
+    videoSeparatorBeats={videoState.separatorBeats}
     vrCut={videoState.reactCut}
     vrFlash={videoState.reactFlash}
     vrWarp={videoState.reactWarp}
@@ -1408,6 +1441,8 @@
     {clipKey}
     onToggleClipSelection={toggleClipSelection}
     onClearClipSelection={clearClipSelection}
+    onSelectAllClips={() => selectClips(allClips.map(clipKey))}
+    onRemoveSelectedClips={removeSelectedVideoClips}
     liveActive={!!videoState.liveDeviceId}
     liveLabel={videoState.liveLabel}
     {onToggleLiveCamera}
@@ -1421,6 +1456,7 @@
     onOpacityChange={(v) => { videoState.opacity = v }}
     onAdvanceChange={(v) => { videoState.advance = v }}
     onBeatsPerCutChange={(v) => { videoState.beatsPerCut = v }}
+    onSeparatorBeatsChange={(v) => { videoState.separatorBeats = v }}
     onToggleVrCut={() => { videoState.reactCut = !videoState.reactCut }}
     onToggleVrFlash={() => { videoState.reactFlash = !videoState.reactFlash }}
     onToggleVrWarp={() => { videoState.reactWarp = !videoState.reactWarp }}
@@ -1454,9 +1490,12 @@
 		ndiActive={electronFeaturesState.ndi.active}
 		v4l2Active={electronFeaturesState.v4l2.active}
 		spoutActive={electronFeaturesState.spout.active}
+		recordActive={electronFeaturesState.record.active}
+		recordPath={electronFeaturesState.record.path}
 		ndiError={electronFeaturesState.ndi.error}
 		v4l2Error={electronFeaturesState.v4l2.error}
 		spoutError={electronFeaturesState.spout.error}
+		recordError={electronFeaturesState.record.error}
 		onOpenOutput={openOutput}
 		onOpenOutputFullscreen={openOutputFullscreen}
 		onToggleStreamPanel={() => { showStreamPanel = !showStreamPanel; }}
@@ -1464,6 +1503,7 @@
 		onToggleNdi={toggleNdi}
 		onToggleV4l2={toggleV4l2}
 		onToggleSpout={toggleSpout}
+		onToggleRecord={toggleRecord}
 	/>
 {/snippet}
 {#snippet streamingSection()}
@@ -1748,6 +1788,7 @@
 			onBeatTriggerAChange={updateBeatTriggerA}
 			onBeatTriggerBChange={updateBeatTriggerB}
 			onTapTempo={tapTempo}
+			onSetBpm={setManualBpm}
 			onClearManualBpm={clearManualBpm}
 			onToggleBeatSyncA={() => toggleBeatSync('A')}
 			onToggleBeatSyncB={() => toggleBeatSync('B')}
@@ -1801,6 +1842,7 @@
 			videoOpacity={videoState.opacity}
 			videoAdvance={videoState.advance}
 			videoBeatsPerCut={videoState.beatsPerCut}
+			videoSeparatorBeats={videoState.separatorBeats}
 			vrCut={videoState.reactCut}
 			vrFlash={videoState.reactFlash}
 			vrWarp={videoState.reactWarp}
@@ -1811,6 +1853,8 @@
 			{clipKey}
 			onToggleClipSelection={toggleClipSelection}
 			onClearClipSelection={clearClipSelection}
+			onSelectAllClips={() => selectClips(allClips.map(clipKey))}
+			onRemoveSelectedClips={removeSelectedVideoClips}
 			liveActive={!!videoState.liveDeviceId}
 			liveLabel={videoState.liveLabel}
 			{onToggleLiveCamera}
@@ -1824,6 +1868,7 @@
 			onOpacityChange={(v) => { videoState.opacity = v }}
 			onAdvanceChange={(v) => { videoState.advance = v }}
 			onBeatsPerCutChange={(v) => { videoState.beatsPerCut = v }}
+			onSeparatorBeatsChange={(v) => { videoState.separatorBeats = v }}
 			onToggleVrCut={() => { videoState.reactCut = !videoState.reactCut }}
 			onToggleVrFlash={() => { videoState.reactFlash = !videoState.reactFlash }}
 			onToggleVrWarp={() => { videoState.reactWarp = !videoState.reactWarp }}

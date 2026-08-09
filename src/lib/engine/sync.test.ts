@@ -20,7 +20,7 @@ describe('MainSync.sendVideo', () => {
 		expect(() => {
 			sync!.sendVideo({
 				enabled: true, clip: proxiedClip, opacity: 0.6,
-				playbackRate: 1, flashOn: false, hueOn: false,
+				playbackRate: 1, flashOn: false, hueOn: false, separatorFlash: false,
 			});
 		}).not.toThrow();
 	});
@@ -30,7 +30,7 @@ describe('MainSync.sendVideo', () => {
 		expect(() => {
 			sync!.sendVideo({
 				enabled: false, clip: null, opacity: 0.6,
-				playbackRate: 1, flashOn: false, hueOn: false,
+				playbackRate: 1, flashOn: false, hueOn: false, separatorFlash: false,
 			});
 		}).not.toThrow();
 	});

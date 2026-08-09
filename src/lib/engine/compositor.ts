@@ -295,7 +295,25 @@ export class Compositor {
 
 	constructor(canvas: HTMLCanvasElement) {
 		this.canvas = canvas;
-		const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
+		// preserveDrawingBuffer: true — without it the browser is free to clear
+		// this buffer immediately after each frame is presented on-screen (a
+		// perf optimization). On-screen scanout is unaffected, but any
+		// asynchronous readback of this canvas — Electron's capturePage()
+		// (NDI/v4l2/Spout output all route through it), canvas.toBlob()
+		// snapshots, etc. — can land after that clear and read back solid
+		// black even though the window visibly shows the real frame.
+		//
+		// alpha: false — this canvas is the entire visible output (video is
+		// drawn INTO it as a texture layer via attachVideoSource, not
+		// DOM-composited behind it), so it never needs real transparency.
+		// With alpha:true + premultipliedAlpha:true (WebGL's default), any
+		// partially-transparent blend layer gets its RGB scaled down toward
+		// black at the drawing-buffer level — invisible on-screen (the OS
+		// compositor blends it against whatever's behind the window), but a
+		// flat capturePage()/toBitmap() readback sees those scaled-down,
+		// near-black values directly. Forcing an opaque backbuffer sidesteps
+		// that entirely.
+		const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
 		if (!gl) throw new Error('Compositor: WebGL2 unavailable on the compositor canvas.');
 		this.gl = gl;
 		this.setup();

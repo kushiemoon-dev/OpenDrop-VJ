@@ -13,8 +13,15 @@ set -e
 # Remove any existing v4l2loopback instance
 sudo modprobe -r v4l2loopback 2>/dev/null || true
 
-# Load with a fixed label and exclusive_caps so Chrome/OBS see it as a real webcam
-sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label="OpenDrop VJ"
+# exclusive_caps=1 is documented to make the device dynamically switch to
+# announcing capture-only capability once a producer attaches (so pickier
+# consumers like Chrome/OBS see a plain webcam) — but on at least this
+# v4l2loopback build it never actually flips: `v4l2-ctl --all` kept showing
+# "Video Output" only even with OpenDrop's ffmpeg writer actively attached,
+# so OBS's Video Capture Device source listed no devices at all. exclusive_caps=0
+# just always advertises both capture and output simultaneously, which is
+# less "pretends to be a real webcam" but is what actually shows up in OBS.
+sudo modprobe v4l2loopback devices=1 exclusive_caps=0 card_label="OpenDrop VJ"
 
 # Find and print the resulting device path
 DEV=""

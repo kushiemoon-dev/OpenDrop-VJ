@@ -69,6 +69,14 @@ export function toggleBeatSync(deck: 'A' | 'B'): void {
 	}
 }
 
+/** Shared by tapTempo (computed from tap intervals) and setManualBpm (typed directly). */
+function applyManualBpm(clock: Clock, bpm: number): void {
+	if (bpm < 20 || bpm > 300) return;
+	audioSourceState.manualBpm = bpm;
+	clock.setBpm(bpm);
+	clock.pulse();
+}
+
 export function tapTempo(clock: Clock): void {
 	const now = performance.now();
 	tapTimes.push(now);
@@ -76,11 +84,13 @@ export function tapTempo(clock: Clock): void {
 	if (tapTimes.length < 2) return;
 	const intervals = tapTimes.slice(1).map((t, i) => t - tapTimes[i]);
 	const avg = intervals.reduce((s, v) => s + v, 0) / intervals.length;
-	const bpm = Math.round(60000 / avg);
-	if (bpm < 40 || bpm > 300) return;
-	audioSourceState.manualBpm = bpm;
-	clock.setBpm(bpm);
-	clock.pulse();
+	applyManualBpm(clock, Math.round(60000 / avg));
+}
+
+/** Type a BPM directly (keyboard entry) instead of tapping it out. Same 20-300 range as tapTempo. */
+export function setManualBpm(clock: Clock, bpm: number): void {
+	tapTimes = [];
+	applyManualBpm(clock, Math.round(bpm));
 }
 
 export function clearManualBpm(clock: Clock): void {

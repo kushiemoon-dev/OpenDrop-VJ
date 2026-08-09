@@ -74,7 +74,7 @@ export type SyncMessage =
 	| { type: 'overlays'; list: Overlay[] }
 	| { type: 'poll'; poll: { status: 'running' | 'resolved'; options: string[]; secondsLeft: number; winnerIndex: number | null; tally: number[] } | null }
 	| { type: 'overlay-queue-index'; index: number }
-	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }
+	| { type: 'video'; enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean; separatorFlash: boolean }
 	| { type: 'beat'; bpm: number }
 	| { type: 'strobe'; on: boolean; rate: number; intensity: number; color: string }
 	| { type: 'color'; deck: 'A' | 'B'; params: ColorParams }
@@ -176,7 +176,7 @@ export class MainSync {
 		});
 	}
 
-	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean }) {
+	sendVideo(state: { enabled: boolean; clip: ClipRef | null; opacity: number; playbackRate: number; flashOn: boolean; hueOn: boolean; separatorFlash: boolean }) {
 		// Shallow copy is load-bearing: a raw Svelte 5 $state-proxied object throws
 		// DataCloneError on postMessage (same class of bug as sendOverlays/sendQVars/sendPoll).
 		sendMsg(this.bc, { type: 'video', ...state, clip: state.clip ? { ...state.clip } : null });

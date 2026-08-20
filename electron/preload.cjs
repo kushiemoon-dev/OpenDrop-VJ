@@ -1,6 +1,6 @@
-'use strict';
+'use strict'
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
@@ -10,9 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // BroadcastChannel relay through main process (cross-window IPC)
   sendBroadcast: (data) => ipcRenderer.send('bc-post', data),
   onBroadcast: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('bc-msg', handler);
-    return () => ipcRenderer.off('bc-msg', handler);
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('bc-msg', handler)
+    return () => ipcRenderer.off('bc-msg', handler)
   },
 
   // NDI output (requires NDI SDK + grandiose)
@@ -21,18 +21,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // NDI input (find sources on the LAN + receive one as a video layer)
   ndiFind: () => ipcRenderer.invoke('ndi:find'),
-  ndiReceiveStart: (name, urlAddress) => ipcRenderer.invoke('ndi:receiveStart', { name, urlAddress }),
+  ndiReceiveStart: (name, urlAddress) =>
+    ipcRenderer.invoke('ndi:receiveStart', { name, urlAddress }),
   ndiReceiveStop: () => ipcRenderer.invoke('ndi:receiveStop'),
   onNdiFrame: (cb) => {
-    const handler = (_, frame) => cb(frame);
-    ipcRenderer.on('ndi:frame', handler);
-    return () => ipcRenderer.off('ndi:frame', handler);
+    const handler = (_, frame) => cb(frame)
+    ipcRenderer.on('ndi:frame', handler)
+    return () => ipcRenderer.off('ndi:frame', handler)
   },
 
   // NDI per-deck output — one named stream per slot (A/B/C/D)
   ndiDeckStart: (slot, name) => ipcRenderer.invoke('ndi-deck:start', { slot, name }),
   ndiDeckStop: (slot) => ipcRenderer.invoke('ndi-deck:stop', { slot }),
-  sendDeckFrame: (slot, width, height, buffer) => ipcRenderer.send('deckframe:post', { slot, width, height, buffer }),
+  sendDeckFrame: (slot, width, height, buffer) =>
+    ipcRenderer.send('deckframe:post', { slot, width, height, buffer }),
 
   // v4l2loopback virtual webcam (Linux — requires ffmpeg + v4l2loopback kernel module)
   v4l2Start: () => ipcRenderer.invoke('v4l2:start'),
@@ -47,35 +49,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startLoopback: (deviceId) => ipcRenderer.invoke('loopback:start', { deviceId }),
   stopLoopback: () => ipcRenderer.invoke('loopback:stop'),
   onLoopbackData: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('loopback:data', handler);
-    return () => ipcRenderer.off('loopback:data', handler);
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('loopback:data', handler)
+    return () => ipcRenderer.off('loopback:data', handler)
   },
 
   // Raw PCM frames streamed from main renderer → output window for audio-reactivity.
   sendAudioFrame: (data) => ipcRenderer.send('audioframe:post', data),
   onAudioFrame: (cb) => {
-    const handler = (_, data) => cb(data);
-    ipcRenderer.on('audioframe:data', handler);
-    return () => ipcRenderer.off('audioframe:data', handler);
+    const handler = (_, data) => cb(data)
+    ipcRenderer.on('audioframe:data', handler)
+    return () => ipcRenderer.off('audioframe:data', handler)
   },
 
   // OSC UDP remote control (requires UDP port to be open on LAN)
   startOsc: (port) => ipcRenderer.invoke('osc:start', { port }),
   stopOsc: () => ipcRenderer.invoke('osc:stop'),
   onOscMsg: (cb) => {
-    const handler = (_, cmdId, value01) => cb(cmdId, value01);
-    ipcRenderer.on('osc:msg', handler);
-    return () => ipcRenderer.off('osc:msg', handler);
+    const handler = (_, cmdId, value01) => cb(cmdId, value01)
+    ipcRenderer.on('osc:msg', handler)
+    return () => ipcRenderer.off('osc:msg', handler)
   },
 
   // WebSocket remote control — phone/tablet touch UI at /remote
   startRemote: () => ipcRenderer.invoke('remote:start'),
   stopRemote: () => ipcRenderer.invoke('remote:stop'),
   onRemoteCmd: (cb) => {
-    const handler = (_, cmd, value) => cb(cmd, value);
-    ipcRenderer.on('remote:cmd', handler);
-    return () => ipcRenderer.off('remote:cmd', handler);
+    const handler = (_, cmd, value) => cb(cmd, value)
+    ipcRenderer.on('remote:cmd', handler)
+    return () => ipcRenderer.off('remote:cmd', handler)
   },
 
   // Ableton Link (optional — requires @ktamas77/abletonlink addon)
@@ -83,18 +85,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopLink: () => ipcRenderer.invoke('link:stop'),
   setLinkTempo: (bpm) => ipcRenderer.invoke('link:set-tempo', { bpm }),
   onLinkState: (cb) => {
-    const handler = (_, state) => cb(state);
-    ipcRenderer.on('link:state', handler);
-    return () => ipcRenderer.off('link:state', handler);
+    const handler = (_, state) => cb(state)
+    ipcRenderer.on('link:state', handler)
+    return () => ipcRenderer.off('link:state', handler)
   },
 
   // Screen targeting — open output fullscreen on a specific display
   listScreens: () => ipcRenderer.invoke('screen:list'),
   openOutputOnDisplay: (displayId) => ipcRenderer.invoke('output:open-on-display', displayId),
   onOutputWindowClosed: (cb) => {
-    const handler = () => cb();
-    ipcRenderer.on('output:window-closed', handler);
-    return () => ipcRenderer.off('output:window-closed', handler);
+    const handler = () => cb()
+    ipcRenderer.on('output:window-closed', handler)
+    return () => ipcRenderer.off('output:window-closed', handler)
   },
 
   // Secrets (OBS password, Twitch/Kick credentials) — write-only from the renderer's side.
@@ -108,9 +110,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
   obsSetScene: (sceneName) => ipcRenderer.invoke('obs:set-scene', sceneName),
   onObsSceneChanged: (cb) => {
-    const handler = (_, sceneName) => cb(sceneName);
-    ipcRenderer.on('obs:scene-changed', handler);
-    return () => ipcRenderer.off('obs:scene-changed', handler);
+    const handler = (_, sceneName) => cb(sceneName)
+    ipcRenderer.on('obs:scene-changed', handler)
+    return () => ipcRenderer.off('obs:scene-changed', handler)
   },
 
   // Chat poll sources
@@ -119,8 +121,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   kickConnect: (channel) => ipcRenderer.invoke('kick:connect', { channel }),
   kickDisconnect: () => ipcRenderer.invoke('kick:disconnect'),
   onChatMessage: (cb) => {
-    const handler = (_, msg) => cb(msg);
-    ipcRenderer.on('chat:message', handler);
-    return () => ipcRenderer.off('chat:message', handler);
+    const handler = (_, msg) => cb(msg)
+    ipcRenderer.on('chat:message', handler)
+    return () => ipcRenderer.off('chat:message', handler)
   },
-});
+})

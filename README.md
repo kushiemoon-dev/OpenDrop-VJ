@@ -33,6 +33,7 @@
 ## Features
 
 **Mixing & decks**
+
 - **4 independent Butterchurn decks**, each routed to bus A, B, or off, mixed through one live A↔B crossfader
 - **Per-deck playlists** — auto-cycle sequential/shuffle, 2–120 s interval, prev/next
 - **Beat / volume-peak trigger** per deck — auto-advance the playlist on the beat or on a volume peak
@@ -40,40 +41,46 @@
 - **Time param sliders** — per-deck speed/zoom/rotation/warp engine multipliers layered on top of any preset
 
 **GPU compositor & overlays**
+
 - **4 blend modes** (normal / additive / screen / multiply) + per-layer **LumaKey** and **ColorKey** chroma keying, all GPU-side
 - **Text and media overlays** — image/video sprites or text layers, with transform, blend mode, beat-reactive scaling, spin, and drift
 - **Overlay auto-cycling queue** — sequential or shuffled rotation through a set of overlays
 
 **Automation & performance state**
+
 - **Snapshots / macros** — 8 slots capturing and recalling a full "look" (color + compositing) with smooth interpolation
 - **Timeline / keyframes** — sequence the 8 snapshot slots on a looping wall-clock timeline
 - **LFO×4** (sine / saw / square / sample-and-hold), routable to any control, plus a strobe effect
 - **Share a set via URL** — encode the current visual state into a link; the recipient gets a one-click import
 
 **Presets & video**
+
 - **16,375 built-in presets** — search, 5-color favorites, cached lazy-rendered thumbnails
 - **Import your own `.milk`/`.prjm` presets** — drag one onto the visualizer to convert and load it on the fly
 - **Presets cloud** — a private per-device library for your own custom presets, backed by a small Cloudflare Worker + R2 (no account, just a portable token)
 - **Video loops** — beat-reactive flash/hue/scale, with an optional CDN-backed library
-- **Live video layer** — webcam, or an **NDI** source received over the LAN *(NDI receive, Electron)*, as an alternative to a video loop clip
+- **Live video layer** — webcam, or an **NDI** source received over the LAN _(NDI receive, Electron)_, as an alternative to a video loop clip
 
 **Control surfaces**
+
 - **MIDI** — CC/note/pitchbend mapping (14-bit CC support) with **bidirectional LED feedback** to your controller
-- **OSC** input over UDP *(Electron)*
-- **Ableton Link** tempo sync *(Electron)*
-- **Remote control from a phone or tablet** over LAN, token-authenticated *(Electron)*
+- **OSC** input over UDP _(Electron)_
+- **Ableton Link** tempo sync _(Electron)_
+- **Remote control from a phone or tablet** over LAN, token-authenticated _(Electron)_
 - Fully **customizable keymap**
 
-**Streaming integrations** *(Electron)*
+**Streaming integrations** _(Electron)_
+
 - **OBS WebSocket** bidirectional scene link — map each OBS scene to a deck slot or a color-coded "mood", kept in sync both ways
 - **Twitch + Kick chat-poll voting** — connect your channel's chat as a live preset-vote source; a timed poll resolves and cuts to the winning preset (vote pool configurable: favorites, playlist A, or playlist B)
 - Streaming credentials (OBS password, Twitch OAuth token, Kick session credentials) stored via Electron's `safeStorage`, never in plaintext
 
 **Output & capture**
+
 - **Output window** — detached fullscreen canvas for a second monitor or an OBS Browser Source
-- **NDI** output *(Electron, requires the NDI SDK)*
-- **Spout** output *(Electron, Windows only)*
-- **Virtual webcam** via v4l2loopback *(Electron, Linux only)*
+- **NDI** output _(Electron, requires the NDI SDK)_
+- **Spout** output _(Electron, Windows only)_
+- **Virtual webcam** via v4l2loopback _(Electron, Linux only)_
 - **Multi-display targeting** and adjustable quality tiers (with an "invisible mode" perf mode for when the output isn't on screen)
 
 ---
@@ -82,12 +89,12 @@
 
 <div align="center">
 
-| Stage layout | Mixer layout |
-|---------------|--------------|
+| Stage layout                           | Mixer layout                           |
+| -------------------------------------- | -------------------------------------- |
 | ![Stage](docs/readme-assets/stage.png) | ![Mixer](docs/readme-assets/mixer.png) |
 
-| GPU compositor & keying |
-|--------------------------|
+| GPU compositor & keying                          |
+| ------------------------------------------------ |
 | ![Compositor](docs/readme-assets/compositor.png) |
 
 </div>
@@ -141,11 +148,11 @@ pnpm electron:rebuild:link   # Ableton Link
 
 Click the audio source button in the app — behaviour adapts per platform:
 
-| Platform | Web | Electron |
-|----------|-----|----------|
-| **Windows** | Screen picker → "Share system audio" (Chrome) | Native loopback — no picker |
-| **Linux** | Device picker → `.monitor` source (PipeWire / PulseAudio) | Same |
-| **macOS** | Tab audio only | Install [BlackHole](https://github.com/ExistentialAudio/BlackHole) → device picker |
+| Platform    | Web                                                       | Electron                                                                           |
+| ----------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **Windows** | Screen picker → "Share system audio" (Chrome)             | Native loopback — no picker                                                        |
+| **Linux**   | Device picker → `.monitor` source (PipeWire / PulseAudio) | Same                                                                               |
+| **macOS**   | Tab audio only                                            | Install [BlackHole](https://github.com/ExistentialAudio/BlackHole) → device picker |
 
 **Linux tip:** `bash scripts/setup-audio.sh` creates a named PipeWire virtual source ("OpenDrop - Son du PC")
 instead of using a raw `.monitor` device.
@@ -155,6 +162,7 @@ instead of using a raw `.monitor` device.
 ## Output & Streaming
 
 ### Second monitor (Electron)
+
 Click **Open Output** in the app. The fullscreen canvas follows the crossfader, presets, compositing,
 overlays, and video loops in real time.
 
@@ -163,11 +171,13 @@ overlays, and video loops in real time.
 > reactive for the session.
 
 ### OBS Browser Source (web)
+
 1. Add a **Browser Source** in OBS
 2. URL: `http://localhost:1420/output` (dev) or the packaged app URL
 3. Width / Height: match your stream resolution
 
 ### Pro outputs (Electron only)
+
 - **NDI** — requires the NDI SDK installed, plus the `grandiose` native module
 - **Spout** — Windows only, vendored SpoutDX
 - **Virtual webcam** — Linux only, via v4l2loopback + ffmpeg (`scripts/setup-v4l2.sh`)
@@ -195,16 +205,16 @@ pnpm build          # Production SPA → build/ (runs presets:build first)
 
 ## Stack
 
-| Layer | Tech |
-|-------|------|
-| UI | SvelteKit 2 + Svelte 5 runes, TypeScript |
-| Visualizer | [Butterchurn](https://github.com/jberg/butterchurn) (Milkdrop WebGL) |
-| Compositor | Custom WebGL2 blend + LumaKey/ColorKey pipeline |
-| Audio | Web Audio API — `AudioContext`, `AnalyserNode`, AudioWorklets |
-| Control | Web MIDI API, OSC (UDP), Ableton Link, WebSocket remote |
-| Build | Vite + `@sveltejs/adapter-static` (SPA, `ssr: false`) |
-| Desktop | Electron 42 (optional — native audio loopback, NDI/Spout/virtual-cam output, OSC, Ableton Link, remote server) |
-| Cloud | Cloudflare Worker + R2 (private custom-preset library) |
+| Layer      | Tech                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------- |
+| UI         | SvelteKit 2 + Svelte 5 runes, TypeScript                                                                       |
+| Visualizer | [Butterchurn](https://github.com/jberg/butterchurn) (Milkdrop WebGL)                                           |
+| Compositor | Custom WebGL2 blend + LumaKey/ColorKey pipeline                                                                |
+| Audio      | Web Audio API — `AudioContext`, `AnalyserNode`, AudioWorklets                                                  |
+| Control    | Web MIDI API, OSC (UDP), Ableton Link, WebSocket remote                                                        |
+| Build      | Vite + `@sveltejs/adapter-static` (SPA, `ssr: false`)                                                          |
+| Desktop    | Electron 42 (optional — native audio loopback, NDI/Spout/virtual-cam output, OSC, Ableton Link, remote server) |
+| Cloud      | Cloudflare Worker + R2 (private custom-preset library)                                                         |
 
 ---
 
@@ -267,17 +277,17 @@ e2e/
 
 ## Known Limitations
 
-| Item | Status |
-|------|--------|
-| Signed installers | Planned — Windows/macOS/Linux builds are all currently unsigned (expect an OS security warning on first launch) |
+| Item                               | Status                                                                                                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signed installers                  | Planned — Windows/macOS/Linux builds are all currently unsigned (expect an OS security warning on first launch)                                                               |
 | Audio reactivity in output (Linux) | A retry mitigation is in place (the PCM-capture kick now retries a few times instead of once); still needs real-world confirmation — re-pick the device if it doesn't kick in |
-| Web MIDI | Chromium / Electron only (not Firefox / Safari) |
-| System audio on macOS (browser) | Tab audio only — install BlackHole for full capture |
-| Spout output | Windows only |
-| Spout input (receive) | Not implemented — the native addon only sends; receive would need new Windows-only DirectX 11 code |
-| Virtual webcam output | Linux only |
-| NDI input (receive) | Electron only — no receive path on the web build |
-| Kick chat integration | Unofficial — Kick has no public chat-read API; needs a session cookie + bearer/XSRF token pulled from browser devtools, may break without notice |
+| Web MIDI                           | Chromium / Electron only (not Firefox / Safari)                                                                                                                               |
+| System audio on macOS (browser)    | Tab audio only — install BlackHole for full capture                                                                                                                           |
+| Spout output                       | Windows only                                                                                                                                                                  |
+| Spout input (receive)              | Not implemented — the native addon only sends; receive would need new Windows-only DirectX 11 code                                                                            |
+| Virtual webcam output              | Linux only                                                                                                                                                                    |
+| NDI input (receive)                | Electron only — no receive path on the web build                                                                                                                              |
+| Kick chat integration              | Unofficial — Kick has no public chat-read API; needs a session cookie + bearer/XSRF token pulled from browser devtools, may break without notice                              |
 
 ---
 
@@ -311,4 +321,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-*Made with ❤️ by [kushiemoon-dev](https://github.com/kushiemoon-dev)*
+_Made with ❤️ by [kushiemoon-dev](https://github.com/kushiemoon-dev)_

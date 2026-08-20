@@ -14,24 +14,24 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import type { CommandId } from './commands.js';
-import type { Snapshot } from './snapshot.js';
+import type { CommandId } from './commands.js'
+import type { Snapshot } from './snapshot.js'
 
 export const snapshotsState = $state({
-	snapshots: new Array(8).fill(null) as (Snapshot | null)[],
-	recallDuration: 2, // seconds, global, shared by all slots
-});
+  snapshots: new Array(8).fill(null) as (Snapshot | null)[],
+  recallDuration: 2, // seconds, global, shared by all slots
+})
 
 export function setSnapshotValues(slot: number, values: Partial<Record<CommandId, number>>): void {
-	const existing = snapshotsState.snapshots[slot];
-	snapshotsState.snapshots[slot] = { name: existing?.name ?? `Slot ${slot}`, values };
+  const existing = snapshotsState.snapshots[slot]
+  snapshotsState.snapshots[slot] = { name: existing?.name ?? `Slot ${slot}`, values }
 }
 
 export function renameSnapshot(slot: number, name: string): void {
-	const s = snapshotsState.snapshots[slot];
-	if (s) snapshotsState.snapshots[slot] = { ...s, name };
+  const s = snapshotsState.snapshots[slot]
+  if (s) snapshotsState.snapshots[slot] = { ...s, name }
 }
 
 export function clearSnapshot(slot: number): void {
-	snapshotsState.snapshots[slot] = null;
+  snapshotsState.snapshots[slot] = null
 }

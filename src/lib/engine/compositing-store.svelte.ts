@@ -7,15 +7,18 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import { type SlotComposite, DEFAULT_SLOT_COMPOSITE } from './sync.js';
-import { type SlotComposites, withSlotComposite } from './compositor.js';
+import { type SlotComposite, DEFAULT_SLOT_COMPOSITE } from './sync.js'
+import { type SlotComposites, withSlotComposite } from './compositor.js'
 
 export const compositingState = $state({
-	slotComposites: [
-		{ ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE }, { ...DEFAULT_SLOT_COMPOSITE },
-	] as SlotComposites,
-});
+  slotComposites: [
+    { ...DEFAULT_SLOT_COMPOSITE },
+    { ...DEFAULT_SLOT_COMPOSITE },
+    { ...DEFAULT_SLOT_COMPOSITE },
+    { ...DEFAULT_SLOT_COMPOSITE },
+  ] as SlotComposites,
+})
 
 export function updateComposite(slot: number, patch: Partial<SlotComposite>): void {
-	compositingState.slotComposites = withSlotComposite(compositingState.slotComposites, slot, patch);
+  compositingState.slotComposites = withSlotComposite(compositingState.slotComposites, slot, patch)
 }

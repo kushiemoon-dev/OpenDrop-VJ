@@ -14,9 +14,9 @@ import { getThumbUrl, putThumbBlob, cacheUrl } from './thumb-cache.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bc = (_butterchurn as any).createVisualizer
-	? _butterchurn
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	: ((_butterchurn as any).default ?? _butterchurn)
+  ? _butterchurn
+  : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((_butterchurn as any).default ?? _butterchurn)
 
 // ─── Exported constants ───────────────────────────────────────────────────────
 
@@ -33,7 +33,10 @@ export const thumbUrls = $state(new Map<string, string>())
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
-interface ThumbJob { slug: string; name: string }
+interface ThumbJob {
+  slug: string
+  name: string
+}
 
 // ─── Pure queue functions (exported for tests) ────────────────────────────────
 
@@ -42,8 +45,8 @@ interface ThumbJob { slug: string; name: string }
  * Pure function — returns a new array, does not mutate input.
  */
 export function enqueueFront(queue: ThumbJob[], job: ThumbJob): ThumbJob[] {
-	const filtered = queue.filter(j => j.slug !== job.slug)
-	return [job, ...filtered]
+  const filtered = queue.filter((j) => j.slug !== job.slug)
+  return [job, ...filtered]
 }
 
 /**
@@ -51,8 +54,8 @@ export function enqueueFront(queue: ThumbJob[], job: ThumbJob): ThumbJob[] {
  * Pure function — returns [job|null, remaining].
  */
 export function dequeueJob(queue: ThumbJob[]): [ThumbJob | null, ThumbJob[]] {
-	if (queue.length === 0) return [null, []]
-	return [queue[0], queue.slice(1)]
+  if (queue.length === 0) return [null, []]
+  return [queue[0]!, queue.slice(1)]
 }
 
 // ─── Browser-only singleton (lazy-init) ───────────────────────────────────────
@@ -62,48 +65,48 @@ let _canvas: HTMLCanvasElement | null = null
 let _audioCtx: AudioContext | null = null
 
 function ensureInit(): boolean {
-	if (typeof window === 'undefined') return false
-	if (_viz) return true
+  if (typeof window === 'undefined') return false
+  if (_viz) return true
 
-	// Offscreen canvas — not attached to DOM
-	_canvas = document.createElement('canvas')
-	_canvas.width = THUMB_W
-	_canvas.height = THUMB_H
+  // Offscreen canvas — not attached to DOM
+  _canvas = document.createElement('canvas')
+  _canvas.width = THUMB_W
+  _canvas.height = THUMB_H
 
-	// Dedicated AudioContext for the thumbnailer
-	_audioCtx = new AudioContext()
+  // Dedicated AudioContext for the thumbnailer
+  _audioCtx = new AudioContext()
 
-	// White noise loop (≈2s) — gain 0.4, NOT connected to destination (silent)
-	const sampleRate = _audioCtx.sampleRate
-	const bufLen = sampleRate * 2
-	const buffer = _audioCtx.createBuffer(1, bufLen, sampleRate)
-	const data = buffer.getChannelData(0)
-	for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1
-	const noiseSource = _audioCtx.createBufferSource()
-	noiseSource.buffer = buffer
-	noiseSource.loop = true
-	const noiseGain = _audioCtx.createGain()
-	noiseGain.gain.value = 0.4
-	noiseSource.connect(noiseGain)
-	// ⚠️ intentionally NOT connecting noiseGain to _audioCtx.destination
-	noiseSource.start()
+  // White noise loop (≈2s) — gain 0.4, NOT connected to destination (silent)
+  const sampleRate = _audioCtx.sampleRate
+  const bufLen = sampleRate * 2
+  const buffer = _audioCtx.createBuffer(1, bufLen, sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1
+  const noiseSource = _audioCtx.createBufferSource()
+  noiseSource.buffer = buffer
+  noiseSource.loop = true
+  const noiseGain = _audioCtx.createGain()
+  noiseGain.gain.value = 0.4
+  noiseSource.connect(noiseGain)
+  // ⚠️ intentionally NOT connecting noiseGain to _audioCtx.destination
+  noiseSource.start()
 
-	// Create Butterchurn visualizer
-	_viz = (bc as typeof _butterchurn).createVisualizer(_audioCtx, _canvas, {
-		width: THUMB_W,
-		height: THUMB_H,
-		meshWidth: 24,
-		meshHeight: 18,
-		pixelRatio: 1,
-		textureRatio: 1,
-		outputFXAA: false,
-	})
-	_viz.connectAudio(noiseGain)
+  // Create Butterchurn visualizer
+  _viz = (bc as typeof _butterchurn).createVisualizer(_audioCtx, _canvas, {
+    width: THUMB_W,
+    height: THUMB_H,
+    meshWidth: 24,
+    meshHeight: 18,
+    pixelRatio: 1,
+    textureRatio: 1,
+    outputFXAA: false,
+  })
+  _viz.connectAudio(noiseGain)
 
-	// Resume opportunistically (user has already interacted)
-	_audioCtx.resume().catch(() => {})
+  // Resume opportunistically (user has already interacted)
+  _audioCtx.resume().catch(() => {})
 
-	return true
+  return true
 }
 
 // ─── Queue state ──────────────────────────────────────────────────────────────
@@ -120,26 +123,28 @@ const _inFlight = new Set<string>()
  * Enqueues at the front (most recently visible presets have priority).
  */
 export function requestThumb(slug: string, name: string): void {
-	if (typeof window === 'undefined') return
-	if (thumbUrls.get(slug)) return
+  if (typeof window === 'undefined') return
+  if (thumbUrls.get(slug)) return
 
-	getThumbUrl(slug).then(url => {
-		if (url) {
-			thumbUrls.set(slug, url)
-			return
-		}
-		if (!_inFlight.has(slug)) {
-			_inFlight.add(slug)
-			_queue = enqueueFront(_queue, { slug, name })
-			kickPump()
-		}
-	}).catch(() => {
-		if (!_inFlight.has(slug)) {
-			_inFlight.add(slug)
-			_queue = enqueueFront(_queue, { slug, name })
-			kickPump()
-		}
-	})
+  getThumbUrl(slug)
+    .then((url) => {
+      if (url) {
+        thumbUrls.set(slug, url)
+        return
+      }
+      if (!_inFlight.has(slug)) {
+        _inFlight.add(slug)
+        _queue = enqueueFront(_queue, { slug, name })
+        kickPump()
+      }
+    })
+    .catch(() => {
+      if (!_inFlight.has(slug)) {
+        _inFlight.add(slug)
+        _queue = enqueueFront(_queue, { slug, name })
+        kickPump()
+      }
+    })
 }
 
 /**
@@ -147,57 +152,71 @@ export function requestThumb(slug: string, name: string): void {
  * Does not cancel a job already in progress.
  */
 export function releaseThumb(slug: string): void {
-	_queue = _queue.filter(j => j.slug !== slug)
+  _queue = _queue.filter((j) => j.slug !== slug)
 }
 
 // ─── Internal pump ────────────────────────────────────────────────────────────
 
 function kickPump(): void {
-	if (_pumping) return
-	_pumping = true
-	pumpNext()
+  if (_pumping) return
+  _pumping = true
+  pumpNext()
 }
 
 function rAF(): Promise<void> {
-	return new Promise(res => requestAnimationFrame(() => res()))
+  return new Promise((res) => requestAnimationFrame(() => res()))
 }
 
 async function pumpNext(): Promise<void> {
-	if (!ensureInit()) { _pumping = false; return }
+  if (!ensureInit()) {
+    _pumping = false
+    return
+  }
 
-	const [job, rest] = dequeueJob(_queue)
-	if (!job) { _pumping = false; return }
-	_queue = rest
+  const [job, rest] = dequeueJob(_queue)
+  if (!job) {
+    _pumping = false
+    return
+  }
+  _queue = rest
 
-	try {
-		const data = await loadPresetData(job.name)
-		if (!data) { _inFlight.delete(job.slug); setTimeout(pumpNext, 0); return }
+  try {
+    const data = await loadPresetData(job.name)
+    if (!data) {
+      _inFlight.delete(job.slug)
+      setTimeout(pumpNext, 0)
+      return
+    }
 
-		_viz!.loadPreset(data, 0)
+    _viz!.loadPreset(data, 0)
 
-		// Warmup — render WARMUP_FRAMES frames so the preset settles
-		for (let i = 0; i < WARMUP_FRAMES; i++) {
-			await rAF()
-			_viz!.render()
-		}
+    // Warmup — render WARMUP_FRAMES frames so the preset settles
+    for (let i = 0; i < WARMUP_FRAMES; i++) {
+      await rAF()
+      _viz!.render()
+    }
 
-		// ⚠️ Final frame + capture in the SAME rAF tick — no await between render and toBlob
-		await rAF()
-		_viz!.render()
-		_canvas!.toBlob(
-			(blob) => {
-				if (!blob) { _inFlight.delete(job.slug); setTimeout(pumpNext, 0); return }
-				putThumbBlob(job.slug, blob).catch(() => {})
-				const url = cacheUrl(job.slug, blob)
-				thumbUrls.set(job.slug, url)
-				_inFlight.delete(job.slug)
-				setTimeout(pumpNext, 0)
-			},
-			'image/webp',
-			WEBP_QUALITY
-		)
-	} catch {
-		_inFlight.delete(job.slug)
-		setTimeout(pumpNext, 0)
-	}
+    // ⚠️ Final frame + capture in the SAME rAF tick — no await between render and toBlob
+    await rAF()
+    _viz!.render()
+    _canvas!.toBlob(
+      (blob) => {
+        if (!blob) {
+          _inFlight.delete(job.slug)
+          setTimeout(pumpNext, 0)
+          return
+        }
+        putThumbBlob(job.slug, blob).catch(() => {})
+        const url = cacheUrl(job.slug, blob)
+        thumbUrls.set(job.slug, url)
+        _inFlight.delete(job.slug)
+        setTimeout(pumpNext, 0)
+      },
+      'image/webp',
+      WEBP_QUALITY
+    )
+  } catch {
+    _inFlight.delete(job.slug)
+    setTimeout(pumpNext, 0)
+  }
 }

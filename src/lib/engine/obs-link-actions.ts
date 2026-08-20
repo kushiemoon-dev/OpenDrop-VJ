@@ -21,51 +21,51 @@
  * reactivity because it isn't reactive at all.
  */
 
-import { obsLinkState } from './obs-link-store.svelte.js';
-import { findSceneForTarget, findTargetForScene } from './obs-mapping.js';
-import { frontSlotIndex, frontSlotMood } from './front-slot.js';
+import { obsLinkState } from './obs-link-store.svelte.js'
+import { findSceneForTarget, findTargetForScene } from './obs-mapping.js'
+import { frontSlotIndex, frontSlotMood } from './front-slot.js'
 
 /** True when `sceneName` is the scene OpenDrop itself last set on OBS — i.e. this
  * incoming CurrentProgramSceneChanged is our own echo, not an externally-initiated change. */
 export function isOwnEcho(sceneName: string, lastOutboundScene: string | null): boolean {
-	return sceneName === lastOutboundScene;
+  return sceneName === lastOutboundScene
 }
 
-let lastOutboundScene: string | null = null;
-let lastFrontSlot = -1;
-let lastMood: number | null = null;
+let lastOutboundScene: string | null = null
+let lastFrontSlot = -1
+let lastMood: number | null = null
 
 /** Unsubscribe for the renderer-side onObsSceneChanged listener registered by
  * connectObs — torn down in disconnectObs so reconnecting never stacks listeners. */
-let unsubObsSceneChanged: (() => void) | null = null;
+let unsubObsSceneChanged: (() => void) | null = null
 
 export async function connectObs(host: string, port: number): Promise<void> {
-	obsLinkState.error = '';
-	const res = await window.electronAPI?.obsConnect(host, port);
-	if (!res?.ok) {
-		obsLinkState.error = res?.error ?? 'OBS connection failed.';
-		return;
-	}
-	obsLinkState.connected = true;
-	obsLinkState.host = host;
-	obsLinkState.port = port;
-	const scenesRes = await window.electronAPI?.obsGetScenes();
-	if (scenesRes?.ok) obsLinkState.scenes = scenesRes.scenes ?? [];
+  obsLinkState.error = ''
+  const res = await window.electronAPI?.obsConnect(host, port)
+  if (!res?.ok) {
+    obsLinkState.error = res?.error ?? 'OBS connection failed.'
+    return
+  }
+  obsLinkState.connected = true
+  obsLinkState.host = host
+  obsLinkState.port = port
+  const scenesRes = await window.electronAPI?.obsGetScenes()
+  if (scenesRes?.ok) obsLinkState.scenes = scenesRes.scenes ?? []
 
-	unsubObsSceneChanged =
-		window.electronAPI?.onObsSceneChanged((sceneName) => {
-			if (isOwnEcho(sceneName, lastOutboundScene)) return;
-			const target = findTargetForScene(obsLinkState.mapping, sceneName);
-			if (!target) return;
-			applyIncomingTarget(target);
-		}) ?? null;
+  unsubObsSceneChanged =
+    window.electronAPI?.onObsSceneChanged((sceneName) => {
+      if (isOwnEcho(sceneName, lastOutboundScene)) return
+      const target = findTargetForScene(obsLinkState.mapping, sceneName)
+      if (!target) return
+      applyIncomingTarget(target)
+    }) ?? null
 }
 
 export async function disconnectObs(): Promise<void> {
-	unsubObsSceneChanged?.();
-	unsubObsSceneChanged = null;
-	await window.electronAPI?.obsDisconnect();
-	obsLinkState.connected = false;
+  unsubObsSceneChanged?.()
+  unsubObsSceneChanged = null
+  await window.electronAPI?.obsDisconnect()
+  obsLinkState.connected = false
 }
 
 /**
@@ -88,35 +88,43 @@ export async function disconnectObs(): Promise<void> {
  *   preset-loading path.
  */
 function applyIncomingTarget(target: ReturnType<typeof findTargetForScene>): void {
-	if (!target) return;
-	obsIncomingTargetHandlers.forEach((cb) => cb(target));
+  if (!target) return
+  obsIncomingTargetHandlers.forEach((cb) => cb(target))
 }
 
-type IncomingTargetHandler = (target: NonNullable<ReturnType<typeof findTargetForScene>>) => void;
-const obsIncomingTargetHandlers: IncomingTargetHandler[] = [];
+type IncomingTargetHandler = (target: NonNullable<ReturnType<typeof findTargetForScene>>) => void
+const obsIncomingTargetHandlers: IncomingTargetHandler[] = []
 export function onIncomingObsTarget(cb: IncomingTargetHandler): void {
-	obsIncomingTargetHandlers.push(cb);
+  obsIncomingTargetHandlers.push(cb)
 }
 
 /** Call reactively (e.g. from an $effect in +page.svelte) whenever opacities/presets4 change. */
 export async function watchFrontSlotForObs(
-	opacities: number[],
-	presets4: string[],
-	favColors: Record<string, number>,
+  opacities: number[],
+  presets4: string[],
+  favColors: Record<string, number>
 ): Promise<void> {
-	if (!obsLinkState.connected) return;
+  if (!obsLinkState.connected) return
 
-	const front = frontSlotIndex(opacities);
-	const mood = frontSlotMood(favColors, presets4, front);
-	if (front === lastFrontSlot && mood === lastMood) return;
-	lastFrontSlot = front;
-	lastMood = mood;
+  const front = frontSlotIndex(opacities)
+  const mood = frontSlotMood(favColors, presets4, front)
+  if (front === lastFrontSlot && mood === lastMood) return
+  lastFrontSlot = front
+  lastMood = mood
 
-	const sceneBySlot = findSceneForTarget(obsLinkState.mapping, { type: 'slot', slot: front as 0 | 1 | 2 | 3 });
-	const sceneByMood = mood ? findSceneForTarget(obsLinkState.mapping, { type: 'mood', colorIndex: mood as 1 | 2 | 3 | 4 | 5 }) : undefined;
-	const scene = sceneByMood ?? sceneBySlot;
-	if (scene) {
-		lastOutboundScene = scene;
-		await window.electronAPI?.obsSetScene(scene);
-	}
+  const sceneBySlot = findSceneForTarget(obsLinkState.mapping, {
+    type: 'slot',
+    slot: front as 0 | 1 | 2 | 3,
+  })
+  const sceneByMood = mood
+    ? findSceneForTarget(obsLinkState.mapping, {
+        type: 'mood',
+        colorIndex: mood as 1 | 2 | 3 | 4 | 5,
+      })
+    : undefined
+  const scene = sceneByMood ?? sceneBySlot
+  if (scene) {
+    lastOutboundScene = scene
+    await window.electronAPI?.obsSetScene(scene)
+  }
 }

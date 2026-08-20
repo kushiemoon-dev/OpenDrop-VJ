@@ -10,16 +10,16 @@
  */
 
 export interface DeckQVarParams {
-	enabled: boolean[]; // length 32, index 0 = q1
-	value: number[];    // length 32, bounded [-2, 2] by the UI/command layer
+  enabled: boolean[] // length 32, index 0 = q1
+  value: number[] // length 32, bounded [-2, 2] by the UI/command layer
 }
 
 export function defaultQVarParams(): DeckQVarParams {
-	return { enabled: new Array(32).fill(false), value: new Array(32).fill(0) };
+  return { enabled: new Array(32).fill(false), value: new Array(32).fill(0) }
 }
 
 /** Q-var params for the 4 decks, indexed 0-3. */
-export type QVarParamsTuple = [DeckQVarParams, DeckQVarParams, DeckQVarParams, DeckQVarParams];
+export type QVarParamsTuple = [DeckQVarParams, DeckQVarParams, DeckQVarParams, DeckQVarParams]
 
 /**
  * Update a single q-var's value (1-indexed) for one deck slot, without
@@ -27,32 +27,44 @@ export type QVarParamsTuple = [DeckQVarParams, DeckQVarParams, DeckQVarParams, D
  * getGlobalQVarParams(); callers driving the Butterchurn-visible global must
  * still do that side effect themselves.
  */
-export function withQVarValue(params: QVarParamsTuple, slot: number, n: number, value: number): QVarParamsTuple {
-	const next = [...params] as QVarParamsTuple;
-	const nextValue = [...next[slot].value];
-	nextValue[n - 1] = value;
-	next[slot] = { ...next[slot], value: nextValue };
-	return next;
+export function withQVarValue(
+  params: QVarParamsTuple,
+  slot: number,
+  n: number,
+  value: number
+): QVarParamsTuple {
+  const next = [...params] as QVarParamsTuple
+  const current = next[slot]!
+  const nextValue = [...current.value]
+  nextValue[n - 1] = value
+  next[slot] = { ...current, value: nextValue }
+  return next
 }
 
 /** Enable watching a q-var (1-indexed), resetting its value to 0. Pure — returns a new tuple. */
 export function withQVarWatch(params: QVarParamsTuple, slot: number, n: number): QVarParamsTuple {
-	const next = [...params] as QVarParamsTuple;
-	const nextEnabled = [...next[slot].enabled];
-	const nextValue = [...next[slot].value];
-	nextEnabled[n - 1] = true;
-	nextValue[n - 1] = 0;
-	next[slot] = { enabled: nextEnabled, value: nextValue };
-	return next;
+  const next = [...params] as QVarParamsTuple
+  const current = next[slot]!
+  const nextEnabled = [...current.enabled]
+  const nextValue = [...current.value]
+  nextEnabled[n - 1] = true
+  nextValue[n - 1] = 0
+  next[slot] = { enabled: nextEnabled, value: nextValue }
+  return next
 }
 
 /** Disable watching a q-var (1-indexed), leaving its last value untouched. Pure — returns a new tuple. */
-export function withoutQVarWatch(params: QVarParamsTuple, slot: number, n: number): QVarParamsTuple {
-	const next = [...params] as QVarParamsTuple;
-	const nextEnabled = [...next[slot].enabled];
-	nextEnabled[n - 1] = false;
-	next[slot] = { ...next[slot], enabled: nextEnabled };
-	return next;
+export function withoutQVarWatch(
+  params: QVarParamsTuple,
+  slot: number,
+  n: number
+): QVarParamsTuple {
+  const next = [...params] as QVarParamsTuple
+  const current = next[slot]!
+  const nextEnabled = [...current.enabled]
+  nextEnabled[n - 1] = false
+  next[slot] = { ...current, enabled: nextEnabled }
+  return next
 }
 
 /**
@@ -64,14 +76,15 @@ export function withoutQVarWatch(params: QVarParamsTuple, slot: number, n: numbe
  * enabling/disabling a q-var take effect without a second loadPreset() call.
  */
 export function injectQVarParams(preset: object, slot: number): object {
-	const patched: Record<string, unknown> = { ...preset };
-	const original = typeof patched.frame_eqs_str === 'string' ? patched.frame_eqs_str : '';
-	const p = `window.__odQVarParams[${slot}]`;
-	const guards = Array.from({ length: 32 }, (_, i) =>
-		`if (${p}.enabled[${i}]) { q${i + 1} = ${p}.value[${i}]; }`
-	).join('\n');
-	patched.frame_eqs_str = `${original}\n${guards}`;
-	return patched;
+  const patched: Record<string, unknown> = { ...preset }
+  const original = typeof patched.frame_eqs_str === 'string' ? patched.frame_eqs_str : ''
+  const p = `window.__odQVarParams[${slot}]`
+  const guards = Array.from(
+    { length: 32 },
+    (_, i) => `if (${p}.enabled[${i}]) { q${i + 1} = ${p}.value[${i}]; }`
+  ).join('\n')
+  patched.frame_eqs_str = `${original}\n${guards}`
+  return patched
 }
 
 /**
@@ -81,14 +94,19 @@ export function injectQVarParams(preset: object, slot: number): object {
  * time-params.ts.
  */
 export function getGlobalQVarParams(): DeckQVarParams[] {
-	const w = window as unknown as { __odQVarParams?: DeckQVarParams[] };
-	if (!w.__odQVarParams) {
-		w.__odQVarParams = [defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams()];
-	}
-	return w.__odQVarParams;
+  const w = window as unknown as { __odQVarParams?: DeckQVarParams[] }
+  if (!w.__odQVarParams) {
+    w.__odQVarParams = [
+      defaultQVarParams(),
+      defaultQVarParams(),
+      defaultQVarParams(),
+      defaultQVarParams(),
+    ]
+  }
+  return w.__odQVarParams
 }
 
 // Eager init at module load, in whichever window (control or output) imports this
 // module — both do, transitively, via deck-manager.ts. Ensures the compiled preset
 // code's window.__odQVarParams[slot] reference is never undefined.
-if (typeof window !== 'undefined') getGlobalQVarParams();
+if (typeof window !== 'undefined') getGlobalQVarParams()

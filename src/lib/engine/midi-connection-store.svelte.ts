@@ -13,7 +13,7 @@
  */
 
 export const midiConnectionState = $state({
-	connected: false,
-	deviceNames: [] as string[],
-	clockBpm: 0, // BPM detected via MIDI clock IN (0 = inactive)
-});
+  connected: false,
+  deviceNames: [] as string[],
+  clockBpm: 0, // BPM detected via MIDI clock IN (0 = inactive)
+})

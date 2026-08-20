@@ -14,6 +14,7 @@ et les exposer via ton Cloudflare Tunnel existant.
 ## 1. Créer un conteneur LXC sur Proxmox
 
 Depuis l'interface Proxmox :
+
 - OS : Debian 12 (Bookworm) minimal
 - Ressources : 512 Mo RAM, 10 Go disque
 - Réseau : bridge `vmbr0`, IP statique (ex: `192.168.1.50`)
@@ -149,9 +150,9 @@ git commit -m "chore: update bundled video loops"
 
 ## Troubleshooting
 
-| Symptôme | Cause probable | Solution |
-|---|---|---|
-| Clips CDN absents, bundlés OK | CDN inaccessible ou `PUBLIC_VIDEO_CDN` vide | `curl -I https://loops.kushie.dev/manifest.json` |
-| CORS error dans la console | Header absent sur Caddy | Vérifier `/etc/caddy/Caddyfile` + `systemctl restart caddy` |
-| Vidéo se charge mais ne joue pas | Format non supporté par Chromium/Electron | Vérifier que ffmpeg a bien produit du VP9 |
-| `pnpm video-loops:build` échoue | ffmpeg absent ou clé API invalide | `which ffmpeg` ; vérifier `PEXELS_API_KEY` / `PIXABAY_API_KEY` |
+| Symptôme                         | Cause probable                              | Solution                                                       |
+| -------------------------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| Clips CDN absents, bundlés OK    | CDN inaccessible ou `PUBLIC_VIDEO_CDN` vide | `curl -I https://loops.kushie.dev/manifest.json`               |
+| CORS error dans la console       | Header absent sur Caddy                     | Vérifier `/etc/caddy/Caddyfile` + `systemctl restart caddy`    |
+| Vidéo se charge mais ne joue pas | Format non supporté par Chromium/Electron   | Vérifier que ffmpeg a bien produit du VP9                      |
+| `pnpm video-loops:build` échoue  | ffmpeg absent ou clé API invalide           | `which ffmpeg` ; vérifier `PEXELS_API_KEY` / `PIXABAY_API_KEY` |

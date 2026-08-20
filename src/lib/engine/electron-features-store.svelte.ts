@@ -10,10 +10,10 @@
  */
 
 export const electronFeaturesState = $state({
-	ndi: { active: false, error: '' },
-	osc: { active: false, port: 7000, error: '' },
-	remote: { active: false, url: '', error: '' },
-	link: { active: false, peers: 0, error: '' },
-	v4l2: { active: false, error: '' },
-	spout: { active: false, error: '' },
-});
+  ndi: { active: false, error: '' },
+  osc: { active: false, port: 7000, error: '' },
+  remote: { active: false, url: '', error: '' },
+  link: { active: false, peers: 0, error: '' },
+  v4l2: { active: false, error: '' },
+  spout: { active: false, error: '' },
+})

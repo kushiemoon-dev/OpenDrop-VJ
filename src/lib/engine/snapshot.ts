@@ -5,17 +5,17 @@
  * browser — same precedent as Compositor).
  */
 
-import type { CommandId } from './commands.js';
+import type { CommandId } from './commands.js'
 
 export interface Snapshot {
-	name: string;
-	values: Partial<Record<CommandId, number>>;
+  name: string
+  values: Partial<Record<CommandId, number>>
 }
 
 /** Ease-in-out (smoothstep). t is clamped to [0,1]. */
 export function smoothstep(t: number): number {
-	const x = t < 0 ? 0 : t > 1 ? 1 : t;
-	return x * x * (3 - 2 * x);
+  const x = t < 0 ? 0 : t > 1 ? 1 : t
+  return x * x * (3 - 2 * x)
 }
 
 /**
@@ -32,18 +32,18 @@ export function smoothstep(t: number): number {
  *    captured.
  */
 export function interpolateSnapshot(
-	start: Partial<Record<CommandId, number>>,
-	target: Partial<Record<CommandId, number>>,
-	progress01: number,
+  start: Partial<Record<CommandId, number>>,
+  target: Partial<Record<CommandId, number>>,
+  progress01: number
 ): Partial<Record<CommandId, number>> {
-	const out: Partial<Record<CommandId, number>> = {};
-	for (const key in target) {
-		const id = key as CommandId;
-		const to = target[id]!;
-		const from = start[id] ?? to;
-		out[id] = from + (to - from) * progress01;
-	}
-	return out;
+  const out: Partial<Record<CommandId, number>> = {}
+  for (const key in target) {
+    const id = key as CommandId
+    const to = target[id]!
+    const from = start[id] ?? to
+    out[id] = from + (to - from) * progress01
+  }
+  return out
 }
 
 /**
@@ -53,39 +53,39 @@ export function interpolateSnapshot(
  * it replaces.
  */
 export class SnapshotEngine {
-	private rafId: number | null = null;
+  private rafId: number | null = null
 
-	recall(
-		start: Partial<Record<CommandId, number>>,
-		target: Partial<Record<CommandId, number>>,
-		durationMs: number,
-		onTick: (values: Partial<Record<CommandId, number>>) => void,
-	): void {
-		this.cancel(); // clean restart: kill any in-flight animation first
+  recall(
+    start: Partial<Record<CommandId, number>>,
+    target: Partial<Record<CommandId, number>>,
+    durationMs: number,
+    onTick: (values: Partial<Record<CommandId, number>>) => void
+  ): void {
+    this.cancel() // clean restart: kill any in-flight animation first
 
-		if (durationMs <= 0) {
-			onTick(interpolateSnapshot(start, target, 1)); // instant jump to target
-			return;
-		}
+    if (durationMs <= 0) {
+      onTick(interpolateSnapshot(start, target, 1)) // instant jump to target
+      return
+    }
 
-		const startTime = performance.now();
-		const frame = (now: number) => {
-			const raw = (now - startTime) / durationMs;
-			if (raw >= 1) {
-				this.rafId = null;
-				onTick(interpolateSnapshot(start, target, 1)); // exact target, no float drift
-				return;
-			}
-			onTick(interpolateSnapshot(start, target, smoothstep(raw)));
-			this.rafId = requestAnimationFrame(frame);
-		};
-		this.rafId = requestAnimationFrame(frame);
-	}
+    const startTime = performance.now()
+    const frame = (now: number) => {
+      const raw = (now - startTime) / durationMs
+      if (raw >= 1) {
+        this.rafId = null
+        onTick(interpolateSnapshot(start, target, 1)) // exact target, no float drift
+        return
+      }
+      onTick(interpolateSnapshot(start, target, smoothstep(raw)))
+      this.rafId = requestAnimationFrame(frame)
+    }
+    this.rafId = requestAnimationFrame(frame)
+  }
 
-	cancel(): void {
-		if (this.rafId !== null) {
-			cancelAnimationFrame(this.rafId);
-			this.rafId = null;
-		}
-	}
+  cancel(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+  }
 }

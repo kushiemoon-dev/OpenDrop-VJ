@@ -12,37 +12,41 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import { type TimelineKeyframe, timelineLoopDuration } from './timeline.js';
-import { snapshotsState } from './snapshots-store.svelte.js';
+import { type TimelineKeyframe, timelineLoopDuration } from './timeline.js'
+import { snapshotsState } from './snapshots-store.svelte.js'
 
 export const timelineState = $state({
-	keyframes: [] as TimelineKeyframe[],
-	playing: false,
-});
+  keyframes: [] as TimelineKeyframe[],
+  playing: false,
+})
 
 export function toggleTimelinePlay(): void {
-	if (timelineState.playing) {
-		timelineState.playing = false;
-		return;
-	}
-	if (timelineLoopDuration(timelineState.keyframes) <= 0) return; // nothing to interpolate, silent no-op
-	timelineState.playing = true;
+  if (timelineState.playing) {
+    timelineState.playing = false
+    return
+  }
+  if (timelineLoopDuration(timelineState.keyframes) <= 0) return // nothing to interpolate, silent no-op
+  timelineState.playing = true
 }
 
 export function addTimelineKeyframe(): void {
-	const firstFilledSlot = snapshotsState.snapshots.findIndex((s) => s !== null);
-	const lastTime = timelineState.keyframes.length > 0
-		? timelineState.keyframes[timelineState.keyframes.length - 1].timeSec
-		: -5;
-	timelineState.keyframes = [...timelineState.keyframes, { slot: firstFilledSlot >= 0 ? firstFilledSlot : 0, timeSec: lastTime + 5 }]
-		.sort((a, b) => a.timeSec - b.timeSec);
+  const firstFilledSlot = snapshotsState.snapshots.findIndex((s) => s !== null)
+  const lastTime =
+    timelineState.keyframes.length > 0
+      ? timelineState.keyframes[timelineState.keyframes.length - 1]!.timeSec
+      : -5
+  timelineState.keyframes = [
+    ...timelineState.keyframes,
+    { slot: firstFilledSlot >= 0 ? firstFilledSlot : 0, timeSec: lastTime + 5 },
+  ].sort((a, b) => a.timeSec - b.timeSec)
 }
 
 export function removeTimelineKeyframe(index: number): void {
-	timelineState.keyframes = timelineState.keyframes.filter((_, i) => i !== index);
+  timelineState.keyframes = timelineState.keyframes.filter((_, i) => i !== index)
 }
 
 export function updateTimelineKeyframe(index: number, patch: Partial<TimelineKeyframe>): void {
-	timelineState.keyframes = timelineState.keyframes.map((kf, i) => (i === index ? { ...kf, ...patch } : kf))
-		.sort((a, b) => a.timeSec - b.timeSec);
+  timelineState.keyframes = timelineState.keyframes
+    .map((kf, i) => (i === index ? { ...kf, ...patch } : kf))
+    .sort((a, b) => a.timeSec - b.timeSec)
 }

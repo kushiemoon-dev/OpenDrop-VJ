@@ -12,10 +12,10 @@
  */
 
 export const strobeState = $state({
-	on: false,
-	/** Beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
-	rate: 1,
-	intensity: 0.8,
-	color: '#ffffff',
-	flash: false,
-});
+  on: false,
+  /** Beats per flash cycle. 0.25=1/4beat, 0.5=half, 1=beat, 2=half-tempo, 4=quarter-tempo */
+  rate: 1,
+  intensity: 0.8,
+  color: '#ffffff',
+  flash: false,
+})

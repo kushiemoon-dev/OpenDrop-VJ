@@ -24,7 +24,7 @@ jobs:
       - run: pnpm build
         env:
           PUBLIC_VIDEO_CDN: https://loops.kushie.dev
-          PUBLIC_CLOUD_PRESETS_API: ""
+          PUBLIC_CLOUD_PRESETS_API: ''
 
       - name: Deploy over SSH
         env:

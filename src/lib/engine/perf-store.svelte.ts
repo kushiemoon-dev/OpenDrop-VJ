@@ -8,11 +8,11 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import { type QualityTier, type InvisibleMode, DEFAULT_TIER, DEFAULT_PERF } from './quality.js';
+import { type QualityTier, type InvisibleMode, DEFAULT_TIER, DEFAULT_PERF } from './quality.js'
 
 export const perfState = $state({
-	quality: DEFAULT_TIER as QualityTier,
-	targetFps: DEFAULT_PERF.targetFps,
-	invisibleMode: DEFAULT_PERF.invisibleMode as InvisibleMode,
-	invisibleFps: DEFAULT_PERF.invisibleFps,
-});
+  quality: DEFAULT_TIER as QualityTier,
+  targetFps: DEFAULT_PERF.targetFps,
+  invisibleMode: DEFAULT_PERF.invisibleMode as InvisibleMode,
+  invisibleFps: DEFAULT_PERF.invisibleFps,
+})

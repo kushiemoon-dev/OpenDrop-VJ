@@ -8,27 +8,35 @@
  */
 
 import {
-	type QVarParamsTuple, defaultQVarParams, getGlobalQVarParams, withQVarValue, withQVarWatch, withoutQVarWatch,
-} from './q-vars.js';
+  type QVarParamsTuple,
+  defaultQVarParams,
+  getGlobalQVarParams,
+  withQVarValue,
+  withQVarWatch,
+  withoutQVarWatch,
+} from './q-vars.js'
 
 export const qvarState = $state({
-	params: [
-		defaultQVarParams(), defaultQVarParams(), defaultQVarParams(), defaultQVarParams(),
-	] as QVarParamsTuple,
-});
+  params: [
+    defaultQVarParams(),
+    defaultQVarParams(),
+    defaultQVarParams(),
+    defaultQVarParams(),
+  ] as QVarParamsTuple,
+})
 
 export function updateQVarValue(slot: number, n: number, value: number): void {
-	qvarState.params = withQVarValue(qvarState.params, slot, n, value);
-	getGlobalQVarParams()[slot].value[n - 1] = value;
+  qvarState.params = withQVarValue(qvarState.params, slot, n, value)
+  getGlobalQVarParams()[slot]!.value[n - 1] = value
 }
 
 export function addQVarWatch(slot: number, n: number): void {
-	qvarState.params = withQVarWatch(qvarState.params, slot, n);
-	getGlobalQVarParams()[slot].enabled[n - 1] = true;
-	getGlobalQVarParams()[slot].value[n - 1] = 0;
+  qvarState.params = withQVarWatch(qvarState.params, slot, n)
+  getGlobalQVarParams()[slot]!.enabled[n - 1] = true
+  getGlobalQVarParams()[slot]!.value[n - 1] = 0
 }
 
 export function removeQVarWatch(slot: number, n: number): void {
-	qvarState.params = withoutQVarWatch(qvarState.params, slot, n);
-	getGlobalQVarParams()[slot].enabled[n - 1] = false;
+  qvarState.params = withoutQVarWatch(qvarState.params, slot, n)
+  getGlobalQVarParams()[slot]!.enabled[n - 1] = false
 }

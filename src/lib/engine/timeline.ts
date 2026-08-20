@@ -5,13 +5,13 @@
  * (verified in a real browser — same precedent as SnapshotEngine/Compositor).
  */
 
-import type { CommandId } from './commands.js';
-import type { Snapshot } from './snapshot.js';
-import { smoothstep, interpolateSnapshot } from './snapshot.js';
+import type { CommandId } from './commands.js'
+import type { Snapshot } from './snapshot.js'
+import { smoothstep, interpolateSnapshot } from './snapshot.js'
 
 export interface TimelineKeyframe {
-	slot: number;
-	timeSec: number;
+  slot: number
+  timeSec: number
 }
 
 /**
@@ -21,8 +21,8 @@ export interface TimelineKeyframe {
  * means there's nothing to interpolate between, so the loop has no length.
  */
 export function timelineLoopDuration(keyframes: TimelineKeyframe[]): number {
-	if (keyframes.length < 2) return 0;
-	return keyframes[keyframes.length - 1].timeSec;
+  if (keyframes.length < 2) return 0
+  return keyframes[keyframes.length - 1]!.timeSec
 }
 
 /**
@@ -42,23 +42,23 @@ export function timelineLoopDuration(keyframes: TimelineKeyframe[]): number {
  *    reached. No special-casing needed — smoothstep's existing clamp covers it.
  */
 export function timelineValuesAt(
-	keyframes: TimelineKeyframe[],
-	snapshots: (Snapshot | null)[],
-	tSec: number,
+  keyframes: TimelineKeyframe[],
+  snapshots: (Snapshot | null)[],
+  tSec: number
 ): Partial<Record<CommandId, number>> {
-	if (keyframes.length < 2) return {};
+  if (keyframes.length < 2) return {}
 
-	let i = 0;
-	while (i < keyframes.length - 2 && tSec >= keyframes[i + 1].timeSec) i++;
-	const from = keyframes[i];
-	const to = keyframes[i + 1];
+  let i = 0
+  while (i < keyframes.length - 2 && tSec >= keyframes[i + 1]!.timeSec) i++
+  const from = keyframes[i]!
+  const to = keyframes[i + 1]!
 
-	const span = to.timeSec - from.timeSec;
-	const progress = span <= 0 ? 1 : (tSec - from.timeSec) / span;
+  const span = to.timeSec - from.timeSec
+  const progress = span <= 0 ? 1 : (tSec - from.timeSec) / span
 
-	const startValues = snapshots[from.slot]?.values ?? {};
-	const targetValues = snapshots[to.slot]?.values ?? {};
-	return interpolateSnapshot(startValues, targetValues, smoothstep(progress));
+  const startValues = snapshots[from.slot]?.values ?? {}
+  const targetValues = snapshots[to.slot]?.values ?? {}
+  return interpolateSnapshot(startValues, targetValues, smoothstep(progress))
 }
 
 /**
@@ -69,40 +69,40 @@ export function timelineValuesAt(
  * where it left off rather than restarting at t=0.
  */
 export class TimelineEngine {
-	private rafId: number | null = null;
-	private resumeFromSec = 0;
+  private rafId: number | null = null
+  private resumeFromSec = 0
 
-	play(
-		keyframes: TimelineKeyframe[],
-		snapshots: (Snapshot | null)[],
-		onTick: (values: Partial<Record<CommandId, number>>) => void,
-	): void {
-		this.cancelFrame();
-		const loopDuration = timelineLoopDuration(keyframes);
-		if (loopDuration <= 0) return;
+  play(
+    keyframes: TimelineKeyframe[],
+    snapshots: (Snapshot | null)[],
+    onTick: (values: Partial<Record<CommandId, number>>) => void
+  ): void {
+    this.cancelFrame()
+    const loopDuration = timelineLoopDuration(keyframes)
+    if (loopDuration <= 0) return
 
-		const startTime = performance.now() - this.resumeFromSec * 1000;
-		const frame = (now: number) => {
-			const elapsedSec = (now - startTime) / 1000;
-			this.resumeFromSec = elapsedSec % loopDuration;
-			onTick(timelineValuesAt(keyframes, snapshots, this.resumeFromSec));
-			this.rafId = requestAnimationFrame(frame);
-		};
-		this.rafId = requestAnimationFrame(frame);
-	}
+    const startTime = performance.now() - this.resumeFromSec * 1000
+    const frame = (now: number) => {
+      const elapsedSec = (now - startTime) / 1000
+      this.resumeFromSec = elapsedSec % loopDuration
+      onTick(timelineValuesAt(keyframes, snapshots, this.resumeFromSec))
+      this.rafId = requestAnimationFrame(frame)
+    }
+    this.rafId = requestAnimationFrame(frame)
+  }
 
-	pause(): void {
-		this.cancelFrame();
-	}
+  pause(): void {
+    this.cancelFrame()
+  }
 
-	destroy(): void {
-		this.cancelFrame();
-	}
+  destroy(): void {
+    this.cancelFrame()
+  }
 
-	private cancelFrame(): void {
-		if (this.rafId !== null) {
-			cancelAnimationFrame(this.rafId);
-			this.rafId = null;
-		}
-	}
+  private cancelFrame(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+  }
 }

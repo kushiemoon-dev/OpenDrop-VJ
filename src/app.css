@@ -1,29 +1,31 @@
 /* src/app.css */
 :root {
   /* Surfaces */
-  --bg-base:        #0d0d0d;
-  --bg-surface:     #141414;
-  --bg-elevated:    #1a1a1a;
-  --bg-hover:       #1e1e3a;
-  --border:         #1e1e48;
-  --border-subtle:  #131330;
+  --bg-base: #0d0d0d;
+  --bg-surface: #141414;
+  --bg-elevated: #1a1a1a;
+  --bg-hover: #1e1e3a;
+  --border: #1e1e48;
+  --border-subtle: #131330;
 
   /* Couleurs */
-  --accent:         #ff2d78;
-  --accent-dim:     rgba(255, 45, 120, 0.15);
-  --accent-glow:    rgba(255, 45, 120, 0.3);
-  --text-primary:   #e0e0ff;
+  --accent: #ff2d78;
+  --accent-dim: rgba(255, 45, 120, 0.15);
+  --accent-glow: rgba(255, 45, 120, 0.3);
+  --text-primary: #e0e0ff;
   --text-secondary: #8888bb;
-  --text-muted:     #44447a;
-  --live:           #00e096;
+  --text-muted: #44447a;
+  --live: #00e096;
 
   /* Extended palette (effects / states) */
-  --cyan:        #00e5ff;   --cyan-dim:   rgba(0, 229, 255, 0.10);
-  --violet:      #b44fff;   --violet-dim: rgba(180, 79, 255, 0.10);
-  --warn:        #ff8c00;
-  --error:       #ff7a7a;
-  --ok:          #4ade80;
-  --info:        #77aaff;
+  --cyan: #00e5ff;
+  --cyan-dim: rgba(0, 229, 255, 0.1);
+  --violet: #b44fff;
+  --violet-dim: rgba(180, 79, 255, 0.1);
+  --warn: #ff8c00;
+  --error: #ff7a7a;
+  --ok: #4ade80;
+  --info: #77aaff;
 
   /* Spacing (base 4 px) */
   --sp-1: 4px;

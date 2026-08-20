@@ -8,10 +8,10 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import type { SharedSet } from './share-set.js';
+import type { SharedSet } from './share-set.js'
 
 export const shareSetState = $state({
-	name: '',
-	copyLabel: 'Copier le lien',
-	pending: null as SharedSet | null,
-});
+  name: '',
+  copyLabel: 'Copier le lien',
+  pending: null as SharedSet | null,
+})

@@ -4,10 +4,10 @@
  */
 
 export const ndiDeckState = $state({
-	slots: [
-		{ active: false, error: '' },
-		{ active: false, error: '' },
-		{ active: false, error: '' },
-		{ active: false, error: '' },
-	],
-});
+  slots: [
+    { active: false, error: '' },
+    { active: false, error: '' },
+    { active: false, error: '' },
+    { active: false, error: '' },
+  ],
+})

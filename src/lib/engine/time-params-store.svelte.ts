@@ -8,18 +8,25 @@
  */
 
 import {
-	type DeckTimeParams, type TimeParamsTuple, defaultTimeParams, getGlobalTimeParams, withTimeParams,
-} from './time-params.js';
+  type DeckTimeParams,
+  type TimeParamsTuple,
+  defaultTimeParams,
+  getGlobalTimeParams,
+  withTimeParams,
+} from './time-params.js'
 
 export const timeParamsState = $state({
-	params: [
-		defaultTimeParams(), defaultTimeParams(), defaultTimeParams(), defaultTimeParams(),
-	] as TimeParamsTuple,
-});
+  params: [
+    defaultTimeParams(),
+    defaultTimeParams(),
+    defaultTimeParams(),
+    defaultTimeParams(),
+  ] as TimeParamsTuple,
+})
 
 export function updateTimeParams(slot: number, patch: Partial<DeckTimeParams>): void {
-	timeParamsState.params = withTimeParams(timeParamsState.params, slot, patch);
-	// Write-through: this is what Butterchurn's injected preset code actually
-	// reads every frame — the $state above is only for the UI to bind to.
-	Object.assign(getGlobalTimeParams()[slot], patch);
+  timeParamsState.params = withTimeParams(timeParamsState.params, slot, patch)
+  // Write-through: this is what Butterchurn's injected preset code actually
+  // reads every frame — the $state above is only for the UI to bind to.
+  Object.assign(getGlobalTimeParams()[slot]!, patch)
 }

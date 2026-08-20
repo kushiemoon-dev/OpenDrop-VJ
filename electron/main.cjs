@@ -1,232 +1,279 @@
-'use strict';
+'use strict'
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, protocol, session, screen } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const { spawn } = require('child_process');
-const dgram = require('dgram');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  desktopCapturer,
+  protocol,
+  session,
+  screen,
+} = require('electron')
+const path = require('path')
+const fs = require('fs')
+const { spawn } = require('child_process')
+const dgram = require('dgram')
 
 // Guard against a dead stdout/stderr pipe (e.g. dev launcher tearing down the terminal)
 // crashing the whole main process on a routine console write. Not a catch-all — anything
 // other than EPIPE is rethrown so real errors still surface.
-process.stdout.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
-process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+process.stdout.on('error', (err) => {
+  if (err.code !== 'EPIPE') throw err
+})
+process.stderr.on('error', (err) => {
+  if (err.code !== 'EPIPE') throw err
+})
 
 // Allow AudioContext to auto-start in renderer windows (including the output window
 // which opens programmatically via window.open, with no user gesture of its own).
 // Must be set before app is ready.
-app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
 
 // Must be called before app is ready — makes app:// behave like https://
 // (standard origin, secure context, fetch API, dynamic import support)
-protocol.registerSchemesAsPrivileged([{
-  scheme: 'app',
-  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
-}]);
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+])
 
 const MIME = {
   '.html': 'text/html',
-  '.js':   'text/javascript',
-  '.mjs':  'text/javascript',
-  '.css':  'text/css',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
   '.json': 'application/json',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
-  '.woff2':'font/woff2',
+  '.woff2': 'font/woff2',
   '.woff': 'font/woff',
-  '.ttf':  'font/ttf',
-  '.ico':  'image/x-icon',
-  '.mp4':  'video/mp4',
+  '.ttf': 'font/ttf',
+  '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
   '.webm': 'video/webm',
-  '.mov':  'video/quicktime',
-  '.m4v':  'video/x-m4v',
-};
+  '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v',
+}
 
 // ── NDI (optional — requires NDI SDK + grandiose) ──────────────────────────
-let grandiose = null;
-let ndiSender = null;
-let ndiTimer = null;
-let outputWin = null;     // tracked below in did-create-window
+let grandiose = null
+let ndiSender = null
+let ndiTimer = null
+let outputWin = null // tracked below in did-create-window
 
 // ── Spout (optional — Windows only, requires spout-addon + SpoutDX vendor sources) ──
-let spout = null;
-let spoutTimer = null;
-try { spout = require('spout-addon'); } catch { /* non-Windows or addon not built */ }
+let spout = null
+let spoutTimer = null
+try {
+  spout = require('spout-addon')
+} catch {
+  /* non-Windows or addon not built */
+}
 
 // ── Per-device output loopback (optional — Windows, requires audify) ──
-let loopbackRt = null;
+let loopbackRt = null
 
 // ── v4l2loopback (Linux — via ffmpeg pipe, no native module required) ──────
-let v4l2Proc = null;
-let v4l2Timer = null;
-let v4l2Draining = false;
-let v4l2W = 0;
-let v4l2H = 0;
-let v4l2Error = '';
+let v4l2Proc = null
+let v4l2Timer = null
+let v4l2Draining = false
+let v4l2W = 0
+let v4l2H = 0
+let v4l2Error = ''
 
 // Find the first v4l2loopback device whose label contains "OpenDrop".
 // Reads /sys/class/video4linux/videoN/name — pure fs, no exec.
 // Returns "/dev/videoN" or null.
 function findV4l2Device() {
   try {
-    const base = '/sys/class/video4linux';
-    const entries = fs.readdirSync(base);
+    const base = '/sys/class/video4linux'
+    const entries = fs.readdirSync(base)
     for (const entry of entries) {
-      const namePath = path.join(base, entry, 'name');
+      const namePath = path.join(base, entry, 'name')
       try {
-        const label = fs.readFileSync(namePath, 'utf8').trim();
-        if (label.includes('OpenDrop')) return `/dev/${entry}`;
-      } catch { /* entry has no name file — skip */ }
+        const label = fs.readFileSync(namePath, 'utf8').trim()
+        if (label.includes('OpenDrop')) return `/dev/${entry}`
+      } catch {
+        /* entry has no name file — skip */
+      }
     }
-  } catch { /* /sys not available (non-Linux) */ }
-  return null;
+  } catch {
+    /* /sys not available (non-Linux) */
+  }
+  return null
 }
 
-const isDev = !app.isPackaged;
-const DEV_URL = 'http://localhost:1420';
-const BUILD_DIR = path.join(__dirname, '../build');
+const isDev = !app.isPackaged
+const DEV_URL = 'http://localhost:1420'
+const BUILD_DIR = path.join(__dirname, '../build')
 
 // ── OSC UDP server (optional, Electron-only) ───────────────────────────────
-let oscServer = null;
+let oscServer = null
 
 // Minimal OSC packet parser: reads null-terminated address string, then
 // a single float32 argument (if present). Returns [address, value01] or null.
 function parseOscPacket(buf) {
-  if (buf.length < 4) return null;
+  if (buf.length < 4) return null
   // Find end of null-padded address
-  let addrEnd = buf.indexOf(0);
-  if (addrEnd < 0) return null;
-  const address = buf.toString('ascii', 0, addrEnd);
+  let addrEnd = buf.indexOf(0)
+  if (addrEnd < 0) return null
+  const address = buf.toString('ascii', 0, addrEnd)
   // Advance past null-padding to 4-byte boundary
-  let offset = Math.ceil((addrEnd + 1) / 4) * 4;
+  let offset = Math.ceil((addrEnd + 1) / 4) * 4
   // Skip type tag string if present (starts with ',')
   if (offset < buf.length && buf[offset] === 0x2c) {
-    const ttEnd = buf.indexOf(0, offset + 1);
-    if (ttEnd >= 0) offset = Math.ceil((ttEnd + 1) / 4) * 4;
+    const ttEnd = buf.indexOf(0, offset + 1)
+    if (ttEnd >= 0) offset = Math.ceil((ttEnd + 1) / 4) * 4
   }
   // Read first float32 argument if enough bytes remain
-  let value01 = 0;
+  let value01 = 0
   if (offset + 4 <= buf.length) {
-    value01 = buf.readFloatBE(offset);
-    value01 = Math.max(0, Math.min(1, value01));
+    value01 = buf.readFloatBE(offset)
+    value01 = Math.max(0, Math.min(1, value01))
   }
-  return [address, value01];
+  return [address, value01]
 }
 
 ipcMain.handle('osc:start', async (_event, { port }) => {
-  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
+  if (oscServer) {
+    try {
+      oscServer.close()
+    } catch {}
+    oscServer = null
+  }
   return new Promise((resolve) => {
-    const sock = dgram.createSocket('udp4');
+    const sock = dgram.createSocket('udp4')
     sock.on('error', (err) => {
-      oscServer = null;
-      resolve({ ok: false, error: err.message });
-    });
+      oscServer = null
+      resolve({ ok: false, error: err.message })
+    })
     sock.on('message', (buf) => {
-      const parsed = parseOscPacket(buf);
-      if (!parsed) return;
-      const [address, value01] = parsed;
-      if (!address.startsWith('/opendrop/')) return;
-      const cmdId = address.slice('/opendrop/'.length);
-      if (!cmdId) return;
+      const parsed = parseOscPacket(buf)
+      if (!parsed) return
+      const [address, value01] = parsed
+      if (!address.startsWith('/opendrop/')) return
+      const cmdId = address.slice('/opendrop/'.length)
+      if (!cmdId) return
       BrowserWindow.getAllWindows().forEach((w) => {
-        if (!w.isDestroyed()) w.webContents.send('osc:msg', cmdId, value01);
-      });
-    });
+        if (!w.isDestroyed()) w.webContents.send('osc:msg', cmdId, value01)
+      })
+    })
     sock.bind(port, () => {
-      oscServer = sock;
-      resolve({ ok: true, port });
-    });
-  });
-});
+      oscServer = sock
+      resolve({ ok: true, port })
+    })
+  })
+})
 
 ipcMain.handle('osc:stop', async () => {
-  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
-  return { ok: true };
-});
+  if (oscServer) {
+    try {
+      oscServer.close()
+    } catch {}
+    oscServer = null
+  }
+  return { ok: true }
+})
 
 // ── WebSocket remote control server (optional, Electron-only) ─────────────
-const crypto = require('crypto');
-const { WebSocketServer } = require('ws');
-const os = require('os');
+const crypto = require('crypto')
+const { WebSocketServer } = require('ws')
+const os = require('os')
 
-let wsServer = null;
-let wsToken = null;
+let wsServer = null
+let wsToken = null
 
 function getLanIp() {
-  const ifaces = os.networkInterfaces();
+  const ifaces = os.networkInterfaces()
   for (const name of Object.keys(ifaces)) {
     for (const iface of ifaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address
     }
   }
-  return '127.0.0.1';
+  return '127.0.0.1'
 }
 
 ipcMain.handle('remote:start', async () => {
-  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
-  wsToken = crypto.randomBytes(12).toString('hex');
+  if (wsServer) {
+    try {
+      wsServer.close()
+    } catch {}
+    wsServer = null
+  }
+  wsToken = crypto.randomBytes(12).toString('hex')
   return new Promise((resolve) => {
-    const wss = new WebSocketServer({ port: 0 }); // OS picks a free port
+    const wss = new WebSocketServer({ port: 0 }) // OS picks a free port
     wss.on('error', (err) => {
-      wsServer = null;
-      resolve({ ok: false, error: err.message });
-    });
+      wsServer = null
+      resolve({ ok: false, error: err.message })
+    })
     wss.on('listening', () => {
-      wsServer = wss;
-      const { port } = wss.address();
-      resolve({ ok: true, port, ip: getLanIp(), token: wsToken });
-    });
+      wsServer = wss
+      const { port } = wss.address()
+      resolve({ ok: true, port, ip: getLanIp(), token: wsToken })
+    })
     wss.on('connection', (ws) => {
       ws.on('message', (data) => {
-        let msg;
-        try { msg = JSON.parse(data.toString()); } catch { return; }
-        if (!msg || msg.token !== wsToken) return;
-        const cmd = typeof msg.cmd === 'string' ? msg.cmd : '';
-        const value = typeof msg.value === 'number' ? Math.max(0, Math.min(1, msg.value)) : 0;
-        if (!cmd) return;
+        let msg
+        try {
+          msg = JSON.parse(data.toString())
+        } catch {
+          return
+        }
+        if (!msg || msg.token !== wsToken) return
+        const cmd = typeof msg.cmd === 'string' ? msg.cmd : ''
+        const value = typeof msg.value === 'number' ? Math.max(0, Math.min(1, msg.value)) : 0
+        if (!cmd) return
         BrowserWindow.getAllWindows().forEach((w) => {
-          if (!w.isDestroyed()) w.webContents.send('remote:cmd', cmd, value);
-        });
-      });
-    });
-  });
-});
+          if (!w.isDestroyed()) w.webContents.send('remote:cmd', cmd, value)
+        })
+      })
+    })
+  })
+})
 
 ipcMain.handle('remote:stop', async () => {
-  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
-  wsToken = null;
-  return { ok: true };
-});
+  if (wsServer) {
+    try {
+      wsServer.close()
+    } catch {}
+    wsServer = null
+  }
+  wsToken = null
+  return { ok: true }
+})
 
 // ── Screen targeting ──────────────────────────────────────────────────────
 ipcMain.handle('screen:list', () => {
-  const primary = screen.getPrimaryDisplay();
+  const primary = screen.getPrimaryDisplay()
   return screen.getAllDisplays().map((d, i) => ({
     id: d.id,
     label: `Display ${i + 1}${d.id === primary.id ? ' (Primary)' : ''}`,
     bounds: d.bounds,
     isPrimary: d.id === primary.id,
-  }));
-});
+  }))
+})
 
 ipcMain.handle('output:open-on-display', async (event, displayId) => {
-  const displays = screen.getAllDisplays();
-  const primary = screen.getPrimaryDisplay();
-  const target = displayId != null
-    ? (displays.find(d => d.id === displayId) ?? primary)
-    : primary;
+  const displays = screen.getAllDisplays()
+  const primary = screen.getPrimaryDisplay()
+  const target = displayId != null ? (displays.find((d) => d.id === displayId) ?? primary) : primary
 
   if (outputWin && !outputWin.isDestroyed()) {
-    outputWin.close();
-    outputWin = null;
+    outputWin.close()
+    outputWin = null
   }
 
-  const { x, y, width, height } = target.bounds;
+  const { x, y, width, height } = target.bounds
   const child = new BrowserWindow({
-    x, y, width, height,
+    x,
+    y,
+    width,
+    height,
     fullscreen: true,
     backgroundColor: '#000000',
     webPreferences: {
@@ -235,165 +282,192 @@ ipcMain.handle('output:open-on-display', async (event, displayId) => {
       nodeIntegration: false,
     },
     title: 'OpenDrop — Output',
-  });
+  })
 
   if (isDev) {
-    child.loadURL(DEV_URL + '/output');
+    child.loadURL(DEV_URL + '/output')
   } else {
-    child.loadURL('app://localhost/output');
+    child.loadURL('app://localhost/output')
   }
 
-  outputWin = child;
+  outputWin = child
   child.on('closed', () => {
-    if (outputWin === child) outputWin = null;
+    if (outputWin === child) outputWin = null
     // Notify all remaining windows so they can update their UI state
-    BrowserWindow.getAllWindows().forEach(w => {
-      if (!w.isDestroyed()) w.webContents.send('output:window-closed');
-    });
-  });
+    BrowserWindow.getAllWindows().forEach((w) => {
+      if (!w.isDestroyed()) w.webContents.send('output:window-closed')
+    })
+  })
 
-  return { ok: true };
-});
+  return { ok: true }
+})
 
 // ── Ableton Link (optional — requires @ktamas77/abletonlink) ──────────────
-let linkInst = null;
-let linkTimer = null;
+let linkInst = null
+let linkTimer = null
 
 ipcMain.handle('link:start', async (_, { bpm }) => {
   try {
     if (!linkInst) {
-      const { AbletonLink } = require('@ktamas77/abletonlink');
-      linkInst = new AbletonLink(bpm || 120);
+      const { AbletonLink } = require('@ktamas77/abletonlink')
+      linkInst = new AbletonLink(bpm || 120)
     }
-    linkInst.enable(true);
-    linkInst.enableStartStopSync(true);
+    linkInst.enable(true)
+    linkInst.enableStartStopSync(true)
     linkInst.setTempoCallback((tempo) => {
-      BrowserWindow.getAllWindows().forEach(w => {
-        if (!w.isDestroyed()) w.webContents.send('link:tempo', tempo);
-      });
-    });
-    if (linkTimer) clearInterval(linkTimer);
+      BrowserWindow.getAllWindows().forEach((w) => {
+        if (!w.isDestroyed()) w.webContents.send('link:tempo', tempo)
+      })
+    })
+    if (linkTimer) clearInterval(linkTimer)
     linkTimer = setInterval(() => {
-      if (!linkInst || !linkInst.isEnabled()) return;
-      const tempo = linkInst.getTempo();
-      const beat = linkInst.getBeat();
-      const phase = linkInst.getPhase(4.0);
-      const peers = linkInst.getNumPeers();
-      BrowserWindow.getAllWindows().forEach(w => {
-        if (!w.isDestroyed()) w.webContents.send('link:state', { tempo, beat, phase, peers });
-      });
-    }, 50);
-    return { ok: true, tempo: linkInst.getTempo() };
+      if (!linkInst || !linkInst.isEnabled()) return
+      const tempo = linkInst.getTempo()
+      const beat = linkInst.getBeat()
+      const phase = linkInst.getPhase(4.0)
+      const peers = linkInst.getNumPeers()
+      BrowserWindow.getAllWindows().forEach((w) => {
+        if (!w.isDestroyed()) w.webContents.send('link:state', { tempo, beat, phase, peers })
+      })
+    }, 50)
+    return { ok: true, tempo: linkInst.getTempo() }
   } catch (err) {
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message }
   }
-});
+})
 
 ipcMain.handle('link:stop', async () => {
-  if (linkTimer) { clearInterval(linkTimer); linkTimer = null; }
-  if (linkInst) { try { linkInst.enable(false); } catch {} }
-  return { ok: true };
-});
+  if (linkTimer) {
+    clearInterval(linkTimer)
+    linkTimer = null
+  }
+  if (linkInst) {
+    try {
+      linkInst.enable(false)
+    } catch {}
+  }
+  return { ok: true }
+})
 
 ipcMain.handle('link:set-tempo', async (_, { bpm }) => {
-  if (!linkInst) return { ok: false, error: 'Link not started' };
-  try { linkInst.setTempo(bpm); return { ok: true }; }
-  catch (err) { return { ok: false, error: err.message }; }
-});
+  if (!linkInst) return { ok: false, error: 'Link not started' }
+  try {
+    linkInst.setTempo(bpm)
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+})
 
 // ── OBS WebSocket (bidirectional scene ⇄ deck/preset link) ─────────────────
-const OBSWebSocket = require('obs-websocket-js').default;
-const obs = new OBSWebSocket();
-let obsConnected = false;
+const OBSWebSocket = require('obs-websocket-js').default
+const obs = new OBSWebSocket()
+let obsConnected = false
 
-obs.on('ConnectionClosed', () => { obsConnected = false; });
+obs.on('ConnectionClosed', () => {
+  obsConnected = false
+})
 obs.on('CurrentProgramSceneChanged', (data) => {
   BrowserWindow.getAllWindows().forEach((w) => {
-    if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName);
-  });
-});
+    if (!w.isDestroyed()) w.webContents.send('obs:scene-changed', data.sceneName)
+  })
+})
 
 ipcMain.handle('obs:connect', async (_, { host, port }) => {
   try {
-    const password = secretsStore.getSecret('obs-password') || undefined;
-    await obs.connect(`ws://${host}:${port}`, password);
-    obsConnected = true;
-    return { ok: true };
+    const password = secretsStore.getSecret('obs-password') || undefined
+    await obs.connect(`ws://${host}:${port}`, password)
+    obsConnected = true
+    return { ok: true }
   } catch (e) {
-    obsConnected = false;
-    return { ok: false, error: e.message };
+    obsConnected = false
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('obs:disconnect', async () => {
   try {
-    if (obsConnected) await obs.disconnect();
-    obsConnected = false;
-    return { ok: true };
+    if (obsConnected) await obs.disconnect()
+    obsConnected = false
+    return { ok: true }
   } catch (e) {
-    obsConnected = false;
-    return { ok: false, error: e.message };
+    obsConnected = false
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('obs:get-scenes', async () => {
   try {
-    const { scenes } = await obs.call('GetSceneList');
-    return { ok: true, scenes: scenes.map((s) => s.sceneName) };
+    const { scenes } = await obs.call('GetSceneList')
+    return { ok: true, scenes: scenes.map((s) => s.sceneName) }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('obs:set-scene', async (_, sceneName) => {
   try {
-    await obs.call('SetCurrentProgramScene', { sceneName });
-    return { ok: true };
+    await obs.call('SetCurrentProgramScene', { sceneName })
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 // ── Chat poll sources — Twitch (tmi.js) + Kick (@retconned/kick-js, unofficial) ─────
-const tmi = require('tmi.js');
-const { createClient: createKickClient } = require('@retconned/kick-js');
+const tmi = require('tmi.js')
+const { createClient: createKickClient } = require('@retconned/kick-js')
 
-let twitchClient = null;
-let kickClient = null;
-let kickGeneration = 0; // guards stale listeners — kick-js exposes no disconnect()/off(), see kick:disconnect below
+let twitchClient = null
+let kickClient = null
+let kickGeneration = 0 // guards stale listeners — kick-js exposes no disconnect()/off(), see kick:disconnect below
 
 function broadcastChatMessage(msg) {
   BrowserWindow.getAllWindows().forEach((w) => {
-    if (!w.isDestroyed()) w.webContents.send('chat:message', msg);
-  });
+    if (!w.isDestroyed()) w.webContents.send('chat:message', msg)
+  })
 }
 
 ipcMain.handle('twitch:connect', async (_, { channel }) => {
   try {
-    const oauthToken = secretsStore.getSecret('twitch-oauth-token');
-    if (!oauthToken) return { ok: false, error: 'No Twitch token registered.' };
-    if (twitchClient) { try { await twitchClient.disconnect(); } catch {} twitchClient = null; }
+    const oauthToken = secretsStore.getSecret('twitch-oauth-token')
+    if (!oauthToken) return { ok: false, error: 'No Twitch token registered.' }
+    if (twitchClient) {
+      try {
+        await twitchClient.disconnect()
+      } catch {}
+      twitchClient = null
+    }
     twitchClient = new tmi.Client({
       connection: { reconnect: true },
       identity: { username: channel, password: oauthToken },
       channels: [channel],
-    });
+    })
     twitchClient.on('message', (_channel, tags, content) => {
-      broadcastChatMessage({ platform: 'twitch', userId: tags['user-id'], username: tags['display-name'] || tags.username, content });
-    });
-    await twitchClient.connect();
-    return { ok: true };
+      broadcastChatMessage({
+        platform: 'twitch',
+        userId: tags['user-id'],
+        username: tags['display-name'] || tags.username,
+        content,
+      })
+    })
+    await twitchClient.connect()
+    return { ok: true }
   } catch (e) {
-    twitchClient = null;
-    return { ok: false, error: e.message };
+    twitchClient = null
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('twitch:disconnect', async () => {
-  if (twitchClient) { try { await twitchClient.disconnect(); } catch {} }
-  twitchClient = null;
-  return { ok: true };
-});
+  if (twitchClient) {
+    try {
+      await twitchClient.disconnect()
+    } catch {}
+  }
+  twitchClient = null
+  return { ok: true }
+})
 
 // @retconned/kick-js is an unofficial, reverse-engineered library — no OAuth, real Kick
 // account credentials only. Do NOT pass { readOnly: true } here: createClient() connects
@@ -404,44 +478,50 @@ ipcMain.handle('twitch:disconnect', async () => {
 // (three fields, not two — verified against the installed package's compiled source).
 ipcMain.handle('kick:connect', async (_, { channel }) => {
   try {
-    const bearerToken = secretsStore.getSecret('kick-bearer-token');
-    const xsrfToken = secretsStore.getSecret('kick-xsrf-token');
-    const cookies = secretsStore.getSecret('kick-cookies');
-    if (!bearerToken || !xsrfToken || !cookies) return { ok: false, error: 'Missing Kick credentials (token + xsrf + cookies).' };
+    const bearerToken = secretsStore.getSecret('kick-bearer-token')
+    const xsrfToken = secretsStore.getSecret('kick-xsrf-token')
+    const cookies = secretsStore.getSecret('kick-cookies')
+    if (!bearerToken || !xsrfToken || !cookies)
+      return { ok: false, error: 'Missing Kick credentials (token + xsrf + cookies).' }
     // Not committed to kickGeneration until login() succeeds, so a failed reconnect
     // attempt can't silence a still-working previous connection (see below).
-    const myGeneration = kickGeneration + 1;
-    const client = createKickClient(channel, { logger: false });
+    const myGeneration = kickGeneration + 1
+    const client = createKickClient(channel, { logger: false })
     client.on('ChatMessage', (message) => {
       // kick-js exposes no way to unsubscribe or close its socket, so a listener from a
       // prior connect/disconnect cycle would otherwise keep forwarding forever — guard by
       // generation instead (see kick:disconnect).
-      if (myGeneration !== kickGeneration) return;
-      broadcastChatMessage({ platform: 'kick', userId: String(message.sender.id), username: message.sender.username, content: message.content });
-    });
-    await client.login({ type: 'tokens', credentials: { bearerToken, xsrfToken, cookies } });
-    kickGeneration = myGeneration;
-    kickClient = client;
-    return { ok: true };
+      if (myGeneration !== kickGeneration) return
+      broadcastChatMessage({
+        platform: 'kick',
+        userId: String(message.sender.id),
+        username: message.sender.username,
+        content: message.content,
+      })
+    })
+    await client.login({ type: 'tokens', credentials: { bearerToken, xsrfToken, cookies } })
+    kickGeneration = myGeneration
+    kickClient = client
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('kick:disconnect', async () => {
-  kickGeneration++; // invalidate any listener still attached to the (unclosable) socket
-  kickClient = null;
-  return { ok: true };
-});
+  kickGeneration++ // invalidate any listener still attached to the (unclosable) socket
+  kickClient = null
+  return { ok: true }
+})
 
 // ── Relay BroadcastChannel messages between renderer processes ─────────────
 ipcMain.on('bc-post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win.webContents.id !== event.sender.id) {
-      win.webContents.send('bc-msg', data);
+      win.webContents.send('bc-msg', data)
     }
-  });
-});
+  })
+})
 
 // ── Relay raw PCM audio frames from main renderer to output window ──────────
 // Dedicated channel (not bc-post) to keep ~190 KB/s PCM traffic separate from
@@ -449,129 +529,155 @@ ipcMain.on('bc-post', (event, data) => {
 ipcMain.on('audioframe:post', (event, data) => {
   BrowserWindow.getAllWindows().forEach((win) => {
     if (win.webContents.id !== event.sender.id) {
-      win.webContents.send('audioframe:data', data);
+      win.webContents.send('audioframe:data', data)
     }
-  });
-});
+  })
+})
 
 // ── Platform info ───────────────────────────────────────────────────────────
-ipcMain.handle('get-platform', () => process.platform);
+ipcMain.handle('get-platform', () => process.platform)
 
 // ── Secrets (OS-keychain-encrypted, main process only — never returned raw to renderer) ──
-const secretsStore = require('./secrets-store.cjs');
+const secretsStore = require('./secrets-store.cjs')
 
-ipcMain.handle('secrets:has', (_, key) => secretsStore.hasSecret(key));
-ipcMain.handle('secrets:set', (_, { key, value }) => { secretsStore.setSecret(key, value); return { ok: true }; });
-ipcMain.handle('secrets:clear', (_, key) => { secretsStore.clearSecret(key); return { ok: true }; });
+ipcMain.handle('secrets:has', (_, key) => secretsStore.hasSecret(key))
+ipcMain.handle('secrets:set', (_, { key, value }) => {
+  secretsStore.setSecret(key, value)
+  return { ok: true }
+})
+ipcMain.handle('secrets:clear', (_, key) => {
+  secretsStore.clearSecret(key)
+  return { ok: true }
+})
 
 // ── NDI handlers ─────────────────────────────────────────────────────────────
 ipcMain.handle('ndi:start', async (_, { name, width, height }) => {
   try {
-    if (!grandiose) grandiose = require('grandiose');
-    if (ndiSender) { ndiSender.destroy?.(); ndiSender = null; }
-    if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
+    if (!grandiose) grandiose = require('grandiose')
+    if (ndiSender) {
+      ndiSender.destroy?.()
+      ndiSender = null
+    }
+    if (ndiTimer) {
+      clearInterval(ndiTimer)
+      ndiTimer = null
+    }
 
-    ndiSender = await grandiose.send({ name, clockVideo: false, clockAudio: false });
+    ndiSender = await grandiose.send({ name, clockVideo: false, clockAudio: false })
 
     ndiTimer = setInterval(async () => {
-      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
-      if (!win || !ndiSender) return;
+      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null
+      if (!win || !ndiSender) return
       try {
-        const img = await win.webContents.capturePage();
-        const buf = img.toBitmap();
-        const w = img.getSize().width;
-        const h = img.getSize().height;
-        if (!w || !h) return;
-        ndiSender.video({
-          xres: w,
-          yres: h,
-          frameRateN: 30000,
-          frameRateD: 1001,
-          pictureAspectRatio: w / h,
-          type: grandiose.FRAME_TYPE_VIDEO,
-          lineStrideBytes: w * 4,
-          fourCC: grandiose.FOURCC_BGRA,
-          data: buf,
-          timestamp: BigInt(0),
-        }).catch(() => {});
-      } catch { /* skip frame on error */ }
-    }, 1000 / 30);
+        const img = await win.webContents.capturePage()
+        const buf = img.toBitmap()
+        const w = img.getSize().width
+        const h = img.getSize().height
+        if (!w || !h) return
+        ndiSender
+          .video({
+            xres: w,
+            yres: h,
+            frameRateN: 30000,
+            frameRateD: 1001,
+            pictureAspectRatio: w / h,
+            type: grandiose.FRAME_TYPE_VIDEO,
+            lineStrideBytes: w * 4,
+            fourCC: grandiose.FOURCC_BGRA,
+            data: buf,
+            timestamp: BigInt(0),
+          })
+          .catch(() => {})
+      } catch {
+        /* skip frame on error */
+      }
+    }, 1000 / 30)
 
-    return { ok: true };
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('ndi:stop', async () => {
-  if (ndiTimer) { clearInterval(ndiTimer); ndiTimer = null; }
-  ndiSender?.destroy?.();
-  ndiSender = null;
-  return { ok: true };
-});
+  if (ndiTimer) {
+    clearInterval(ndiTimer)
+    ndiTimer = null
+  }
+  ndiSender?.destroy?.()
+  ndiSender = null
+  return { ok: true }
+})
 
 // ── NDI per-deck output (one named stream per slot, fed by renderer canvas readback) ──
-const ndiDeckSenders = {}; // { [slot: number]: sender }
+const ndiDeckSenders = {} // { [slot: number]: sender }
 
 ipcMain.handle('ndi-deck:start', async (_, { slot, name }) => {
   try {
-    if (!grandiose) grandiose = require('grandiose');
-    if (ndiDeckSenders[slot]) { ndiDeckSenders[slot].destroy?.(); delete ndiDeckSenders[slot]; }
-    ndiDeckSenders[slot] = await grandiose.send({ name, clockVideo: false, clockAudio: false });
-    return { ok: true };
+    if (!grandiose) grandiose = require('grandiose')
+    if (ndiDeckSenders[slot]) {
+      ndiDeckSenders[slot].destroy?.()
+      delete ndiDeckSenders[slot]
+    }
+    ndiDeckSenders[slot] = await grandiose.send({ name, clockVideo: false, clockAudio: false })
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('ndi-deck:stop', async (_, { slot }) => {
-  ndiDeckSenders[slot]?.destroy?.();
-  delete ndiDeckSenders[slot];
-  return { ok: true };
-});
+  ndiDeckSenders[slot]?.destroy?.()
+  delete ndiDeckSenders[slot]
+  return { ok: true }
+})
 
 // Renderer pushes one already-rendered RGBA frame per slot per sample tick (paced by its
 // own rAF loop, see ndi-deck-actions.ts) — no main-side timer needed, unlike the composite
 // NDI-out sender which pulls via capturePage() on its own interval.
 ipcMain.on('deckframe:post', (_, { slot, width, height, buffer }) => {
-  const sender = ndiDeckSenders[slot];
-  if (!sender || !width || !height) return;
+  const sender = ndiDeckSenders[slot]
+  if (!sender || !width || !height) return
   try {
-    sender.video({
-      xres: width,
-      yres: height,
-      frameRateN: 30000,
-      frameRateD: 1001,
-      pictureAspectRatio: width / height,
-      type: grandiose.FRAME_TYPE_VIDEO,
-      lineStrideBytes: width * 4,
-      // RGBA to match getImageData()'s native byte order (see ndi-deck-actions.ts) — avoids a
-      // per-frame channel swap. If Task 4's live validation shows swapped R/B channels on the
-      // NDI receiver, switch this to grandiose.FOURCC_BGRA and swap channels before sending.
-      fourCC: grandiose.FOURCC_RGBA,
-      data: Buffer.from(buffer),
-      timestamp: BigInt(0),
-    }).catch(() => {});
-  } catch { /* skip frame on error */ }
-});
+    sender
+      .video({
+        xres: width,
+        yres: height,
+        frameRateN: 30000,
+        frameRateD: 1001,
+        pictureAspectRatio: width / height,
+        type: grandiose.FRAME_TYPE_VIDEO,
+        lineStrideBytes: width * 4,
+        // RGBA to match getImageData()'s native byte order (see ndi-deck-actions.ts) — avoids a
+        // per-frame channel swap. If Task 4's live validation shows swapped R/B channels on the
+        // NDI receiver, switch this to grandiose.FOURCC_BGRA and swap channels before sending.
+        fourCC: grandiose.FOURCC_RGBA,
+        data: Buffer.from(buffer),
+        timestamp: BigInt(0),
+      })
+      .catch(() => {})
+  } catch {
+    /* skip frame on error */
+  }
+})
 
 // ── NDI receive (NDI source → video layer, both windows) ───────────────────
-let ndiReceiver = null;
-let ndiReceiveActive = false;
+let ndiReceiver = null
+let ndiReceiveActive = false
 
 ipcMain.handle('ndi:find', async () => {
   try {
-    if (!grandiose) grandiose = require('grandiose');
-    const sources = await grandiose.find({}, 3000);
-    return { ok: true, sources: sources.map((s) => ({ name: s.name, urlAddress: s.urlAddress })) };
+    if (!grandiose) grandiose = require('grandiose')
+    const sources = await grandiose.find({}, 3000)
+    return { ok: true, sources: sources.map((s) => ({ name: s.name, urlAddress: s.urlAddress })) }
   } catch (e) {
-    return { ok: false, error: e.message, sources: [] };
+    return { ok: false, error: e.message, sources: [] }
   }
-});
+})
 
 ipcMain.handle('ndi:receiveStart', async (_, { name, urlAddress }) => {
   try {
-    if (!grandiose) grandiose = require('grandiose');
+    if (!grandiose) grandiose = require('grandiose')
     // Don't touch ndiReceiveActive/ndiReceiver until receive() below actually
     // succeeds — flipping them first would kill a working prior receiver on a
     // failed re-select (e.g. source went offline). The old loop already stops
@@ -585,14 +691,14 @@ ipcMain.handle('ndi:receiveStart', async (_, { name, urlAddress }) => {
       source: { name, urlAddress },
       colorFormat: grandiose.COLOR_FORMAT_RGBX_RGBA,
       bandwidth: grandiose.BANDWIDTH_LOWEST,
-    });
-    ndiReceiver = receiver;
-    ndiReceiveActive = true;
-    (async () => {
+    })
+    ndiReceiver = receiver
+    ndiReceiveActive = true
+    ;(async () => {
       while (ndiReceiveActive && ndiReceiver === receiver) {
         try {
-          const frame = await receiver.video(1000);
-          if (!ndiReceiveActive || ndiReceiver !== receiver) break;
+          const frame = await receiver.video(1000)
+          if (!ndiReceiveActive || ndiReceiver !== receiver) break
           BrowserWindow.getAllWindows().forEach((w) => {
             if (!w.isDestroyed()) {
               w.webContents.send('ndi:frame', {
@@ -600,159 +706,219 @@ ipcMain.handle('ndi:receiveStart', async (_, { name, urlAddress }) => {
                 height: frame.yres,
                 lineStrideBytes: frame.lineStrideBytes,
                 data: frame.data,
-              });
+              })
             }
-          });
-        } catch { /* receive timeout — keep looping until stopped */ }
+          })
+        } catch {
+          /* receive timeout — keep looping until stopped */
+        }
       }
-    })();
-    return { ok: true };
+    })()
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('ndi:receiveStop', async () => {
-  ndiReceiveActive = false;
-  ndiReceiver = null;
-  return { ok: true };
-});
+  ndiReceiveActive = false
+  ndiReceiver = null
+  return { ok: true }
+})
 
 // ── Spout handlers ────────────────────────────────────────────────────────
 ipcMain.handle('spout:start', async (_, { name }) => {
   try {
-    if (process.platform !== 'win32') return { ok: false, error: 'Spout is only available on Windows.' };
-    if (!spout) return { ok: false, error: 'spout-addon not available — rebuild with: pnpm run electron:rebuild:spout' };
-    if (spoutTimer) { clearInterval(spoutTimer); spoutTimer = null; }
-    spout.stop();
+    if (process.platform !== 'win32')
+      return { ok: false, error: 'Spout is only available on Windows.' }
+    if (!spout)
+      return {
+        ok: false,
+        error: 'spout-addon not available — rebuild with: pnpm run electron:rebuild:spout',
+      }
+    if (spoutTimer) {
+      clearInterval(spoutTimer)
+      spoutTimer = null
+    }
+    spout.stop()
 
-    const ok = spout.init(name || 'OpenDrop VJ');
-    if (!ok) return { ok: false, error: 'OpenDirectX11 failed — no DirectX 11 GPU available.' };
+    const ok = spout.init(name || 'OpenDrop VJ')
+    if (!ok) return { ok: false, error: 'OpenDirectX11 failed — no DirectX 11 GPU available.' }
 
     spoutTimer = setInterval(async () => {
-      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
-      if (!win) return;
+      const win = outputWin && !outputWin.isDestroyed() ? outputWin : null
+      if (!win) return
       try {
-        const img = await win.webContents.capturePage();
-        const buf = img.toBitmap(); // BGRA top-down, w*4 stride — exact match for SendImage
-        const { width: w, height: h } = img.getSize();
-        if (!w || !h) return;
-        spout.send(buf, w, h);
-      } catch { /* skip frame on error */ }
-    }, 1000 / 30);
+        const img = await win.webContents.capturePage()
+        const buf = img.toBitmap() // BGRA top-down, w*4 stride — exact match for SendImage
+        const { width: w, height: h } = img.getSize()
+        if (!w || !h) return
+        spout.send(buf, w, h)
+      } catch {
+        /* skip frame on error */
+      }
+    }, 1000 / 30)
 
-    return { ok: true };
+    return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('spout:stop', () => {
-  if (spoutTimer) { clearInterval(spoutTimer); spoutTimer = null; }
-  try { spout?.stop(); } catch {}
-  return { ok: true };
-});
+  if (spoutTimer) {
+    clearInterval(spoutTimer)
+    spoutTimer = null
+  }
+  try {
+    spout?.stop()
+  } catch {}
+  return { ok: true }
+})
 
 // ── v4l2loopback handlers ─────────────────────────────────────────────────
 ipcMain.handle('v4l2:start', async () => {
   // Teardown any prior session
-  if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
-  if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
-  v4l2Draining = false;
-  v4l2Error = '';
+  if (v4l2Timer) {
+    clearInterval(v4l2Timer)
+    v4l2Timer = null
+  }
+  if (v4l2Proc) {
+    try {
+      v4l2Proc.stdin.end()
+      v4l2Proc.kill('SIGTERM')
+    } catch {}
+    v4l2Proc = null
+  }
+  v4l2Draining = false
+  v4l2Error = ''
 
   // Locate device before doing anything else
-  const devPath = findV4l2Device();
+  const devPath = findV4l2Device()
   if (!devPath) {
-    return { ok: false, error: "No v4l2loopback device 'OpenDrop' found. Run scripts/setup-v4l2.sh and try again." };
+    return {
+      ok: false,
+      error: "No v4l2loopback device 'OpenDrop' found. Run scripts/setup-v4l2.sh and try again.",
+    }
   }
 
   // Capture one frame to lock W×H (rawvideo needs a fixed size at spawn time)
-  const win = outputWin && !outputWin.isDestroyed() ? outputWin : null;
-  if (!win) return { ok: false, error: 'Fenêtre output introuvable.' };
+  const win = outputWin && !outputWin.isDestroyed() ? outputWin : null
+  if (!win) return { ok: false, error: 'Fenêtre output introuvable.' }
 
-  let firstImg;
+  let firstImg
   try {
-    firstImg = await win.webContents.capturePage();
+    firstImg = await win.webContents.capturePage()
   } catch (e) {
-    return { ok: false, error: `Capture initiale échouée : ${e.message}` };
+    return { ok: false, error: `Capture initiale échouée : ${e.message}` }
   }
-  v4l2W = firstImg.getSize().width;
-  v4l2H = firstImg.getSize().height;
-  if (!v4l2W || !v4l2H) return { ok: false, error: 'Zero resolution — is the output window visible?' };
+  v4l2W = firstImg.getSize().width
+  v4l2H = firstImg.getSize().height
+  if (!v4l2W || !v4l2H)
+    return { ok: false, error: 'Zero resolution — is the output window visible?' }
 
   // Spawn ffmpeg: read raw BGRA from stdin, emit YUV420p to the v4l2 device
-  const proc = spawn('ffmpeg', [
-    '-f', 'rawvideo',
-    '-pix_fmt', 'bgra',
-    '-s', `${v4l2W}x${v4l2H}`,
-    '-r', '30',
-    '-i', 'pipe:0',
-    '-f', 'v4l2',
-    '-pix_fmt', 'yuv420p',
-    devPath,
-  ], { stdio: ['pipe', 'ignore', 'pipe'] });
+  const proc = spawn(
+    'ffmpeg',
+    [
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'bgra',
+      '-s',
+      `${v4l2W}x${v4l2H}`,
+      '-r',
+      '30',
+      '-i',
+      'pipe:0',
+      '-f',
+      'v4l2',
+      '-pix_fmt',
+      'yuv420p',
+      devPath,
+    ],
+    { stdio: ['pipe', 'ignore', 'pipe'] }
+  )
 
-  proc.on('error', (e) => { v4l2Error = e.code === 'ENOENT' ? 'ffmpeg not found — install ffmpeg and try again.' : e.message; });
-  proc.stderr.on('data', (chunk) => { v4l2Error = chunk.toString().trim().split('\n').pop() ?? v4l2Error; });
+  proc.on('error', (e) => {
+    v4l2Error = e.code === 'ENOENT' ? 'ffmpeg not found — install ffmpeg and try again.' : e.message
+  })
+  proc.stderr.on('data', (chunk) => {
+    v4l2Error = chunk.toString().trim().split('\n').pop() ?? v4l2Error
+  })
   proc.on('exit', (code) => {
-    if (code !== 0 && code !== null) v4l2Error = v4l2Error || `ffmpeg a quitté avec le code ${code}.`;
-    if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
-    v4l2Proc = null;
-  });
-  proc.stdin.on('drain', () => { v4l2Draining = false; });
+    if (code !== 0 && code !== null)
+      v4l2Error = v4l2Error || `ffmpeg a quitté avec le code ${code}.`
+    if (v4l2Timer) {
+      clearInterval(v4l2Timer)
+      v4l2Timer = null
+    }
+    v4l2Proc = null
+  })
+  proc.stdin.on('drain', () => {
+    v4l2Draining = false
+  })
 
-  v4l2Proc = proc;
+  v4l2Proc = proc
 
   // Allow ffmpeg a short moment to fail fast (ENOENT, bad device, etc.)
-  await new Promise((r) => setTimeout(r, 150));
+  await new Promise((r) => setTimeout(r, 150))
   if (!v4l2Proc || v4l2Error.length > 0) {
-    return { ok: false, error: v4l2Error || 'ffmpeg a quitté immédiatement.' };
+    return { ok: false, error: v4l2Error || 'ffmpeg a quitté immédiatement.' }
   }
 
   // Push first frame right away so the stream starts immediately
-  const firstBuf = firstImg.toBitmap();
+  const firstBuf = firstImg.toBitmap()
   if (!v4l2Draining) {
-    const ok = v4l2Proc.stdin.write(firstBuf);
-    if (!ok) v4l2Draining = true;
+    const ok = v4l2Proc.stdin.write(firstBuf)
+    if (!ok) v4l2Draining = true
   }
 
   // Capture-and-write loop @30fps
   v4l2Timer = setInterval(async () => {
-    const w = outputWin && !outputWin.isDestroyed() ? outputWin : null;
-    if (!w || !v4l2Proc || v4l2Draining) return;
+    const w = outputWin && !outputWin.isDestroyed() ? outputWin : null
+    if (!w || !v4l2Proc || v4l2Draining) return
     try {
-      const img = await w.webContents.capturePage();
-      const { width, height } = img.getSize();
+      const img = await w.webContents.capturePage()
+      const { width, height } = img.getSize()
       // Drop frames whose size changed — rawvideo can't handle mid-stream resize
-      if (width !== v4l2W || height !== v4l2H) return;
-      const written = v4l2Proc.stdin.write(img.toBitmap());
-      if (!written) v4l2Draining = true;
-    } catch { /* skip frame on error */ }
-  }, 1000 / 30);
+      if (width !== v4l2W || height !== v4l2H) return
+      const written = v4l2Proc.stdin.write(img.toBitmap())
+      if (!written) v4l2Draining = true
+    } catch {
+      /* skip frame on error */
+    }
+  }, 1000 / 30)
 
-  return { ok: true };
-});
+  return { ok: true }
+})
 
 ipcMain.handle('v4l2:stop', async () => {
-  if (v4l2Timer) { clearInterval(v4l2Timer); v4l2Timer = null; }
-  if (v4l2Proc) {
-    try { v4l2Proc.stdin.end(); } catch {}
-    try { v4l2Proc.kill('SIGTERM'); } catch {}
-    v4l2Proc = null;
+  if (v4l2Timer) {
+    clearInterval(v4l2Timer)
+    v4l2Timer = null
   }
-  v4l2W = 0;
-  v4l2H = 0;
-  v4l2Draining = false;
-  return { ok: true };
-});
+  if (v4l2Proc) {
+    try {
+      v4l2Proc.stdin.end()
+    } catch {}
+    try {
+      v4l2Proc.kill('SIGTERM')
+    } catch {}
+    v4l2Proc = null
+  }
+  v4l2W = 0
+  v4l2H = 0
+  v4l2Draining = false
+  return { ok: true }
+})
 
 // ── Per-device output loopback handlers ────────────────────────────────────
 ipcMain.handle('loopback:list', async () => {
   try {
-    const { RtAudio, RtAudioApi } = require('audify');
-    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined);
-    const devices = rt.getDevices();
+    const { RtAudio, RtAudioApi } = require('audify')
+    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined)
+    const devices = rt.getDevices()
     // Output devices with outputChannels > 0 can be captured via WASAPI loopback
     // by opening them as input streams — RtAudio applies AUDCLNT_STREAMFLAGS_LOOPBACK.
     const outputs = devices
@@ -763,29 +929,34 @@ ipcMain.handle('loopback:list', async () => {
         maxInputChannels: d.inputChannels,
         maxOutputChannels: d.outputChannels,
         defaultSampleRate: d.preferredSampleRate,
-      }));
-    return { ok: true, devices: outputs };
+      }))
+    return { ok: true, devices: outputs }
   } catch (e) {
-    return { ok: false, error: e.message, devices: [] };
+    return { ok: false, error: e.message, devices: [] }
   }
-});
+})
 
 ipcMain.handle('loopback:start', async (_, { deviceId }) => {
   try {
-    const { RtAudio, RtAudioApi, RtAudioFormat } = require('audify');
+    const { RtAudio, RtAudioApi, RtAudioFormat } = require('audify')
     // Idempotent teardown
-    if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
+    if (loopbackRt) {
+      try {
+        loopbackRt.closeStream()
+      } catch {}
+      loopbackRt = null
+    }
 
-    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined);
-    const devices = rt.getDevices();
-    const device = devices.find((d) => d.id === deviceId);
-    if (!device) return { ok: false, error: `Device ${deviceId} not found` };
+    const rt = new RtAudio(process.platform === 'win32' ? RtAudioApi.WINDOWS_WASAPI : undefined)
+    const devices = rt.getDevices()
+    const device = devices.find((d) => d.id === deviceId)
+    if (!device) return { ok: false, error: `Device ${deviceId} not found` }
 
-    const sampleRate = device.preferredSampleRate || 48000;
-    const channels = Math.min(device.outputChannels, 2) || 2;
-    const frameSize = 1920; // ~40ms @48kHz
+    const sampleRate = device.preferredSampleRate || 48000
+    const channels = Math.min(device.outputChannels, 2) || 2
+    const frameSize = 1920 // ~40ms @48kHz
 
-    const liveWindows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+    const liveWindows = () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed())
 
     // Pass the output device id as inputParameters — WASAPI loopback mode.
     rt.openStream(
@@ -795,44 +966,51 @@ ipcMain.handle('loopback:start', async (_, { deviceId }) => {
       sampleRate,
       frameSize,
       'OpenDropLoopback',
-      (pcm) => liveWindows().forEach((w) => w.webContents.send('loopback:data', { sampleRate, channels, pcm })),
+      (pcm) =>
+        liveWindows().forEach((w) =>
+          w.webContents.send('loopback:data', { sampleRate, channels, pcm })
+        ),
       null,
       0,
       (err) => liveWindows().forEach((w) => w.webContents.send('loopback:error', String(err)))
-    );
+    )
 
-    rt.start();
-    loopbackRt = rt;
-    return { ok: true, sampleRate, channels };
+    rt.start()
+    loopbackRt = rt
+    return { ok: true, sampleRate, channels }
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, error: e.message }
   }
-});
+})
 
 ipcMain.handle('loopback:stop', async () => {
-  if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
-  return { ok: true };
-});
+  if (loopbackRt) {
+    try {
+      loopbackRt.closeStream()
+    } catch {}
+    loopbackRt = null
+  }
+  return { ok: true }
+})
 
 // ── Custom app:// protocol for production SPA routing ─────────────────────
 function registerProtocol() {
   protocol.handle('app', (request) => {
-    const { pathname } = new URL(request.url);
-    const rel = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
-    const ext = path.extname(rel).toLowerCase();
-    const candidate = path.resolve(BUILD_DIR, '.' + rel);
-    const inBounds = candidate === BUILD_DIR || candidate.startsWith(BUILD_DIR + path.sep);
-    const filePath = (ext && inBounds && fs.existsSync(candidate))
-      ? candidate
-      : path.join(BUILD_DIR, 'index.html');
+    const { pathname } = new URL(request.url)
+    const rel = decodeURIComponent(pathname === '/' ? '/index.html' : pathname)
+    const ext = path.extname(rel).toLowerCase()
+    const candidate = path.resolve(BUILD_DIR, '.' + rel)
+    const inBounds = candidate === BUILD_DIR || candidate.startsWith(BUILD_DIR + path.sep)
+    const filePath =
+      ext && inBounds && fs.existsSync(candidate) ? candidate : path.join(BUILD_DIR, 'index.html')
     try {
-      const data = fs.readFileSync(filePath);
-      const mime = MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
-      return new Response(data, { headers: { 'Content-Type': mime } });
+      const data = fs.readFileSync(filePath)
+      const mime = MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+      return new Response(data, { headers: { 'Content-Type': mime } })
     } catch {
-      return new Response('Not Found', { status: 404 });
+      return new Response('Not Found', { status: 404 })
     }
-  });
+  })
 }
 
 function createWindow() {
@@ -850,43 +1028,54 @@ function createWindow() {
     },
     title: 'OpenDrop VJ',
     show: false,
-  });
+  })
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => win.show())
 
   // ── System audio loopback via getDisplayMedia ──────────────────────────────
   // Intercepts renderer getDisplayMedia() calls. On Windows, fulfils with
   // native loopback (no screen-share dialog, no extra software). On macOS/Linux
   // the UI routes to Path B (device picker / BlackHole / .monitor) before
   // calling connectDisplay(), so this handler is a graceful fallback only.
-  win.webContents.session.setDisplayMediaRequestHandler((_request, callback) => {
-    // getDisplayMedia({ audio: true, video: true }) requires both streams to be
-    // fulfilled — returning audio-only causes "Invalid capture constraints".
-    // Always include a screen source so the video constraint is satisfied;
-    // the renderer stops the video track immediately after capture.
-    desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
-      const video = sources[0] ?? null;
-      if (!video) { callback({}); return; }
-      if (process.platform === 'win32') {
-        // Windows WASAPI loopback — captures all system audio output
-        callback({ audio: 'loopback', video });
-      } else {
-        callback({ video });
-      }
-    }).catch(() => callback({}));
-  }, { useSystemPicker: false });
+  win.webContents.session.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      // getDisplayMedia({ audio: true, video: true }) requires both streams to be
+      // fulfilled — returning audio-only causes "Invalid capture constraints".
+      // Always include a screen source so the video constraint is satisfied;
+      // the renderer stops the video track immediately after capture.
+      desktopCapturer
+        .getSources({ types: ['screen'] })
+        .then((sources) => {
+          const video = sources[0] ?? null
+          if (!video) {
+            callback({})
+            return
+          }
+          if (process.platform === 'win32') {
+            // Windows WASAPI loopback — captures all system audio output
+            callback({ audio: 'loopback', video })
+          } else {
+            callback({ video })
+          }
+        })
+        .catch(() => callback({}))
+    },
+    { useSystemPicker: false }
+  )
 
   if (isDev) {
-    win.loadURL(DEV_URL);
+    win.loadURL(DEV_URL)
   } else {
-    win.loadURL('app://localhost/');
+    win.loadURL('app://localhost/')
   }
 
   // Track the output window for NDI capture
   win.webContents.on('did-create-window', (child) => {
-    outputWin = child;
-    child.on('closed', () => { if (outputWin === child) outputWin = null; });
-  });
+    outputWin = child
+    child.on('closed', () => {
+      if (outputWin === child) outputWin = null
+    })
+  })
 
   // Allow output window opened via window.open('/output', ...)
   win.webContents.setWindowOpenHandler(() => ({
@@ -902,9 +1091,9 @@ function createWindow() {
       },
       title: 'OpenDrop — Output',
     },
-  }));
+  }))
 
-  return win;
+  return win
 }
 
 app.whenReady().then(() => {
@@ -912,24 +1101,53 @@ app.whenReady().then(() => {
   // Without this, Electron may silently deny media permission requests, causing
   // enumerateDevices() to return only the default mic without labels.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(['media', 'display-capture', 'mediaKeySystem'].includes(permission));
-  });
+    callback(['media', 'display-capture', 'mediaKeySystem'].includes(permission))
+  })
 
-  if (!isDev) registerProtocol();
+  if (!isDev) registerProtocol()
 
-  createWindow();
+  createWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
 
 app.on('window-all-closed', () => {
-  if (loopbackRt) { try { loopbackRt.closeStream(); } catch {} loopbackRt = null; }
-  if (v4l2Proc) { try { v4l2Proc.stdin.end(); v4l2Proc.kill('SIGTERM'); } catch {} v4l2Proc = null; }
-  if (oscServer) { try { oscServer.close(); } catch {} oscServer = null; }
-  if (wsServer) { try { wsServer.close(); } catch {} wsServer = null; }
-  if (linkTimer) { clearInterval(linkTimer); linkTimer = null; }
-  if (linkInst) { try { linkInst.enable(false); } catch {} linkInst = null; }
-  if (process.platform !== 'darwin') app.quit();
-});
+  if (loopbackRt) {
+    try {
+      loopbackRt.closeStream()
+    } catch {}
+    loopbackRt = null
+  }
+  if (v4l2Proc) {
+    try {
+      v4l2Proc.stdin.end()
+      v4l2Proc.kill('SIGTERM')
+    } catch {}
+    v4l2Proc = null
+  }
+  if (oscServer) {
+    try {
+      oscServer.close()
+    } catch {}
+    oscServer = null
+  }
+  if (wsServer) {
+    try {
+      wsServer.close()
+    } catch {}
+    wsServer = null
+  }
+  if (linkTimer) {
+    clearInterval(linkTimer)
+    linkTimer = null
+  }
+  if (linkInst) {
+    try {
+      linkInst.enable(false)
+    } catch {}
+    linkInst = null
+  }
+  if (process.platform !== 'darwin') app.quit()
+})

@@ -17,48 +17,58 @@
  * visualizer-startup.ts).
  */
 
-import type { DeckManager } from './deck-manager.js';
-import type { Compositor } from './compositor.js';
-import type { MainSync } from './sync.js';
-import { getQualitySettings } from './quality.js';
-import { deckState } from './deck-store.svelte.js';
-import { audioSourceState } from './audio-source-store.svelte.js';
-import { perfState } from './perf-store.svelte.js';
-import { runStatusState } from './run-status-store.svelte.js';
+import type { DeckManager } from './deck-manager.js'
+import type { Compositor } from './compositor.js'
+import type { MainSync } from './sync.js'
+import { getQualitySettings } from './quality.js'
+import { deckState } from './deck-store.svelte.js'
+import { audioSourceState } from './audio-source-store.svelte.js'
+import { perfState } from './perf-store.svelte.js'
+import { runStatusState } from './run-status-store.svelte.js'
 
 export async function openOutputFullscreen(
-	isElectron: boolean, selectedDisplayId: number | null, sync: MainSync | null,
-	getBusPresetA: () => string, getBusPresetB: () => string, setOutputOpen: (v: boolean) => void,
+  isElectron: boolean,
+  selectedDisplayId: number | null,
+  sync: MainSync | null,
+  getBusPresetA: () => string,
+  getBusPresetB: () => string,
+  setOutputOpen: (v: boolean) => void
 ): Promise<void> {
-	if (!isElectron) {
-		// Web fallback: fullscreen the visualizer area
-		const el = document.querySelector('.visualizer-wrap') as HTMLElement | null;
-		el?.requestFullscreen?.();
-		return;
-	}
-	const res = await window.electronAPI!.openOutputOnDisplay(selectedDisplayId);
-	if (res?.ok) {
-		setOutputOpen(true);
-		// Push current state after the window loads
-		setTimeout(() => {
-			sync?.sendPreset('A', getBusPresetA());
-			sync?.sendPreset('B', getBusPresetB());
-			sync?.sendCrossfader(deckState.crossfader);
-			if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId);
-		}, 800);
-	}
+  if (!isElectron) {
+    // Web fallback: fullscreen the visualizer area
+    const el = document.querySelector('.visualizer-wrap') as HTMLElement | null
+    el?.requestFullscreen?.()
+    return
+  }
+  const res = await window.electronAPI!.openOutputOnDisplay(selectedDisplayId)
+  if (res?.ok) {
+    setOutputOpen(true)
+    // Push current state after the window loads
+    setTimeout(() => {
+      sync?.sendPreset('A', getBusPresetA())
+      sync?.sendPreset('B', getBusPresetB())
+      sync?.sendCrossfader(deckState.crossfader)
+      if (audioSourceState.currentDeviceId) sync?.sendSource(audioSourceState.currentDeviceId)
+    }, 800)
+  }
 }
 
 export function onResize(
-	canvases: (HTMLCanvasElement | undefined)[], compositorCanvas: HTMLCanvasElement | undefined,
-	manager: DeckManager, compositor: Compositor | null,
+  canvases: (HTMLCanvasElement | undefined)[],
+  compositorCanvas: HTMLCanvasElement | undefined,
+  manager: DeckManager,
+  compositor: Compositor | null
 ): void {
-	if (runStatusState.status !== 'running') return;
-	for (let i = 0; i < 4; i++) {
-		const c = canvases[i];
-		if (c) manager.resize(i, c.clientWidth, c.clientHeight);
-	}
-	if (compositorCanvas) {
-		compositor?.resize(compositorCanvas.clientWidth, compositorCanvas.clientHeight, getQualitySettings(perfState.quality).pixelRatio);
-	}
+  if (runStatusState.status !== 'running') return
+  for (let i = 0; i < 4; i++) {
+    const c = canvases[i]
+    if (c) manager.resize(i, c.clientWidth, c.clientHeight)
+  }
+  if (compositorCanvas) {
+    compositor?.resize(
+      compositorCanvas.clientWidth,
+      compositorCanvas.clientHeight,
+      getQualitySettings(perfState.quality).pixelRatio
+    )
+  }
 }

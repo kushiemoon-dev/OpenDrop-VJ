@@ -12,13 +12,19 @@
  */
 
 export const audioSourceState = $state({
-	currentDeviceId: '',
-	currentLoopbackDeviceId: 0,
-	devices: [] as MediaDeviceInfo[],
-	manualBpm: 0,
-	detectedBpm: 0,
-	sourceLabel: 'none',
-	showDevicePicker: false,
-	showSystemAudioHelp: false,
-	outputDevices: [] as Array<{ id: number; name: string; maxInputChannels: number; maxOutputChannels: number; defaultSampleRate: number }>,
-});
+  currentDeviceId: '',
+  currentLoopbackDeviceId: 0,
+  devices: [] as MediaDeviceInfo[],
+  manualBpm: 0,
+  detectedBpm: 0,
+  sourceLabel: 'none',
+  showDevicePicker: false,
+  showSystemAudioHelp: false,
+  outputDevices: [] as Array<{
+    id: number
+    name: string
+    maxInputChannels: number
+    maxOutputChannels: number
+    defaultSampleRate: number
+  }>,
+})

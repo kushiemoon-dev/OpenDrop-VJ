@@ -9,7 +9,7 @@
  */
 
 export const runStatusState = $state({
-	status: 'idle' as 'idle' | 'running' | 'error',
-	errorMsg: '',
-	sourceError: '',
-});
+  status: 'idle' as 'idle' | 'running' | 'error',
+  errorMsg: '',
+  sourceError: '',
+})

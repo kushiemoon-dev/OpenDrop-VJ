@@ -13,24 +13,28 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import { type BeatTriggerConfig, defaultBeatTriggerConfig, applyBeatTriggerPatch } from './beat-trigger.js';
+import {
+  type BeatTriggerConfig,
+  defaultBeatTriggerConfig,
+  applyBeatTriggerPatch,
+} from './beat-trigger.js'
 
 export const beatSyncState = $state({
-	beatSyncA: false,
-	beatSyncB: false,
-	beatsPerChange: 8,
-	beatTriggerA: defaultBeatTriggerConfig() as BeatTriggerConfig,
-	beatTriggerB: defaultBeatTriggerConfig() as BeatTriggerConfig,
-	autoXfade: false,
-	lockA: false,
-	lockB: false,
-	beat: false,
-});
+  beatSyncA: false,
+  beatSyncB: false,
+  beatsPerChange: 8,
+  beatTriggerA: defaultBeatTriggerConfig() as BeatTriggerConfig,
+  beatTriggerB: defaultBeatTriggerConfig() as BeatTriggerConfig,
+  autoXfade: false,
+  lockA: false,
+  lockB: false,
+  beat: false,
+})
 
 export function updateBeatTriggerA(patch: Partial<BeatTriggerConfig>): void {
-	beatSyncState.beatTriggerA = applyBeatTriggerPatch(beatSyncState.beatTriggerA, patch);
+  beatSyncState.beatTriggerA = applyBeatTriggerPatch(beatSyncState.beatTriggerA, patch)
 }
 
 export function updateBeatTriggerB(patch: Partial<BeatTriggerConfig>): void {
-	beatSyncState.beatTriggerB = applyBeatTriggerPatch(beatSyncState.beatTriggerB, patch);
+  beatSyncState.beatTriggerB = applyBeatTriggerPatch(beatSyncState.beatTriggerB, patch)
 }

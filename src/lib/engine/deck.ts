@@ -12,171 +12,176 @@
 // Static import — safe because ssr: false disables server-side execution.
 // butterchurn is a webpack-in-UMD bundle; Vite wraps it as { default: Visualizer }.
 // The real API object may be on .default.default due to double-wrapping.
-import _butterchurn from 'butterchurn';
+import _butterchurn from 'butterchurn'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bc = (_butterchurn as any).createVisualizer
-	? _butterchurn
-	: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-		((_butterchurn as any).default ?? _butterchurn);
+  ? _butterchurn
+  : // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((_butterchurn as any).default ?? _butterchurn)
 
-export type DeckState = 'idle' | 'running' | 'stopped';
+export type DeckState = 'idle' | 'running' | 'stopped'
 
 export interface DeckOptions {
-	width?: number;
-	height?: number;
-	meshWidth?: number;
-	meshHeight?: number;
-	pixelRatio?: number;
-	textureRatio?: number;
-	outputFXAA?: boolean;
+  width?: number
+  height?: number
+  meshWidth?: number
+  meshHeight?: number
+  pixelRatio?: number
+  textureRatio?: number
+  outputFXAA?: boolean
 }
 
 export class Deck {
-	private viz: import('butterchurn').Visualizer | null = null; // typed via src/lib/types/butterchurn.d.ts
-	private rafId: number | null = null;
-	private _state: DeckState = 'idle';
-	private frameInterval = 0;   // ms between renders (0 = unlimited)
-	private lastFrameTime = 0;   // timestamp of the last viz.render() call
-	renderCount = 0;             // total renders called, used to measure actual FPS
+  private viz: import('butterchurn').Visualizer | null = null // typed via src/lib/types/butterchurn.d.ts
+  private rafId: number | null = null
+  private _state: DeckState = 'idle'
+  private frameInterval = 0 // ms between renders (0 = unlimited)
+  private lastFrameTime = 0 // timestamp of the last viz.render() call
+  renderCount = 0 // total renders called, used to measure actual FPS
 
-	readonly canvas: HTMLCanvasElement;
-	readonly id: string;
+  readonly canvas: HTMLCanvasElement
+  readonly id: string
 
-	get state(): DeckState {
-		return this._state;
-	}
+  get state(): DeckState {
+    return this._state
+  }
 
-	constructor(canvas: HTMLCanvasElement, id: string) {
-		this.canvas = canvas;
-		this.id = id;
-	}
+  constructor(canvas: HTMLCanvasElement, id: string) {
+    this.canvas = canvas
+    this.id = id
+  }
 
-	/**
-	 * Initialize Butterchurn on this deck's canvas.
-	 * Must be called once an AudioContext exists (user gesture).
-	 */
-	async init(audioCtx: AudioContext, opts: DeckOptions = {}): Promise<void> {
-		const w = opts.width ?? (this.canvas.clientWidth || 800);
-		const h = opts.height ?? (this.canvas.clientHeight || 600);
+  /**
+   * Initialize Butterchurn on this deck's canvas.
+   * Must be called once an AudioContext exists (user gesture).
+   */
+  async init(audioCtx: AudioContext, opts: DeckOptions = {}): Promise<void> {
+    const w = opts.width ?? (this.canvas.clientWidth || 800)
+    const h = opts.height ?? (this.canvas.clientHeight || 600)
 
-		this.canvas.width = w;
-		this.canvas.height = h;
+    this.canvas.width = w
+    this.canvas.height = h
 
-		this.viz = bc.createVisualizer(audioCtx, this.canvas, {
-			width: w,
-			height: h,
-			meshWidth: opts.meshWidth ?? 32,
-			meshHeight: opts.meshHeight ?? 24,
-			pixelRatio: opts.pixelRatio ?? 1,
-			textureRatio: opts.textureRatio ?? 1,
-			outputFXAA: opts.outputFXAA ?? false
-		});
+    this.viz = bc.createVisualizer(audioCtx, this.canvas, {
+      width: w,
+      height: h,
+      meshWidth: opts.meshWidth ?? 32,
+      meshHeight: opts.meshHeight ?? 24,
+      pixelRatio: opts.pixelRatio ?? 1,
+      textureRatio: opts.textureRatio ?? 1,
+      outputFXAA: opts.outputFXAA ?? false,
+    })
 
-		this._state = 'running';
-	}
+    this._state = 'running'
+  }
 
-	/**
-	 * Connect an audio source node (analyser, gain, etc.) to this deck.
-	 */
-	connectAudio(node: AudioNode): void {
-		this.viz?.connectAudio(node);
-	}
+  /**
+   * Connect an audio source node (analyser, gain, etc.) to this deck.
+   */
+  connectAudio(node: AudioNode): void {
+    this.viz?.connectAudio(node)
+  }
 
-	/**
-	 * Load a Butterchurn preset object.
-	 * @param preset  The preset JSON object (from butterchurn-presets or converted).
-	 * @param blend   Blend time in seconds (0 = hard cut, 2 = soft transition).
-	 */
-	loadPreset(preset: object, blend = 2.0): void {
-		this.viz?.loadPreset(preset, blend);
-	}
+  /**
+   * Load a Butterchurn preset object.
+   * @param preset  The preset JSON object (from butterchurn-presets or converted).
+   * @param blend   Blend time in seconds (0 = hard cut, 2 = soft transition).
+   */
+  loadPreset(preset: object, blend = 2.0): void {
+    this.viz?.loadPreset(preset, blend)
+  }
 
-	/**
-	 * Render a single frame. Call in a requestAnimationFrame loop.
-	 */
-	render(): void {
-		this.viz?.render();
-		this.renderCount++;
-	}
+  /**
+   * Render a single frame. Call in a requestAnimationFrame loop.
+   */
+  render(): void {
+    this.viz?.render()
+    this.renderCount++
+  }
 
-	/**
-	 * Set a target FPS cap for this deck's render loop.
-	 * @param fps  Target frames per second. 0 = unlimited.
-	 */
-	setTargetFps(fps: number): void {
-		this.frameInterval = fps > 0 ? 1000 / fps : 0;
-	}
+  /**
+   * Set a target FPS cap for this deck's render loop.
+   * @param fps  Target frames per second. 0 = unlimited.
+   */
+  setTargetFps(fps: number): void {
+    this.frameInterval = fps > 0 ? 1000 / fps : 0
+  }
 
-	/**
-	 * Start the render loop on this deck.
-	 */
-	startRenderLoop(): void {
-		if (this.rafId !== null) return;
-		const loop = (now: number) => {
-			if (this._state !== 'running') return;
-			if (this.frameInterval === 0 || now - this.lastFrameTime >= this.frameInterval) {
-				this.lastFrameTime = this.frameInterval === 0
-					? now
-					: now - ((now - this.lastFrameTime) % this.frameInterval);
-				this.render();
-			}
-			this.rafId = requestAnimationFrame(loop);
-		};
-		this.rafId = requestAnimationFrame(loop);
-	}
+  /**
+   * Start the render loop on this deck.
+   */
+  startRenderLoop(): void {
+    if (this.rafId !== null) return
+    const loop = (now: number) => {
+      if (this._state !== 'running') return
+      if (this.frameInterval === 0 || now - this.lastFrameTime >= this.frameInterval) {
+        this.lastFrameTime =
+          this.frameInterval === 0 ? now : now - ((now - this.lastFrameTime) % this.frameInterval)
+        this.render()
+      }
+      this.rafId = requestAnimationFrame(loop)
+    }
+    this.rafId = requestAnimationFrame(loop)
+  }
 
-	/**
-	 * Stop the render loop without destroying the instance.
-	 */
-	pause(): void {
-		if (this.rafId !== null) {
-			cancelAnimationFrame(this.rafId);
-			this.rafId = null;
-		}
-		this._state = 'idle';
-	}
+  /**
+   * Stop the render loop without destroying the instance.
+   */
+  pause(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
+    this._state = 'idle'
+  }
 
-	/**
-	 * Resume the render loop after a pause.
-	 * Sets state back to 'running' and restarts the RAF loop.
-	 */
-	resume(): void {
-		this._state = 'running';
-		this.startRenderLoop();
-	}
+  /**
+   * Resume the render loop after a pause.
+   * Sets state back to 'running' and restarts the RAF loop.
+   */
+  resume(): void {
+    this._state = 'running'
+    this.startRenderLoop()
+  }
 
-	/**
-	 * Resize the renderer. Call on window resize.
-	 */
-	resize(width: number, height: number): void {
-		this.canvas.width = width;
-		this.canvas.height = height;
-		this.viz?.setRendererSize(width, height);
-	}
+  /**
+   * Resize the renderer. Call on window resize.
+   */
+  resize(width: number, height: number): void {
+    this.canvas.width = width
+    this.canvas.height = height
+    this.viz?.setRendererSize(width, height)
+  }
 
-	/**
-	 * Apply new quality settings without recreating the visualizer.
-	 * Calls setRendererSize (updates mesh + pixel/textureRatio) + setOutputAA.
-	 */
-	applyQuality(opts: { meshWidth: number; meshHeight: number; pixelRatio: number; textureRatio: number; outputFXAA: boolean }): void {
-		if (!this.viz) return;
-		const w = this.canvas.clientWidth || this.canvas.width;
-		const h = this.canvas.clientHeight || this.canvas.height;
-		this.viz.setRendererSize(w, h, {
-			meshWidth: opts.meshWidth,
-			meshHeight: opts.meshHeight,
-			pixelRatio: opts.pixelRatio,
-			textureRatio: opts.textureRatio
-		});
-		this.viz.setOutputAA(opts.outputFXAA);
-	}
+  /**
+   * Apply new quality settings without recreating the visualizer.
+   * Calls setRendererSize (updates mesh + pixel/textureRatio) + setOutputAA.
+   */
+  applyQuality(opts: {
+    meshWidth: number
+    meshHeight: number
+    pixelRatio: number
+    textureRatio: number
+    outputFXAA: boolean
+  }): void {
+    if (!this.viz) return
+    const w = this.canvas.clientWidth || this.canvas.width
+    const h = this.canvas.clientHeight || this.canvas.height
+    this.viz.setRendererSize(w, h, {
+      meshWidth: opts.meshWidth,
+      meshHeight: opts.meshHeight,
+      pixelRatio: opts.pixelRatio,
+      textureRatio: opts.textureRatio,
+    })
+    this.viz.setOutputAA(opts.outputFXAA)
+  }
 
-	/**
-	 * Destroy the deck and release resources.
-	 */
-	destroy(): void {
-		this.pause();
-		this._state = 'stopped';
-		this.viz = null;
-	}
+  /**
+   * Destroy the deck and release resources.
+   */
+  destroy(): void {
+    this.pause()
+    this._state = 'stopped'
+    this.viz = null
+  }
 }

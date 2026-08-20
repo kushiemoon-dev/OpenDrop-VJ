@@ -11,9 +11,9 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import { type ColorParams, DEFAULT_COLOR_PARAMS } from './sync.js';
+import { type ColorParams, DEFAULT_COLOR_PARAMS } from './sync.js'
 
 export const colorState = $state({
-	a: { ...DEFAULT_COLOR_PARAMS } as ColorParams,
-	b: { ...DEFAULT_COLOR_PARAMS } as ColorParams,
-});
+  a: { ...DEFAULT_COLOR_PARAMS } as ColorParams,
+  b: { ...DEFAULT_COLOR_PARAMS } as ColorParams,
+})

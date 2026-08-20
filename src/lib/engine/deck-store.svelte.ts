@@ -21,13 +21,13 @@
  */
 
 export const deckState = $state({
-	activeSlot: 0, // 0=A 1=B 2=C 3=D — cible du preset browser
-	presetA: '',
-	presetB: '',
-	preset2: '',
-	preset3: '',
-	deckBus: ['A', 'B', 'off', 'off'] as Array<'A' | 'B' | 'off'>,
-	crossfader: 0, // 0 = 100% A, 1 = 100% B
-	transitionTime: 2.0, // secondes de fondu preset (0 = hard cut)
-	slotEpoch: 0,
-});
+  activeSlot: 0, // 0=A 1=B 2=C 3=D — cible du preset browser
+  presetA: '',
+  presetB: '',
+  preset2: '',
+  preset3: '',
+  deckBus: ['A', 'B', 'off', 'off'] as Array<'A' | 'B' | 'off'>,
+  crossfader: 0, // 0 = 100% A, 1 = 100% B
+  transitionTime: 2.0, // secondes de fondu preset (0 = hard cut)
+  slotEpoch: 0,
+})

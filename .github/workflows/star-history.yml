@@ -2,7 +2,7 @@ name: star-history
 
 on:
   schedule:
-    - cron: "17 4 * * 1" # weekly, Monday
+    - cron: '17 4 * * 1' # weekly, Monday
   workflow_dispatch:
 
 permissions:

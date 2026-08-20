@@ -15,30 +15,30 @@
  * Extension .svelte.ts is required to compile Svelte 5 $state runes.
  */
 
-import type { CommandId } from './commands.js';
-import type { MidiTriggerKey } from './midi.js';
-import { type KeyBinding, DEFAULT_KEYMAP, resetKeymap } from './keymap.js';
+import type { CommandId } from './commands.js'
+import type { MidiTriggerKey } from './midi.js'
+import { type KeyBinding, DEFAULT_KEYMAP, resetKeymap } from './keymap.js'
 
 export const midiMappingState = $state({
-	midiMappings: {} as Partial<Record<CommandId, MidiTriggerKey>>,
-	keymap: { ...DEFAULT_KEYMAP } as KeyBinding,
-	learningAction: null as CommandId | null,
-});
+  midiMappings: {} as Partial<Record<CommandId, MidiTriggerKey>>,
+  keymap: { ...DEFAULT_KEYMAP } as KeyBinding,
+  learningAction: null as CommandId | null,
+})
 
 export function setMidiMapping(action: CommandId, key: MidiTriggerKey): void {
-	midiMappingState.midiMappings = { ...midiMappingState.midiMappings, [action]: key };
+  midiMappingState.midiMappings = { ...midiMappingState.midiMappings, [action]: key }
 }
 
 export function clearMidiMapping(action: CommandId): void {
-	const { [action]: _, ...rest } = midiMappingState.midiMappings;
-	midiMappingState.midiMappings = rest as Partial<Record<CommandId, MidiTriggerKey>>;
+  const { [action]: _, ...rest } = midiMappingState.midiMappings
+  midiMappingState.midiMappings = rest as Partial<Record<CommandId, MidiTriggerKey>>
 }
 
 export function removeKeyBinding(key: string): void {
-	const { [key]: _, ...rest } = midiMappingState.keymap;
-	midiMappingState.keymap = rest as KeyBinding;
+  const { [key]: _, ...rest } = midiMappingState.keymap
+  midiMappingState.keymap = rest as KeyBinding
 }
 
 export function resetMidiKeymap(): void {
-	midiMappingState.keymap = resetKeymap();
+  midiMappingState.keymap = resetKeymap()
 }

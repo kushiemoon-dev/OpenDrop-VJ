@@ -55,3 +55,6 @@ playwright-report
 
 # Local planning/task workspace (scratch, non committable)
 .planning/
+
+# Local editor state
+.vscode/

@@ -8,6 +8,9 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      PUBLIC_VIDEO_CDN: https://loops.kushie.dev
+      PUBLIC_CLOUD_PRESETS_API: ''
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 

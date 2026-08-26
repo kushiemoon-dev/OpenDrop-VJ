@@ -283,7 +283,7 @@
 	function primaryPreset(bus: 'A' | 'B'): string {
 		void deckState.slotEpoch; // force reactive tracking
 		for (let i = 0; i < 4; i++) {
-			if (deckState.deckBus[i] === bus && isRunning(i)) return presets4[i];
+			if (deckState.deckBus[i] === bus && isRunning(i)) return presets4[i]!;
 		}
 		return bus === 'A' ? deckState.presetA : deckState.presetB;
 	}
@@ -300,7 +300,7 @@
 		!videoState.enabled ? null :
 		videoState.liveDeviceId ? { kind: 'live', deviceId: videoState.liveDeviceId, label: videoState.liveLabel } :
 		videoState.ndiSourceName ? { kind: 'ndi', sourceName: videoState.ndiSourceName, urlAddress: videoState.ndiUrlAddress } :
-		allClips.length > 0 ? allClips[videoState.currentClipIndex % allClips.length].ref : null
+		allClips.length > 0 ? allClips[videoState.currentClipIndex % allClips.length]!.ref : null
 	);
 	// Rounded to 1/20 steps so the sync $effect doesn't fire at 60fps
 	const videoPlaybackRateStep = $derived(Math.round(videoState.playbackRate * 20) / 20);
@@ -437,12 +437,12 @@
 				const idx = direction === 1
 					? (presetIdxA + 1) % presetList.length
 					: ((presetIdxA <= 0 ? presetList.length : presetIdxA) - 1) % presetList.length;
-				selectPresetForDeck('A', presetList[idx].name);
+				selectPresetForDeck('A', presetList[idx]!.name);
 			} else {
 				const idx = direction === 1
 					? (presetIdxB + 1) % presetList.length
 					: ((presetIdxB <= 0 ? presetList.length : presetIdxB) - 1) % presetList.length;
-				selectPresetForDeck('B', presetList[idx].name);
+				selectPresetForDeck('B', presetList[idx]!.name);
 			}
 		},
 		togglePlaylist,
@@ -646,21 +646,21 @@
 	$effect(() => {
 		const composites = compositingState.slotComposites;
 		if (!sync) return;
-		for (let i = 0; i < 4; i++) sync.sendComposite(i, composites[i]);
+		for (let i = 0; i < 4; i++) sync.sendComposite(i, composites[i]!);
 	});
 
 	// — Sync time params vers output, par slot —
 	$effect(() => {
 		const params = timeParamsState.params;
 		if (!sync) return;
-		for (let i = 0; i < 4; i++) sync.sendTime(i, params[i]);
+		for (let i = 0; i < 4; i++) sync.sendTime(i, params[i]!);
 	});
 
 	// — Sync Q-vars vers output, par slot —
 	$effect(() => {
 		const params = qvarState.params;
 		if (!sync) return;
-		for (let i = 0; i < 4; i++) sync.sendQVars(i, params[i]);
+		for (let i = 0; i < 4; i++) sync.sendQVars(i, params[i]!);
 	});
 
 	// Pushes opacity + compositing config to the local Compositor (Stage).
@@ -668,7 +668,7 @@
 		const ops = opacities;
 		const composites = compositingState.slotComposites;
 		if (!compositor) return;
-		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i], composites[i]);
+		for (let i = 0; i < 4; i++) compositor.setLayer(i, ops[i]!, composites[i]!);
 	});
 
 	// Pushes color params to the Compositor — by assigned bus (same
@@ -753,7 +753,7 @@
 		const eco = perfState.invisibleFps;
 		for (let i = 0; i < 4; i++) {
 			if (!manager.isRunning(i)) continue;
-			const visible = ops[i] > 0.001;
+			const visible = ops[i]! > 0.001;
 			const wantedFps = (visible || mode === 'off') ? target : (mode === 'eco' ? eco : 0);
 			if (mode === 'pause' && !visible) {
 				if (!pausedSlots.has(i)) {
@@ -862,7 +862,7 @@
 					const parsed = JSON.parse(savedTimeParams);
 					if (Array.isArray(parsed) && parsed.length === 4) {
 						timeParamsState.params = parsed.map((p) => ({ ...defaultTimeParams(), ...p })) as typeof timeParamsState.params;
-						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot], timeParamsState.params[slot]);
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalTimeParams()[slot]!, timeParamsState.params[slot]!);
 					}
 				} catch { /* ignore corrupt od-time-params */ }
 			}
@@ -872,7 +872,7 @@
 					const parsed = JSON.parse(savedQVars);
 					if (Array.isArray(parsed) && parsed.length === 4) {
 						qvarState.params = parsed.map((p) => ({ ...defaultQVarParams(), ...p })) as typeof qvarState.params;
-						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot], { enabled: [...qvarState.params[slot].enabled], value: [...qvarState.params[slot].value] });
+						for (let slot = 0; slot < 4; slot++) Object.assign(getGlobalQVarParams()[slot]!, { enabled: [...qvarState.params[slot]!.enabled], value: [...qvarState.params[slot]!.value] });
 					}
 				} catch { /* ignore corrupt od-qvars */ }
 			}
@@ -961,8 +961,8 @@
 		await initPresets();
 		builtinClips = await initVideoLoops();
 		presetList = buildPresetList();
-		if (presetList.length > 0) deckState.presetA = presetList[0].name;
-		if (presetList.length > 1) deckState.presetB = presetList[1].name;
+		if (presetList.length > 0) deckState.presetA = presetList[0]!.name;
+		if (presetList.length > 1) deckState.presetB = presetList[1]!.name;
 
 		await initCloudPresets();
 	});
@@ -1151,18 +1151,18 @@
 		const compositeMatch = id.match(/^(composite-blend|lumakey-black|lumakey-white|colorkey-hue|colorkey-tolerance)-([0-3])$/);
 		if (compositeMatch) {
 			const e = COMPOSITE_CMDS.find(([prefix]) => prefix === compositeMatch[1]);
-			return e ? e[3](compositingState.slotComposites[Number(compositeMatch[2])]) : null;
+			return e ? e[3](compositingState.slotComposites[Number(compositeMatch[2])]!) : null;
 		}
 		const timeMatch = id.match(/^(time-speed|time-zoom|time-rot|time-warp|time-dx|time-dy|time-stretch|time-wave)-([0-3])$/);
 		if (timeMatch) {
 			const e = TIME_CMDS.find(([prefix]) => prefix === timeMatch[1]);
-			return e ? timeParamsState.params[Number(timeMatch[2])][e[2]] / 2 : null;
+			return e ? timeParamsState.params[Number(timeMatch[2])]![e[2]] / 2 : null;
 		}
 		const qvarMatch = id.match(/^qvar-(\d+)-([0-3])$/);
 		if (qvarMatch) {
 			const n = Number(qvarMatch[1]);
 			if (n < 1 || n > 32) return null;
-			return (qvarState.params[Number(qvarMatch[2])].value[n - 1] + 2) / 4;
+			return (qvarState.params[Number(qvarMatch[2])]!.value[n - 1]! + 2) / 4;
 		}
 		return null;
 	}
@@ -1251,7 +1251,7 @@
 	}
 
 	async function toggleNdiDeck(slot: number): Promise<void> {
-		if (ndiDeckState.slots[slot].active) {
+		if (ndiDeckState.slots[slot]!.active) {
 			await stopNdiDeck(slot);
 		} else {
 			const canvas = canvases[slot];
@@ -1275,7 +1275,7 @@
 
 	function cycleBus(slot: number) {
 		const order: Array<'A' | 'B' | 'off'> = ['A', 'B', 'off'];
-		const next = order[(order.indexOf(deckState.deckBus[slot]) + 1) % order.length];
+		const next = order[(order.indexOf(deckState.deckBus[slot]!) + 1) % order.length];
 		deckState.deckBus = deckState.deckBus.map((b, i) => (i === slot ? next : b)) as Array<'A' | 'B' | 'off'>;
 	}
 
@@ -1329,7 +1329,7 @@
 		const options: string[] = [];
 		while (options.length < 3 && remaining.length > 0) {
 			const idx = Math.floor(Math.random() * remaining.length);
-			options.push(remaining.splice(idx, 1)[0]);
+			options.push(remaining.splice(idx, 1)[0]!);
 		}
 
 		startPoll(options, 30, (winnerIndex) => {
@@ -1340,7 +1340,7 @@
 			// (Task 12 review carryover).
 			const targetSlot = frontSlotIndex(opacities);
 			// Reuse Task 8's slot-parameterized selectPreset — do not add a second preset-load path.
-			selectPresetAction(targetSlot, options[winnerIndex], manager, sync, primaryPreset);
+			selectPresetAction(targetSlot, options[winnerIndex]!, manager, sync, primaryPreset);
 		});
 	}
 
@@ -1525,7 +1525,7 @@
 {#snippet compositeSection()}
 	<SidebarComposite
 		{mixerSelectedSlot}
-		composite={compositingState.slotComposites[mixerSelectedSlot]}
+		composite={compositingState.slotComposites[mixerSelectedSlot]!}
 		onUpdate={(patch) => updateComposite(mixerSelectedSlot, patch)}
 	/>
 {/snippet}
@@ -1563,7 +1563,7 @@
 {#snippet timeSection()}
 	<SidebarTime
 		{mixerSelectedSlot}
-		timeParams={timeParamsState.params[mixerSelectedSlot]}
+		timeParams={timeParamsState.params[mixerSelectedSlot]!}
 		onUpdate={(patch) => updateTimeParams(mixerSelectedSlot, patch)}
 		onReset={() => updateTimeParams(mixerSelectedSlot, defaultTimeParams())}
 	/>
@@ -1571,7 +1571,7 @@
 {#snippet qvarSection()}
 	<SidebarQvar
 		{mixerSelectedSlot}
-		qvar={qvarState.params[mixerSelectedSlot]}
+		qvar={qvarState.params[mixerSelectedSlot]!}
 		onAddWatch={(n) => addQVarWatch(mixerSelectedSlot, n)}
 		onUpdateValue={(n, value) => updateQVarValue(mixerSelectedSlot, n, value)}
 		onRemoveWatch={(n) => removeQVarWatch(mixerSelectedSlot, n)}
@@ -1689,9 +1689,9 @@
 					<DeckCard
 						{letter}
 						canvas={canvases[i]}
-						presetName={presets4[i]}
+						presetName={presets4[i]!}
 						isActive={deckState.activeSlot === i}
-						isLive={opacities[i] > 0.5}
+						isLive={opacities[i]! > 0.5}
 						bus={deckState.deckBus[i]}
 						running={isRunning(i)}
 						onSelect={() => { deckState.activeSlot = i }}

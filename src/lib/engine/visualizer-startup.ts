@@ -235,9 +235,7 @@ export async function startVisualizer(
       if (isElectron) {
         try {
           await audio.startPcmCapture((f) => window.electronAPI!.sendAudioFrame(f))
-        } catch (e) {
-          console.error('[output] startPcmCapture failed', e)
-        }
+        } catch { /* retried on every hello; can silently fail to activate on Linux */ }
       }
     })
 

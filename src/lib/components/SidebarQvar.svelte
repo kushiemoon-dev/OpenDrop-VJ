@@ -35,7 +35,7 @@
 			<input type="range" min="-2" max="2" step="0.01" value={qvar.value[n - 1]}
 				oninput={(e) => onUpdateValue(n, +e.currentTarget.value)}
 				style="flex:1" />
-			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{qvar.value[n - 1].toFixed(2)}</span>
+			<span style="font-size:9px;color:#aaa;width:28px;text-align:right">{qvar.value[n - 1]!.toFixed(2)}</span>
 			<button class="btn-sm" onclick={() => onRemoveWatch(n)}>×</button>
 		</div>
 	{/each}

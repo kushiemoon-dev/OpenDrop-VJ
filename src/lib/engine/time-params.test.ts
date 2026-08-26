@@ -6,6 +6,8 @@ import {
   type TimeParamsTuple,
 } from './time-params.js'
 
+type InjectedPreset = { frame_eqs_str: string; other?: string }
+
 describe('defaultTimeParams', () => {
   it('all multipliers equal 1 (neutral)', () => {
     expect(defaultTimeParams()).toEqual({
@@ -27,12 +29,12 @@ describe('injectTimeParams', () => {
     const patched = injectTimeParams(preset, 0)
     expect(preset.frame_eqs_str).toBe('a.zoom = 1.01;') // unchanged
     expect(patched).not.toBe(preset) // different object
-    expect((patched as any).other).toBe('field') // untouched fields preserved
+    expect((patched as InjectedPreset).other).toBe('field') // untouched fields preserved
   })
 
   it("prefixes scaled a.time, before the preset's original code", () => {
     const preset = { frame_eqs_str: 'a.zoom = 1.01;' }
-    const patched = injectTimeParams(preset, 0) as any
+    const patched = injectTimeParams(preset, 0) as InjectedPreset
     const speedLineIndex = patched.frame_eqs_str.indexOf('a.time = a.time *')
     const originalLineIndex = patched.frame_eqs_str.indexOf('a.zoom = 1.01;')
     expect(speedLineIndex).toBeGreaterThanOrEqual(0)
@@ -41,7 +43,7 @@ describe('injectTimeParams', () => {
 
   it('adds the 7 multiplier lines after the original code, referencing window.__odDeckParams[slot]', () => {
     const preset = { frame_eqs_str: 'a.zoom = 1.01;' }
-    const patched = injectTimeParams(preset, 2) as any
+    const patched = injectTimeParams(preset, 2) as InjectedPreset
     for (const field of [
       'zoomMult',
       'rotMult',
@@ -57,8 +59,8 @@ describe('injectTimeParams', () => {
 
   it('namespaces correctly per slot (no collision between decks)', () => {
     const preset = { frame_eqs_str: '' }
-    const patched0 = injectTimeParams(preset, 0) as any
-    const patched3 = injectTimeParams(preset, 3) as any
+    const patched0 = injectTimeParams(preset, 0) as InjectedPreset
+    const patched3 = injectTimeParams(preset, 3) as InjectedPreset
     expect(patched0.frame_eqs_str).toContain('window.__odDeckParams[0]')
     expect(patched0.frame_eqs_str).not.toContain('window.__odDeckParams[3]')
     expect(patched3.frame_eqs_str).toContain('window.__odDeckParams[3]')
@@ -67,7 +69,7 @@ describe('injectTimeParams', () => {
 
   it('handles a preset without frame_eqs_str (empty string by default)', () => {
     const preset = {}
-    const patched = injectTimeParams(preset, 0) as any
+    const patched = injectTimeParams(preset, 0) as InjectedPreset
     expect(patched.frame_eqs_str).toContain('a.time = a.time *')
   })
 })

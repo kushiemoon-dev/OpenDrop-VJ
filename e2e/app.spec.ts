@@ -23,9 +23,9 @@ test.describe('Page principale', () => {
   test('les canvas de rendu sont présents après Start', async ({ page }) => {
     // Les canvas sont créés dans onMount des Deck — ils n'existent pas avant Start
     await startVisualizer(page)
-    const canvases = page.locator('canvas.deck-canvas')
-    const count = await canvases.count()
-    expect(count).toBeGreaterThanOrEqual(2)
+    // 4 canvas source (texture par deck, cachés) + 1 canvas composité (visible)
+    await expect(page.locator('canvas.deck-src')).toHaveCount(4)
+    await expect(page.locator('canvas.deck-canvas')).toHaveCount(1)
   })
 
   test('Start lance le visualiseur sans erreur', async ({ page }) => {
@@ -191,10 +191,7 @@ test.describe('Fenêtre output', () => {
     expect(bodyClass).toBeGreaterThan(0)
   })
 
-  test("l'overlay de diagnostic audio est présent sur la page /output", async ({
-    page,
-    context,
-  }) => {
+  test('les canvas de rendu sont présents sur la page /output', async ({ page, context }) => {
     // La preset drawer couvre le bouton — la fermer et attendre qu'elle soit vraiment fermée
     await page.locator('.preset-browser-toggle').click()
     await expect(page.locator('.preset-drawer--open')).toHaveCount(0)
@@ -204,10 +201,9 @@ test.describe('Fenêtre output', () => {
     ])
     await popup.waitForLoadState('load', { timeout: 20000 })
     expect(popup.url()).toContain('/output')
-    // L'overlay diagnostique est rendu dès que Svelte monte le composant
-    // (le SPA hydrate après load → timeout généreux)
-    await expect(popup.locator('.diag-overlay')).toBeVisible({ timeout: 15000 })
-    await expect(popup.locator('.diag-overlay')).toContainText('PCM rx:0')
-    await expect(popup.locator('.diag-overlay')).toContainText('acq:N')
+    // 4 canvas source (texture par deck, cachés) + 1 canvas composité (visible),
+    // rendus dès que Svelte monte le composant (le SPA hydrate après load → timeout généreux)
+    await expect(popup.locator('canvas.deck-src')).toHaveCount(4, { timeout: 15000 })
+    await expect(popup.locator('canvas.layer')).toHaveCount(1)
   })
 })

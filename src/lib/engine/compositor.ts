@@ -366,9 +366,7 @@ export class Compositor {
       // bad frame is skipped instead of freezing everything.
       try {
         this.drawFrame()
-      } catch (e) {
-        console.error('Compositor: drawFrame failed, skipping this frame', e)
-      }
+      } catch { /* skip one bad frame instead of freezing the render loop */ }
       this.rafId = requestAnimationFrame(tick)
     }
     this.rafId = requestAnimationFrame(tick)

@@ -81,7 +81,7 @@
         <DeckCard
           letter="DECK {i + 1}"
           canvas={canvases[i]}
-          presetName={presets4[i]}
+          presetName={presets4[i]!}
           isActive={selectedSlot === i}
           isLive={isRunning(i)}
           bus={deckBus[i]}

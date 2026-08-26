@@ -26,7 +26,7 @@
 
 	function pollPercent(t: number[], i: number): number {
 		const total = t.reduce((a, b) => a + b, 0);
-		return total === 0 ? 0 : (t[i] / total) * 100;
+		return total === 0 ? 0 : ((t[i] ?? 0) / total) * 100;
 	}
 
 	// id → data URL, loaded from IndexedDB

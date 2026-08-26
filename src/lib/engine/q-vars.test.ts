@@ -8,6 +8,8 @@ import {
   type QVarParamsTuple,
 } from './q-vars.js'
 
+type InjectedPreset = { frame_eqs_str: string; other?: string }
+
 describe('defaultQVarParams', () => {
   it('32 slots, all disabled, value 0', () => {
     const p = defaultQVarParams()
@@ -24,12 +26,12 @@ describe('injectQVarParams', () => {
     const patched = injectQVarParams(preset, 0)
     expect(preset.frame_eqs_str).toBe('a.zoom = 1.01;')
     expect(patched).not.toBe(preset)
-    expect((patched as any).other).toBe('field')
+    expect((patched as InjectedPreset).other).toBe('field')
   })
 
   it('adds the original code before the 32 guard lines', () => {
     const preset = { frame_eqs_str: 'a.zoom = 1.01;' }
-    const patched = injectQVarParams(preset, 0) as any
+    const patched = injectQVarParams(preset, 0) as InjectedPreset
     const originalIndex = patched.frame_eqs_str.indexOf('a.zoom = 1.01;')
     const firstGuardIndex = patched.frame_eqs_str.indexOf(
       'if (window.__odQVarParams[0].enabled[0])'
@@ -40,7 +42,7 @@ describe('injectQVarParams', () => {
 
   it('generates 32 guard lines q1..q32, referencing window.__odQVarParams[slot]', () => {
     const preset = { frame_eqs_str: '' }
-    const patched = injectQVarParams(preset, 2) as any
+    const patched = injectQVarParams(preset, 2) as InjectedPreset
     for (let n = 1; n <= 32; n++) {
       expect(patched.frame_eqs_str).toContain(
         `if (window.__odQVarParams[2].enabled[${n - 1}]) { q${n} = window.__odQVarParams[2].value[${n - 1}]; }`
@@ -50,8 +52,8 @@ describe('injectQVarParams', () => {
 
   it('namespaces correctly per slot (no collision between decks)', () => {
     const preset = { frame_eqs_str: '' }
-    const patched0 = injectQVarParams(preset, 0) as any
-    const patched3 = injectQVarParams(preset, 3) as any
+    const patched0 = injectQVarParams(preset, 0) as InjectedPreset
+    const patched3 = injectQVarParams(preset, 3) as InjectedPreset
     expect(patched0.frame_eqs_str).toContain('window.__odQVarParams[0]')
     expect(patched0.frame_eqs_str).not.toContain('window.__odQVarParams[3]')
     expect(patched3.frame_eqs_str).toContain('window.__odQVarParams[3]')
@@ -60,7 +62,7 @@ describe('injectQVarParams', () => {
 
   it('handles a preset without frame_eqs_str (empty string by default)', () => {
     const preset = {}
-    const patched = injectQVarParams(preset, 0) as any
+    const patched = injectQVarParams(preset, 0) as InjectedPreset
     expect(patched.frame_eqs_str).toContain('if (window.__odQVarParams[0].enabled[0])')
   })
 })

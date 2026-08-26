@@ -160,7 +160,7 @@ export class AudioEngine {
     this._disconnectCurrent()
     // Reuse the existing node — createMediaElementAudioSource throws if called twice
     // on the same element ("HTMLMediaElement already connected").
-    if (!this.mediaElementSource || (this.mediaElementSource as any).mediaElement !== el) {
+    if (!this.mediaElementSource || this.mediaElementSource.mediaElement !== el) {
       this.mediaElementSource = this.ctx.createMediaElementSource(el)
     }
     this.mediaElementSource.connect(this.gainNode)

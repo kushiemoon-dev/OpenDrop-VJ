@@ -128,7 +128,7 @@
 		const eco = invisibleFps;
 		if (!manager) return;
 		for (let i = 0; i < 4; i++) {
-			const visible = ops[i] > 0.001 || mode === 'off';
+			const visible = ops[i]! > 0.001 || mode === 'off';
 			const fps = visible ? target : (mode === 'eco' ? eco : 0);
 			manager.setSlotTargetFps(i, fps);
 		}
@@ -140,7 +140,7 @@
 		const composites = slotComposites;
 		if (!compositor) return;
 		for (let i = 0; i < 4; i++) {
-			compositor.setLayer(i, ops[i], composites[i]);
+			compositor.setLayer(i, ops[i]!, composites[i]!);
 		}
 	});
 
@@ -148,7 +148,7 @@
 	$effect(() => {
 		const colors = slotColors;
 		if (!compositor) return;
-		for (let i = 0; i < 4; i++) compositor.setColor(i, colors[i]);
+		for (let i = 0; i < 4; i++) compositor.setColor(i, colors[i]!);
 	});
 
 	// Pushes the <video> element as the Compositor's bottom texture layer whenever
@@ -189,8 +189,8 @@
 			// Explicit initial push — the $effect won't re-trigger until one of
 			// the $state values it reads changes (compositor isn't one of those).
 			for (let i = 0; i < 4; i++) {
-				compositor.setLayer(i, slotOpacities[i], slotComposites[i]);
-				compositor.setColor(i, slotColors[i]);
+				compositor.setLayer(i, slotOpacities[i]!, slotComposites[i]!);
+				compositor.setColor(i, slotColors[i]!);
 			}
 			// videoEl is virtually always undefined this early (VideoLayer hasn't
 			// resolved a clip from the sync channel yet) — the $effects above take
@@ -257,9 +257,9 @@
 					next[msg.slot] = msg.config;
 					slotComposites = next;
 				} else if (msg.type === 'time') {
-					Object.assign(getGlobalTimeParams()[msg.slot], msg.params);
+					Object.assign(getGlobalTimeParams()[msg.slot]!, msg.params);
 				} else if (msg.type === 'qvars') {
-					Object.assign(getGlobalQVarParams()[msg.slot], msg.params);
+					Object.assign(getGlobalQVarParams()[msg.slot]!, msg.params);
 				} else if (msg.type === 'perf') {
 					targetFps = msg.targetFps;
 					invisibleMode = msg.invisibleMode as InvisibleMode;

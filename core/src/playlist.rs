@@ -307,6 +307,7 @@ mod tests {
         names.iter().map(|s| s.to_string()).collect()
     }
 
+    #[allow(clippy::type_complexity)]
     fn spy() -> (Rc<RefCell<Vec<String>>>, Box<dyn FnMut(&str)>) {
         let calls = Rc::new(RefCell::new(Vec::new()));
         let calls_clone = calls.clone();

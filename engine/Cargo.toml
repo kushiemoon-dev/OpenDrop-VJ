@@ -3,6 +3,10 @@ name = "opendrop-engine"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+glutin = "0.32.3"
+glow = "0.17"
+
 [build-dependencies]
 bindgen = "0.70"
 pkg-config = "0.3"

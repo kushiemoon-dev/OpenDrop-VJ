@@ -6,9 +6,10 @@ use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
 use opendrop_engine::compositor::Compositor;
-use opendrop_engine::deck::{self, DeckStack};
+use opendrop_engine::deck::{self, Deck};
 use raw_window_handle::HasWindowHandle;
 use std::num::NonZeroU32;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
@@ -19,12 +20,6 @@ use winit::window::{Window, WindowAttributes, WindowId};
 /// bootstrap. A VJ setup can have control and output on different-refresh
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
-
-/// Step 4 deck test-pattern colors: same 4 flat colors the Phase 0 spike
-/// used for its own plumbing-isolation check (`PHASE0_DEBUG_SOLID`).
-const DECK_COLORS: [(f32, f32, f32); deck::DECK_COUNT] =
-    [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 1.0, 0.0)];
-const BAND_COLOR: (f32, f32, f32) = (1.0, 1.0, 1.0);
 
 struct WindowSlot {
     window: Window,
@@ -60,11 +55,14 @@ struct AppState {
     main_ctx: PossiblyCurrentContext,
     control: WindowSlot,
     output: WindowSlot,
-    deck_stack: DeckStack,
+    decks: Vec<Deck>,
     compositor: Compositor,
     gl: glow::Context,
     refresh_interval: Duration,
     next_frame_at: Instant,
+    /// TEMPORARY (Phase 2 only): running sample position fed to
+    /// deck::synth_audio_chunk. Advances once per rendered frame.
+    sample_pos: u64,
 }
 
 #[derive(Default)]
@@ -113,17 +111,19 @@ impl ApplicationHandler for App {
         // rendering on every call, is what keeps that from turning into a
         // self-sustaining busy loop (measured: ~10 kHz without this gate).
         if now >= state.next_frame_at {
-            // Step 4 plumbing, no projectM yet: each deck context paints its
-            // own test pattern into its own pbuffer and copies it into its
-            // shared texture; then, back on the main context, each texture
-            // is blitted into its quadrant of the composite FBO.
+            // Each deck context injects one PCM chunk, renders one projectM
+            // frame, and copies it into its shared texture; then, back on
+            // the main context, each texture is blitted into its quadrant
+            // of the composite FBO.
             for i in 0..deck::DECK_COUNT {
-                if let Err(e) = state.deck_stack.contexts[i].make_current(&state.deck_stack.surfaces[i]) {
+                if let Err(e) = state.decks[i].context.make_current(&state.decks[i].surface) {
                     eprintln!("[app] deck {i} make_current failed: {e}");
                     continue;
                 }
-                deck::render_test_pattern(&state.deck_stack.gl[i], state.deck_stack.textures[i], DECK_COLORS[i], BAND_COLOR);
+                let pcm = deck::synth_audio_chunk(state.sample_pos, i);
+                state.decks[i].render_frame(&pcm);
             }
+            state.sample_pos += deck::AUDIO_CHUNK as u64;
             // Reacquire the main context (any of its surfaces works: the
             // composite FBO belongs to the context, not the surface) before
             // touching the compositor or either window.
@@ -131,7 +131,7 @@ impl ApplicationHandler for App {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
             for i in 0..deck::DECK_COUNT {
-                state.compositor.blit_deck_into_quadrant(&state.gl, state.deck_stack.textures[i], i);
+                state.compositor.blit_deck_into_quadrant(&state.gl, state.decks[i].texture, i);
             }
 
             // Two windows, one context: each surface is made current in
@@ -198,6 +198,68 @@ fn create_window_slot(display: &Display, gl_config: &Config, window: Window) -> 
     })
 }
 
+fn preset_dir() -> PathBuf {
+    let raw = std::env::var("OPENDROP_PRESET_DIR").unwrap_or_else(|_| {
+        panic!(
+            "OPENDROP_PRESET_DIR is not set. Point it at a directory of .milk presets, e.g.:\n  \
+             OPENDROP_PRESET_DIR=/srv/http/opendrop-presets cargo run -p opendrop-app"
+        )
+    });
+    PathBuf::from(raw)
+}
+
+fn walk_milk_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                out.extend(walk_milk_files(&p));
+            } else if p.extension().map(|e| e.eq_ignore_ascii_case("milk")).unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+    out
+}
+
+/// Picks up to `count` visually distinct presets: one per top-level
+/// category subdirectory where possible: so the 4 decks don't all end up
+/// on lookalike presets. Skips transition-only presets (near-static/black
+/// by design, a bad default for eyeballing that rendering actually works),
+/// same skip the Phase 0 spike applied when picking its one preset.
+fn pick_distinct_presets(dir: &Path, count: usize) -> Vec<PathBuf> {
+    let mut categories: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default();
+    categories.sort();
+
+    let mut picks = Vec::with_capacity(count);
+    for cat in &categories {
+        if picks.len() >= count {
+            break;
+        }
+        let mut files = walk_milk_files(cat);
+        files.sort();
+        if let Some(p) = files.into_iter().find(|p| !p.to_string_lossy().contains("Transition")) {
+            picks.push(p);
+        }
+    }
+    if picks.len() < count {
+        let mut all = walk_milk_files(dir);
+        all.sort();
+        for p in all {
+            if picks.len() >= count {
+                break;
+            }
+            if !picks.contains(&p) && !p.to_string_lossy().contains("Transition") {
+                picks.push(p);
+            }
+        }
+    }
+    picks
+}
+
 /// Step 3 of Phase 2: two windows sharing one GL context, paced explicitly
 /// instead of relying on vsync. See `piped-rolling-sunrise.md` step 3: a
 /// Wayland surface that stops being visible stops receiving frame
@@ -227,14 +289,28 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .build(Some(raw_window_handle));
 
     // Anchor context: created here, converted to PossiblyCurrent, but not
-    // actually made current yet. engine::deck::create_deck_stack creates its
-    // 4 contexts sharing this anchor's namespace before any of the 5 total
+    // actually made current yet. engine::deck::create_decks creates its 4
+    // contexts sharing this anchor's namespace before any of the 5 total
     // contexts is made current: see gl_state correctness notes in the plan.
     let not_current_main = unsafe { display.create_context(&gl_config, &ctx_attrs) }
         .map_err(|e| format!("failed to create main GL context: {e}"))?;
     let main_ctx = not_current_main.treat_as_possibly_current();
 
-    let deck_stack = deck::create_deck_stack(&display, &gl_config, &main_ctx)?;
+    let decks = deck::create_decks(&display, &gl_config, &main_ctx)?;
+
+    let presets = pick_distinct_presets(&preset_dir(), deck::DECK_COUNT);
+    if presets.len() < deck::DECK_COUNT {
+        return Err(format!(
+            "found only {} distinct, non-transition preset(s) under OPENDROP_PRESET_DIR, need {}",
+            presets.len(),
+            deck::DECK_COUNT
+        ));
+    }
+    for (i, dk) in decks.iter().enumerate() {
+        dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
+        dk.load_preset(&presets[i])?;
+        println!("[app] deck {i} preset: {}", presets[i].display());
+    }
 
     let refresh_millihertz = control_window
         .current_monitor()
@@ -291,7 +367,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         );
         tex
     };
-    let visible_from_deck3 = unsafe { deck_stack.gl[3].is_texture(probe_tex) };
+    let visible_from_deck3 = unsafe { decks[3].gl.is_texture(probe_tex) };
     println!("[app] texture created in main context, visible from deck context 4: {visible_from_deck3}");
     if !visible_from_deck3 {
         return Err("share group broken: texture created in the main context is not visible from deck context 4".to_string());
@@ -302,11 +378,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         main_ctx,
         control,
         output,
-        deck_stack,
+        decks,
         compositor,
         gl,
         refresh_interval,
         next_frame_at: Instant::now(),
+        sample_pos: 0,
     })
 }
 

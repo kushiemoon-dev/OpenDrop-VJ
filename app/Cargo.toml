@@ -1,0 +1,8 @@
+[package]
+name = "opendrop-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opendrop-core = { path = "../core" }
+opendrop-engine = { path = "../engine" }

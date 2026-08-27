@@ -1,1 +1,12 @@
+pub mod beat_trigger;
+pub mod blend;
+pub mod clock;
 pub mod commands;
+pub mod lfo;
+pub mod overlay;
+pub mod playlist;
+pub mod q_vars;
+pub mod share_set;
+pub mod snapshot;
+pub mod time_params;
+pub mod timeline;

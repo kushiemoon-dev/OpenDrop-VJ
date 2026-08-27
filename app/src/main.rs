@@ -5,7 +5,8 @@ use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
-use opendrop_engine::compositor::Compositor;
+use opendrop_core::blend::{BlendMode, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
 use raw_window_handle::HasWindowHandle;
 use std::num::NonZeroU32;
@@ -20,6 +21,25 @@ use winit::window::{Window, WindowAttributes, WindowId};
 /// bootstrap. A VJ setup can have control and output on different-refresh
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
+
+/// TEMPORARY (step 6 only): hardcoded opacities/blend modes, forced in code
+/// exactly as the plan's step 6 asks, cycling every 4s through the 3
+/// scenarios its verification calls for: a single slot fullscreen, additive
+/// of two decks (brighter), multiply of two decks (darker). core::show::Show
+/// (step 7) replaces this with the real crossfader-driven state.
+fn hardcoded_layer_inputs(elapsed_secs: f64) -> [LayerInput; 4] {
+    let off = LayerInput { opacity: 0.0, composite: DEFAULT_SLOT_COMPOSITE, color: DEFAULT_COLOR_PARAMS };
+    let layer = |blend: BlendMode| LayerInput {
+        opacity: 1.0,
+        composite: SlotComposite { blend, ..DEFAULT_SLOT_COMPOSITE },
+        color: DEFAULT_COLOR_PARAMS,
+    };
+    match (elapsed_secs / 4.0) as u64 % 3 {
+        0 => [layer(BlendMode::Normal), off, off, off], // one slot -> fullscreen
+        1 => [layer(BlendMode::Normal), layer(BlendMode::Additive), off, off], // additive -> brighter
+        _ => [layer(BlendMode::Normal), layer(BlendMode::Multiply), off, off], // multiply -> darker
+    }
+}
 
 struct WindowSlot {
     window: Window,
@@ -63,6 +83,10 @@ struct AppState {
     /// TEMPORARY (Phase 2 only): running sample position fed to
     /// deck::synth_audio_chunk. Advances once per rendered frame.
     sample_pos: u64,
+    /// TEMPORARY (step 6 only: core::show::Show replaces this in step 7):
+    /// bootstrap time, used to cycle hardcoded_layer_inputs's 3 verification
+    /// scenarios (single slot / additive / multiply) every few seconds.
+    started_at: Instant,
 }
 
 #[derive(Default)]
@@ -113,8 +137,8 @@ impl ApplicationHandler for App {
         if now >= state.next_frame_at {
             // Each deck context injects one PCM chunk, renders one projectM
             // frame, and copies it into its shared texture; then, back on
-            // the main context, each texture is blitted into its quadrant
-            // of the composite FBO.
+            // the main context, each texture is drawn through the
+            // compositor shader into the composite FBO.
             for i in 0..deck::DECK_COUNT {
                 if let Err(e) = state.decks[i].context.make_current(&state.decks[i].surface) {
                     eprintln!("[app] deck {i} make_current failed: {e}");
@@ -130,8 +154,12 @@ impl ApplicationHandler for App {
             if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
+            let layer_inputs = hardcoded_layer_inputs(now.duration_since(state.started_at).as_secs_f64());
+            let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
+            state.compositor.begin_frame(&state.gl);
             for i in 0..deck::DECK_COUNT {
-                state.compositor.blit_deck_into_quadrant(&state.gl, state.decks[i].texture, i);
+                let force_normal = lowest_active == Some(i);
+                state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
             }
 
             // Two windows, one context: each surface is made current in
@@ -384,6 +412,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         refresh_interval,
         next_frame_at: Instant::now(),
         sample_pos: 0,
+        started_at: Instant::now(),
     })
 }
 

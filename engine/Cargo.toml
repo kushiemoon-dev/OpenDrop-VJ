@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 glutin = "0.32.3"
 glow = "0.17"
+opendrop-core = { path = "../core" }
 
 [build-dependencies]
 bindgen = "0.70"

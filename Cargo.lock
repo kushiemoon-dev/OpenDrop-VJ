@@ -1087,6 +1087,7 @@ dependencies = [
  "bindgen",
  "glow",
  "glutin",
+ "opendrop-core",
  "pkg-config",
 ]
 

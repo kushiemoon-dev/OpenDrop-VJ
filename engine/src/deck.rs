@@ -1,6 +1,7 @@
 //! The 4 deck GL contexts. Each shares the object namespace of the app's
 //! main window context (so textures created here are visible from it, and
-//! vice versa) and renders off-screen into its own pbuffer.
+//! vice versa), owns one projectM instance, and renders off-screen into its
+//! own pbuffer.
 //!
 //! Deck resolution is capped hard at 4096: `EGL_MAX_PBUFFER_WIDTH/HEIGHT`.
 //! `with_pbuffer_sizes()` on the config template is ignored by EGL, so that
@@ -14,8 +15,11 @@ use glutin::context::{
 };
 use glutin::display::{Display, GlDisplay};
 use glutin::surface::{PbufferSurface, Surface, SurfaceAttributesBuilder};
+use std::ffi::CString;
 use std::num::NonZeroU32;
+use std::path::Path;
 
+use crate::ffi;
 use crate::gl_debug;
 use crate::gl_state;
 
@@ -23,22 +27,70 @@ pub const DECK_W: u32 = 1280;
 pub const DECK_H: u32 = 720;
 pub const DECK_COUNT: usize = 4;
 
-/// The 4 deck contexts, their pbuffer surfaces, one `glow::Context` per
-/// context, and one shared RGBA8 texture per deck already allocated in each
-/// context's namespace: the copy target for `glCopyTexSubImage2D` from
-/// Phase 2 step 4 onward.
-pub struct DeckStack {
-    pub contexts: Vec<PossiblyCurrentContext>,
-    pub surfaces: Vec<Surface<PbufferSurface>>,
-    pub gl: Vec<glow::Context>,
-    pub textures: Vec<glow::NativeTexture>,
+/// samples/channel per injected PCM chunk, ~10ms @48kHz: matches the
+/// spike's own chunking, kept only because `synth_audio_chunk` is temporary.
+pub const AUDIO_CHUNK: usize = 480;
+const SAMPLE_RATE: u32 = 48_000;
+
+/// One deck: its own GL context (sharing the main context's object
+/// namespace), pbuffer surface, `glow::Context`, shared output texture, and
+/// projectM instance: all created together, all belonging to this one
+/// context.
+pub struct Deck {
+    pub context: PossiblyCurrentContext,
+    pub surface: Surface<PbufferSurface>,
+    pub gl: glow::Context,
+    pub texture: glow::NativeTexture,
+    handle: ffi::projectm_handle,
 }
 
-pub fn create_deck_stack(
-    display: &Display,
-    config: &Config,
-    anchor: &PossiblyCurrentContext,
-) -> Result<DeckStack, String> {
+impl Deck {
+    /// The single passage point for loading a preset into this deck.
+    /// Phase 4's per-preset pre-flight validation (a subprocess that loads
+    /// the file first, so a bad preset can't take down a running deck)
+    /// hooks in here without touching how contexts are structured. Must be
+    /// called while this deck's context is current.
+    pub fn load_preset(&self, path: &Path) -> Result<(), String> {
+        let c_path = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|e| format!("preset path {} is not a valid C string: {e}", path.display()))?;
+        unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), false) };
+        Ok(())
+    }
+
+    /// Injects one chunk of PCM, renders one projectM frame: GL state
+    /// saved/restored in absolute terms around the opaque render call (see
+    /// `gl_state`, and the plan's step-1 review: without this, the
+    /// subsequent copy can read garbage left behind by whatever the preset
+    /// did to blend/framebuffer/viewport state): then copies the result
+    /// into this deck's shared texture. Must be called while this deck's
+    /// context is current.
+    pub fn render_frame(&self, pcm: &[f32]) {
+        unsafe {
+            ffi::projectm_pcm_add_float(
+                self.handle,
+                pcm.as_ptr(),
+                (pcm.len() / 2) as u32,
+                ffi::projectm_channels_PROJECTM_STEREO,
+            );
+            let before = gl_state::save(&self.gl);
+            ffi::projectm_opengl_render_frame(self.handle);
+            gl_state::restore(&self.gl, &before);
+        }
+        copy_fbo0_to_shared_texture(&self.gl, self.texture);
+    }
+}
+
+impl Drop for Deck {
+    fn drop(&mut self) {
+        // projectm_destroy needs this deck's context current to free its GL
+        // resources. Fine today: the whole Vec<Deck> (contexts included)
+        // is torn down together at process exit; revisit if a Deck is ever
+        // dropped individually while its siblings keep running.
+        unsafe { ffi::projectm_destroy(self.handle) };
+    }
+}
+
+pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrentContext) -> Result<Vec<Deck>, String> {
     let deck_ctx_attrs = ContextAttributesBuilder::new()
         .with_debug(cfg!(debug_assertions))
         .with_profile(GlProfile::Core)
@@ -54,8 +106,7 @@ pub fn create_deck_stack(
             .map_err(|e| format!("failed to create deck {i} GL context: {e}"))?;
         not_current.push(ctx);
     }
-    let contexts: Vec<PossiblyCurrentContext> =
-        not_current.into_iter().map(|c| c.treat_as_possibly_current()).collect();
+    let mut contexts = not_current.into_iter().map(|c| c.treat_as_possibly_current());
 
     let mut surfaces = Vec::with_capacity(DECK_COUNT);
     for i in 0..DECK_COUNT {
@@ -67,17 +118,15 @@ pub fn create_deck_stack(
             .map_err(|e| format!("failed to create deck {i} pbuffer surface: {e}"))?;
         surfaces.push(surface);
     }
+    let mut surfaces = surfaces.into_iter();
 
-    let mut gl = Vec::with_capacity(DECK_COUNT);
-    let mut textures = Vec::with_capacity(DECK_COUNT);
+    let mut decks = Vec::with_capacity(DECK_COUNT);
     for i in 0..DECK_COUNT {
-        contexts[i]
-            .make_current(&surfaces[i])
-            .map_err(|e| format!("failed to make deck {i} context current: {e}"))?;
+        let context = contexts.next().expect("exactly DECK_COUNT contexts were created above");
+        let surface = surfaces.next().expect("exactly DECK_COUNT surfaces were created above");
+        context.make_current(&surface).map_err(|e| format!("failed to make deck {i} context current: {e}"))?;
 
-        let mut ctx_gl = unsafe {
-            glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s))
-        };
+        let mut gl = unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
         if cfg!(debug_assertions) {
             let label: &'static str = match i {
                 0 => "deck0",
@@ -85,41 +134,46 @@ pub fn create_deck_stack(
                 2 => "deck2",
                 _ => "deck3",
             };
-            gl_debug::install(&mut ctx_gl, label);
+            gl_debug::install(&mut gl, label);
         }
 
-        let version = unsafe { ctx_gl.get_parameter_string(glow::VERSION) };
+        let version = unsafe { gl.get_parameter_string(glow::VERSION) };
         println!("[engine] deck context {i}: GL {version}");
 
-        let tex = create_shared_deck_texture(&ctx_gl);
-        textures.push(tex);
-        gl.push(ctx_gl);
+        let texture = create_shared_deck_texture(&gl);
+
+        // projectm_create() allocates GL resources immediately, so it needs
+        // this deck's context current (it is, from make_current above):
+        // those resources end up private to this context, same as the FBO.
+        let handle = unsafe { ffi::projectm_create() };
+        if handle.is_null() {
+            return Err(format!("projectm_create() returned NULL in deck {i} context"));
+        }
+        unsafe { ffi::projectm_set_window_size(handle, DECK_W as usize, DECK_H as usize) };
+
+        decks.push(Deck { context, surface, gl, texture, handle });
     }
 
-    Ok(DeckStack { contexts, surfaces, gl, textures })
+    Ok(decks)
 }
 
-/// Step 4 diagnostic test pattern, no projectM involved yet: a solid `color`
-/// fill with a `band_color` strip along the bottom of the frame, then
-/// copied into the deck's shared texture. The bottom-band placement is the
-/// end-to-end orientation test: far more reliable than a near-symmetric
-/// MilkDrop preset would be, and it stays "bottom" all the way through
-/// (texture, composite, window) specifically because nothing along that
-/// path flips rows. Assumes deck context `i`'s pbuffer is already current.
-pub fn render_test_pattern(gl: &glow::Context, tex: glow::NativeTexture, color: (f32, f32, f32), band_color: (f32, f32, f32)) {
-    unsafe {
-        gl.disable(glow::SCISSOR_TEST);
-        gl.clear_color(color.0, color.1, color.2, 1.0);
-        gl.clear(glow::COLOR_BUFFER_BIT);
-
-        let band_h = (DECK_H / 8).max(1) as i32; // GL row 0 is the bottom of the frame
-        gl.enable(glow::SCISSOR_TEST);
-        gl.scissor(0, 0, DECK_W as i32, band_h);
-        gl.clear_color(band_color.0, band_color.1, band_color.2, 1.0);
-        gl.clear(glow::COLOR_BUFFER_BIT);
-        gl.disable(glow::SCISSOR_TEST);
+/// TEMPORARY (Phase 2 only: real audio capture lands in Phase 3): synthesizes
+/// one PCM chunk so presets have something to react to. Ported from the
+/// earlier prototype's `synth_audio_chunk`, one call per deck per frame, sharing
+/// `sample_pos` across decks so their tones/kicks stay in phase.
+pub fn synth_audio_chunk(sample_pos: u64, deck_index: usize) -> Vec<f32> {
+    let mut buf = Vec::with_capacity(AUDIO_CHUNK * 2);
+    let base_freq = 220.0 + deck_index as f32 * 55.0;
+    for n in 0..AUDIO_CHUNK {
+        let t = (sample_pos + n as u64) as f32 / SAMPLE_RATE as f32;
+        let tone = (t * base_freq * std::f32::consts::TAU).sin() * 0.3;
+        let beat_phase = (t * 2.0) % 1.0; // ~2 Hz synthetic kick
+        let kick = if beat_phase < 0.02 { (1.0 - beat_phase / 0.02) * 0.6 } else { 0.0 };
+        let s = (tone + kick).clamp(-1.0, 1.0);
+        buf.push(s);
+        buf.push(s);
     }
-    copy_fbo0_to_shared_texture(gl, tex);
+    buf
 }
 
 /// Copies this context's own pbuffer (FBO 0) into its shared deck texture.

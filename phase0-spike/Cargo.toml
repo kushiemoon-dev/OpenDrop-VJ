@@ -1,0 +1,15 @@
+[package]
+name = "phase0-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+khronos-egl = { version = "6", features = ["dynamic"] }
+glow = "0.14"
+libloading = "0.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"

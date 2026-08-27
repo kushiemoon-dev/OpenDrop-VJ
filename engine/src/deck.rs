@@ -17,6 +17,7 @@ use glutin::surface::{PbufferSurface, Surface, SurfaceAttributesBuilder};
 use std::num::NonZeroU32;
 
 use crate::gl_debug;
+use crate::gl_state;
 
 pub const DECK_W: u32 = 1280;
 pub const DECK_H: u32 = 720;
@@ -96,6 +97,40 @@ pub fn create_deck_stack(
     }
 
     Ok(DeckStack { contexts, surfaces, gl, textures })
+}
+
+/// Step 4 diagnostic test pattern, no projectM involved yet: a solid `color`
+/// fill with a `band_color` strip along the bottom of the frame, then
+/// copied into the deck's shared texture. The bottom-band placement is the
+/// end-to-end orientation test: far more reliable than a near-symmetric
+/// MilkDrop preset would be, and it stays "bottom" all the way through
+/// (texture, composite, window) specifically because nothing along that
+/// path flips rows. Assumes deck context `i`'s pbuffer is already current.
+pub fn render_test_pattern(gl: &glow::Context, tex: glow::NativeTexture, color: (f32, f32, f32), band_color: (f32, f32, f32)) {
+    unsafe {
+        gl.disable(glow::SCISSOR_TEST);
+        gl.clear_color(color.0, color.1, color.2, 1.0);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+
+        let band_h = (DECK_H / 8).max(1) as i32; // GL row 0 is the bottom of the frame
+        gl.enable(glow::SCISSOR_TEST);
+        gl.scissor(0, 0, DECK_W as i32, band_h);
+        gl.clear_color(band_color.0, band_color.1, band_color.2, 1.0);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+        gl.disable(glow::SCISSOR_TEST);
+    }
+    copy_fbo0_to_shared_texture(gl, tex);
+}
+
+/// Copies this context's own pbuffer (FBO 0) into its shared deck texture.
+/// The exclusive `glCopyTexSubImage2D` in this whole pipeline: GPU-to-GPU,
+/// no `glReadPixels` anywhere near the render path.
+pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture) {
+    gl_state::reset_read_framebuffer_to_fbo0(gl);
+    unsafe {
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, DECK_W as i32, DECK_H as i32);
+    }
 }
 
 fn create_shared_deck_texture(gl: &glow::Context) -> glow::NativeTexture {

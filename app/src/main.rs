@@ -5,6 +5,7 @@ use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
+use opendrop_engine::compositor::Compositor;
 use opendrop_engine::deck::{self, DeckStack};
 use raw_window_handle::HasWindowHandle;
 use std::num::NonZeroU32;
@@ -19,12 +20,17 @@ use winit::window::{Window, WindowAttributes, WindowId};
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
 
+/// Step 4 deck test-pattern colors: same 4 flat colors the Phase 0 spike
+/// used for its own plumbing-isolation check (`PHASE0_DEBUG_SOLID`).
+const DECK_COLORS: [(f32, f32, f32); deck::DECK_COUNT] =
+    [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 1.0, 0.0)];
+const BAND_COLOR: (f32, f32, f32) = (1.0, 1.0, 1.0);
+
 struct WindowSlot {
     window: Window,
     surface: Surface<WindowSurface>,
     size: (u32, u32),
     occluded: bool,
-    clear_color: (f32, f32, f32),
 }
 
 impl WindowSlot {
@@ -37,16 +43,12 @@ impl WindowSlot {
         Ok(())
     }
 
-    fn render_and_swap(&self, ctx: &PossiblyCurrentContext, gl: &glow::Context) -> Result<(), String> {
+    fn render_and_swap(&self, ctx: &PossiblyCurrentContext, gl: &glow::Context, compositor: &Compositor) -> Result<(), String> {
         if self.occluded {
             return Ok(());
         }
         self.make_current_and_size_viewport(ctx, gl)?;
-        unsafe {
-            let (r, g, b) = self.clear_color;
-            gl.clear_color(r, g, b, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
-        }
+        compositor.blit_to_current_window(gl, self.size.0 as i32, self.size.1 as i32);
         self.window.pre_present_notify();
         self.surface.swap_buffers(ctx).map_err(|e| format!("swap_buffers failed: {e}"))
     }
@@ -58,8 +60,8 @@ struct AppState {
     main_ctx: PossiblyCurrentContext,
     control: WindowSlot,
     output: WindowSlot,
-    #[allow(dead_code)] // unused until deck rendering lands in step 4/5; kept alive for its Drop
     deck_stack: DeckStack,
+    compositor: Compositor,
     gl: glow::Context,
     refresh_interval: Duration,
     next_frame_at: Instant,
@@ -111,14 +113,35 @@ impl ApplicationHandler for App {
         // rendering on every call, is what keeps that from turning into a
         // self-sustaining busy loop (measured: ~10 kHz without this gate).
         if now >= state.next_frame_at {
+            // Step 4 plumbing, no projectM yet: each deck context paints its
+            // own test pattern into its own pbuffer and copies it into its
+            // shared texture; then, back on the main context, each texture
+            // is blitted into its quadrant of the composite FBO.
+            for i in 0..deck::DECK_COUNT {
+                if let Err(e) = state.deck_stack.contexts[i].make_current(&state.deck_stack.surfaces[i]) {
+                    eprintln!("[app] deck {i} make_current failed: {e}");
+                    continue;
+                }
+                deck::render_test_pattern(&state.deck_stack.gl[i], state.deck_stack.textures[i], DECK_COLORS[i], BAND_COLOR);
+            }
+            // Reacquire the main context (any of its surfaces works: the
+            // composite FBO belongs to the context, not the surface) before
+            // touching the compositor or either window.
+            if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
+                eprintln!("[app] failed to reacquire main context: {e}");
+            }
+            for i in 0..deck::DECK_COUNT {
+                state.compositor.blit_deck_into_quadrant(&state.gl, state.deck_stack.textures[i], i);
+            }
+
             // Two windows, one context: each surface is made current in
             // turn. Skipping render+swap for an Occluded(true) window is
             // load-bearing on Wayland: see the DontWait/WaitUntil comment
             // in bootstrap().
-            if let Err(e) = state.control.render_and_swap(&state.main_ctx, &state.gl) {
+            if let Err(e) = state.control.render_and_swap(&state.main_ctx, &state.gl, &state.compositor) {
                 eprintln!("[app] control window render failed: {e}");
             }
-            if let Err(e) = state.output.render_and_swap(&state.main_ctx, &state.gl) {
+            if let Err(e) = state.output.render_and_swap(&state.main_ctx, &state.gl, &state.compositor) {
                 eprintln!("[app] output window render failed: {e}");
             }
             state.next_frame_at += state.refresh_interval;
@@ -154,12 +177,7 @@ fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> R
     Ok((window, gl_config))
 }
 
-fn create_window_slot(
-    display: &Display,
-    gl_config: &Config,
-    window: Window,
-    clear_color: (f32, f32, f32),
-) -> Result<WindowSlot, String> {
+fn create_window_slot(display: &Display, gl_config: &Config, window: Window) -> Result<WindowSlot, String> {
     let raw_window_handle = window
         .window_handle()
         .map_err(|e| format!("window has no raw handle: {e}"))?
@@ -177,7 +195,6 @@ fn create_window_slot(
         surface,
         size: (size.width.max(1), size.height.max(1)),
         occluded: false,
-        clear_color,
     })
 }
 
@@ -225,8 +242,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .unwrap_or(FALLBACK_REFRESH_MILLIHERTZ);
     let refresh_interval = Duration::from_secs_f64(1000.0 / refresh_millihertz as f64);
 
-    let control = create_window_slot(&display, &gl_config, control_window, (0.10, 0.35, 0.85))?;
-    let output = create_window_slot(&display, &gl_config, output_window, (0.85, 0.35, 0.10))?;
+    let control = create_window_slot(&display, &gl_config, control_window)?;
+    let output = create_window_slot(&display, &gl_config, output_window)?;
 
     // set_swap_interval must run while its own surface is current, else EGL
     // applies it to whichever surface happens to be current instead.
@@ -242,6 +259,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     }
     let version = unsafe { gl.get_parameter_string(glow::VERSION) };
     println!("[app] main context: GL {version}");
+
+    // Compositor FBO/texture belong to whichever context is current at
+    // creation: main_ctx is current here (on control's surface), same as
+    // it will be every time the compositor's FBO is touched later.
+    let compositor = Compositor::new(&gl)?;
 
     main_ctx.make_current(&output.surface).map_err(|e| format!("make_current(output) failed: {e}"))?;
     output
@@ -281,6 +303,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         control,
         output,
         deck_stack,
+        compositor,
         gl,
         refresh_interval,
         next_frame_at: Instant::now(),

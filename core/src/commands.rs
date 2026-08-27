@@ -6,8 +6,9 @@
 
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Deck {
+    #[default]
     A,
     B,
 }
@@ -552,12 +553,6 @@ mod tests {
         playlist_next_calls: Vec<Deck>,
         playlist_prev_calls: Vec<Deck>,
         advance_overlay_queue_calls: Vec<i32>,
-    }
-
-    impl Default for Deck {
-        fn default() -> Self {
-            Deck::A
-        }
     }
 
     impl CommandContext for MockCtx {

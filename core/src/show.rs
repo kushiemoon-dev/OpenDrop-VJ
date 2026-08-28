@@ -28,10 +28,22 @@ pub fn bus_gain(bus: DeckBus, x: f64) -> f64 {
     }
 }
 
+impl DeckBus {
+    /// Cycles the bus assignment: `A -> B -> Off -> A`.
+    pub fn next(self) -> Self {
+        match self {
+            DeckBus::A => DeckBus::B,
+            DeckBus::B => DeckBus::Off,
+            DeckBus::Off => DeckBus::A,
+        }
+    }
+}
+
 pub struct Show {
     pub crossfader: f64,
     pub deck_bus: [DeckBus; 4],
     pub active_deck: Deck,
+    pub selected_slot: usize,
     pub slot_composites: [SlotComposite; 4],
     pub color_params_a: ColorParams,
     pub color_params_b: ColorParams,
@@ -43,6 +55,7 @@ impl Default for Show {
             crossfader: 0.0,
             deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],
             active_deck: Deck::A,
+            selected_slot: 0,
             slot_composites: [DEFAULT_SLOT_COMPOSITE; 4],
             color_params_a: DEFAULT_COLOR_PARAMS,
             color_params_b: DEFAULT_COLOR_PARAMS,
@@ -54,6 +67,23 @@ impl Show {
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
     pub fn slot_opacities(&self) -> [f64; 4] {
         std::array::from_fn(|i| bus_gain(self.deck_bus[i], self.crossfader))
+    }
+
+    /// Selects a physical slot (clicked deck-card) and derives `active_deck`
+    /// from its bus assignment. Port of `activeDeckLetter` in
+    /// `MixerLayout.svelte:62`: `Off` falls back to `A`, same as the
+    /// original ternary.
+    pub fn select_slot(&mut self, slot: usize) {
+        self.selected_slot = slot;
+        self.active_deck = if self.deck_bus[slot] == DeckBus::B { Deck::B } else { Deck::A };
+    }
+
+    /// Resolves a bus letter to the first physical slot assigned to it.
+    pub fn deck_bus_slot_for(&self, deck: Deck) -> Option<usize> {
+        self.deck_bus.iter().position(|&b| match deck {
+            Deck::A => b == DeckBus::A,
+            Deck::B => b == DeckBus::B,
+        })
     }
 }
 
@@ -181,6 +211,69 @@ mod tests {
             show.crossfader = 1.0;
             assert_eq!(show.slot_opacities()[2], 0.0);
             assert_eq!(show.slot_opacities()[3], 0.0);
+        }
+    }
+
+    mod deck_bus_next {
+        use super::*;
+
+        #[test]
+        fn cycles_a_to_b_to_off_and_wraps_to_a() {
+            assert_eq!(DeckBus::A.next(), DeckBus::B);
+            assert_eq!(DeckBus::B.next(), DeckBus::Off);
+            assert_eq!(DeckBus::Off.next(), DeckBus::A);
+        }
+    }
+
+    mod select_slot {
+        use super::*;
+
+        #[test]
+        fn slot_on_bus_a_selects_active_deck_a() {
+            let mut show = Show::default();
+            show.select_slot(0); // deck_bus[0] == A
+            assert_eq!(show.selected_slot, 0);
+            assert_eq!(show.active_deck, Deck::A);
+        }
+
+        #[test]
+        fn slot_on_bus_b_selects_active_deck_b() {
+            let mut show = Show::default();
+            show.select_slot(1); // deck_bus[1] == B
+            assert_eq!(show.selected_slot, 1);
+            assert_eq!(show.active_deck, Deck::B);
+        }
+
+        #[test]
+        fn slot_on_bus_off_falls_back_to_active_deck_a() {
+            let mut show = Show::default();
+            show.select_slot(2); // deck_bus[2] == Off
+            assert_eq!(show.selected_slot, 2);
+            assert_eq!(show.active_deck, Deck::A);
+        }
+    }
+
+    mod deck_bus_slot_for {
+        use super::*;
+
+        #[test]
+        fn returns_first_slot_assigned_to_deck_a() {
+            let show = Show::default();
+            assert_eq!(show.deck_bus_slot_for(Deck::A), Some(0));
+        }
+
+        #[test]
+        fn returns_first_slot_assigned_to_deck_b() {
+            let show = Show::default();
+            assert_eq!(show.deck_bus_slot_for(Deck::B), Some(1));
+        }
+
+        #[test]
+        fn returns_none_when_no_slot_assigned_to_deck() {
+            let mut show = Show::default();
+            show.deck_bus = [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off];
+            assert_eq!(show.deck_bus_slot_for(Deck::A), None);
+            assert_eq!(show.deck_bus_slot_for(Deck::B), None);
         }
     }
 

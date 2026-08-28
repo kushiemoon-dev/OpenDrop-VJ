@@ -144,6 +144,11 @@ struct AppState {
     #[allow(dead_code)]
     preflight_tx: mpsc::Sender<(usize, String, preflight::PreflightVerdict)>,
     preflight_rx: mpsc::Receiver<(usize, String, preflight::PreflightVerdict)>,
+    /// Name→path lookup for the full preset catalog (`show.preset_catalog`
+    /// carries the name+category metadata; resolving a selected name back
+    /// to a file for loading is app-side, since it's filesystem-backed).
+    #[allow(dead_code)]
+    path_by_name: HashMap<String, PathBuf>,
 }
 
 #[derive(Default)]
@@ -491,6 +496,24 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         println!("[app] deck {i} preset: {}", presets[i].display());
     }
 
+    // Full catalog scan (all presets, not just the 4 bootstrap picks above):
+    // builds the name→path lookup for resolving UI selections back to a
+    // file, plus the Vec<PresetMeta> (name + category) shown in the preset
+    // browser. The name is derived from the file's path relative to the
+    // preset dir, with `/` replaced by ` - ` and the extension stripped:
+    // stable and manifest-free, and it doubles as the categorization key
+    // `category_from_name` expects.
+    let all_milk = walk_milk_files(&preset_dir());
+    let mut path_by_name: HashMap<String, PathBuf> = HashMap::with_capacity(all_milk.len());
+    let mut catalog: Vec<opendrop_core::preset_index::PresetMeta> = Vec::with_capacity(all_milk.len());
+    for p in &all_milk {
+        let name = p.strip_prefix(&preset_dir()).unwrap_or(p).with_extension("").to_string_lossy().replace('/', " - ");
+        let category = opendrop_core::preset_index::category_from_name(&name);
+        catalog.push(opendrop_core::preset_index::PresetMeta { name: name.clone(), category });
+        path_by_name.insert(name, p.clone());
+    }
+    catalog.sort_by(|a, b| a.name.cmp(&b.name));
+
     let refresh_millihertz = control_window
         .current_monitor()
         .and_then(|m| m.refresh_rate_millihertz())
@@ -565,6 +588,9 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
 
     let (preflight_tx, preflight_rx) = mpsc::channel();
 
+    let mut show = Show::default();
+    show.preset_catalog = catalog;
+
     Ok(AppState {
         display,
         main_ctx,
@@ -578,7 +604,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         next_frame_at: Instant::now(),
         audio: opendrop_audio::spawn_capture(),
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
-        show: Show::default(),
+        show,
         registry: create_default_registry(),
         keymap: keymap::default_keymap(),
         blit_control_timer,
@@ -587,6 +613,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         perf_tick: 0,
         preflight_tx,
         preflight_rx,
+        path_by_name,
     })
 }
 

@@ -17,10 +17,19 @@
 //! up directly in `input_devices()`. That's the monitor source.
 const DEFAULT_SINK_ALIAS: &str = "default_sink";
 
+/// Picks the monitor source by its `list_input_devices` label, falling back
+/// to the default input device.
+///
+/// Uses the fallible `description()` for the same reason
+/// `list_input_devices` does (see its doc comment): `Display`/`.to_string()`
+/// panics when `description()` fails, and a panic here kills the capture
+/// thread outright, taking the Audio panel's device hot-swap down with it
+/// for the rest of the session.
 pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
-    use cpal::traits::HostTrait;
-    let monitor =
-        host.input_devices().ok().and_then(|mut devices| devices.find(|d| d.to_string() == DEFAULT_SINK_ALIAS));
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let monitor = host.input_devices().ok().and_then(|mut devices| {
+        devices.find(|d| d.description().map(|desc| desc.name() == DEFAULT_SINK_ALIAS).unwrap_or(false))
+    });
     if let Some(device) = monitor {
         return Some(device);
     }

@@ -25,6 +25,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 mod keymap;
 mod preflight;
+mod thumbnails;
 
 /// ponytail: paced off the control window's monitor only, read once at
 /// bootstrap. A VJ setup can have control and output on different-refresh

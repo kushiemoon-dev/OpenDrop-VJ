@@ -7,29 +7,48 @@ use arc_swap::ArcSwap;
 use cpal::Sample;
 use std::sync::Arc;
 
-pub(crate) fn spawn(snapshot: Arc<ArcSwap<AudioSnapshot>>) {
-    std::thread::spawn(move || run(snapshot));
+pub(crate) fn spawn(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>) {
+    std::thread::spawn(move || run(snapshot, rx));
 }
 
-fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>) {
-    let host = cpal::default_host();
-    let Some(device) = crate::device::select_input_device(&host) else {
-        eprintln!("[audio] no input device available: visuals will not react to system audio");
-        return;
-    };
-    match build_stream(&device, snapshot) {
+/// Opens the given device and starts playback, keeping the returned
+/// `cpal::Stream` alive keeps the callback running on cpal's own internal
+/// thread. `None` on any failure (already logged internally).
+fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Option<cpal::Stream> {
+    match build_stream(device, snapshot) {
         Ok(stream) => {
             use cpal::traits::StreamTrait;
             if let Err(e) = stream.play() {
                 eprintln!("[audio] failed to start capture stream: {e}: visuals will not react to system audio");
-                return;
+                return None;
             }
-            loop {
-                std::thread::park(); // keeps `stream` alive; the callback runs on cpal's own internal thread
-            }
+            Some(stream)
         }
-        Err(e) => eprintln!("[audio] failed to open input device: {e}: visuals will not react to system audio"),
+        Err(e) => {
+            eprintln!("[audio] failed to open input device: {e}: visuals will not react to system audio");
+            None
+        }
     }
+}
+
+/// Listens on `rx` for device-selection requests (see `AudioHandle::
+/// set_device`) and reopens the stream on the named device each time one
+/// arrives, without restarting this thread. Exits when `rx` closes (the
+/// `AudioHandle`: and its `device_tx`: was dropped).
+fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>) {
+    let host = cpal::default_host();
+    let mut current_stream = match crate::device::select_input_device(&host) {
+        Some(device) => open_and_play(&device, snapshot.clone()),
+        None => {
+            eprintln!("[audio] no input device available: visuals will not react to system audio");
+            None
+        }
+    };
+    while let Ok(name) = rx.recv() {
+        drop(current_stream.take()); // Drop stops the old cpal stream before opening the new one
+        current_stream = crate::device::select_input_device_by_name(&host, &name).and_then(|d| open_and_play(&d, snapshot.clone()));
+    }
+    // rx.recv() returned Err: sender (AudioHandle) dropped: process shutting down.
 }
 
 fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Result<cpal::Stream, String> {

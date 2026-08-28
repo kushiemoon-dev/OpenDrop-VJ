@@ -27,3 +27,20 @@ pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
     eprintln!("[audio] no \"{DEFAULT_SINK_ALIAS}\" (system-output monitor) input device: falling back to the default input device");
     host.default_input_device()
 }
+
+/// Labels of every available input device, for UI device pickers.
+///
+/// Uses `Display`/`.to_string()`, not a `.name()` method: `DeviceTrait` has
+/// none in cpal 0.18 (see module doc above). Same label `select_input_device`
+/// matches `DEFAULT_SINK_ALIAS` against.
+pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
+    use cpal::traits::HostTrait;
+    host.input_devices().map(|devices| devices.map(|d| d.to_string()).collect()).unwrap_or_default()
+}
+
+/// Selects an input device by its exact `list_input_devices` label, for
+/// hot-swapping the capture device by name.
+pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
+    use cpal::traits::HostTrait;
+    host.input_devices().ok()?.find(|d| d.to_string() == name)
+}

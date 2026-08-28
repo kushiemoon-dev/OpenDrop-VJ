@@ -3,6 +3,7 @@ pub mod deck;
 pub mod ffi;
 pub mod gl_debug;
 pub mod gl_state;
+pub mod thumbnail;
 pub mod timing;
 
 /// (major, minor, patch) of the linked libprojectM: proves bindgen + linking work.

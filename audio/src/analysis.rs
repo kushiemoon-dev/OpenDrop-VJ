@@ -34,6 +34,16 @@ pub fn bass_energy(bass_bins: &[u8]) -> f64 {
     (sum_sq / bass_bins.len() as f64).sqrt()
 }
 
+/// Normalized RMS level from a PCM buffer. Returns 0.0 for empty buffers.
+/// Feeds both the VU-meter UI widget and the beat-sync volume-peak trigger.
+/// PCM is assumed to be in the range [-1.0, 1.0] (normalized by capture).
+pub fn vu_level(pcm: &[f32]) -> f64 {
+    if pcm.is_empty() {
+        return 0.0;
+    }
+    (pcm.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / pcm.len() as f64).sqrt()
+}
+
 pub struct Analyser {
     fft: std::sync::Arc<dyn rustfft::Fft<f32>>,
     hann_window: Vec<f32>,       // precomputed once, length FFT_SIZE
@@ -134,6 +144,34 @@ mod tests {
         fn returns_0_for_silence() {
             let bins = [0u8; 51];
             assert_eq!(bass_energy(&bins), 0.0);
+        }
+    }
+
+    mod vu_level_tests {
+        use super::*;
+
+        #[test]
+        fn returns_zero_for_empty_buffer() {
+            assert_eq!(vu_level(&[]), 0.0);
+        }
+
+        #[test]
+        fn returns_zero_for_silence_buffer() {
+            let silence = vec![0.0f32; 1024];
+            assert_eq!(vu_level(&silence), 0.0);
+        }
+
+        #[test]
+        fn returns_absolute_value_for_constant_buffer() {
+            // For constant [c, c, ...], RMS = |c|
+            let constant = vec![0.5f32; 1024];
+            assert_eq!(vu_level(&constant), 0.5);
+
+            let negative = vec![-0.75f32; 512];
+            assert_eq!(vu_level(&negative), 0.75);
+
+            let ones = vec![1.0f32; 100];
+            assert_eq!(vu_level(&ones), 1.0);
         }
     }
 }

@@ -37,6 +37,12 @@ pub struct Deck {
     pub surface: Surface<PbufferSurface>,
     pub gl: glow::Context,
     pub texture: glow::NativeTexture,
+    /// This deck's own render size: `DECK_W`/`DECK_H` for the 4 live
+    /// decks, `THUMB_W`/`THUMB_H` for the thumbnail context. Kept so
+    /// `render_frame`'s copy sizes itself off the real surface instead of
+    /// the module-level live-deck constants.
+    width: u32,
+    height: u32,
     handle: ffi::projectm_handle,
     render_timer: PassTimer,
     copy_timer: PassTimer,
@@ -48,11 +54,21 @@ impl Deck {
     /// the file first, so a bad preset can't take down a running deck)
     /// hooks in here without touching how contexts are structured. Must be
     /// called while this deck's context is current.
-    pub fn load_preset(&self, path: &Path) -> Result<(), String> {
+    pub fn load_preset(&self, path: &Path, smooth_transition: bool) -> Result<(), String> {
         let c_path = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|e| format!("preset path {} is not a valid C string: {e}", path.display()))?;
-        unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), false) };
+        unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), smooth_transition) };
         Ok(())
+    }
+
+    /// Sets the soft-cut transition duration in seconds.
+    pub fn set_soft_cut_duration(&self, seconds: f64) {
+        unsafe { ffi::projectm_set_soft_cut_duration(self.handle, seconds) };
+    }
+
+    /// Sets the mesh size (width and height) for the visualization.
+    pub fn set_mesh_size(&self, width: usize, height: usize) {
+        unsafe { ffi::projectm_set_mesh_size(self.handle, width, height) };
     }
 
     /// Injects one chunk of PCM, renders one projectM frame: GL state
@@ -83,7 +99,7 @@ impl Deck {
         self.render_timer.end(&self.gl);
 
         self.copy_timer.begin(&self.gl);
-        copy_fbo0_to_shared_texture(&self.gl, self.texture);
+        copy_fbo0_to_shared_texture(&self.gl, self.texture, self.width as i32, self.height as i32);
         self.copy_timer.end(&self.gl);
     }
 
@@ -107,24 +123,7 @@ impl Drop for Deck {
 }
 
 pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrentContext) -> Result<Vec<Deck>, String> {
-    let deck_ctx_attrs = ContextAttributesBuilder::new()
-        .with_debug(cfg!(debug_assertions))
-        .with_profile(GlProfile::Core)
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
-        .with_sharing(anchor)
-        .build(None);
-
-    // All 4 created: none made current yet: before any of the 5 total
-    // contexts (this anchor included) is ever made current.
-    let mut not_current = Vec::with_capacity(DECK_COUNT);
-    for i in 0..DECK_COUNT {
-        let ctx = unsafe { display.create_context(config, &deck_ctx_attrs) }
-            .map_err(|e| format!("failed to create deck {i} GL context: {e}"))?;
-        not_current.push(ctx);
-    }
-    let mut contexts = not_current.into_iter().map(|c| c.treat_as_possibly_current());
-
-    let mut surfaces = Vec::with_capacity(DECK_COUNT);
+    let mut decks = Vec::with_capacity(DECK_COUNT);
     for i in 0..DECK_COUNT {
         let attrs = SurfaceAttributesBuilder::<PbufferSurface>::new().build(
             NonZeroU32::new(DECK_W).expect("DECK_W is nonzero"),
@@ -132,62 +131,100 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
         );
         let surface = unsafe { display.create_pbuffer_surface(config, &attrs) }
             .map_err(|e| format!("failed to create deck {i} pbuffer surface: {e}"))?;
-        surfaces.push(surface);
+
+        let label: &'static str = match i {
+            0 => "deck0",
+            1 => "deck1",
+            2 => "deck2",
+            _ => "deck3",
+        };
+        decks.push(create_one_deck_context(display, config, anchor, surface, DECK_W, DECK_H, label)?);
     }
-    let mut surfaces = surfaces.into_iter();
-
-    let mut decks = Vec::with_capacity(DECK_COUNT);
-    for i in 0..DECK_COUNT {
-        let context = contexts.next().expect("exactly DECK_COUNT contexts were created above");
-        let surface = surfaces.next().expect("exactly DECK_COUNT surfaces were created above");
-        context.make_current(&surface).map_err(|e| format!("failed to make deck {i} context current: {e}"))?;
-
-        let mut gl = unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
-        if cfg!(debug_assertions) {
-            let label: &'static str = match i {
-                0 => "deck0",
-                1 => "deck1",
-                2 => "deck2",
-                _ => "deck3",
-            };
-            gl_debug::install(&mut gl, label);
-        }
-
-        let version = unsafe { gl.get_parameter_string(glow::VERSION) };
-        println!("[engine] deck context {i}: GL {version}");
-
-        let texture = create_shared_deck_texture(&gl);
-
-        // projectm_create() allocates GL resources immediately, so it needs
-        // this deck's context current (it is, from make_current above):
-        // those resources end up private to this context, same as the FBO.
-        let handle = unsafe { ffi::projectm_create() };
-        if handle.is_null() {
-            return Err(format!("projectm_create() returned NULL in deck {i} context"));
-        }
-        unsafe { ffi::projectm_set_window_size(handle, DECK_W as usize, DECK_H as usize) };
-
-        let render_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} render_timer: {e}"))?;
-        let copy_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} copy_timer: {e}"))?;
-
-        decks.push(Deck { context, surface, gl, texture, handle, render_timer, copy_timer });
-    }
-
     Ok(decks)
 }
 
-/// Copies this context's own pbuffer (FBO 0) into its shared deck texture.
-/// The exclusive `glCopyTexSubImage2D` in this whole pipeline: GPU-to-GPU,
-/// no `glReadPixels` anywhere near the render path.
-pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture) {
+/// Builds one GL context sharing `anchor`'s object namespace, made current
+/// against the given (already-created) pbuffer `surface`, with its own
+/// `glow::Context` and projectM instance: the extracted per-deck body of
+/// `create_decks`.
+///
+/// `w`/`h` are parameters rather than `DECK_W`/`DECK_H` because a second
+/// caller used to build a smaller, 6th context here for preset thumbnails.
+/// That renderer now runs in a separate process (`app::thumbnail_child`),
+/// so `create_decks` is the only caller left; the sizes stay explicit
+/// because everything downstream of them: the shared texture's
+/// allocation, `copy_fbo0_to_shared_texture`'s copy region: has to agree
+/// with the surface actually created, not with a module constant.
+///
+/// Note: this used to be split across 3 loops in `create_decks` so that all
+/// 4 deck contexts were created before any of them (or `anchor`) was made
+/// current. That ordering isn't an EGL requirement: a share-group context
+/// can be created at any time regardless of which sibling is current.
+pub fn create_one_deck_context(
+    display: &Display,
+    config: &Config,
+    anchor: &PossiblyCurrentContext,
+    surface: Surface<PbufferSurface>,
+    w: u32,
+    h: u32,
+    debug_label: &'static str,
+) -> Result<Deck, String> {
+    let deck_ctx_attrs = ContextAttributesBuilder::new()
+        .with_debug(cfg!(debug_assertions))
+        .with_profile(GlProfile::Core)
+        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_sharing(anchor)
+        .build(None);
+    let not_current = unsafe { display.create_context(config, &deck_ctx_attrs) }
+        .map_err(|e| format!("failed to create {debug_label} GL context: {e}"))?;
+    let context = not_current.treat_as_possibly_current();
+    context
+        .make_current(&surface)
+        .map_err(|e| format!("failed to make {debug_label} context current: {e}"))?;
+
+    let mut gl = unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
+    if cfg!(debug_assertions) {
+        gl_debug::install(&mut gl, debug_label);
+    }
+
+    let version = unsafe { gl.get_parameter_string(glow::VERSION) };
+    println!("[engine] {debug_label} context: GL {version}");
+
+    let texture = create_shared_deck_texture(&gl, w, h);
+
+    // projectm_create() allocates GL resources immediately, so it needs
+    // this deck's context current (it is, from make_current above):
+    // those resources end up private to this context, same as the FBO.
+    let handle = unsafe { ffi::projectm_create() };
+    if handle.is_null() {
+        return Err(format!("projectm_create() returned NULL in {debug_label} context"));
+    }
+    unsafe { ffi::projectm_set_window_size(handle, w as usize, h as usize) };
+
+    let render_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} render_timer: {e}"))?;
+    let copy_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} copy_timer: {e}"))?;
+
+    Ok(Deck { context, surface, gl, texture, width: w, height: h, handle, render_timer, copy_timer })
+}
+
+/// Copies a `w` x `h` region of this context's own pbuffer (FBO 0) into its
+/// shared deck texture. The exclusive `glCopyTexSubImage2D` in this whole
+/// pipeline: GPU-to-GPU, no `glReadPixels` anywhere near the render path.
+///
+/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`: see
+/// `create_one_deck_context` on why that distinction is kept even now that
+/// every live caller passes the deck constants.
+pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture, w: i32, h: i32) {
     gl_state::reset_read_framebuffer_to_fbo0(gl);
     unsafe {
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, DECK_W as i32, DECK_H as i32);
+        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
     }
 }
 
-fn create_shared_deck_texture(gl: &glow::Context) -> glow::NativeTexture {
+/// Allocates the context's shared output texture at its own `w` x `h`: see
+/// `copy_fbo0_to_shared_texture` on why this is not `DECK_W`/`DECK_H`.
+fn create_shared_deck_texture(gl: &glow::Context, w: u32, h: u32) -> glow::NativeTexture {
     unsafe {
         let tex = gl.create_texture().expect("glGenTextures failed");
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
@@ -195,8 +232,8 @@ fn create_shared_deck_texture(gl: &glow::Context) -> glow::NativeTexture {
             glow::TEXTURE_2D,
             0,
             glow::RGBA8 as i32,
-            DECK_W as i32,
-            DECK_H as i32,
+            w as i32,
+            h as i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,

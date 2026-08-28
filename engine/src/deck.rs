@@ -37,6 +37,12 @@ pub struct Deck {
     pub surface: Surface<PbufferSurface>,
     pub gl: glow::Context,
     pub texture: glow::NativeTexture,
+    /// This deck's own render size: `DECK_W`/`DECK_H` for the 4 live
+    /// decks, `THUMB_W`/`THUMB_H` for the thumbnail context. Kept so
+    /// `render_frame`'s copy sizes itself off the real surface instead of
+    /// the module-level live-deck constants.
+    width: u32,
+    height: u32,
     handle: ffi::projectm_handle,
     render_timer: PassTimer,
     copy_timer: PassTimer,
@@ -93,7 +99,7 @@ impl Deck {
         self.render_timer.end(&self.gl);
 
         self.copy_timer.begin(&self.gl);
-        copy_fbo0_to_shared_texture(&self.gl, self.texture);
+        copy_fbo0_to_shared_texture(&self.gl, self.texture, self.width as i32, self.height as i32);
         self.copy_timer.end(&self.gl);
     }
 
@@ -182,7 +188,7 @@ pub fn create_one_deck_context(
     let version = unsafe { gl.get_parameter_string(glow::VERSION) };
     println!("[engine] {debug_label} context: GL {version}");
 
-    let texture = create_shared_deck_texture(&gl);
+    let texture = create_shared_deck_texture(&gl, w, h);
 
     // projectm_create() allocates GL resources immediately, so it needs
     // this deck's context current (it is, from make_current above):
@@ -196,21 +202,28 @@ pub fn create_one_deck_context(
     let render_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} render_timer: {e}"))?;
     let copy_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} copy_timer: {e}"))?;
 
-    Ok(Deck { context, surface, gl, texture, handle, render_timer, copy_timer })
+    Ok(Deck { context, surface, gl, texture, width: w, height: h, handle, render_timer, copy_timer })
 }
 
-/// Copies this context's own pbuffer (FBO 0) into its shared deck texture.
-/// The exclusive `glCopyTexSubImage2D` in this whole pipeline: GPU-to-GPU,
-/// no `glReadPixels` anywhere near the render path.
-pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture) {
+/// Copies a `w` x `h` region of this context's own pbuffer (FBO 0) into its
+/// shared deck texture. The exclusive `glCopyTexSubImage2D` in this whole
+/// pipeline: GPU-to-GPU, no `glReadPixels` anywhere near the render path.
+///
+/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`: the
+/// thumbnail context (`thumbnail::ThumbnailRenderer`) shares this code at
+/// 192x108 and would otherwise copy a 1280x720 region out of a 192x108
+/// pbuffer, 31 times per thumbnail.
+pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture, w: i32, h: i32) {
     gl_state::reset_read_framebuffer_to_fbo0(gl);
     unsafe {
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, DECK_W as i32, DECK_H as i32);
+        gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
     }
 }
 
-fn create_shared_deck_texture(gl: &glow::Context) -> glow::NativeTexture {
+/// Allocates the context's shared output texture at its own `w` x `h`: see
+/// `copy_fbo0_to_shared_texture` on why this is not `DECK_W`/`DECK_H`.
+fn create_shared_deck_texture(gl: &glow::Context, w: u32, h: u32) -> glow::NativeTexture {
     unsafe {
         let tex = gl.create_texture().expect("glGenTextures failed");
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
@@ -218,8 +231,8 @@ fn create_shared_deck_texture(gl: &glow::Context) -> glow::NativeTexture {
             glow::TEXTURE_2D,
             0,
             glow::RGBA8 as i32,
-            DECK_W as i32,
-            DECK_H as i32,
+            w as i32,
+            h as i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,

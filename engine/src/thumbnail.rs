@@ -22,7 +22,7 @@ use std::path::Path;
 use crate::deck::{create_one_deck_context, Deck};
 
 pub const THUMB_W: u32 = 192;
-pub const THUMB_H: u32 = 108; // reprend thumbnailer.svelte.ts:23-24
+pub const THUMB_H: u32 = 108; // matches thumbnailer.svelte.ts:23-24
 
 /// One dedicated deck-like context for offscreen preset thumbnail
 /// rendering. Wraps a single `Deck` on its own pbuffer, sized for
@@ -48,6 +48,14 @@ impl ThumbnailRenderer {
     /// audio-reactive presets don't render a frozen/silent frame), then
     /// reads back the result synchronously. Makes this renderer's context
     /// current itself: the caller doesn't need to.
+    ///
+    /// The returned RGBA8 rows are top-first (see `flip_rows_vertically`),
+    /// not the bottom-first order `glReadPixels` hands back.
+    ///
+    /// Nothing validates `path` before it reaches projectM here: this
+    /// renderer runs in-process, so a preset that crashes projectM takes
+    /// the whole app down with it. The out-of-process pre-flight check
+    /// (`app::preflight`) guards live deck loads only, never this path.
     pub fn render_thumbnail(&mut self, path: &Path) -> Result<Vec<u8>, String> {
         const WARMUP_FRAMES: usize = 30; // thumbnailer.svelte.ts:25
 
@@ -82,6 +90,52 @@ impl ThumbnailRenderer {
                 glow::PixelPackData::Slice(Some(&mut pixels)),
             );
         }
-        Ok(pixels)
+        Ok(flip_rows_vertically(&pixels, (THUMB_W * 4) as usize))
+    }
+}
+
+/// Reverses the row order of a tightly packed image, `row_bytes` per row.
+///
+/// `glReadPixels` returns rows bottom-first, GL's lower-left origin;
+/// `egui::ColorImage` (and therefore this pipeline's on-disk cache, which
+/// stores `render_thumbnail`'s bytes verbatim) wants them top-first.
+/// Reversed once here, at the source, so both the uploaded texture and the
+/// cache file end up the right way up and no consumer needs a compensating
+/// UV flip. egui_glow does exactly this in its own `read_screen_rgba`
+/// (egui_glow 0.36.1 src/painter.rs:678-682).
+fn flip_rows_vertically(pixels: &[u8], row_bytes: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pixels.len());
+    for row in pixels.chunks_exact(row_bytes).rev() {
+        out.extend_from_slice(row);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod flip_rows_vertically_tests {
+        use super::*;
+
+        #[test]
+        fn reverses_row_order_and_keeps_each_row_intact() {
+            // 2 pixels wide, 3 rows tall, 1 byte per "pixel" for legibility.
+            let pixels = [1, 1, 2, 2, 3, 3];
+            assert_eq!(flip_rows_vertically(&pixels, 2), vec![3, 3, 2, 2, 1, 1]);
+        }
+
+        #[test]
+        fn is_its_own_inverse() {
+            let pixels: Vec<u8> = (0..24).collect();
+            let once = flip_rows_vertically(&pixels, 4);
+            assert_eq!(flip_rows_vertically(&once, 4), pixels);
+        }
+
+        #[test]
+        fn a_single_row_image_is_unchanged() {
+            let pixels = [7, 8, 9, 10];
+            assert_eq!(flip_rows_vertically(&pixels, 4), pixels.to_vec());
+        }
     }
 }

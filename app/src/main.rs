@@ -38,8 +38,24 @@ const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
 /// Culled (opacity ≤ 0.001) decks still render, just at this much lower
 /// rate: not stopped outright: so a deck doesn't show a visible cold
 /// start (projectM's per-preset warm-up/transition state going stale) the
-/// moment the crossfader brings it back in.
+/// moment the crossfader brings it back in. This is the `Eco` invisible-mode
+/// throttle (Step 20): `Pause` skips rendering the deck entirely instead,
+/// and `Off` ignores this constant altogether.
 const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
+
+/// Power mode applied to invisible (opacity ≤ 0.001) decks: selected from
+/// the Quality panel (Step 20). `Eco` reproduces the original always-on
+/// behavior (throttled to `IDLE_DECK_INTERVAL`, so the texture stays warm
+/// for a fast comeback); `Pause` skips rendering the deck entirely while
+/// invisible, so its texture keeps showing whatever frame it last rendered;
+/// `Off` disables the throttle, rendering invisible decks at full rate same
+/// as visible ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InvisibleMode {
+    Eco,
+    Pause,
+    Off,
+}
 
 /// Per-slot compositor input driven by the live show state: opacity from
 /// `bus_gain(deck_bus[slot], crossfader)`, composite config directly from
@@ -70,6 +86,7 @@ enum Panel {
     PresetBrowser,
     Playlists,
     Audio,
+    Quality,
 }
 
 struct WindowSlot {
@@ -172,6 +189,14 @@ struct AppState {
     last_vu_level: f64,
     /// Per-deck throttle for culled (invisible) decks: see IDLE_DECK_INTERVAL.
     deck_next_render_at: [Instant; deck::DECK_COUNT],
+    /// Power mode applied to invisible decks: see `InvisibleMode`. Written
+    /// by the Quality panel, read each tick by the per-deck render loop.
+    invisible_mode: InvisibleMode,
+    /// Mesh-size change requested from the Quality panel's per-deck preset
+    /// buttons. Drained (and applied via `Deck::set_mesh_size`) at the point
+    /// in the per-deck loop where that deck's context is already current:
+    /// never call `set_mesh_size` outside a current context.
+    pending_mesh_size: [Option<(usize, usize)>; deck::DECK_COUNT],
     show: Show,
     registry: CommandRegistry,
     keymap: HashMap<Key, CommandId>,
@@ -274,6 +299,9 @@ fn ui_root(
     last_vu_level: f64,
     load_request: &mut Option<String>,
     t0: Instant,
+    refresh_interval: &mut Duration,
+    invisible_mode: &mut InvisibleMode,
+    pending_mesh_size: &mut [Option<(usize, usize)>; deck::DECK_COUNT],
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -281,6 +309,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
             ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
             ui.selectable_value(active_panel, Panel::Audio, "Audio");
+            ui.selectable_value(active_panel, Panel::Quality, "Quality");
         });
         ui.separator();
         match active_panel {
@@ -295,6 +324,9 @@ fn ui_root(
             }
             Panel::Audio => {
                 ui::audio::show(ui, audio, input_devices, selected_input_device, last_vu_level);
+            }
+            Panel::Quality => {
+                ui::quality::show(ui, refresh_interval, invisible_mode, pending_mesh_size);
             }
         }
     });
@@ -440,15 +472,30 @@ impl ApplicationHandler for App {
 
             for i in 0..deck::DECK_COUNT {
                 let visible = layer_inputs[i].opacity > 0.001;
-                if !visible && now < state.deck_next_render_at[i] {
+                // See `InvisibleMode`: `Eco` is the original always-on
+                // throttle, `Pause` skips rendering this deck entirely while
+                // invisible (its texture keeps showing the last frame it
+                // rendered), `Off` renders invisible decks at full rate.
+                let should_render = match (visible, state.invisible_mode) {
+                    (true, _) | (false, InvisibleMode::Off) => true,
+                    (false, InvisibleMode::Eco) => now >= state.deck_next_render_at[i],
+                    (false, InvisibleMode::Pause) => false,
+                };
+                if !should_render {
                     continue;
                 }
                 if let Err(e) = state.decks[i].context.make_current(&state.decks[i].surface) {
                     eprintln!("[app] deck {i} make_current failed: {e}");
                     continue;
                 }
+                // Applied here, not before make_current above: `set_mesh_size`
+                // is an FFI call into this deck's projectM instance and must
+                // run while its context is current, same as `render_frame`.
+                if let Some((w, h)) = state.pending_mesh_size[i].take() {
+                    state.decks[i].set_mesh_size(w, h);
+                }
                 state.decks[i].render_frame(&audio.pcm);
-                if !visible {
+                if !visible && state.invisible_mode == InvisibleMode::Eco {
                     state.deck_next_render_at[i] = now + IDLE_DECK_INTERVAL;
                 }
             }
@@ -518,6 +565,9 @@ impl ApplicationHandler for App {
                 audio,
                 input_devices,
                 selected_input_device,
+                refresh_interval,
+                invisible_mode,
+                pending_mesh_size,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -545,6 +595,9 @@ impl ApplicationHandler for App {
                     last_vu_level,
                     &mut preset_load_request,
                     t0,
+                    refresh_interval,
+                    invisible_mode,
+                    pending_mesh_size,
                 );
             });
             if let Some(name) = preset_load_request {
@@ -903,6 +956,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         selected_input_device: None,
         last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
+        invisible_mode: InvisibleMode::Eco,
+        pending_mesh_size: [None; deck::DECK_COUNT],
         show,
         registry: create_default_registry(),
         keymap: keymap::default_keymap(),

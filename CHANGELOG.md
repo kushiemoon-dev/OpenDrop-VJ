@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.0] - 2026-07-22
 
-First stable release — the 4-deck mixer, GPU compositor, automation (snapshots/timeline/LFO),
+First stable release: the 4-deck mixer, GPU compositor, automation (snapshots/timeline/LFO),
 preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro outputs
 (NDI/Spout/virtual-cam/OBS) described in the README are all in place and exercised end to end.
 
@@ -15,24 +15,24 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 
 - Video loop composited as a real WebGL texture layer inside the GPU compositor (5th layer,
   uploaded via `texImage2D` from the same rAF loop as the 4 deck canvases), replacing the old DOM
-  `<video>` + CSS `mix-blend-mode:screen` approach — unreliable across two independently
+  `<video>` + CSS `mix-blend-mode:screen` approach, unreliable across two independently
   GPU-composited surfaces on some Chromium/Mesa/Wayland stacks, where the video stayed invisible
   regardless of blend mode. Decks composite among themselves first, unchanged; the video layer
-  draws last, on top, at its own opacity — visible at exactly its own slider strength regardless of
+  draws last, on top, at its own opacity, visible at exactly its own slider strength regardless of
   deck opacity/crossfader position.
 
 ### Fixed
 
 - Render loop could die permanently: a CDN-hosted video clip is cross-origin, and the `<video>`
   element had no `crossorigin` attribute, so `texImage2D` threw an uncaught `SecurityError` that
-  broke the `requestAnimationFrame` chain — nothing rendered again until reload. Fixed the
+  broke the `requestAnimationFrame` chain, and nothing rendered again until reload. Fixed the
   attribute and wrapped the render tick in try/catch so no future per-frame error can freeze the
   whole app again either.
-- `sendVideo` threw `DataCloneError` on `BroadcastChannel.postMessage` — a raw Svelte 5
+- `sendVideo` threw `DataCloneError` on `BroadcastChannel.postMessage`: a raw Svelte 5
   `$state`-proxied clip object isn't structured-cloneable; same class of bug already handled for
   `sendOverlays`/`sendQVars`/`sendPoll`, `sendVideo` was the one missed.
 - Video clip list rows collapsed to ~2px tall instead of scrolling normally once there were enough
-  clips to overflow the list's `max-height` — `overflow:hidden` (needed for name ellipsis) disables
+  clips to overflow the list's `max-height`. `overflow:hidden` (needed for name ellipsis) disables
   flexbox's automatic minimum-size protection; `flex-shrink:0` restores it.
 
 ## [0.9.0] - 2026-07-20
@@ -56,14 +56,14 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 
 ### Security
 
-- Pinned `axios` to `>=1.18.0` via pnpm override (transitive dependency of `@retconned/kick-js`, `wait-on`, `audify`) — resolves 3 moderate DoS advisories
+- Pinned `axios` to `>=1.18.0` via pnpm override (transitive dependency of `@retconned/kick-js`, `wait-on`, `audify`), resolving 3 moderate DoS advisories
 
 ## [0.8.0] - 2026-07-16
 
 ### Added
 
 - Live video input as a deck source: webcam and NDI network sources (Electron)
-- Runtime `.milk`/`.prjm` MilkDrop preset import via drag-and-drop — no rebuild needed
+- Runtime `.milk`/`.prjm` MilkDrop preset import via drag-and-drop, no rebuild needed
 
 ### Fixed
 
@@ -71,7 +71,7 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 
 ### Changed
 
-- `+page.svelte` (2,570+ lines) further split — 15 new engine stores and action modules extracted (deck/mixer state, beat-sync, MIDI connection/mapping, audio source, Electron feature toggles, run status, share-set, the visualizer startup sequence, output-window management); down to ~1,900 lines
+- `+page.svelte` (2,570+ lines) further split: 15 new engine stores and action modules extracted (deck/mixer state, beat-sync, MIDI connection/mapping, audio source, Electron feature toggles, run status, share-set, the visualizer startup sequence, output-window management); down to ~1,900 lines
 
 ## [0.7.0] - 2026-07-11
 
@@ -86,14 +86,14 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 
 ### Changed
 
-- `+page.svelte` (1,500+ lines) split into focused engine modules and stores — cloud presets, overlay, video-loop playback, and playlist subsystems extracted, plus 14 sidebar sections (stage-common and mixer-only) pulled into standalone components; each extraction preceded by characterization/reactive-wrapper tests
+- `+page.svelte` (1,500+ lines) split into focused engine modules and stores: cloud presets, overlay, video-loop playback, and playlist subsystems extracted, plus 14 sidebar sections (stage-common and mixer-only) pulled into standalone components; each extraction preceded by characterization/reactive-wrapper tests
 - README rewritten for the current 4-deck feature set
 
 ## [0.4.1] - 2026-06-15
 
 ### Added
 
-- All 1754 Milkdrop presets now available (up from 100) via lazy-loading — names appear instantly, data loads on first use
+- All 1754 Milkdrop presets now available (up from 100) via lazy-loading: names appear instantly, data loads on first use
 
 ### Fixed
 
@@ -104,21 +104,21 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 ## [0.4.0] - 2026-06-14
 
 > **Complete rewrite**: web-first stack (SvelteKit + Butterchurn + Electron)
-> replacing Tauri / Rust / projectM C++ entirely. Zero native toolchain —
+> replacing Tauri / Rust / projectM C++ entirely. Zero native toolchain:
 > runs on Windows, Linux, and Mac out of the box.
 
 ### Added
 
 - **Butterchurn** visualizer engine (Milkdrop WebGL, 100 presets via `butterchurn-presets`)
-- **2 independent decks A/B** — separate Butterchurn instances on their own canvases
+- **2 independent decks A/B**: separate Butterchurn instances on their own canvases
 - **Crossfader** A↔B via opacity (0–1 slider, arrow-key shortcuts ±0.05)
 - **Per-deck playlists**: sequential / shuffle auto-cycle, 2–120 s interval, add/remove/prev/next
-- **Beat-sync / BPM**: `BeatDetector` — bass-energy detection, 43-frame history, 300 ms cooldown
+- **Beat-sync / BPM**: `BeatDetector`, bass-energy detection, 43-frame history, 300 ms cooldown
 - **MIDI mapping** (Web MIDI API, Chromium/Electron only): CC/notes → crossfader, playlists
 - **Favorites** ★ persisted in localStorage
 - **Author-derived tag filters** with chip UI
 - Live **preset search**
-- Detached **output window** at `/output` — designed for OBS Browser Source
+- Detached **output window** at `/output`, designed for OBS Browser Source
 - Audio sources: mic, device picker, audio file, `getDisplayMedia` (display capture)
 - **System audio loopback** via Electron `desktopCapturer` (Linux/Windows)
 - **Export / import** playlists as JSON (`opendrop-playlists.json`)
@@ -129,14 +129,14 @@ preset/video libraries, control surfaces (MIDI/OSC/Ableton Link/remote), and pro
 ### Changed
 
 - Dropped Tauri / Rust / projectM C++ / OpenGL renderer sidecar / v4l2loopback / Spout / NDI
-- App is a SvelteKit SPA (`adapter-static`, `ssr: false`) — Electron wraps it as a native desktop app
+- App is a SvelteKit SPA (`adapter-static`, `ssr: false`); Electron wraps it as a native desktop app
 - Bumped concurrently to v10, electron-builder to v26 (security fixes)
 - CI: pnpm/action-setup v4, softprops/action-gh-release v2, Node.js 22 on all runners
 - pnpm v11: overrides and allowBuilds moved to `pnpm-workspace.yaml`
 
 ### Known Limitations
 
-- Blend modes not implemented — opacity crossfade only
+- Blend modes not implemented, opacity crossfade only
 - 100 / 1754 presets loaded (full library load deferred)
 - Web MIDI: Chromium / Electron only (Firefox / Safari unsupported)
 - System audio loopback: Electron only (unavailable in plain browser)

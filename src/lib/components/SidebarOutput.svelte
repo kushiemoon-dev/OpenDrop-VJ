@@ -66,7 +66,7 @@
 		</button>
 	{/if}
 	{#if outputOpen && !isElectron}
-		<span class="label" style="color:var(--info)">Output window open — use as OBS Browser Source</span>
+		<span class="label" style="color:var(--info)">Output window open: use as OBS Browser Source</span>
 	{/if}
 	{#if showStreamPanel && isElectron}
 		<div class="stream-panel">

@@ -31,7 +31,7 @@
 		ws.onopen = () => { connected = true; connecting = false; };
 		ws.onclose = () => { connected = false; connecting = false; };
 		ws.onerror = () => {
-			error = `Connection failed — check that OpenDrop is open and on the same network.`;
+			error = `Connection failed. Check that OpenDrop is open and on the same network.`;
 			connected = false;
 			connecting = false;
 		};

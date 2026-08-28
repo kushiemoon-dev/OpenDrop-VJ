@@ -1637,7 +1637,7 @@
 	{#if runStatusState.status === 'idle' && !shareSetState.pending}
 		<div class="overlay">
 			<h1 class="logo">OpenDrop</h1>
-			<p class="tagline">Milkdrop visualizer — web-first</p>
+			<p class="tagline">Milkdrop visualizer, web-first</p>
 			<button class="btn-primary" onclick={startVisualizer}>▶ Start</button>
 		</div>
 	{/if}

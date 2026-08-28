@@ -407,7 +407,7 @@ export class Compositor {
       if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
         const info = gl.getShaderInfoLog(shader)
         gl.deleteShader(shader)
-        throw new Error(`Compositor: shader compile failed — ${info}`)
+        throw new Error(`Compositor: shader compile failed: ${info}`)
       }
       return shader
     }
@@ -417,7 +417,7 @@ export class Compositor {
     gl.linkProgram(program)
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
       const info = gl.getProgramInfoLog(program)
-      throw new Error(`Compositor: program link failed — ${info}`)
+      throw new Error(`Compositor: program link failed: ${info}`)
     }
     return program
   }

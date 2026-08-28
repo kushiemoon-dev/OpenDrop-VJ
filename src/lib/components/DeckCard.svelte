@@ -70,7 +70,7 @@
         style:color={BUS_COLORS[bus ?? 'off']}
         onclick={(e) => { e.stopPropagation(); onCycleBus?.() }}
         type="button"
-        title="Bus: {bus ?? 'off'} — click to change"
+        title="Bus: {bus ?? 'off'}, click to change"
       >{BUS_LABELS[bus ?? 'off']}</button>
       <button
         class="deck-card__run"

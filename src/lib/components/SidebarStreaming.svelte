@@ -225,7 +225,7 @@
 		{#if hasKickCreds}<span class="secret-ok" title="Credentials saved">✓</span>{/if}
 	</div>
 	<p class="hint">
-		Kick has no public chat-read API — log into kick.com in a browser, open devtools
+		Kick has no public chat-read API. Log into kick.com in a browser, open devtools
 		(Application tab → Cookies for the session cookie, Network for the bearer token
 		and the XSRF token), paste the three values above, then Save. Unofficial method,
 		may stop working without notice.

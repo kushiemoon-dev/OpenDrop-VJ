@@ -21,7 +21,7 @@ export function isMilkPresetFilename(filename: string): boolean {
  */
 export async function convertMilkPreset(text: string): Promise<object> {
   if (!text.includes('[preset00]')) {
-    throw new Error('Not a MilkDrop preset — missing [preset00] header.')
+    throw new Error('Not a MilkDrop preset: missing [preset00] header.')
   }
   const { convertPreset } = await import('milkdrop-preset-converter')
   return convertPreset(text)

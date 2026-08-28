@@ -101,7 +101,7 @@ export async function startNdiDeck(slot: number, canvas: HTMLCanvasElement): Pro
     if (!res?.ok) {
       slotState(slot).active = false
       slotState(slot).error =
-        res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.'
+        res?.error ?? 'NDI SDK not found; install the NDI Runtime from ndi.video.'
       return
     }
     tick(slot, canvas)

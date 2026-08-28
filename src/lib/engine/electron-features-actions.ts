@@ -27,7 +27,7 @@ export async function toggleNdi(): Promise<void> {
     if (res?.ok) electronFeaturesState.ndi.active = true
     else
       electronFeaturesState.ndi.error =
-        res?.error ?? 'NDI SDK not found — install the NDI Runtime from ndi.video.'
+        res?.error ?? 'NDI SDK not found; install the NDI Runtime from ndi.video.'
   }
 }
 

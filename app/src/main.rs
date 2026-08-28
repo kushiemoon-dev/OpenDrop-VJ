@@ -69,6 +69,7 @@ enum Panel {
     Decks,
     PresetBrowser,
     Playlists,
+    Audio,
 }
 
 struct WindowSlot {
@@ -153,6 +154,17 @@ struct AppState {
     /// latest PCM chunk + energy, read once per tick and shared by every
     /// deck due that tick.
     audio: opendrop_audio::AudioHandle,
+    /// Labels of every available input device, enumerated once at bootstrap
+    /// via `opendrop_audio::list_input_devices()` and cached here for the
+    /// Audio panel's dropdown (Step 19). The brief is explicit that the
+    /// device list doesn't change mid-session, so this is never re-scanned
+    /// per frame.
+    input_devices: Vec<String>,
+    /// Name of the input device currently selected in the Audio panel's
+    /// dropdown, if the user has picked one explicitly via `AudioHandle::
+    /// set_device`. `None` means still on whichever device `spawn_capture`
+    /// chose by default (`opendrop_audio::device::select_input_device`).
+    selected_input_device: Option<String>,
     /// RMS of the current tick's PCM snapshot (`opendrop_audio::analysis::
     /// vu_level`), computed once per tick by the beat-sync engine wiring and
     /// stored here so a later panel (Step 19's VU meter) can read it without
@@ -256,6 +268,10 @@ fn ui_root(
     preset_search_query: &mut String,
     thumb_queue: &mut Vec<ThumbJob>,
     thumbnail_textures: &HashMap<String, egui::TextureHandle>,
+    audio: &opendrop_audio::AudioHandle,
+    input_devices: &Vec<String>,
+    selected_input_device: &mut Option<String>,
+    last_vu_level: f64,
     load_request: &mut Option<String>,
     t0: Instant,
 ) {
@@ -264,6 +280,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Decks, "Decks");
             ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
             ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
+            ui.selectable_value(active_panel, Panel::Audio, "Audio");
         });
         ui.separator();
         match active_panel {
@@ -275,6 +292,9 @@ fn ui_root(
             }
             Panel::Playlists => {
                 ui::playlists::show(ui, show, t0);
+            }
+            Panel::Audio => {
+                ui::audio::show(ui, audio, input_devices, selected_input_device, last_vu_level);
             }
         }
     });
@@ -468,17 +488,20 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
-            // Copied out (Instant is Copy) before the destructure below so
-            // the Playlists panel's Tap Tempo button can compute its own
-            // `t0.elapsed()` at click time. `t0` itself is never named in
-            // that destructure, so `state.t0` stays readable either way.
+            // Copied out (Instant/f64 are Copy) before the destructure below
+            // so the Playlists panel's Tap Tempo button can compute its own
+            // `t0.elapsed()` at click time, and the Audio panel's VU meter
+            // can read this tick's level. Neither is named in that
+            // destructure, so `state.t0`/`state.last_vu_level` stay readable
+            // either way.
             let t0 = state.t0;
+            let last_vu_level = state.last_vu_level;
 
-            // Decks (Step 16), preset-browser (Step 17), and playlists (Step
-            // 18) panels: real content, replacing the Step 2 placeholder.
-            // Destructured so the closure below only borrows the fields it
-            // needs, disjoint from `egui_glow` itself (see `ui_root`'s doc
-            // comment).
+            // Decks (Step 16), preset-browser (Step 17), playlists (Step
+            // 18), and audio (Step 19) panels: real content, replacing the
+            // Step 2 placeholder. Destructured so the closure below only
+            // borrows the fields it needs, disjoint from `egui_glow` itself
+            // (see `ui_root`'s doc comment).
             let AppState {
                 egui_glow,
                 control,
@@ -492,6 +515,9 @@ impl ApplicationHandler for App {
                 preset_search_query,
                 thumb_queue,
                 thumbnail_textures,
+                audio,
+                input_devices,
+                selected_input_device,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -513,6 +539,10 @@ impl ApplicationHandler for App {
                     preset_search_query,
                     thumb_queue,
                     thumbnail_textures,
+                    audio,
+                    input_devices,
+                    selected_input_device,
+                    last_vu_level,
                     &mut preset_load_request,
                     t0,
                 );
@@ -866,6 +896,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         next_frame_at: Instant::now(),
         t0: Instant::now(),
         audio: opendrop_audio::spawn_capture(),
+        // Step 19: enumerated once here at bootstrap and cached; the Audio
+        // panel never calls `list_input_devices()` itself, per the brief
+        // ("the list doesn't change mid-session").
+        input_devices: opendrop_audio::list_input_devices(),
+        selected_input_device: None,
         last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         show,

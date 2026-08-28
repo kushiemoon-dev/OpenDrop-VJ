@@ -5,3 +5,4 @@ pub mod audio;
 pub mod decks;
 pub mod playlists;
 pub mod preset_browser;
+pub mod quality;

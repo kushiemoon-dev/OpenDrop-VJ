@@ -465,7 +465,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     }
     for (i, dk) in decks.iter().enumerate() {
         dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
-        dk.load_preset(&presets[i])?;
+        dk.load_preset(&presets[i], false)?;
         println!("[app] deck {i} preset: {}", presets[i].display());
     }
 

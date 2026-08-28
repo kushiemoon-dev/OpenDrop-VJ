@@ -15,6 +15,7 @@ use opendrop_engine::thumbnail::ThumbnailRenderer;
 use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -788,8 +789,14 @@ fn preset_display_name(preset_dir: &Path, path: &Path) -> String {
 /// not multi-user-safe on a shared machine either. A non-absolute
 /// `XDG_CACHE_HOME` is ignored, as the XDG spec requires.
 fn thumbnail_cache_dir() -> PathBuf {
-    let xdg = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from);
-    let home_cache = std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".cache"));
+    thumbnail_cache_dir_from(std::env::var_os("XDG_CACHE_HOME"), std::env::var_os("HOME"))
+}
+
+/// The env-reading half of `thumbnail_cache_dir`, split out so the fallback
+/// order is testable without mutating process-global environment state.
+fn thumbnail_cache_dir_from(xdg_cache_home: Option<OsString>, home: Option<OsString>) -> PathBuf {
+    let xdg = xdg_cache_home.map(PathBuf::from);
+    let home_cache = home.map(PathBuf::from).map(|h| h.join(".cache"));
     xdg.into_iter()
         .chain(home_cache)
         .find(|p| p.is_absolute())
@@ -1076,4 +1083,64 @@ fn main() {
     let event_loop = EventLoop::new().expect("failed to create winit event loop");
     let mut app = App::default();
     event_loop.run_app(&mut app).expect("event loop exited with an error");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod preset_display_name_tests {
+        use super::*;
+
+        #[test]
+        fn strips_the_preset_root_and_the_extension() {
+            let name = preset_display_name(Path::new("/presets"), Path::new("/presets/Fractal/Blobby/306 nz+.milk"));
+            assert_eq!(name, "Fractal - Blobby - 306 nz+");
+        }
+
+        #[test]
+        fn a_file_directly_under_the_root_keeps_just_its_stem() {
+            assert_eq!(preset_display_name(Path::new("/presets"), Path::new("/presets/Solo.milk")), "Solo");
+        }
+
+        #[test]
+        fn a_path_outside_the_root_falls_back_to_the_whole_path() {
+            let name = preset_display_name(Path::new("/presets"), Path::new("/elsewhere/Odd.milk"));
+            assert_eq!(name, " - elsewhere - Odd");
+        }
+    }
+
+    mod thumbnail_cache_dir_tests {
+        use super::*;
+
+        fn os(s: &str) -> Option<OsString> {
+            Some(OsString::from(s))
+        }
+
+        #[test]
+        fn prefers_xdg_cache_home() {
+            let dir = thumbnail_cache_dir_from(os("/xdg"), os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/xdg/opendrop/thumbnails"));
+        }
+
+        #[test]
+        fn falls_back_to_home_dot_cache() {
+            let dir = thumbnail_cache_dir_from(None, os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));
+        }
+
+        #[test]
+        fn ignores_a_relative_xdg_cache_home() {
+            let dir = thumbnail_cache_dir_from(os("relative/cache"), os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));
+        }
+
+        #[test]
+        fn never_lands_directly_in_a_shared_tmp_root() {
+            // Even the last-resort branch nests under its own subdirectory
+            // rather than a bare, world-predictable path.
+            let dir = thumbnail_cache_dir_from(None, None);
+            assert!(dir.ends_with("opendrop/thumbnails"));
+        }
+    }
 }

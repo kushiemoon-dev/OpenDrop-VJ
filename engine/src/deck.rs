@@ -22,6 +22,7 @@ use std::path::Path;
 use crate::ffi;
 use crate::gl_debug;
 use crate::gl_state;
+use crate::timing::PassTimer;
 
 pub const DECK_W: u32 = 1280;
 pub const DECK_H: u32 = 720;
@@ -42,6 +43,8 @@ pub struct Deck {
     pub gl: glow::Context,
     pub texture: glow::NativeTexture,
     handle: ffi::projectm_handle,
+    render_timer: PassTimer,
+    copy_timer: PassTimer,
 }
 
 impl Deck {
@@ -64,7 +67,13 @@ impl Deck {
     /// did to blend/framebuffer/viewport state): then copies the result
     /// into this deck's shared texture. Must be called while this deck's
     /// context is current.
-    pub fn render_frame(&self, pcm: &[f32]) {
+    ///
+    /// Render and copy are timed as two sequential `GL_TIME_ELAPSED`
+    /// queries (never nested: see `timing::PassTimer`), each read back
+    /// non-blockingly and inline, so timing this costs nothing beyond the
+    /// query calls themselves: no extra context switch.
+    pub fn render_frame(&mut self, pcm: &[f32]) {
+        self.render_timer.begin(&self.gl);
         unsafe {
             ffi::projectm_pcm_add_float(
                 self.handle,
@@ -76,7 +85,19 @@ impl Deck {
             ffi::projectm_opengl_render_frame(self.handle);
             gl_state::restore(&self.gl, &before);
         }
+        self.render_timer.end(&self.gl);
+
+        self.copy_timer.begin(&self.gl);
         copy_fbo0_to_shared_texture(&self.gl, self.texture);
+        self.copy_timer.end(&self.gl);
+    }
+
+    pub fn render_ms(&self) -> Option<f64> {
+        self.render_timer.last_ms()
+    }
+
+    pub fn copy_ms(&self) -> Option<f64> {
+        self.copy_timer.last_ms()
     }
 }
 
@@ -151,7 +172,10 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
         }
         unsafe { ffi::projectm_set_window_size(handle, DECK_W as usize, DECK_H as usize) };
 
-        decks.push(Deck { context, surface, gl, texture, handle });
+        let render_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} render_timer: {e}"))?;
+        let copy_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} copy_timer: {e}"))?;
+
+        decks.push(Deck { context, surface, gl, texture, handle, render_timer, copy_timer });
     }
 
     Ok(decks)

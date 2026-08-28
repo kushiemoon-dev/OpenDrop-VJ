@@ -26,6 +26,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 mod keymap;
 mod preflight;
 mod thumbnails;
+mod ui;
 
 /// ponytail: paced off the control window's monitor only, read once at
 /// bootstrap. A VJ setup can have control and output on different-refresh
@@ -162,6 +163,11 @@ struct AppState {
     /// Soft-cut transition duration applied to every load routed through
     /// `request_preset_load`: one global setting, not per-slot (see Step 16).
     transition_seconds: f64,
+    /// `egui::TextureId` for each deck's live GPU texture, registered once
+    /// at bootstrap via `painter.register_native_texture`: never
+    /// re-registered per frame, which would leak a texture handle in
+    /// egui_glow's painter every tick.
+    deck_tex_ids: [egui::TextureId; 4],
 }
 
 #[derive(Default)]
@@ -179,6 +185,30 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
     let Some(path) = state.path_by_name.get(&name).cloned() else { return };
     state.pending_validations.insert(slot); // for the UI: "validating…" on this card
     preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
+}
+
+/// Root of the control window's egui content for this frame. `ui` here is
+/// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
+/// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
+/// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
+/// Task 2's notes on this same drift). Only the decks panel (Step 16) so
+/// far; later steps (17-21) add more panels here.
+///
+/// Takes individual `AppState` fields, not `&mut AppState`: see
+/// `ui::decks::show`'s doc comment for why.
+#[allow(clippy::too_many_arguments)]
+fn ui_root(
+    ui: &mut egui::Ui,
+    show: &mut Show,
+    deck_tex_ids: &[egui::TextureId; 4],
+    deck_preset_names: &[String; 4],
+    pending_validations: &HashSet<usize>,
+    preset_errors: &HashMap<usize, String>,
+    transition_seconds: &mut f64,
+) {
+    egui::CentralPanel::default().show(ui, |ui| {
+        ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
+    });
 }
 
 impl ApplicationHandler for App {
@@ -316,12 +346,23 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
-            // Placeholder panel only: real content lands in later steps
-            // (16-21). This just proves the egui_glow pipeline is wired up.
-            state.egui_glow.run(&state.control.window, |ui| {
-                egui::CentralPanel::default().show(ui, |ui| {
-                    ui.label("egui OK");
-                });
+            // Decks panel (Step 16): real content, replacing the Step 2
+            // placeholder. Destructured so the closure below only borrows
+            // the fields it needs, disjoint from `egui_glow` itself (see
+            // `ui_root`'s doc comment).
+            let AppState {
+                egui_glow,
+                control,
+                show,
+                deck_tex_ids,
+                deck_preset_names,
+                pending_validations,
+                preset_errors,
+                transition_seconds,
+                ..
+            } = state;
+            egui_glow.run(&control.window, |ui| {
+                ui_root(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
             });
 
             // Two windows, one context: each surface is made current in
@@ -590,7 +631,18 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // shader_version=None (auto-detect), native_pixels_per_point=None (no
     // forced ratio), dithering=true: same as egui_glow's own example
     // (examples/pure_glow.rs:188).
-    let egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
+    let mut egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
+
+    // Register each deck's live GPU texture with egui's painter once, here
+    // at bootstrap: never per-frame, which would leak a new texture handle
+    // into the painter every tick. `register_native_texture` touches no GL
+    // state and is safe to call at any time (egui_glow 0.36.1
+    // src/painter.rs:649-655). `glow::Texture` is a type alias that
+    // resolves to `glow::NativeTexture` for a native (non-wasm) `glow::
+    // Context` (glow 0.17 src/native.rs:205), the same type as
+    // `Deck::texture`, so it passes through directly with no `.0`.
+    let deck_tex_ids: [egui::TextureId; 4] =
+        std::array::from_fn(|i| egui_glow.painter.register_native_texture(decks[i].texture));
 
     // Compositor FBO/texture belong to whichever context is current at
     // creation: main_ctx is current here (on control's surface), same as
@@ -663,6 +715,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         preset_errors: HashMap::new(),
         deck_preset_names: Default::default(),
         transition_seconds: 0.0,
+        deck_tex_ids,
     })
 }
 

@@ -1,17 +1,14 @@
 //! Disk + GPU-texture cache for preset thumbnails, driven by `core::
 //! thumb_queue`'s pure job queue. Port of `thumbnailer.svelte.ts`'s
-//! `onVisible`/`onHidden`-driven pipeline (Step 15 of the plan); the actual
-//! call site: pumping this once per tick from `about_to_wait`, gated on
-//! the preset-browser panel's visibility, plus the `enqueue_front` calls
-//! that feed jobs in as presets scroll into view: is Step 17. Nothing here
-//! is called yet.
+//! `onVisible`/`onHidden`-driven pipeline (Step 15 of the plan). `main.rs`'s
+//! `about_to_wait` pumps `pump_thumbnail_queue` once per tick, gated on the
+//! preset-browser panel's visibility; `ui::preset_browser` feeds jobs in via
+//! `enqueue_front` as tiles scroll into view (both Step 17).
 //!
 //! Disk cache entries are raw RGBA8 (`ThumbnailRenderer::render_thumbnail`'s
 //! exact output), no header: the size is always known ahead of time
 //! (`THUMB_W * THUMB_H * 4`), so a length check on read is enough to detect
 //! a stale/corrupt entry.
-
-#![allow(dead_code)] // wired up to `about_to_wait` by Task 17
 
 use opendrop_core::thumb_queue::{dequeue_job, ThumbJob};
 use opendrop_engine::thumbnail::{ThumbnailRenderer, THUMB_H, THUMB_W};

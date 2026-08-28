@@ -1,0 +1,9 @@
+[package]
+name = "opendrop-audio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cpal = { version = "0.18.2", features = ["pipewire"] }
+rustfft = "6.4"
+arc-swap = "1.9"

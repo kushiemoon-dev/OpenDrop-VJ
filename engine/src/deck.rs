@@ -22,15 +22,11 @@ use std::path::Path;
 use crate::ffi;
 use crate::gl_debug;
 use crate::gl_state;
+use crate::timing::PassTimer;
 
 pub const DECK_W: u32 = 1280;
 pub const DECK_H: u32 = 720;
 pub const DECK_COUNT: usize = 4;
-
-/// samples/channel per injected PCM chunk, ~10ms @48kHz: matches the
-/// spike's own chunking, kept only because `synth_audio_chunk` is temporary.
-pub const AUDIO_CHUNK: usize = 480;
-const SAMPLE_RATE: u32 = 48_000;
 
 /// One deck: its own GL context (sharing the main context's object
 /// namespace), pbuffer surface, `glow::Context`, shared output texture, and
@@ -42,6 +38,8 @@ pub struct Deck {
     pub gl: glow::Context,
     pub texture: glow::NativeTexture,
     handle: ffi::projectm_handle,
+    render_timer: PassTimer,
+    copy_timer: PassTimer,
 }
 
 impl Deck {
@@ -64,7 +62,13 @@ impl Deck {
     /// did to blend/framebuffer/viewport state): then copies the result
     /// into this deck's shared texture. Must be called while this deck's
     /// context is current.
-    pub fn render_frame(&self, pcm: &[f32]) {
+    ///
+    /// Render and copy are timed as two sequential `GL_TIME_ELAPSED`
+    /// queries (never nested: see `timing::PassTimer`), each read back
+    /// non-blockingly and inline, so timing this costs nothing beyond the
+    /// query calls themselves: no extra context switch.
+    pub fn render_frame(&mut self, pcm: &[f32]) {
+        self.render_timer.begin(&self.gl);
         unsafe {
             ffi::projectm_pcm_add_float(
                 self.handle,
@@ -76,7 +80,19 @@ impl Deck {
             ffi::projectm_opengl_render_frame(self.handle);
             gl_state::restore(&self.gl, &before);
         }
+        self.render_timer.end(&self.gl);
+
+        self.copy_timer.begin(&self.gl);
         copy_fbo0_to_shared_texture(&self.gl, self.texture);
+        self.copy_timer.end(&self.gl);
+    }
+
+    pub fn render_ms(&self) -> Option<f64> {
+        self.render_timer.last_ms()
+    }
+
+    pub fn copy_ms(&self) -> Option<f64> {
+        self.copy_timer.last_ms()
     }
 }
 
@@ -151,29 +167,13 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
         }
         unsafe { ffi::projectm_set_window_size(handle, DECK_W as usize, DECK_H as usize) };
 
-        decks.push(Deck { context, surface, gl, texture, handle });
+        let render_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} render_timer: {e}"))?;
+        let copy_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} copy_timer: {e}"))?;
+
+        decks.push(Deck { context, surface, gl, texture, handle, render_timer, copy_timer });
     }
 
     Ok(decks)
-}
-
-/// TEMPORARY (Phase 2 only: real audio capture lands in Phase 3): synthesizes
-/// one PCM chunk so presets have something to react to. Ported from the
-/// earlier prototype's `synth_audio_chunk`, one call per deck per frame, sharing
-/// `sample_pos` across decks so their tones/kicks stay in phase.
-pub fn synth_audio_chunk(sample_pos: u64, deck_index: usize) -> Vec<f32> {
-    let mut buf = Vec::with_capacity(AUDIO_CHUNK * 2);
-    let base_freq = 220.0 + deck_index as f32 * 55.0;
-    for n in 0..AUDIO_CHUNK {
-        let t = (sample_pos + n as u64) as f32 / SAMPLE_RATE as f32;
-        let tone = (t * base_freq * std::f32::consts::TAU).sin() * 0.3;
-        let beat_phase = (t * 2.0) % 1.0; // ~2 Hz synthetic kick
-        let kick = if beat_phase < 0.02 { (1.0 - beat_phase / 0.02) * 0.6 } else { 0.0 };
-        let s = (tone + kick).clamp(-1.0, 1.0);
-        buf.push(s);
-        buf.push(s);
-    }
-    buf
 }
 
 /// Copies this context's own pbuffer (FBO 0) into its shared deck texture.

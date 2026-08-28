@@ -13,6 +13,8 @@
 use glow::HasContext;
 use opendrop_core::blend::{blend_state_for, BlendMode, ColorParams, GlBlend, SlotComposite};
 
+use crate::timing::PassTimer;
+
 pub const COMP_W: u32 = 1920;
 pub const COMP_H: u32 = 1080;
 
@@ -148,6 +150,7 @@ pub struct Compositor {
     /// from `gl_VertexID` alone): ES/compatibility profiles don't need
     /// this, which is why the WebGL2 source never had one.
     empty_vao: glow::NativeVertexArray,
+    composite_timer: PassTimer,
 }
 
 impl Compositor {
@@ -194,19 +197,33 @@ impl Compositor {
             // constructor and never touching GL_BLEND's enable bit again.
             gl.enable(glow::BLEND);
 
-            Ok(Self { fbo, color_tex, program, uniforms, empty_vao })
+            let composite_timer = PassTimer::new(gl).map_err(|e| format!("composite_timer: {e}"))?;
+
+            Ok(Self { fbo, color_tex, program, uniforms, empty_vao, composite_timer })
         }
     }
 
-    /// Clears the composite FBO to transparent. Call once per frame before
-    /// any `composite_layer` calls.
-    pub fn begin_frame(&self, gl: &glow::Context) {
+    /// Clears the composite FBO to transparent and starts the "composite"
+    /// pass's timer. Call once per frame, before any `composite_layer`
+    /// calls; pair with `end_frame` after the last one.
+    pub fn begin_frame(&mut self, gl: &glow::Context) {
+        self.composite_timer.begin(gl);
         unsafe {
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
             gl.viewport(0, 0, COMP_W as i32, COMP_H as i32);
             gl.clear_color(0.0, 0.0, 0.0, 0.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
+    }
+
+    /// Ends the "composite" pass's timer: call once per frame, after the
+    /// last `composite_layer` call.
+    pub fn end_frame(&mut self, gl: &glow::Context) {
+        self.composite_timer.end(gl);
+    }
+
+    pub fn composite_ms(&self) -> Option<f64> {
+        self.composite_timer.last_ms()
     }
 
     /// Draws one deck's texture into the composite FBO with its blend mode,

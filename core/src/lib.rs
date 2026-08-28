@@ -1,3 +1,4 @@
+pub mod beat_detector;
 pub mod beat_trigger;
 pub mod blend;
 pub mod clock;
@@ -5,8 +6,10 @@ pub mod commands;
 pub mod lfo;
 pub mod overlay;
 pub mod playlist;
+pub mod preset_index;
 pub mod q_vars;
 pub mod share_set;
+pub mod show;
 pub mod snapshot;
 pub mod time_params;
 pub mod timeline;

@@ -146,18 +146,20 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
 /// Builds one GL context sharing `anchor`'s object namespace, made current
 /// against the given (already-created) pbuffer `surface`, with its own
 /// `glow::Context` and projectM instance: the extracted per-deck body of
-/// `create_decks`. Reused for the dedicated thumbnail-rendering context
-/// (`thumbnail::ThumbnailRenderer::new`) with its own smaller `w`/`h`: same
-/// `anchor` share group as the 4 decks, but its own, 6th, distinct context:
-/// never one of the 4 deck contexts themselves.
+/// `create_decks`.
+///
+/// `w`/`h` are parameters rather than `DECK_W`/`DECK_H` because a second
+/// caller used to build a smaller, 6th context here for preset thumbnails.
+/// That renderer now runs in a separate process (`app::thumbnail_child`),
+/// so `create_decks` is the only caller left; the sizes stay explicit
+/// because everything downstream of them: the shared texture's
+/// allocation, `copy_fbo0_to_shared_texture`'s copy region: has to agree
+/// with the surface actually created, not with a module constant.
 ///
 /// Note: this used to be split across 3 loops in `create_decks` so that all
 /// 4 deck contexts were created before any of them (or `anchor`) was made
-/// current. That ordering isn't an EGL requirement (a share-group context
-/// can be created at any time regardless of which sibling is current) and
-/// can't be preserved once this is reused for the thumbnail context anyway
-///: it's built well after decks 0-3 are already current, whenever it's
-/// first needed.
+/// current. That ordering isn't an EGL requirement: a share-group context
+/// can be created at any time regardless of which sibling is current.
 pub fn create_one_deck_context(
     display: &Display,
     config: &Config,
@@ -209,10 +211,9 @@ pub fn create_one_deck_context(
 /// shared deck texture. The exclusive `glCopyTexSubImage2D` in this whole
 /// pipeline: GPU-to-GPU, no `glReadPixels` anywhere near the render path.
 ///
-/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`: the
-/// thumbnail context (`thumbnail::ThumbnailRenderer`) shares this code at
-/// 192x108 and would otherwise copy a 1280x720 region out of a 192x108
-/// pbuffer, 31 times per thumbnail.
+/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`: see
+/// `create_one_deck_context` on why that distinction is kept even now that
+/// every live caller passes the deck constants.
 pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture, w: i32, h: i32) {
     gl_state::reset_read_framebuffer_to_fbo0(gl);
     unsafe {

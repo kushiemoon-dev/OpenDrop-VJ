@@ -162,17 +162,18 @@ fn tile(
                 if ui.is_rect_visible(rect) {
                     if let Some(tex) = thumbnail_textures.get(name) {
                         // Identity UV, deliberately NOT the V-flipped rect
-                        // `ui::decks` needs for the live deck texture:
-                        // `render_thumbnail` already reverses glReadPixels'
-                        // bottom-first rows at the source, so these pixels
-                        // reach egui in its own top-first order.
+                        // `ui::decks` needs for the live deck texture: the
+                        // `--render-thumbnail` child reverses glReadPixels'
+                        // bottom-first rows before writing the cache file,
+                        // so these pixels reach egui in its own top-first
+                        // order.
                         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
                         ui.painter().image(tex.id(), rect, uv, egui::Color32::WHITE);
                     } else if failed_thumbnails.contains(name) {
                         // Rendering this one already failed. Re-queueing it
-                        // would re-run a full preset load + 31 render frames
-                        // + a blocking readback every tick, for as long as
-                        // the tile stays on screen.
+                        // would respawn a render child process, for a
+                        // preset already known to produce nothing usable,
+                        // for as long as the tile stays on screen.
                         ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(60, 30, 30));
                     } else {
                         ui.painter().rect_filled(rect, 2.0, egui::Color32::DARK_GRAY);

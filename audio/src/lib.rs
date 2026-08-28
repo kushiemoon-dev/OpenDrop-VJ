@@ -1,4 +1,4 @@
-mod analysis;
+pub mod analysis;
 mod capture;
 pub mod device;
 

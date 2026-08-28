@@ -68,6 +68,7 @@ enum Panel {
     #[default]
     Decks,
     PresetBrowser,
+    Playlists,
 }
 
 struct WindowSlot {
@@ -142,10 +143,21 @@ struct AppState {
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
     next_frame_at: Instant,
+    /// Reference instant captured once at bootstrap. Every `now_ms` fed to
+    /// `core`'s beat-sync engine (`BeatDetector::process_sample`,
+    /// `Show::tap_tempo`, `Show::check_volume_peak_triggers`) is derived from
+    /// `t0.elapsed()`, never from `next_frame_at`. Step 18: the pacing clock
+    /// and the beat-sync timestamp are deliberately different clocks.
+    t0: Instant,
     /// Handle to the dedicated audio capture thread: `latest()` gives the
     /// latest PCM chunk + energy, read once per tick and shared by every
     /// deck due that tick.
     audio: opendrop_audio::AudioHandle,
+    /// RMS of the current tick's PCM snapshot (`opendrop_audio::analysis::
+    /// vu_level`), computed once per tick by the beat-sync engine wiring and
+    /// stored here so a later panel (Step 19's VU meter) can read it without
+    /// a second `vu_level` pass over the same PCM.
+    last_vu_level: f64,
     /// Per-deck throttle for culled (invisible) decks: see IDLE_DECK_INTERVAL.
     deck_next_render_at: [Instant; deck::DECK_COUNT],
     show: Show,
@@ -245,11 +257,13 @@ fn ui_root(
     thumb_queue: &mut Vec<ThumbJob>,
     thumbnail_textures: &HashMap<String, egui::TextureHandle>,
     load_request: &mut Option<String>,
+    t0: Instant,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(active_panel, Panel::Decks, "Decks");
             ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
+            ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
         });
         ui.separator();
         match active_panel {
@@ -258,6 +272,9 @@ fn ui_root(
             }
             Panel::PresetBrowser => {
                 ui::preset_browser::show(ui, show, preset_search_query, thumb_queue, thumbnail_textures, load_request);
+            }
+            Panel::Playlists => {
+                ui::playlists::show(ui, show, t0);
             }
         }
     });
@@ -370,6 +387,37 @@ impl ApplicationHandler for App {
             // full resolution even while invisible" pathology from the
             // diagnostic, killed at the root rather than papered over.
             let audio = state.audio.latest();
+
+            // Beat-sync engine wiring (Step 18): runs once per tick, before
+            // the deck-rendering loop below. `take_fired_presets` is drained
+            // at the top of `about_to_wait`, once per call, before this
+            // render-gated block: a preset/playlist advance fired by
+            // `show.on_beat()` here becomes visible on that drain at the
+            // start of the next `about_to_wait` call, same path as a
+            // keyboard-driven `navigate_preset`. Placing this block ahead of
+            // the deck-rendering loop, rather than after it, starts that
+            // preset's async pre-flight validation as early as possible in
+            // the tick. `now_ms` is `t0.elapsed()`, a monotonic clock
+            // independent of `next_frame_at` (the render-pacing deadline,
+            // which drifts by design, see the resync branch below). Never
+            // derive it from `next_frame_at`.
+            let now_ms = state.t0.elapsed().as_secs_f64() * 1000.0;
+            let dt = state.refresh_interval.as_secs_f64();
+            if state.show.manual_bpm == 0.0 {
+                let r = state.show.beat_detector.process_sample(audio.energy_byte, now_ms);
+                if r.beat_triggered {
+                    state.show.clock.pulse(Some(r.bpm));
+                    if state.show.clock.bpm() == 0.0 {
+                        state.show.on_beat();
+                    }
+                }
+            }
+            for _ in 0..state.show.clock.step(dt) {
+                state.show.on_beat();
+            }
+            state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
+            state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
+
             for i in 0..deck::DECK_COUNT {
                 let visible = layer_inputs[i].opacity > 0.001;
                 if !visible && now < state.deck_next_render_at[i] {
@@ -420,10 +468,17 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
-            // Decks (Step 16) and preset-browser (Step 17) panels: real
-            // content, replacing the Step 2 placeholder. Destructured so the
-            // closure below only borrows the fields it needs, disjoint from
-            // `egui_glow` itself (see `ui_root`'s doc comment).
+            // Copied out (Instant is Copy) before the destructure below so
+            // the Playlists panel's Tap Tempo button can compute its own
+            // `t0.elapsed()` at click time. `t0` itself is never named in
+            // that destructure, so `state.t0` stays readable either way.
+            let t0 = state.t0;
+
+            // Decks (Step 16), preset-browser (Step 17), and playlists (Step
+            // 18) panels: real content, replacing the Step 2 placeholder.
+            // Destructured so the closure below only borrows the fields it
+            // needs, disjoint from `egui_glow` itself (see `ui_root`'s doc
+            // comment).
             let AppState {
                 egui_glow,
                 control,
@@ -459,6 +514,7 @@ impl ApplicationHandler for App {
                     thumb_queue,
                     thumbnail_textures,
                     &mut preset_load_request,
+                    t0,
                 );
             });
             if let Some(name) = preset_load_request {
@@ -808,7 +864,9 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         egui_glow,
         refresh_interval,
         next_frame_at: Instant::now(),
+        t0: Instant::now(),
         audio: opendrop_audio::spawn_capture(),
+        last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         show,
         registry: create_default_registry(),

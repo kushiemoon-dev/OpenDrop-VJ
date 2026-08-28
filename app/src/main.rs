@@ -28,6 +28,12 @@ mod keymap;
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
 
+/// Culled (opacity ≤ 0.001) decks still render, just at this much lower
+/// rate: not stopped outright: so a deck doesn't show a visible cold
+/// start (projectM's per-preset warm-up/transition state going stale) the
+/// moment the crossfader brings it back in.
+const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
+
 /// Per-slot compositor input driven by the live show state: opacity from
 /// `bus_gain(deck_bus[slot], crossfader)`, composite config directly from
 /// `slot_composites`, and color params from whichever bus (A/B) that slot is
@@ -87,6 +93,8 @@ struct AppState {
     /// TEMPORARY (Phase 2 only): running sample position fed to
     /// deck::synth_audio_chunk. Advances once per rendered frame.
     sample_pos: u64,
+    /// Per-deck throttle for culled (invisible) decks: see IDLE_DECK_INTERVAL.
+    deck_next_render_at: [Instant; deck::DECK_COUNT],
     show: Show,
     registry: CommandRegistry,
     keymap: HashMap<Key, CommandId>,
@@ -149,17 +157,31 @@ impl ApplicationHandler for App {
         // rendering on every call, is what keeps that from turning into a
         // self-sustaining busy loop (measured: ~10 kHz without this gate).
         if now >= state.next_frame_at {
+            let layer_inputs = layer_inputs_from_show(&state.show);
+
             // Each deck context injects one PCM chunk, renders one projectM
             // frame, and copies it into its shared texture; then, back on
             // the main context, each texture is drawn through the
-            // compositor shader into the composite FBO.
+            // compositor shader into the composite FBO. A deck at or below
+            // the 0.001 opacity floor: never sampled by composite_layer
+            // either way: is culled down to IDLE_DECK_INTERVAL instead of
+            // rendering at full rate for nothing: the "4 decks rendered at
+            // full resolution even while invisible" pathology from the
+            // diagnostic, killed at the root rather than papered over.
             for i in 0..deck::DECK_COUNT {
+                let visible = layer_inputs[i].opacity > 0.001;
+                if !visible && now < state.deck_next_render_at[i] {
+                    continue;
+                }
                 if let Err(e) = state.decks[i].context.make_current(&state.decks[i].surface) {
                     eprintln!("[app] deck {i} make_current failed: {e}");
                     continue;
                 }
                 let pcm = deck::synth_audio_chunk(state.sample_pos, i);
                 state.decks[i].render_frame(&pcm);
+                if !visible {
+                    state.deck_next_render_at[i] = now + IDLE_DECK_INTERVAL;
+                }
             }
             state.sample_pos += deck::AUDIO_CHUNK as u64;
             // Reacquire the main context (any of its surfaces works: the
@@ -168,7 +190,6 @@ impl ApplicationHandler for App {
             if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
-            let layer_inputs = layer_inputs_from_show(&state.show);
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for i in 0..deck::DECK_COUNT {
@@ -426,6 +447,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         refresh_interval,
         next_frame_at: Instant::now(),
         sample_pos: 0,
+        deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         show: Show::default(),
         registry: create_default_registry(),
         keymap: keymap::default_keymap(),

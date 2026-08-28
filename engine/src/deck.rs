@@ -28,11 +28,6 @@ pub const DECK_W: u32 = 1280;
 pub const DECK_H: u32 = 720;
 pub const DECK_COUNT: usize = 4;
 
-/// samples/channel per injected PCM chunk, ~10ms @48kHz: matches the
-/// spike's own chunking, kept only because `synth_audio_chunk` is temporary.
-pub const AUDIO_CHUNK: usize = 480;
-const SAMPLE_RATE: u32 = 48_000;
-
 /// One deck: its own GL context (sharing the main context's object
 /// namespace), pbuffer surface, `glow::Context`, shared output texture, and
 /// projectM instance: all created together, all belonging to this one
@@ -179,25 +174,6 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
     }
 
     Ok(decks)
-}
-
-/// TEMPORARY (Phase 2 only: real audio capture lands in Phase 3): synthesizes
-/// one PCM chunk so presets have something to react to. Ported from the
-/// earlier prototype's `synth_audio_chunk`, one call per deck per frame, sharing
-/// `sample_pos` across decks so their tones/kicks stay in phase.
-pub fn synth_audio_chunk(sample_pos: u64, deck_index: usize) -> Vec<f32> {
-    let mut buf = Vec::with_capacity(AUDIO_CHUNK * 2);
-    let base_freq = 220.0 + deck_index as f32 * 55.0;
-    for n in 0..AUDIO_CHUNK {
-        let t = (sample_pos + n as u64) as f32 / SAMPLE_RATE as f32;
-        let tone = (t * base_freq * std::f32::consts::TAU).sin() * 0.3;
-        let beat_phase = (t * 2.0) % 1.0; // ~2 Hz synthetic kick
-        let kick = if beat_phase < 0.02 { (1.0 - beat_phase / 0.02) * 0.6 } else { 0.0 };
-        let s = (tone + kick).clamp(-1.0, 1.0);
-        buf.push(s);
-        buf.push(s);
-    }
-    buf
 }
 
 /// Copies this context's own pbuffer (FBO 0) into its shared deck texture.

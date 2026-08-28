@@ -99,9 +99,10 @@ struct AppState {
     gl: glow::Context,
     refresh_interval: Duration,
     next_frame_at: Instant,
-    /// TEMPORARY (Phase 2 only): running sample position fed to
-    /// deck::synth_audio_chunk. Advances once per rendered frame.
-    sample_pos: u64,
+    /// Handle to the dedicated audio capture thread: `latest()` gives the
+    /// latest PCM chunk + energy, read once per tick and shared by every
+    /// deck due that tick.
+    audio: opendrop_audio::AudioHandle,
     /// Per-deck throttle for culled (invisible) decks: see IDLE_DECK_INTERVAL.
     deck_next_render_at: [Instant; deck::DECK_COUNT],
     show: Show,
@@ -181,6 +182,7 @@ impl ApplicationHandler for App {
             // rendering at full rate for nothing: the "4 decks rendered at
             // full resolution even while invisible" pathology from the
             // diagnostic, killed at the root rather than papered over.
+            let audio = state.audio.latest();
             for i in 0..deck::DECK_COUNT {
                 let visible = layer_inputs[i].opacity > 0.001;
                 if !visible && now < state.deck_next_render_at[i] {
@@ -190,13 +192,11 @@ impl ApplicationHandler for App {
                     eprintln!("[app] deck {i} make_current failed: {e}");
                     continue;
                 }
-                let pcm = deck::synth_audio_chunk(state.sample_pos, i);
-                state.decks[i].render_frame(&pcm);
+                state.decks[i].render_frame(&audio.pcm);
                 if !visible {
                     state.deck_next_render_at[i] = now + IDLE_DECK_INTERVAL;
                 }
             }
-            state.sample_pos += deck::AUDIO_CHUNK as u64;
             // Reacquire the main context (any of its surfaces works: the
             // composite FBO belongs to the context, not the surface) before
             // touching the compositor or either window.
@@ -489,7 +489,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         gl,
         refresh_interval,
         next_frame_at: Instant::now(),
-        sample_pos: 0,
+        audio: opendrop_audio::spawn_capture(),
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         show: Show::default(),
         registry: create_default_registry(),

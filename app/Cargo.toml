@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 opendrop-core = { path = "../core" }
 opendrop-engine = { path = "../engine" }
+opendrop-audio = { path = "../audio" }
 winit = "0.30.13"
 glutin = "0.32.3"
 glutin-winit = "0.5.0"

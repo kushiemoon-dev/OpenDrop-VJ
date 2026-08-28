@@ -3,6 +3,7 @@ pub mod deck;
 pub mod ffi;
 pub mod gl_debug;
 pub mod gl_state;
+pub mod timing;
 
 /// (major, minor, patch) of the linked libprojectM: proves bindgen + linking work.
 pub fn projectm_version() -> (i32, i32, i32) {

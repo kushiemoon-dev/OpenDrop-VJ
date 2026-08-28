@@ -10,6 +10,7 @@ use opendrop_core::commands::{create_default_registry, CommandId, CommandRegistr
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -68,12 +69,20 @@ impl WindowSlot {
         Ok(())
     }
 
-    fn render_and_swap(&self, ctx: &PossiblyCurrentContext, gl: &glow::Context, compositor: &Compositor) -> Result<(), String> {
+    fn render_and_swap(
+        &self,
+        ctx: &PossiblyCurrentContext,
+        gl: &glow::Context,
+        compositor: &Compositor,
+        blit_timer: &mut PassTimer,
+    ) -> Result<(), String> {
         if self.occluded {
             return Ok(());
         }
         self.make_current_and_size_viewport(ctx, gl)?;
+        blit_timer.begin(gl);
         compositor.blit_to_current_window(gl, self.size.0 as i32, self.size.1 as i32);
+        blit_timer.end(gl);
         self.window.pre_present_notify();
         self.surface.swap_buffers(ctx).map_err(|e| format!("swap_buffers failed: {e}"))
     }
@@ -98,6 +107,10 @@ struct AppState {
     show: Show,
     registry: CommandRegistry,
     keymap: HashMap<Key, CommandId>,
+    blit_control_timer: PassTimer,
+    blit_output_timer: PassTimer,
+    last_output_swap_at: Option<Instant>,
+    perf_tick: u64,
 }
 
 #[derive(Default)]
@@ -196,17 +209,45 @@ impl ApplicationHandler for App {
                 let force_normal = lowest_active == Some(i);
                 state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
             }
+            state.compositor.end_frame(&state.gl);
 
             // Two windows, one context: each surface is made current in
             // turn. Skipping render+swap for an Occluded(true) window is
             // load-bearing on Wayland: see the DontWait/WaitUntil comment
             // in bootstrap().
-            if let Err(e) = state.control.render_and_swap(&state.main_ctx, &state.gl, &state.compositor) {
+            if let Err(e) =
+                state.control.render_and_swap(&state.main_ctx, &state.gl, &state.compositor, &mut state.blit_control_timer)
+            {
                 eprintln!("[app] control window render failed: {e}");
             }
-            if let Err(e) = state.output.render_and_swap(&state.main_ctx, &state.gl, &state.compositor) {
+            if let Err(e) =
+                state.output.render_and_swap(&state.main_ctx, &state.gl, &state.compositor, &mut state.blit_output_timer)
+            {
                 eprintln!("[app] output window render failed: {e}");
             }
+            // Wall-clock swap-to-swap time is the ground truth for frame
+            // time: the GPU pass timers below measure execution time in
+            // their own context and never sum into this, since passes
+            // across contexts can overlap on real hardware.
+            let swap_now = Instant::now();
+            let wall_ms = state.last_output_swap_at.map(|prev| (swap_now - prev).as_secs_f64() * 1000.0);
+            state.last_output_swap_at = Some(swap_now);
+
+            state.perf_tick += 1;
+            if state.perf_tick % 60 == 0 {
+                let active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001).unwrap_or(0);
+                let fmt = |v: Option<f64>| v.map(|ms| format!("{ms:.3}ms")).unwrap_or_else(|| "n/a".to_string());
+                println!(
+                    "[timing] deck{active} render={} copy={} | composite={} | blit control={} output={} | wall(swap-to-swap)={}",
+                    fmt(state.decks[active].render_ms()),
+                    fmt(state.decks[active].copy_ms()),
+                    fmt(state.compositor.composite_ms()),
+                    fmt(state.blit_control_timer.last_ms()),
+                    fmt(state.blit_output_timer.last_ms()),
+                    fmt(wall_ms),
+                );
+            }
+
             state.next_frame_at += state.refresh_interval;
             if state.next_frame_at < now {
                 state.next_frame_at = now + state.refresh_interval; // fell behind; resync instead of catching up frame-by-frame
@@ -403,6 +444,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // creation: main_ctx is current here (on control's surface), same as
     // it will be every time the compositor's FBO is touched later.
     let compositor = Compositor::new(&gl)?;
+    let blit_control_timer = PassTimer::new(&gl).map_err(|e| format!("blit_control_timer: {e}"))?;
+    let blit_output_timer = PassTimer::new(&gl).map_err(|e| format!("blit_output_timer: {e}"))?;
 
     main_ctx.make_current(&output.surface).map_err(|e| format!("make_current(output) failed: {e}"))?;
     output
@@ -451,6 +494,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         show: Show::default(),
         registry: create_default_registry(),
         keymap: keymap::default_keymap(),
+        blit_control_timer,
+        blit_output_timer,
+        last_output_swap_at: None,
+        perf_tick: 0,
     })
 }
 

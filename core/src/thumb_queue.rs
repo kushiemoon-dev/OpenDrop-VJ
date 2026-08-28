@@ -1,7 +1,7 @@
 //! Port of OpenDrop-VJ `thumbnailer.svelte.ts:47-59`: the pure job-queue
-//! logic driving lazy preset-thumbnail rendering. `slot_key` reprend le
-//! rôle de `slug` côté web; ici le nom du preset lui-même sert de clé, pas
-//! de système de slug séparé nécessaire côté natif.
+//! logic driving lazy preset-thumbnail rendering. `slot_key` plays the
+//! role `slug` played on the web side; here the preset name itself serves
+//! as the key, no separate slug system needed on the native side.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThumbJob {

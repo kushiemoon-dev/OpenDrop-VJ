@@ -1,3 +1,4 @@
+pub mod beat_detector;
 pub mod beat_trigger;
 pub mod blend;
 pub mod clock;

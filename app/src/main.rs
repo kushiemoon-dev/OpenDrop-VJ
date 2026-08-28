@@ -483,6 +483,12 @@ impl ApplicationHandler for App {
             for _ in 0..state.show.clock.step(dt) {
                 state.show.on_beat();
             }
+            // The interval-driven half of the same playlist engines the
+            // beats above drive: without this the Playlists panel's
+            // "Interval (s)" slider does nothing and Play only ever loads
+            // the current item. Same `dt` as `clock.step`, converted to the
+            // milliseconds `PlaylistEngine` works in.
+            state.show.tick_playlists(dt * 1000.0);
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
 

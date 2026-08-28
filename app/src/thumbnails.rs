@@ -50,7 +50,13 @@ enum RenderPoll {
     /// The child exited cleanly. Its output still has to be read and
     /// length-checked before it counts as a real thumbnail.
     Exited,
+    /// The child exited or died on its own, and `try_wait` has already
+    /// reaped it.
     Failed(String),
+    /// The child overran `RENDER_TIMEOUT` and has been sent SIGKILL, but
+    /// deliberately not waited on. The caller must hand it to `reap_killed`
+    /// instead of dropping it.
+    TimedOut,
 }
 
 /// Cache filename for `preset_name` under `cache_dir`: a hash of the name
@@ -107,13 +113,35 @@ fn poll_render(in_flight: &mut InFlightThumb) -> RenderPoll {
         // is exactly the case this whole out-of-process detour exists for.
         Ok(Some(status)) => RenderPoll::Failed(format!("thumbnail renderer exited with {status}")),
         Ok(None) if in_flight.started_at.elapsed() > RENDER_TIMEOUT => {
+            // SIGKILL, and then nothing: reaping is `reap_killed`'s job.
+            // `spawn_preflight` follows kill() with a blocking wait() here,
+            // which is correct there because it runs on its own thread. This
+            // runs on the event-loop thread, where wait() would be a stall
+            // of unbounded length: and a child that has already been
+            // unresponsive for RENDER_TIMEOUT is the likeliest of all to be
+            // stuck in an uninterruptible kernel wait (a wedged GPU ioctl, a
+            // slow network-mounted cache directory) where even SIGKILL does
+            // not land promptly. That stall is the exact failure this whole
+            // out-of-process change exists to prevent.
             let _ = in_flight.child.kill();
-            let _ = in_flight.child.wait(); // reap: kill() alone leaves a zombie until this process exits
-            RenderPoll::Failed("thumbnail render timed out".to_string())
+            RenderPoll::TimedOut
         }
         Ok(None) => RenderPoll::Running,
         Err(e) => RenderPoll::Failed(format!("wait failed: {e}")),
     }
+}
+
+/// Reaps children killed by `poll_render`'s timeout branch, without ever
+/// blocking. Each one is polled with `try_wait` on as many ticks as it
+/// takes, and dropped from the list once it is gone (or once the wait
+/// itself errors, which leaves nothing further to reap).
+///
+/// Called unconditionally from `about_to_wait`, deliberately not from
+/// `pump_thumbnail_queue`: the pump is gated on the preset browser being
+/// visible, and a killed child has to be reaped whether or not the user is
+/// still looking at the panel that spawned it.
+pub fn reap_killed(killed: &mut Vec<Child>) {
+    killed.retain_mut(|child| matches!(child.try_wait(), Ok(None)));
 }
 
 /// Does at most one unit of work per tick, so a burst of newly-visible
@@ -138,6 +166,7 @@ fn poll_render(in_flight: &mut InFlightThumb) -> RenderPoll {
 pub fn pump_thumbnail_queue(
     queue: &mut Vec<ThumbJob>,
     in_flight: &mut Option<InFlightThumb>,
+    killed: &mut Vec<Child>,
     cache_dir: &Path,
     path_by_name: &HashMap<String, PathBuf>,
     ctx: &egui::Context,
@@ -158,6 +187,14 @@ pub fn pump_thumbnail_queue(
             RenderPoll::Failed(e) => {
                 failed.insert(pending.job.name.clone());
                 return Err(format!("{}: {e}", pending.job.name));
+            }
+            RenderPoll::TimedOut => {
+                failed.insert(pending.job.name.clone());
+                // SIGKILLed but not waited on: see `poll_render`. Hand it
+                // to the non-blocking reaper rather than dropping it, which
+                // would leave a zombie for the rest of the session.
+                killed.push(pending.child);
+                return Err(format!("{}: thumbnail render timed out", pending.job.name));
             }
             RenderPoll::Exited => {
                 // The child's clean exit is a claim, not proof. `read_cached`
@@ -185,6 +222,17 @@ pub fn pump_thumbnail_queue(
         // extra spawn; with it, none.
         return Ok(());
     }
+    if textures.contains_key(&job.slot_key) {
+        // The mirror image of the check above, for the success case: the
+        // same stale re-enqueued job survives a child that *succeeded*, and
+        // would otherwise cost a redundant 83KB read plus a second texture
+        // upload that immediately replaces the one just built. Reading this
+        // as "already done" rather than "slot busy" is only correct because
+        // `ui::preset_browser` uses the preset name as its slot key, so a
+        // filled slot always holds this exact preset; revisit if slot keys
+        // ever become reusable across presets.
+        return Ok(());
+    }
     let Some(preset_path) = path_by_name.get(&job.name) else {
         return Ok(()); // stale job (e.g. catalog changed under it): nothing to render
     };
@@ -209,6 +257,54 @@ pub fn pump_thumbnail_queue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod reap_killed_tests {
+        use super::*;
+
+        fn long_lived_child() -> Child {
+            Command::new("sleep").arg("30").stdout(Stdio::null()).stderr(Stdio::null()).spawn().expect("failed to spawn `sleep`")
+        }
+
+        #[test]
+        fn keeps_a_child_that_is_still_running_and_does_not_block_on_it() {
+            let mut killed = vec![long_lived_child()];
+            let started = Instant::now();
+            reap_killed(&mut killed);
+            // The polarity that matters: `Ok(None)` means "still running",
+            // so the entry has to survive. Inverting this predicate would
+            // drop a live child and leak it for good.
+            assert_eq!(killed.len(), 1);
+            // And the call has to have returned without waiting for a child
+            // with 30 seconds left to live. This runs on the event-loop
+            // thread; blocking here is the whole bug this reaper exists to
+            // avoid. The bound is deliberately loose: it is checking for a
+            // blocking wait, not measuring scheduler latency.
+            assert!(started.elapsed() < Duration::from_secs(1), "reap_killed blocked on a live child");
+            let _ = killed[0].kill();
+            let _ = killed[0].wait(); // test cleanup, not the event-loop path
+        }
+
+        #[test]
+        fn drops_a_child_once_it_has_exited() {
+            let mut killed = vec![long_lived_child()];
+            let _ = killed[0].kill();
+            // Polled, never waited on, exactly as `about_to_wait` does it:
+            // the entry clears within a few ticks rather than in one call.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !killed.is_empty() && Instant::now() < deadline {
+                reap_killed(&mut killed);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(killed.is_empty(), "a killed child was never reaped");
+        }
+
+        #[test]
+        fn on_an_empty_list_is_a_no_op() {
+            let mut killed: Vec<Child> = Vec::new();
+            reap_killed(&mut killed);
+            assert!(killed.is_empty());
+        }
+    }
 
     mod cache_path_tests {
         use super::*;

@@ -104,18 +104,26 @@ pub fn run_render_thumbnail(preset_path: &Path, out_path: &Path) -> ! {
 /// Reads this context's pbuffer (FBO 0) back into CPU memory, rows
 /// bottom-first as `glReadPixels` hands them over.
 ///
-/// The three resets first are not optional. `projectm_opengl_render_frame`
-/// leaves `READ_FRAMEBUFFER_BINDING` pointed at one of projectM's own
-/// internal FBOs (the whole reason `gl_state::reset_read_framebuffer_to_fbo0`
-/// exists: see its doc comment), and neither the pixel-pack buffer binding
-/// nor `PACK_ALIGNMENT` is part of the `gl_state` snapshot restored above,
-/// so both are set here in absolute terms rather than assumed.
+/// The resets first are not optional. `projectm_opengl_render_frame` leaves
+/// `READ_FRAMEBUFFER_BINDING` pointed at one of projectM's own internal FBOs
+/// (the whole reason `gl_state::reset_read_framebuffer_to_fbo0` exists: see
+/// its doc comment), and none of the pixel *pack* state is part of the
+/// `gl_state` snapshot restored around each rendered frame, which covers
+/// `UNPACK_ALIGNMENT` only. So every input `glReadPixels` reads besides the
+/// framebuffer itself is set here in absolute terms rather than assumed:
+/// the pack buffer binding, the alignment, and the row/skip offsets. In
+/// practice libprojectM 4.1.6 appears to touch only unpack state, so this is
+/// belt and braces: but "absolute reset" has to mean all of it to be worth
+/// claiming.
 fn read_back(gl: &glow::Context) -> Vec<u8> {
     let mut pixels = vec![0u8; (THUMB_W * THUMB_H * 4) as usize];
     opendrop_engine::gl_state::reset_read_framebuffer_to_fbo0(gl);
     unsafe {
         gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
         gl.pixel_store_i32(glow::PACK_ALIGNMENT, 4);
+        gl.pixel_store_i32(glow::PACK_ROW_LENGTH, 0);
+        gl.pixel_store_i32(glow::PACK_SKIP_ROWS, 0);
+        gl.pixel_store_i32(glow::PACK_SKIP_PIXELS, 0);
         gl.read_pixels(
             0,
             0,

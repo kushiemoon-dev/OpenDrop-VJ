@@ -259,6 +259,10 @@ struct AppState {
     /// because its tile scrolled into view), one at a time, polled by
     /// `pump_thumbnail_queue`.
     thumbnail_in_flight: Option<thumbnails::InFlightThumb>,
+    /// Render children SIGKILLed after overrunning their timeout, held only
+    /// until `thumbnails::reap_killed` confirms they are gone. They are
+    /// never `wait()`ed on: that blocks, and this is the event-loop thread.
+    thumbnail_killed: Vec<std::process::Child>,
     /// Disk cache dir for rendered thumbnails (see `thumbnails::cache_path`).
     thumbnail_cache_dir: PathBuf,
     /// Name of the monitor currently selected in the Output panel's dropdown
@@ -557,10 +561,16 @@ impl ApplicationHandler for App {
             // Unlike the deck loop above, this touches no GL context of its
             // own any more: the render happens in a child process, and all
             // this does here is poll it and upload the bytes it wrote.
+            // Deliberately outside the gate below: a render child killed on
+            // timeout has to be reaped whether or not the browser panel is
+            // still on screen, and this is a `try_wait` per outstanding
+            // corpse, normally zero of them.
+            thumbnails::reap_killed(&mut state.thumbnail_killed);
             if state.active_panel == Panel::PresetBrowser || state.thumbnail_in_flight.is_some() {
                 if let Err(e) = thumbnails::pump_thumbnail_queue(
                     &mut state.thumb_queue,
                     &mut state.thumbnail_in_flight,
+                    &mut state.thumbnail_killed,
                     &state.thumbnail_cache_dir,
                     &state.path_by_name,
                     &state.egui_glow.egui_ctx,
@@ -1076,6 +1086,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
         thumbnail_in_flight: None,
+        thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
         selected_output_monitor: None,
     })

@@ -5,40 +5,44 @@ use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
-use opendrop_core::blend::{BlendMode, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use opendrop_core::blend::DEFAULT_COLOR_PARAMS;
+use opendrop_core::commands::{create_default_registry, CommandId, CommandRegistry};
+use opendrop_core::show::{DeckBus, Show};
 use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
 use raw_window_handle::HasWindowHandle;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::Key;
 use winit::window::{Window, WindowAttributes, WindowId};
+
+mod keymap;
 
 /// ponytail: paced off the control window's monitor only, read once at
 /// bootstrap. A VJ setup can have control and output on different-refresh
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
 
-/// TEMPORARY (step 6 only): hardcoded opacities/blend modes, forced in code
-/// exactly as the plan's step 6 asks, cycling every 4s through the 3
-/// scenarios its verification calls for: a single slot fullscreen, additive
-/// of two decks (brighter), multiply of two decks (darker). core::show::Show
-/// (step 7) replaces this with the real crossfader-driven state.
-fn hardcoded_layer_inputs(elapsed_secs: f64) -> [LayerInput; 4] {
-    let off = LayerInput { opacity: 0.0, composite: DEFAULT_SLOT_COMPOSITE, color: DEFAULT_COLOR_PARAMS };
-    let layer = |blend: BlendMode| LayerInput {
-        opacity: 1.0,
-        composite: SlotComposite { blend, ..DEFAULT_SLOT_COMPOSITE },
-        color: DEFAULT_COLOR_PARAMS,
-    };
-    match (elapsed_secs / 4.0) as u64 % 3 {
-        0 => [layer(BlendMode::Normal), off, off, off], // one slot -> fullscreen
-        1 => [layer(BlendMode::Normal), layer(BlendMode::Additive), off, off], // additive -> brighter
-        _ => [layer(BlendMode::Normal), layer(BlendMode::Multiply), off, off], // multiply -> darker
-    }
+/// Per-slot compositor input driven by the live show state: opacity from
+/// `bus_gain(deck_bus[slot], crossfader)`, composite config directly from
+/// `slot_composites`, and color params from whichever bus (A/B) that slot is
+/// currently assigned to: `Off` slots get the default (harmless, since
+/// their opacity is 0 and composite_layer skips them at the 0.001 floor).
+fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
+    let opacities = show.slot_opacities();
+    std::array::from_fn(|i| {
+        let color = match show.deck_bus[i] {
+            DeckBus::A => show.color_params_a,
+            DeckBus::B => show.color_params_b,
+            DeckBus::Off => DEFAULT_COLOR_PARAMS,
+        };
+        LayerInput { opacity: opacities[i] as f32, composite: show.slot_composites[i], color }
+    })
 }
 
 struct WindowSlot {
@@ -83,10 +87,9 @@ struct AppState {
     /// TEMPORARY (Phase 2 only): running sample position fed to
     /// deck::synth_audio_chunk. Advances once per rendered frame.
     sample_pos: u64,
-    /// TEMPORARY (step 6 only: core::show::Show replaces this in step 7):
-    /// bootstrap time, used to cycle hardcoded_layer_inputs's 3 verification
-    /// scenarios (single slot / additive / multiply) every few seconds.
-    started_at: Instant,
+    show: Show,
+    registry: CommandRegistry,
+    keymap: HashMap<Key, CommandId>,
 }
 
 #[derive(Default)]
@@ -105,6 +108,17 @@ impl ApplicationHandler for App {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
+
+        // Handled regardless of which window has focus: both windows show
+        // the same show state, so the keymap isn't per-window.
+        if let WindowEvent::KeyboardInput { event: key_event, .. } = &event {
+            if key_event.state == ElementState::Pressed {
+                if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
+                    state.registry.dispatch(cmd_id, 1.0, &mut state.show);
+                }
+            }
+        }
+
         let slot = if window_id == state.control.window.id() {
             &mut state.control
         } else if window_id == state.output.window.id() {
@@ -154,7 +168,7 @@ impl ApplicationHandler for App {
             if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
-            let layer_inputs = hardcoded_layer_inputs(now.duration_since(state.started_at).as_secs_f64());
+            let layer_inputs = layer_inputs_from_show(&state.show);
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for i in 0..deck::DECK_COUNT {
@@ -412,7 +426,9 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         refresh_interval,
         next_frame_at: Instant::now(),
         sample_pos: 0,
-        started_at: Instant::now(),
+        show: Show::default(),
+        registry: create_default_registry(),
+        keymap: keymap::default_keymap(),
     })
 }
 

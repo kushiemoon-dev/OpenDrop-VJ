@@ -7,6 +7,7 @@ pub mod overlay;
 pub mod playlist;
 pub mod q_vars;
 pub mod share_set;
+pub mod show;
 pub mod snapshot;
 pub mod time_params;
 pub mod timeline;

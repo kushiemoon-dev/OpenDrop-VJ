@@ -15,6 +15,7 @@ use raw_window_handle::HasWindowHandle;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
@@ -86,6 +87,30 @@ impl WindowSlot {
         self.window.pre_present_notify();
         self.surface.swap_buffers(ctx).map_err(|e| format!("swap_buffers failed: {e}"))
     }
+
+    /// Same as `render_and_swap`, but paints the egui overlay on top of the
+    /// composite before swapping. Used only for `control`: `output` never
+    /// carries UI, so a shared method taking `Option<&mut EguiGlow>` would
+    /// force it to pass `None` for nothing.
+    fn render_and_swap_with_egui(
+        &self,
+        ctx: &PossiblyCurrentContext,
+        gl: &glow::Context,
+        compositor: &Compositor,
+        blit_timer: &mut PassTimer,
+        egui_glow: &mut egui_glow::EguiGlow,
+    ) -> Result<(), String> {
+        if self.occluded {
+            return Ok(());
+        }
+        self.make_current_and_size_viewport(ctx, gl)?;
+        blit_timer.begin(gl);
+        compositor.blit_to_current_window(gl, self.size.0 as i32, self.size.1 as i32);
+        blit_timer.end(gl);
+        egui_glow.paint(&self.window); // after the blit, before the swap: draws over the composite
+        self.window.pre_present_notify();
+        self.surface.swap_buffers(ctx).map_err(|e| format!("swap_buffers failed: {e}"))
+    }
 }
 
 struct AppState {
@@ -96,7 +121,8 @@ struct AppState {
     output: WindowSlot,
     decks: Vec<Deck>,
     compositor: Compositor,
-    gl: glow::Context,
+    gl: Arc<glow::Context>,
+    egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
     next_frame_at: Instant,
     /// Handle to the dedicated audio capture thread: `latest()` gives the
@@ -131,10 +157,19 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         let Some(state) = &mut self.state else { return };
 
+        // egui first, control window only: output never carries UI.
+        if window_id == state.control.window.id() {
+            let _egui_response = state.egui_glow.on_window_event(&state.control.window, &event);
+        }
+
         // Handled regardless of which window has focus: both windows show
-        // the same show state, so the keymap isn't per-window.
+        // the same show state, so the keymap isn't per-window. Gated on
+        // egui_wants_keyboard_input() (not EventResponse.consumed, which is
+        // also true for e.g. a mouse click on a button) so debug shortcuts
+        // keep working except while an egui text widget (e.g. the preset
+        // browser search) actually has focus.
         if let WindowEvent::KeyboardInput { event: key_event, .. } = &event {
-            if key_event.state == ElementState::Pressed {
+            if key_event.state == ElementState::Pressed && !state.egui_glow.egui_ctx.egui_wants_keyboard_input() {
                 if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
                     state.registry.dispatch(cmd_id, 1.0, &mut state.show);
                 }
@@ -211,13 +246,25 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
+            // Placeholder panel only: real content lands in later steps
+            // (16-21). This just proves the egui_glow pipeline is wired up.
+            state.egui_glow.run(&state.control.window, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.label("egui OK");
+                });
+            });
+
             // Two windows, one context: each surface is made current in
             // turn. Skipping render+swap for an Occluded(true) window is
             // load-bearing on Wayland: see the DontWait/WaitUntil comment
             // in bootstrap().
-            if let Err(e) =
-                state.control.render_and_swap(&state.main_ctx, &state.gl, &state.compositor, &mut state.blit_control_timer)
-            {
+            if let Err(e) = state.control.render_and_swap_with_egui(
+                &state.main_ctx,
+                &state.gl,
+                &state.compositor,
+                &mut state.blit_control_timer,
+                &mut state.egui_glow,
+            ) {
                 eprintln!("[app] control window render failed: {e}");
             }
             if let Err(e) =
@@ -254,6 +301,12 @@ impl ApplicationHandler for App {
             }
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(state.next_frame_at));
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(state) = &mut self.state {
+            state.egui_glow.destroy();
+        }
     }
 }
 
@@ -437,8 +490,17 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     if cfg!(debug_assertions) {
         opendrop_engine::gl_debug::install(&mut gl, "main");
     }
+    // Arc, not an owned glow::Context: EguiGlow::new (below) requires
+    // shared ownership. The 4 Deck::gl contexts stay owned, unshared: see
+    // engine/src/deck.rs.
+    let gl = Arc::new(gl);
     let version = unsafe { gl.get_parameter_string(glow::VERSION) };
     println!("[app] main context: GL {version}");
+
+    // shader_version=None (auto-detect), native_pixels_per_point=None (no
+    // forced ratio), dithering=true: same as egui_glow's own example
+    // (examples/pure_glow.rs:188).
+    let egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
 
     // Compositor FBO/texture belong to whichever context is current at
     // creation: main_ctx is current here (on control's surface), same as
@@ -487,6 +549,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         decks,
         compositor,
         gl,
+        egui_glow,
         refresh_interval,
         next_frame_at: Instant::now(),
         audio: opendrop_audio::spawn_capture(),

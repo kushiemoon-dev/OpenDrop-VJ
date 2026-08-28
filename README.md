@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/readme-assets/stage.png" alt="OpenDrop VJ" width="760">
+<img src="docs/readme-assets/banner.png" alt="OpenDrop VJ" width="600">
 
 # OpenDrop VJ
 

@@ -55,7 +55,7 @@
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.8.3",
     "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.65.0",
+    "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@types/node": "^25.9.3",
     "@types/ws": "^8.18.1",

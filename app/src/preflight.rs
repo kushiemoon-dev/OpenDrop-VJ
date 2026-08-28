@@ -140,6 +140,7 @@ pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc
                 Ok(Some(_)) => break PreflightVerdict::Failed("preset rejected by projectM".to_string()),
                 Ok(None) if start.elapsed() > TIMEOUT => {
                     let _ = child.kill();
+                    let _ = child.wait(); // reap: kill() alone leaves a zombie until this process exits
                     break PreflightVerdict::Failed("preflight check timed out".to_string());
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),

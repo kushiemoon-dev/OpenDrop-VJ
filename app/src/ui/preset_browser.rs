@@ -105,7 +105,13 @@ pub fn show(
 
     ui.separator();
 
-    let per_row = ((ui.available_width() / tile_stride(ui)).floor() as usize).max(1);
+    // Measured against the width the ScrollArea below will actually hand
+    // its contents: `allocated_width` is what a non-floating scrollbar
+    // takes out of it (0 for egui's default floating bars). Counting one
+    // tile too many per row would clip the rightmost one, since
+    // `ui.horizontal` does not wrap.
+    let usable_w = ui.available_width() - ui.spacing().scroll.allocated_width();
+    let per_row = ((usable_w / tile_stride(ui)).floor() as usize).max(1);
     // Borrows `search_cache`, not `show`, so the tiles below can still take
     // `show` mutably.
     let results = search_cache.resolve(show, search_query.as_str());

@@ -10,7 +10,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::beat_detector::BeatDetector;
+use crate::beat_trigger::{
+    default_beat_trigger_config, default_volume_peak_state, detect_volume_peak, should_trigger_on_beat,
+    BeatTriggerConfig, BeatTriggerMode, VolumePeakState,
+};
 use crate::blend::{ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use crate::clock::Clock;
 use crate::commands::{CommandContext, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
@@ -60,6 +66,23 @@ pub struct Show {
     pub playlists: PlaylistStore,
     pub lock_a: bool,
     pub lock_b: bool,
+    pub clock: Clock,
+    pub beat_detector: BeatDetector,
+    pub beat_sync_a: bool,
+    pub beat_sync_b: bool,
+    pub beat_trigger_a: BeatTriggerConfig,
+    pub beat_trigger_b: BeatTriggerConfig,
+    pub auto_xfade: bool,
+    /// Cadence of the auto-crossfade, in beats: DISTINCT from
+    /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
+    /// cadence). Two separate fields in `beat-sync-store.svelte.ts:25-27`.
+    pub beats_per_change: u32,
+    auto_xfade_count: u32,
+    /// 0.0 = no manual BPM set.
+    pub manual_bpm: f64,
+    tap_times: Vec<f64>,
+    volume_peak_state_a: VolumePeakState,
+    volume_peak_state_b: VolumePeakState,
 }
 
 impl Default for Show {
@@ -102,6 +125,19 @@ impl Default for Show {
             playlists,
             lock_a: false,
             lock_b: false,
+            clock: Clock::new(),
+            beat_detector: BeatDetector::new(),
+            beat_sync_a: false,
+            beat_sync_b: false,
+            beat_trigger_a: default_beat_trigger_config(),
+            beat_trigger_b: default_beat_trigger_config(),
+            auto_xfade: false,
+            beats_per_change: 8,
+            auto_xfade_count: 0,
+            manual_bpm: 0.0,
+            tap_times: Vec::new(),
+            volume_peak_state_a: default_volume_peak_state(),
+            volume_peak_state_b: default_volume_peak_state(),
         }
     }
 }
@@ -153,6 +189,131 @@ impl Show {
             }
         }
         out
+    }
+
+    /// Called by `app` once per beat emitted by `clock`/`beat_detector` (see
+    /// step 18 for the call site). Port of `onBeat`,
+    /// `beat-tempo-actions.ts:48-70` (minus the overlay/video/network pulse,
+    /// out of scope here).
+    pub fn on_beat(&mut self) {
+        if self.auto_xfade {
+            self.auto_xfade_count = (self.auto_xfade_count + 1) % self.beats_per_change.max(1);
+            if self.auto_xfade_count == 0 {
+                self.crossfader = if self.crossfader < 0.5 { 1.0 } else { 0.0 };
+            }
+        }
+        self.maybe_advance_on_beat(Deck::A);
+        self.maybe_advance_on_beat(Deck::B);
+    }
+
+    fn maybe_advance_on_beat(&mut self, deck: Deck) {
+        let (synced, locked, trigger) = match deck {
+            Deck::A => (self.beat_sync_a, self.lock_a, self.beat_trigger_a),
+            Deck::B => (self.beat_sync_b, self.lock_b, self.beat_trigger_b),
+        };
+        if !synced || locked {
+            return;
+        }
+        if !should_trigger_on_beat(self.clock.beat_count() as i64, trigger) {
+            return;
+        }
+        self.advance_or_navigate(deck);
+    }
+
+    /// Advances the deck's playlist if it has items, otherwise falls back to
+    /// cycling the full preset catalog via `navigate_preset`.
+    fn advance_or_navigate(&mut self, deck: Deck) {
+        let has_items = match deck {
+            Deck::A => !self.playlists.a_items.is_empty(),
+            Deck::B => !self.playlists.b_items.is_empty(),
+        };
+        if has_items {
+            self.playlists.playlist_next(deck);
+        } else {
+            self.navigate_preset(deck, 1);
+        }
+    }
+
+    /// Port of `toggleBeatSync`, `beat-tempo-actions.ts:83-97`: flips the
+    /// deck's beat-sync flag and switches the playlist engine's own timer
+    /// between infinite (fully beat-driven) and the configured interval.
+    pub fn toggle_beat_sync(&mut self, deck: Deck) {
+        let synced = match deck {
+            Deck::A => {
+                self.beat_sync_a = !self.beat_sync_a;
+                self.beat_sync_a
+            }
+            Deck::B => {
+                self.beat_sync_b = !self.beat_sync_b;
+                self.beat_sync_b
+            }
+        };
+        let ms = if synced { f64::INFINITY } else { self.playlists.interval_sec * 1000.0 };
+        self.playlists.set_beat_sync_interval(deck, ms);
+    }
+
+    /// Port of `tapTempo`, `beat-tempo-actions.ts:99-111`. `now_ms` is
+    /// supplied by `app`: `core` owns no real clock.
+    pub fn tap_tempo(&mut self, now_ms: f64) {
+        self.tap_times.push(now_ms);
+        if self.tap_times.len() > 4 {
+            self.tap_times.remove(0);
+        }
+        if self.tap_times.len() < 2 {
+            return;
+        }
+        let avg = self.tap_times.windows(2).map(|w| w[1] - w[0]).sum::<f64>() / (self.tap_times.len() - 1) as f64;
+        let bpm = (60_000.0 / avg).round();
+        if !(40.0..=300.0).contains(&bpm) {
+            return;
+        }
+        self.manual_bpm = bpm;
+        self.clock.set_bpm(bpm);
+        self.clock.pulse(None); // resync phase only, bpm already set: does not emit a beat.
+    }
+
+    /// Port of `clearManualBpm`, `beat-tempo-actions.ts:113-117`.
+    pub fn clear_manual_bpm(&mut self) {
+        self.manual_bpm = 0.0;
+        self.tap_times.clear();
+        self.clock.set_bpm(0.0);
+    }
+
+    /// Manual BPM if set, otherwise the detected BPM (`0.0` if neither is
+    /// available: the UI shows "—" on `0.0`, port of the ternary in
+    /// `SidebarPlaylist.svelte:113`).
+    pub fn current_bpm(&self) -> f64 {
+        if self.manual_bpm > 0.0 {
+            self.manual_bpm
+        } else {
+            self.beat_detector.bpm()
+        }
+    }
+
+    /// Trigger independent of the beat count, for `BeatTriggerMode::VolumePeak`
+    /// (`should_trigger_on_beat` explicitly ignores that mode). `rms` is
+    /// supplied by `app`: see step 9's `audio::analysis::vu_level`.
+    pub fn check_volume_peak_triggers(&mut self, rms: f64, now_ms: f64) {
+        self.check_one_volume_peak(Deck::A, rms, now_ms);
+        self.check_one_volume_peak(Deck::B, rms, now_ms);
+    }
+
+    fn check_one_volume_peak(&mut self, deck: Deck, rms: f64, now_ms: f64) {
+        let (synced, locked, trigger, state) = match deck {
+            Deck::A => (self.beat_sync_a, self.lock_a, self.beat_trigger_a, self.volume_peak_state_a),
+            Deck::B => (self.beat_sync_b, self.lock_b, self.beat_trigger_b, self.volume_peak_state_b),
+        };
+        if !synced || locked || trigger.mode != BeatTriggerMode::VolumePeak {
+            return;
+        }
+        let result = detect_volume_peak(rms, state, trigger.sensitivity, now_ms);
+        match deck {
+            Deck::A => self.volume_peak_state_a = result.next,
+            Deck::B => self.volume_peak_state_b = result.next,
+        }
+        if result.triggered {
+            self.advance_or_navigate(deck);
+        }
     }
 }
 
@@ -642,6 +803,350 @@ mod tests {
             show.navigate_preset(Deck::B, 1);
             let out = show.take_fired_presets();
             assert_eq!(out.len(), 2);
+        }
+    }
+
+    mod beat_sync_defaults {
+        use super::*;
+
+        #[test]
+        fn beat_sync_starts_false_for_both_decks() {
+            let show = Show::default();
+            assert!(!show.beat_sync_a);
+            assert!(!show.beat_sync_b);
+        }
+
+        #[test]
+        fn beat_trigger_configs_start_at_default() {
+            let show = Show::default();
+            assert_eq!(show.beat_trigger_a, default_beat_trigger_config());
+            assert_eq!(show.beat_trigger_b, default_beat_trigger_config());
+        }
+
+        #[test]
+        fn auto_xfade_starts_false_with_beats_per_change_8() {
+            let show = Show::default();
+            assert!(!show.auto_xfade);
+            assert_eq!(show.beats_per_change, 8);
+        }
+
+        #[test]
+        fn manual_bpm_starts_at_zero() {
+            assert_eq!(Show::default().manual_bpm, 0.0);
+        }
+    }
+
+    mod on_beat {
+        use super::*;
+
+        fn catalog(names: &[&str]) -> Vec<PresetMeta> {
+            names.iter().map(|n| PresetMeta { name: n.to_string(), category: "Other".to_string() }).collect()
+        }
+
+        #[test]
+        fn auto_xfade_does_not_toggle_before_the_configured_beat_count() {
+            let mut show = Show::default();
+            show.auto_xfade = true;
+            show.beats_per_change = 4;
+            for _ in 0..3 {
+                show.on_beat();
+                assert_eq!(show.crossfader, 0.0);
+            }
+        }
+
+        #[test]
+        fn auto_xfade_toggles_on_the_nth_beat() {
+            let mut show = Show::default();
+            show.auto_xfade = true;
+            show.beats_per_change = 4;
+            for _ in 0..4 {
+                show.on_beat();
+            }
+            assert_eq!(show.crossfader, 1.0);
+        }
+
+        #[test]
+        fn auto_xfade_toggles_back_after_another_n_beats() {
+            let mut show = Show::default();
+            show.auto_xfade = true;
+            show.beats_per_change = 2;
+            show.on_beat();
+            show.on_beat();
+            assert_eq!(show.crossfader, 1.0);
+            show.on_beat();
+            show.on_beat();
+            assert_eq!(show.crossfader, 0.0);
+        }
+
+        #[test]
+        fn does_not_touch_crossfader_when_auto_xfade_is_off() {
+            let mut show = Show::default();
+            show.beats_per_change = 1;
+            show.on_beat();
+            assert_eq!(show.crossfader, 0.0);
+        }
+
+        #[test]
+        fn does_not_advance_when_beat_sync_is_false() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            // beat_sync_a/b default to false.
+            show.on_beat();
+            assert!(show.fired_preset_a.borrow().is_none());
+            assert!(show.fired_preset_b.borrow().is_none());
+        }
+
+        #[test]
+        fn does_not_advance_when_locked_even_if_beat_sync_is_true() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_sync_a = true;
+            show.lock_a = true;
+            show.on_beat();
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+
+        #[test]
+        fn advances_the_playlist_when_it_has_items() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.playlists.add_to_playlist(Deck::A, "p2".to_string());
+            show.beat_sync_a = true;
+            show.on_beat();
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 1);
+        }
+
+        #[test]
+        fn navigates_the_preset_catalog_when_the_playlist_is_empty() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_sync_a = true;
+            show.on_beat();
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
+        }
+
+        #[test]
+        fn deck_b_advances_independently_of_deck_a() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::B, "p1".to_string());
+            show.playlists.add_to_playlist(Deck::B, "p2".to_string());
+            show.beat_sync_b = true;
+            show.on_beat();
+            assert_eq!(show.playlists.engine_b_mut().unwrap().current_index(), 1);
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+
+        #[test]
+        fn respects_the_configured_trigger_cadence_via_the_clock_beat_count() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_sync_a = true;
+            show.beat_trigger_a.beats_per_change = 4;
+            show.clock.pulse(None); // beat_count = 1
+            show.on_beat();
+            show.clock.pulse(None); // 2
+            show.on_beat();
+            show.clock.pulse(None); // 3
+            show.on_beat();
+            assert!(show.fired_preset_a.borrow().is_none());
+            show.clock.pulse(None); // 4
+            show.on_beat();
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
+        }
+    }
+
+    mod toggle_beat_sync {
+        use super::*;
+
+        #[test]
+        fn sets_the_playlist_interval_to_infinity_then_restores_it() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.playlists.interval_sec = 5.0;
+
+            show.toggle_beat_sync(Deck::A);
+            assert!(show.beat_sync_a);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().interval_ms(), f64::INFINITY);
+
+            show.toggle_beat_sync(Deck::A);
+            assert!(!show.beat_sync_a);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().interval_ms(), 5000.0);
+        }
+    }
+
+    mod tap_tempo {
+        use super::*;
+
+        #[test]
+        fn a_single_tap_does_not_set_a_bpm() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            assert_eq!(show.manual_bpm, 0.0);
+        }
+
+        #[test]
+        fn computes_bpm_from_a_regular_interval() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(500.0); // 500ms -> 120bpm
+            assert_eq!(show.manual_bpm, 120.0);
+            assert_eq!(show.clock.bpm(), 120.0);
+        }
+
+        #[test]
+        fn averages_over_all_kept_intervals() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(400.0); // interval 400
+            show.tap_tempo(1000.0); // interval 600, avg 500 -> 120bpm
+            assert_eq!(show.manual_bpm, 120.0);
+        }
+
+        #[test]
+        fn rejects_a_computed_bpm_below_40() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(3000.0); // 3000ms -> 20bpm
+            assert_eq!(show.manual_bpm, 0.0);
+        }
+
+        #[test]
+        fn rejects_a_computed_bpm_above_300() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(100.0); // 100ms -> 600bpm
+            assert_eq!(show.manual_bpm, 0.0);
+        }
+
+        #[test]
+        fn keeps_only_the_last_4_taps() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(500.0);
+            show.tap_tempo(1000.0);
+            show.tap_tempo(1500.0);
+            show.tap_tempo(2000.0); // 5th tap: oldest (0.0) is dropped
+            assert_eq!(show.tap_times, vec![500.0, 1000.0, 1500.0, 2000.0]);
+        }
+    }
+
+    mod clear_manual_bpm {
+        use super::*;
+
+        #[test]
+        fn resets_manual_bpm_tap_times_and_clock_bpm() {
+            let mut show = Show::default();
+            show.tap_tempo(0.0);
+            show.tap_tempo(500.0);
+            assert_eq!(show.manual_bpm, 120.0);
+
+            show.clear_manual_bpm();
+            assert_eq!(show.manual_bpm, 0.0);
+            assert!(show.tap_times.is_empty());
+            assert_eq!(show.clock.bpm(), 0.0);
+        }
+    }
+
+    mod current_bpm {
+        use super::*;
+
+        fn commit_detected_bpm(show: &mut Show) {
+            for i in 0..43 {
+                show.beat_detector.process_sample(10.0, i as f64 * 10.0);
+            }
+            let mut now = 10_000.0;
+            show.beat_detector.process_sample(50.0, now);
+            now += 310.0;
+            show.beat_detector.process_sample(50.0, now);
+            now += 310.0;
+            show.beat_detector.process_sample(50.0, now); // commits bpm = 194.0
+        }
+
+        #[test]
+        fn returns_zero_when_neither_manual_nor_detected_bpm_is_set() {
+            assert_eq!(Show::default().current_bpm(), 0.0);
+        }
+
+        #[test]
+        fn falls_back_to_the_detected_bpm_when_no_manual_bpm_is_set() {
+            let mut show = Show::default();
+            commit_detected_bpm(&mut show);
+            assert_eq!(show.current_bpm(), 194.0);
+        }
+
+        #[test]
+        fn manual_bpm_takes_priority_over_the_detected_bpm() {
+            let mut show = Show::default();
+            commit_detected_bpm(&mut show);
+            show.manual_bpm = 128.0;
+            assert_eq!(show.current_bpm(), 128.0);
+        }
+    }
+
+    mod check_volume_peak_triggers {
+        use super::*;
+
+        fn catalog(names: &[&str]) -> Vec<PresetMeta> {
+            names.iter().map(|n| PresetMeta { name: n.to_string(), category: "Other".to_string() }).collect()
+        }
+
+        fn volume_peak_trigger() -> BeatTriggerConfig {
+            BeatTriggerConfig { mode: BeatTriggerMode::VolumePeak, beats_per_change: 8, offset: 0, sensitivity: 0.5 }
+        }
+
+        #[test]
+        fn does_nothing_in_beat_mode() {
+            let mut show = Show::default(); // default trigger mode is Beat
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_sync_a = true;
+            show.check_volume_peak_triggers(0.9, 1000.0);
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+
+        #[test]
+        fn does_nothing_when_not_synced() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_trigger_a = volume_peak_trigger();
+            // beat_sync_a defaults to false.
+            show.check_volume_peak_triggers(0.9, 1000.0);
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+
+        #[test]
+        fn does_nothing_when_locked() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_trigger_a = volume_peak_trigger();
+            show.beat_sync_a = true;
+            show.lock_a = true;
+            show.check_volume_peak_triggers(0.9, 1000.0);
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+
+        #[test]
+        fn advances_on_a_clear_peak_in_volume_peak_mode() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_trigger_a = volume_peak_trigger();
+            show.beat_sync_a = true;
+            show.check_volume_peak_triggers(0.2, 1000.0); // establishes the rolling average
+            show.check_volume_peak_triggers(0.9, 1600.0); // clear peak above it
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
+        }
+
+        #[test]
+        fn processes_both_decks_independently() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.beat_trigger_a = volume_peak_trigger();
+            show.beat_trigger_b = volume_peak_trigger();
+            show.beat_sync_a = true;
+            show.beat_sync_b = true;
+            show.check_volume_peak_triggers(0.2, 1000.0);
+            show.check_volume_peak_triggers(0.9, 1600.0);
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
+            assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("P1"));
         }
     }
 }

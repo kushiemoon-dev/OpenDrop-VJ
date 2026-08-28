@@ -26,6 +26,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::Key;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+mod egl_headless;
 mod keymap;
 mod preflight;
 mod thumbnails;

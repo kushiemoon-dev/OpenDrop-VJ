@@ -9,9 +9,11 @@
 //! Ported from an earlier prototype's `check_single_preset` (a
 //! pattern already proven there), with two differences: `opendrop_engine::
 //! ffi` instead of the spike's local `mod ffi`, and a smaller resolution:
-//! a validation check has no visual-quality requirement.
+//! a validation check has no visual-quality requirement. The EGL bootstrap
+//! itself lives in `egl_headless`, shared with the `--render-thumbnail`
+//! child.
 
-use khronos_egl as egl;
+use crate::egl_headless::{create_context, create_pbuffer, init_egl};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,60 +21,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-type Egl = egl::DynamicInstance<egl::Latest>;
-
 const PREFLIGHT_W: i32 = 320;
 const PREFLIGHT_H: i32 = 180;
 
 // ---------------------------------------------------------- child process
-
-fn init_egl() -> (Egl, egl::Display, egl::Config) {
-    let inst = unsafe { egl::DynamicInstance::<egl::Latest>::load_required() }.expect("failed to load libEGL.so.1");
-    let display = unsafe { inst.get_display(egl::DEFAULT_DISPLAY) }.expect("eglGetDisplay failed");
-    inst.initialize(display).expect("eglInitialize failed");
-    inst.bind_api(egl::OPENGL_API).expect("eglBindAPI(OPENGL_API) failed");
-
-    let config_attribs = [
-        egl::SURFACE_TYPE,
-        egl::PBUFFER_BIT,
-        egl::RENDERABLE_TYPE,
-        egl::OPENGL_BIT,
-        egl::RED_SIZE,
-        8,
-        egl::GREEN_SIZE,
-        8,
-        egl::BLUE_SIZE,
-        8,
-        egl::ALPHA_SIZE,
-        8,
-        egl::NONE,
-    ];
-    let config = inst
-        .choose_first_config(display, &config_attribs)
-        .expect("eglChooseConfig failed")
-        .expect("no matching EGL config for pbuffer+OpenGL");
-    (inst, display, config)
-}
-
-// No `share` context param here (unlike the spike's general-purpose
-// version): a preflight child never has more than this one context.
-fn create_context(inst: &Egl, display: egl::Display, config: egl::Config) -> egl::Context {
-    let attribs = [
-        egl::CONTEXT_MAJOR_VERSION,
-        3,
-        egl::CONTEXT_MINOR_VERSION,
-        3,
-        egl::CONTEXT_OPENGL_PROFILE_MASK,
-        egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        egl::NONE,
-    ];
-    inst.create_context(display, config, None, &attribs).expect("eglCreateContext failed")
-}
-
-fn create_pbuffer(inst: &Egl, display: egl::Display, config: egl::Config, w: i32, h: i32) -> egl::Surface {
-    let attribs = [egl::WIDTH, w, egl::HEIGHT, h, egl::NONE];
-    inst.create_pbuffer_surface(display, config, &attribs).expect("eglCreatePbufferSurface failed")
-}
 
 static PRESET_FAILED: AtomicBool = AtomicBool::new(false);
 

@@ -87,6 +87,7 @@ enum Panel {
     Playlists,
     Audio,
     Quality,
+    Output,
 }
 
 struct WindowSlot {
@@ -248,6 +249,14 @@ struct AppState {
     thumbnail_renderer: ThumbnailRenderer,
     /// Disk cache dir for rendered thumbnails (see `thumbnails::cache_path`).
     thumbnail_cache_dir: PathBuf,
+    /// Name of the monitor currently selected in the Output panel's dropdown
+    /// (Step 21), if the user has picked one explicitly. `None` means
+    /// "current monitor": passed straight through as `Fullscreen::
+    /// Borderless(None)`. Monitors themselves are never cached on `AppState`:
+    /// the panel re-queries `event_loop.available_monitors()` fresh every
+    /// frame it's visible (see `ui::output`'s doc comment for why this is
+    /// deliberately unlike Step 19's `input_devices` cache).
+    selected_output_monitor: Option<String>,
 }
 
 #[derive(Default)]
@@ -302,6 +311,9 @@ fn ui_root(
     refresh_interval: &mut Duration,
     invisible_mode: &mut InvisibleMode,
     pending_mesh_size: &mut [Option<(usize, usize)>; deck::DECK_COUNT],
+    event_loop: &ActiveEventLoop,
+    output_window: &Window,
+    selected_output_monitor: &mut Option<String>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -310,6 +322,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
             ui.selectable_value(active_panel, Panel::Audio, "Audio");
             ui.selectable_value(active_panel, Panel::Quality, "Quality");
+            ui.selectable_value(active_panel, Panel::Output, "Output");
         });
         ui.separator();
         match active_panel {
@@ -327,6 +340,9 @@ fn ui_root(
             }
             Panel::Quality => {
                 ui::quality::show(ui, refresh_interval, invisible_mode, pending_mesh_size);
+            }
+            Panel::Output => {
+                ui::output::show(ui, event_loop, output_window, selected_output_monitor);
             }
         }
     });
@@ -552,6 +568,7 @@ impl ApplicationHandler for App {
             let AppState {
                 egui_glow,
                 control,
+                output,
                 show,
                 deck_tex_ids,
                 deck_preset_names,
@@ -568,6 +585,7 @@ impl ApplicationHandler for App {
                 refresh_interval,
                 invisible_mode,
                 pending_mesh_size,
+                selected_output_monitor,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -598,6 +616,9 @@ impl ApplicationHandler for App {
                     refresh_interval,
                     invisible_mode,
                     pending_mesh_size,
+                    event_loop,
+                    &output.window,
+                    selected_output_monitor,
                 );
             });
             if let Some(name) = preset_load_request {
@@ -979,6 +1000,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         thumbnail_textures: HashMap::new(),
         thumbnail_renderer,
         thumbnail_cache_dir: std::env::temp_dir().join("opendrop-thumbs"),
+        selected_output_monitor: None,
     })
 }
 

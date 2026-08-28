@@ -5,17 +5,53 @@
 //! preset-browser panel's visibility; `ui::preset_browser` feeds jobs in via
 //! `enqueue_front` as tiles scroll into view (both Step 17).
 //!
-//! Disk cache entries are raw RGBA8 (`ThumbnailRenderer::render_thumbnail`'s
-//! exact output), no header: the size is always known ahead of time
-//! (`THUMB_W * THUMB_H * 4`), so a length check on read is enough to detect
-//! a stale/corrupt entry.
+//! Disk cache entries are raw RGBA8 (`THUMB_W * THUMB_H * 4` bytes), no
+//! header: the size is always known ahead of time, so a length check on
+//! read is enough to detect a stale, truncated, or corrupt entry.
+//!
+//! Nothing here renders anything. A cache miss spawns a `--render-thumbnail`
+//! child process (`thumbnail_child`), which writes the cache file itself;
+//! this module only ever reads that file. That keeps a preset that crashes
+//! projectM from taking down the app on nothing more than a scroll, and
+//! keeps the 31-frame render and its blocking `glReadPixels` off the
+//! event-loop thread. At most one child is outstanding at a time: a fast
+//! scroll through a ~9800-tile grid must not turn into dozens of concurrent
+//! subprocesses: and the pump does at most one unit of work per tick, as it
+//! always has.
 
 use opendrop_core::thumb_queue::{dequeue_job, ThumbJob};
-use opendrop_engine::thumbnail::{ThumbnailRenderer, THUMB_H, THUMB_W};
+use opendrop_engine::thumbnail::{THUMB_H, THUMB_W};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 const RGBA_BYTES: usize = (THUMB_W * THUMB_H * 4) as usize;
+
+/// Wall-clock budget for one `--render-thumbnail` child before it is killed
+/// and its preset written off. Longer than `preflight`'s 5s: that child
+/// loads a preset and renders 5 frames, this one renders 31 and reads them
+/// back. Nothing waits on this deadline: it is checked from the pump's
+/// per-tick poll, so a hung child costs the UI nothing but one stalled
+/// thumbnail slot.
+const RENDER_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The one `--render-thumbnail` child currently outstanding, if any, and
+/// the job it was spawned for. Owned by `AppState`; created and consumed
+/// only by `pump_thumbnail_queue`.
+pub struct InFlightThumb {
+    child: Child,
+    job: ThumbJob,
+    started_at: Instant,
+}
+
+enum RenderPoll {
+    Running,
+    /// The child exited cleanly. Its output still has to be read and
+    /// length-checked before it counts as a real thumbnail.
+    Exited,
+    Failed(String),
+}
 
 /// Cache filename for `preset_name` under `cache_dir`: a hash of the name
 /// (sidesteps any filesystem-illegal-character handling for arbitrary
@@ -34,27 +70,10 @@ fn read_cached(cache_dir: &Path, preset_name: &str) -> Option<Vec<u8>> {
     (bytes.len() == RGBA_BYTES).then_some(bytes)
 }
 
-/// Cache hit: read straight from disk. Miss: render via `renderer` (Step
-/// 11) and write the result through to disk for next time. A write failure
-/// is logged, not propagated: the freshly rendered pixels are still good,
-/// only the caching optimization was lost.
-fn load_or_render(cache_dir: &Path, renderer: &mut ThumbnailRenderer, preset_path: &Path, preset_name: &str) -> Result<Vec<u8>, String> {
-    if let Some(cached) = read_cached(cache_dir, preset_name) {
-        return Ok(cached);
-    }
-    let pixels = renderer.render_thumbnail(preset_path)?;
-    let dest = cache_path(cache_dir, preset_name);
-    let _ = std::fs::create_dir_all(cache_dir);
-    if let Err(e) = std::fs::write(&dest, &pixels) {
-        eprintln!("[thumbnails] failed to write cache {}: {e}", dest.display());
-    }
-    Ok(pixels)
-}
-
 /// Converts raw RGBA8 `pixels` (must be `RGBA_BYTES` long) into a loaded
-/// egui texture. Rows arrive top-first: `render_thumbnail` reverses
-/// `glReadPixels`' bottom-first order at the source, and the disk cache
-/// stores that already-reversed form: which is the order
+/// egui texture. Rows arrive top-first: the `--render-thumbnail` child
+/// reverses `glReadPixels`' bottom-first order before writing the cache
+/// file, so what comes off disk is already in the order
 /// `ColorImage::from_rgba_unmultiplied` expects. `name` is only the debug
 /// label egui attaches to the texture, not a cache key.
 fn rgba_to_texture(ctx: &egui::Context, name: &str, pixels: &[u8]) -> egui::TextureHandle {
@@ -62,46 +81,129 @@ fn rgba_to_texture(ctx: &egui::Context, name: &str, pixels: &[u8]) -> egui::Text
     ctx.load_texture(name, image, egui::TextureOptions::default())
 }
 
-/// Pumps at most one job off `queue`: called once per tick so a burst of
-/// newly-visible preset tiles never stalls the live render loop. On a hit,
-/// loads/renders the thumbnail (see `load_or_render`) and stores the
-/// resulting `TextureHandle` in `textures`, keyed by `job.slot_key`: the
-/// handle keeps the GPU texture alive until it's dropped (egui never frees
-/// it earlier), so replacing or removing map entries is how a caller
-/// reclaims that memory. Ok(()) with no queue activity, or once a job
-/// without a resolvable path is skipped, are not errors.
+/// Re-invokes this same binary as `--render-thumbnail <preset> <out>`.
+/// Mirrors `preflight::spawn_preflight`'s child setup, minus the thread:
+/// nothing here blocks, so there is nothing for a thread to get off the
+/// event loop.
+fn spawn_render(preset_path: &Path, out_path: &Path) -> Result<Child, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe() failed: {e}"))?;
+    Command::new(exe)
+        .arg("--render-thumbnail")
+        .arg(preset_path)
+        .arg(out_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("spawn failed: {e}"))
+}
+
+/// Non-blocking check on the outstanding child, including the timeout:
+/// same `try_wait` shape as `spawn_preflight`'s loop, but polled once per
+/// tick from the event loop instead of slept on in a thread.
+fn poll_render(in_flight: &mut InFlightThumb) -> RenderPoll {
+    match in_flight.child.try_wait() {
+        Ok(Some(status)) if status.success() => RenderPoll::Exited,
+        // Covers death-by-signal too (a projectM segfault or abort), which
+        // is exactly the case this whole out-of-process detour exists for.
+        Ok(Some(status)) => RenderPoll::Failed(format!("thumbnail renderer exited with {status}")),
+        Ok(None) if in_flight.started_at.elapsed() > RENDER_TIMEOUT => {
+            let _ = in_flight.child.kill();
+            let _ = in_flight.child.wait(); // reap: kill() alone leaves a zombie until this process exits
+            RenderPoll::Failed("thumbnail render timed out".to_string())
+        }
+        Ok(None) => RenderPoll::Running,
+        Err(e) => RenderPoll::Failed(format!("wait failed: {e}")),
+    }
+}
+
+/// Does at most one unit of work per tick, so a burst of newly-visible
+/// preset tiles never stalls the live render loop: either poll the
+/// outstanding render child, or take one job off `queue`. A job that hits
+/// the disk cache is finished on the spot (a ~83KB read plus a texture
+/// upload); a miss spawns a child and finishes on a later tick. The
+/// resulting `TextureHandle` is stored in `textures`, keyed by
+/// `job.slot_key`: the handle keeps the GPU texture alive until it's
+/// dropped (egui never frees it earlier), so replacing or removing map
+/// entries is how a caller reclaims that memory. Ok(()) with no queue
+/// activity, or once a job without a resolvable path is skipped, are not
+/// errors.
 ///
-/// A preset whose render fails is recorded in `failed` and never retried:
-/// the tile that asked for it is still on screen and still has no texture,
-/// so it would re-enqueue the same job on the very next frame, turning one
-/// failure into a full preset load + 31 render frames + a blocking
-/// `glReadPixels` every tick, indefinitely. `ui::preset_browser` reads the
-/// same set to stop enqueueing at the source.
+/// A preset whose render fails: non-zero exit, death by signal, timeout,
+/// or a missing/wrong-size output file: is recorded in `failed` and never
+/// retried: the tile that asked for it is still on screen and still has no
+/// texture, so it would re-enqueue the same job on the very next tick,
+/// turning one failure into an endless respawn loop. `ui::preset_browser`
+/// reads the same set to stop enqueueing at the source.
 #[allow(clippy::too_many_arguments)]
 pub fn pump_thumbnail_queue(
     queue: &mut Vec<ThumbJob>,
+    in_flight: &mut Option<InFlightThumb>,
     cache_dir: &Path,
-    renderer: &mut ThumbnailRenderer,
     path_by_name: &HashMap<String, PathBuf>,
     ctx: &egui::Context,
     textures: &mut HashMap<String, egui::TextureHandle>,
     failed: &mut HashSet<String>,
 ) -> Result<(), String> {
+    // A child spawned on an earlier tick takes priority, and every branch
+    // below returns: never poll a child and start another job in the same
+    // tick. This is also what lets `main.rs` keep pumping purely to drain
+    // an outstanding child after the user has switched away from the
+    // browser panel, without that draining the rest of the queue.
+    if let Some(mut pending) = in_flight.take() {
+        match poll_render(&mut pending) {
+            RenderPoll::Running => {
+                *in_flight = Some(pending);
+                return Ok(());
+            }
+            RenderPoll::Failed(e) => {
+                failed.insert(pending.job.name.clone());
+                return Err(format!("{}: {e}", pending.job.name));
+            }
+            RenderPoll::Exited => {
+                // The child's clean exit is a claim, not proof. `read_cached`
+                // is the verification: a missing or wrong-length file counts
+                // as a failed render, same as a non-zero exit would.
+                let Some(pixels) = read_cached(cache_dir, &pending.job.name) else {
+                    failed.insert(pending.job.name.clone());
+                    return Err(format!("{}: renderer exited cleanly but wrote no usable thumbnail", pending.job.name));
+                };
+                textures.insert(pending.job.slot_key, rgba_to_texture(ctx, &pending.job.name, &pixels));
+                return Ok(());
+            }
+        }
+    }
+
     let (job, rest) = dequeue_job(std::mem::take(queue));
     *queue = rest;
     let Some(job) = job else { return Ok(()) };
+    if failed.contains(&job.name) {
+        // Already known bad. `ui::preset_browser` stops enqueueing a name
+        // once it lands in `failed`, but a job for it can already be
+        // sitting in the queue: the tile re-enqueues on every frame its
+        // render child is still running, and the failure is only recorded
+        // when that child exits. Without this the name gets exactly one
+        // extra spawn; with it, none.
+        return Ok(());
+    }
     let Some(preset_path) = path_by_name.get(&job.name) else {
         return Ok(()); // stale job (e.g. catalog changed under it): nothing to render
     };
-    let pixels = match load_or_render(cache_dir, renderer, preset_path, &job.name) {
-        Ok(pixels) => pixels,
+
+    if let Some(pixels) = read_cached(cache_dir, &job.name) {
+        textures.insert(job.slot_key, rgba_to_texture(ctx, &job.name, &pixels));
+        return Ok(());
+    }
+
+    match spawn_render(preset_path, &cache_path(cache_dir, &job.name)) {
+        Ok(child) => {
+            *in_flight = Some(InFlightThumb { child, job, started_at: Instant::now() });
+            Ok(())
+        }
         Err(e) => {
             failed.insert(job.name.clone());
-            return Err(e);
+            Err(format!("{}: {e}", job.name))
         }
-    };
-    textures.insert(job.slot_key.clone(), rgba_to_texture(ctx, &job.name, &pixels));
-    Ok(())
+    }
 }
 
 #[cfg(test)]

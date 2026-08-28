@@ -11,7 +11,6 @@ use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
-use opendrop_engine::thumbnail::ThumbnailRenderer;
 use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
 use std::collections::{HashMap, HashSet};
@@ -29,6 +28,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 mod egl_headless;
 mod keymap;
 mod preflight;
+mod thumbnail_child;
 mod thumbnails;
 mod ui;
 
@@ -253,10 +253,12 @@ struct AppState {
     /// Cached preset thumbnails, keyed by preset name: populated by
     /// `pump_thumbnail_queue`, read by the preset-browser panel.
     thumbnail_textures: HashMap<String, egui::TextureHandle>,
-    /// Dedicated offscreen GL context for rendering preset thumbnails (Step
-    /// 11/15): its own pbuffer, sharing the deck contexts' namespace but
-    /// never one of the 4 deck contexts itself.
-    thumbnail_renderer: ThumbnailRenderer,
+    /// The one outstanding `--render-thumbnail` child process, if any.
+    /// Thumbnails are rendered out of process (see `thumbnails`' module doc:
+    /// a preset that crashes projectM must not take the app down just
+    /// because its tile scrolled into view), one at a time, polled by
+    /// `pump_thumbnail_queue`.
+    thumbnail_in_flight: Option<thumbnails::InFlightThumb>,
     /// Disk cache dir for rendered thumbnails (see `thumbnails::cache_path`).
     thumbnail_cache_dir: PathBuf,
     /// Name of the monitor currently selected in the Output panel's dropdown
@@ -543,19 +545,23 @@ impl ApplicationHandler for App {
                 }
             }
 
-            // Preset-browser thumbnail pump (Step 17): at most one job per
-            // tick (see `pump_thumbnail_queue`'s own doc comment), and only
-            // while the panel that could actually show the result is
-            // visible: otherwise this would keep rendering thumbnails no
-            // one can see. Like the deck loop above, this may leave a
-            // different context (the thumbnail renderer's own pbuffer
-            // context) current: the reacquire right below fixes that up
-            // unconditionally either way.
-            if state.active_panel == Panel::PresetBrowser {
+            // Preset-browser thumbnail pump (Step 17): at most one unit of
+            // work per tick (see `pump_thumbnail_queue`'s own doc comment),
+            // and only while the panel that could actually show the result
+            // is visible: otherwise this would keep rendering thumbnails no
+            // one can see. The `is_some()` half is what reaps a child that
+            // was still rendering when the user switched panels; the pump
+            // returns as soon as it has handled that child, so it never
+            // drains the rest of the queue while the browser is hidden.
+            //
+            // Unlike the deck loop above, this touches no GL context of its
+            // own any more: the render happens in a child process, and all
+            // this does here is poll it and upload the bytes it wrote.
+            if state.active_panel == Panel::PresetBrowser || state.thumbnail_in_flight.is_some() {
                 if let Err(e) = thumbnails::pump_thumbnail_queue(
                     &mut state.thumb_queue,
+                    &mut state.thumbnail_in_flight,
                     &state.thumbnail_cache_dir,
-                    &mut state.thumbnail_renderer,
                     &state.path_by_name,
                     &state.egui_glow.egui_ctx,
                     &mut state.thumbnail_textures,
@@ -898,10 +904,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
 
     let decks = deck::create_decks(&display, &gl_config, &main_ctx)?;
 
-    // 6th context, sharing the same group as the 4 decks above but never
-    // one of them: dedicated to lazy, offscreen preset thumbnail rendering
-    // for the preset browser panel (Step 17; renderer built by Step 11).
-    let thumbnail_renderer = ThumbnailRenderer::new(&display, &gl_config, &main_ctx)?;
+    // No thumbnail context here. Preset thumbnails used to get a 6th
+    // in-process GL context of their own; they are now rendered in a
+    // `--render-thumbnail` child process (see `thumbnails`' module doc), so
+    // this process holds exactly the 4 deck contexts plus the main one.
 
     let preset_root = preset_dir();
     let presets = pick_distinct_presets(&preset_root, deck::DECK_COUNT);
@@ -1069,16 +1075,24 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
-        thumbnail_renderer,
+        thumbnail_in_flight: None,
         thumbnail_cache_dir: thumbnail_cache_dir(),
         selected_output_monitor: None,
     })
 }
 
 fn main() {
+    // Hidden subcommands, both of them this same binary re-invoked as a
+    // child process by the parent app, both of them `-> !`. Neither is a
+    // user-facing CLI: the parent builds these argv lines itself, and the
+    // whole result protocol is the exit code (plus, for --render-thumbnail,
+    // the file it wrote).
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--preflight-check" {
         preflight::run_preflight_check(Path::new(&args[2]));
+    }
+    if args.len() >= 4 && args[1] == "--render-thumbnail" {
+        thumbnail_child::run_render_thumbnail(Path::new(&args[2]), Path::new(&args[3]));
     }
 
     let event_loop = EventLoop::new().expect("failed to create winit event loop");

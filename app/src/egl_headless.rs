@@ -64,3 +64,12 @@ pub fn create_pbuffer(inst: &Egl, display: egl::Display, config: egl::Config, w:
     let attribs = [egl::WIDTH, w, egl::HEIGHT, h, egl::NONE];
     inst.create_pbuffer_surface(display, config, &attribs).expect("eglCreatePbufferSurface failed")
 }
+
+/// A `glow::Context` loaded through `eglGetProcAddress` for the currently
+/// current EGL context. Same loader the earlier prototype used
+/// (an earlier prototype's `make_gl`); the glutin-side equivalent in
+/// `engine::deck` goes through `Display::get_proc_address` instead, which
+/// these child processes have no `Display` for.
+pub fn make_gl(inst: &Egl) -> glow::Context {
+    unsafe { glow::Context::from_loader_function(|s| inst.get_proc_address(s).map_or(std::ptr::null(), |f| f as *const _)) }
+}

@@ -6,6 +6,7 @@ pub mod commands;
 pub mod lfo;
 pub mod overlay;
 pub mod playlist;
+pub mod preset_index;
 pub mod q_vars;
 pub mod share_set;
 pub mod show;

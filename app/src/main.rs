@@ -8,8 +8,10 @@ use glutin_winit::DisplayBuilder;
 use opendrop_core::blend::DEFAULT_COLOR_PARAMS;
 use opendrop_core::commands::{create_default_registry, CommandId, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
+use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::thumbnail::ThumbnailRenderer;
 use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
 use std::collections::{HashMap, HashSet};
@@ -54,6 +56,18 @@ fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
         };
         LayerInput { opacity: opacities[i] as f32, composite: show.slot_composites[i], color }
     })
+}
+
+/// Which top-level panel the control window is currently showing: gates
+/// per-tick work that only matters while its panel is visible (Step 17: the
+/// thumbnail pump only runs while `PresetBrowser` is on screen). Deliberately
+/// minimal: just enough to gate that one thing, not a general tabbed-panel
+/// system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum Panel {
+    #[default]
+    Decks,
+    PresetBrowser,
 }
 
 struct WindowSlot {
@@ -168,6 +182,23 @@ struct AppState {
     /// re-registered per frame, which would leak a texture handle in
     /// egui_glow's painter every tick.
     deck_tex_ids: [egui::TextureId; 4],
+    /// Which panel the control window currently shows: see `Panel`.
+    active_panel: Panel,
+    /// Live text in the preset-browser search box.
+    preset_search_query: String,
+    /// Job queue feeding `thumbnails::pump_thumbnail_queue` (Step 15):
+    /// `enqueue_front`-ed by the preset-browser panel for each visible tile
+    /// still missing a texture.
+    thumb_queue: Vec<ThumbJob>,
+    /// Cached preset thumbnails, keyed by preset name: populated by
+    /// `pump_thumbnail_queue`, read by the preset-browser panel.
+    thumbnail_textures: HashMap<String, egui::TextureHandle>,
+    /// Dedicated offscreen GL context for rendering preset thumbnails (Step
+    /// 11/15): its own pbuffer, sharing the deck contexts' namespace but
+    /// never one of the 4 deck contexts itself.
+    thumbnail_renderer: ThumbnailRenderer,
+    /// Disk cache dir for rendered thumbnails (see `thumbnails::cache_path`).
+    thumbnail_cache_dir: PathBuf,
 }
 
 #[derive(Default)]
@@ -191,11 +222,15 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
 /// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). Only the decks panel (Step 16) so
-/// far; later steps (17-21) add more panels here.
+/// Task 2's notes on this same drift). Decks (Step 16) and preset-browser
+/// (Step 17) panels so far, switched via the tab row; later steps add more
+/// panels here.
 ///
 /// Takes individual `AppState` fields, not `&mut AppState`: see
-/// `ui::decks::show`'s doc comment for why.
+/// `ui::decks::show`'s doc comment for why. `load_request` is an out-param:
+/// the preset-browser panel can't call `request_preset_load` itself (that
+/// needs the whole `AppState`), so a click just records the name here for
+/// the caller to act on once this frame's egui pass is done.
 #[allow(clippy::too_many_arguments)]
 fn ui_root(
     ui: &mut egui::Ui,
@@ -205,9 +240,26 @@ fn ui_root(
     pending_validations: &HashSet<usize>,
     preset_errors: &HashMap<usize, String>,
     transition_seconds: &mut f64,
+    active_panel: &mut Panel,
+    preset_search_query: &mut String,
+    thumb_queue: &mut Vec<ThumbJob>,
+    thumbnail_textures: &HashMap<String, egui::TextureHandle>,
+    load_request: &mut Option<String>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
-        ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
+        ui.horizontal(|ui| {
+            ui.selectable_value(active_panel, Panel::Decks, "Decks");
+            ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
+        });
+        ui.separator();
+        match active_panel {
+            Panel::Decks => {
+                ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
+            }
+            Panel::PresetBrowser => {
+                ui::preset_browser::show(ui, show, preset_search_query, thumb_queue, thumbnail_textures, load_request);
+            }
+        }
     });
 }
 
@@ -332,6 +384,28 @@ impl ApplicationHandler for App {
                     state.deck_next_render_at[i] = now + IDLE_DECK_INTERVAL;
                 }
             }
+
+            // Preset-browser thumbnail pump (Step 17): at most one job per
+            // tick (see `pump_thumbnail_queue`'s own doc comment), and only
+            // while the panel that could actually show the result is
+            // visible: otherwise this would keep rendering thumbnails no
+            // one can see. Like the deck loop above, this may leave a
+            // different context (the thumbnail renderer's own pbuffer
+            // context) current: the reacquire right below fixes that up
+            // unconditionally either way.
+            if state.active_panel == Panel::PresetBrowser {
+                if let Err(e) = thumbnails::pump_thumbnail_queue(
+                    &mut state.thumb_queue,
+                    &state.thumbnail_cache_dir,
+                    &mut state.thumbnail_renderer,
+                    &state.path_by_name,
+                    &state.egui_glow.egui_ctx,
+                    &mut state.thumbnail_textures,
+                ) {
+                    eprintln!("[app] thumbnail pump failed: {e}");
+                }
+            }
+
             // Reacquire the main context (any of its surfaces works: the
             // composite FBO belongs to the context, not the surface) before
             // touching the compositor or either window.
@@ -346,10 +420,10 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
-            // Decks panel (Step 16): real content, replacing the Step 2
-            // placeholder. Destructured so the closure below only borrows
-            // the fields it needs, disjoint from `egui_glow` itself (see
-            // `ui_root`'s doc comment).
+            // Decks (Step 16) and preset-browser (Step 17) panels: real
+            // content, replacing the Step 2 placeholder. Destructured so the
+            // closure below only borrows the fields it needs, disjoint from
+            // `egui_glow` itself (see `ui_root`'s doc comment).
             let AppState {
                 egui_glow,
                 control,
@@ -359,11 +433,41 @@ impl ApplicationHandler for App {
                 pending_validations,
                 preset_errors,
                 transition_seconds,
+                active_panel,
+                preset_search_query,
+                thumb_queue,
+                thumbnail_textures,
                 ..
             } = state;
+            // Out-param for the preset-browser click path: see `ui_root`'s
+            // doc comment. `show` is still borrowed (via the destructure
+            // above) for the duration of this closure, so the actual
+            // `request_preset_load` call has to wait until after `run()`
+            // returns, below.
+            let mut preset_load_request: Option<String> = None;
             egui_glow.run(&control.window, |ui| {
-                ui_root(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
+                ui_root(
+                    ui,
+                    show,
+                    deck_tex_ids,
+                    deck_preset_names,
+                    pending_validations,
+                    preset_errors,
+                    transition_seconds,
+                    active_panel,
+                    preset_search_query,
+                    thumb_queue,
+                    thumbnail_textures,
+                    &mut preset_load_request,
+                );
             });
+            if let Some(name) = preset_load_request {
+                // Same pipeline as keyboard navigation and playlist/beat-sync
+                // advances (`take_fired_presets`, above): never a direct
+                // `Deck::load_preset` call, which would bypass the pre-flight
+                // validation Step 14 added.
+                request_preset_load(state, state.show.selected_slot, name);
+            }
 
             // Two windows, one context: each surface is made current in
             // turn. Skipping render+swap for an Occluded(true) window is
@@ -568,6 +672,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
 
     let decks = deck::create_decks(&display, &gl_config, &main_ctx)?;
 
+    // 6th context, sharing the same group as the 4 decks above but never
+    // one of them: dedicated to lazy, offscreen preset thumbnail rendering
+    // for the preset browser panel (Step 17; renderer built by Step 11).
+    let thumbnail_renderer = ThumbnailRenderer::new(&display, &gl_config, &main_ctx)?;
+
     let presets = pick_distinct_presets(&preset_dir(), deck::DECK_COUNT);
     if presets.len() < deck::DECK_COUNT {
         return Err(format!(
@@ -716,6 +825,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_preset_names: Default::default(),
         transition_seconds: 0.0,
         deck_tex_ids,
+        active_panel: Panel::default(),
+        preset_search_query: String::new(),
+        thumb_queue: Vec::new(),
+        thumbnail_textures: HashMap::new(),
+        thumbnail_renderer,
+        thumbnail_cache_dir: std::env::temp_dir().join("opendrop-thumbs"),
     })
 }
 

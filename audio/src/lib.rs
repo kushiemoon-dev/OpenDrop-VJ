@@ -1,6 +1,6 @@
 mod analysis;
 mod capture;
-mod device;
+pub mod device;
 
 pub use analysis::AnalyserConfig;
 
@@ -23,12 +23,20 @@ fn silent_snapshot() -> AudioSnapshot {
 
 pub struct AudioHandle {
     snapshot: std::sync::Arc<arc_swap::ArcSwap<AudioSnapshot>>,
+    device_tx: std::sync::mpsc::Sender<String>,
 }
 
 impl AudioHandle {
     /// Never blocks: an atomic load of the current Arc (AC-7).
     pub fn latest(&self) -> std::sync::Arc<AudioSnapshot> {
         self.snapshot.load_full()
+    }
+
+    /// Requests the capture thread to reopen its stream on the named input
+    /// device. Never blocks and never fails on the caller's side: a closed
+    /// receiver (capture thread gone) is silently ignored.
+    pub fn set_device(&self, name: String) {
+        let _ = self.device_tx.send(name);
     }
 }
 
@@ -39,6 +47,12 @@ impl AudioHandle {
 /// (AC-4).
 pub fn spawn_capture() -> AudioHandle {
     let snapshot = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(silent_snapshot()));
-    capture::spawn(snapshot.clone());
-    AudioHandle { snapshot }
+    let (device_tx, device_rx) = std::sync::mpsc::channel();
+    capture::spawn(snapshot.clone(), device_rx);
+    AudioHandle { snapshot, device_tx }
+}
+
+/// Lists the labels of every available input device, for UI device pickers.
+pub fn list_input_devices() -> Vec<String> {
+    device::list_input_devices(&cpal::default_host())
 }

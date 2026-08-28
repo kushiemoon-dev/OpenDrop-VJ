@@ -7,8 +7,12 @@
 //! `bus_gain` and the default bus assignment are ported from OpenDrop-VJ
 //! `src/routes/+page.svelte:264-269`.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::blend::{ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use crate::commands::{CommandContext, Deck};
+use crate::preset_index::PresetMeta;
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
 /// slot never shows, regardless of crossfader position.
@@ -47,6 +51,11 @@ pub struct Show {
     pub slot_composites: [SlotComposite; 4],
     pub color_params_a: ColorParams,
     pub color_params_b: ColorParams,
+    pub preset_catalog: Vec<PresetMeta>,
+    preset_index_a: usize,
+    preset_index_b: usize,
+    fired_preset_a: Rc<RefCell<Option<String>>>,
+    fired_preset_b: Rc<RefCell<Option<String>>>,
 }
 
 impl Default for Show {
@@ -59,8 +68,22 @@ impl Default for Show {
             slot_composites: [DEFAULT_SLOT_COMPOSITE; 4],
             color_params_a: DEFAULT_COLOR_PARAMS,
             color_params_b: DEFAULT_COLOR_PARAMS,
+            preset_catalog: Vec::new(),
+            preset_index_a: 0,
+            preset_index_b: 0,
+            fired_preset_a: Rc::new(RefCell::new(None)),
+            fired_preset_b: Rc::new(RefCell::new(None)),
         }
     }
+}
+
+/// A preset name chosen by `navigate_preset`, resolved to the physical slot
+/// its bus letter maps to. Drained from `Show::take_fired_presets` by `app`
+/// each tick to trigger the validated load (`Deck::load_preset`): `Show`
+/// stays I/O-free and never touches GL directly.
+pub struct PendingPresetLoad {
+    pub slot: usize,
+    pub name: String,
 }
 
 impl Show {
@@ -85,6 +108,23 @@ impl Show {
             Deck::B => b == DeckBus::B,
         })
     }
+
+    /// Drains presets fired by `navigate_preset` since the last drain,
+    /// resolved to their physical slot. If a deck's letter isn't assigned to
+    /// any slot (both `Off`, or both slots on the other letter), the fired
+    /// preset is silently dropped: consistent with "Active" shortcuts
+    /// having no visible effect when that deck isn't displayed anywhere.
+    pub fn take_fired_presets(&mut self) -> Vec<PendingPresetLoad> {
+        let mut out = Vec::new();
+        for (deck, cell) in [(Deck::A, &self.fired_preset_a), (Deck::B, &self.fired_preset_b)] {
+            if let Some(name) = cell.borrow_mut().take() {
+                if let Some(slot) = self.deck_bus_slot_for(deck) {
+                    out.push(PendingPresetLoad { slot, name });
+                }
+            }
+        }
+        out
+    }
 }
 
 impl CommandContext for Show {
@@ -107,11 +147,37 @@ impl CommandContext for Show {
         };
     }
 
-    // Preset browsing, playlists, and the overlay queue are Phase 4/M2+
-    // territory (see commands.rs's own header note: most CommandId
-    // variants are no-op stubs in the TS source too, wired up by later
-    // milestones). Phase 2 has no preset list or overlay queue to act on.
-    fn navigate_preset(&mut self, _deck: Deck, _direction: i32) {}
+    /// Cycles the deck's index through the full preset catalog (not the
+    /// playlist: see `playlist::PlaylistEngine`) and reports the chosen
+    /// name via `fired_preset_a`/`fired_preset_b`, drained by
+    /// `take_fired_presets`. Port of `navigatePreset` in
+    /// `+page.svelte:434-448`.
+    fn navigate_preset(&mut self, deck: Deck, direction: i32) {
+        if self.preset_catalog.is_empty() {
+            return;
+        }
+        let len = self.preset_catalog.len();
+        let idx_ref = match deck {
+            Deck::A => &mut self.preset_index_a,
+            Deck::B => &mut self.preset_index_b,
+        };
+        // Port of +page.svelte:436-439/441-444: avoids negative modulo.
+        *idx_ref = if direction == 1 {
+            (*idx_ref + 1) % len
+        } else {
+            ((if *idx_ref == 0 { len } else { *idx_ref }) - 1) % len
+        };
+        let name = self.preset_catalog[*idx_ref].name.clone();
+        let cell = match deck {
+            Deck::A => &self.fired_preset_a,
+            Deck::B => &self.fired_preset_b,
+        };
+        *cell.borrow_mut() = Some(name);
+    }
+
+    // Playlists and the overlay queue are Phase 4/M2+ territory (see
+    // commands.rs's own header note: most CommandId variants are no-op
+    // stubs in the TS source too, wired up by later milestones).
     fn toggle_playlist(&mut self, _deck: Deck) {}
     fn playlist_next(&mut self, _deck: Deck) {}
     fn playlist_prev(&mut self, _deck: Deck) {}
@@ -335,6 +401,145 @@ mod tests {
             let mut show = Show::default();
             reg.dispatch(CommandId::DeckSwitch, 1.0, &mut show);
             assert_eq!(show.active_deck, Deck::B);
+        }
+    }
+
+    mod navigate_preset {
+        use super::*;
+
+        fn catalog(names: &[&str]) -> Vec<PresetMeta> {
+            names.iter().map(|n| PresetMeta { name: n.to_string(), category: "Other".to_string() }).collect()
+        }
+
+        #[test]
+        fn forward_advances_the_index_by_one() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.navigate_preset(Deck::A, 1);
+            assert_eq!(show.preset_index_a, 1);
+        }
+
+        #[test]
+        fn backward_decrements_the_index_by_one() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.preset_index_a = 2;
+            show.navigate_preset(Deck::A, -1);
+            assert_eq!(show.preset_index_a, 1);
+        }
+
+        #[test]
+        fn forward_wraps_from_the_last_index_to_zero() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.preset_index_a = 2;
+            show.navigate_preset(Deck::A, 1);
+            assert_eq!(show.preset_index_a, 0);
+        }
+
+        #[test]
+        fn backward_wraps_from_zero_to_the_last_index() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.preset_index_a = 0;
+            show.navigate_preset(Deck::A, -1);
+            assert_eq!(show.preset_index_a, 2);
+        }
+
+        #[test]
+        fn deck_a_and_deck_b_have_independent_indices() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.navigate_preset(Deck::A, 1);
+            assert_eq!(show.preset_index_a, 1);
+            assert_eq!(show.preset_index_b, 0);
+        }
+
+        #[test]
+        fn reports_the_chosen_preset_name_via_the_fired_cell() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            show.navigate_preset(Deck::A, 1);
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
+        }
+
+        #[test]
+        fn empty_catalog_is_a_no_op() {
+            let mut show = Show::default();
+            show.navigate_preset(Deck::A, 1);
+            assert_eq!(show.preset_index_a, 0);
+            assert!(show.fired_preset_a.borrow().is_none());
+        }
+    }
+
+    mod take_fired_presets {
+        use super::*;
+
+        fn catalog(names: &[&str]) -> Vec<PresetMeta> {
+            names.iter().map(|n| PresetMeta { name: n.to_string(), category: "Other".to_string() }).collect()
+        }
+
+        #[test]
+        fn targets_the_slot_assigned_to_deck_a() {
+            let mut show = Show::default(); // deck_bus[0] == A
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::A, 1);
+            let out = show.take_fired_presets();
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].slot, 0);
+            assert_eq!(out[0].name, "P1");
+        }
+
+        #[test]
+        fn targets_the_slot_assigned_to_deck_b() {
+            let mut show = Show::default(); // deck_bus[1] == B
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::B, 1);
+            let out = show.take_fired_presets();
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].slot, 1);
+            assert_eq!(out[0].name, "P1");
+        }
+
+        #[test]
+        fn follows_deck_bus_reassignment() {
+            let mut show = Show::default();
+            show.deck_bus = [DeckBus::B, DeckBus::A, DeckBus::Off, DeckBus::Off];
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::A, 1);
+            let out = show.take_fired_presets();
+            assert_eq!(out[0].slot, 1);
+        }
+
+        #[test]
+        fn no_report_when_no_slot_is_assigned_to_the_deck() {
+            let mut show = Show::default();
+            show.deck_bus = [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off];
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::A, 1);
+            let out = show.take_fired_presets();
+            assert!(out.is_empty());
+        }
+
+        #[test]
+        fn drains_are_empty_after_the_first_call() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::A, 1);
+            let first = show.take_fired_presets();
+            assert_eq!(first.len(), 1);
+            let second = show.take_fired_presets();
+            assert!(second.is_empty());
+        }
+
+        #[test]
+        fn reports_both_decks_when_both_have_fired() {
+            let mut show = Show::default();
+            show.preset_catalog = catalog(&["P0", "P1"]);
+            show.navigate_preset(Deck::A, 1);
+            show.navigate_preset(Deck::B, 1);
+            let out = show.take_fired_presets();
+            assert_eq!(out.len(), 2);
         }
     }
 }

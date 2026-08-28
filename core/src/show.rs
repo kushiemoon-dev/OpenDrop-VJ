@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 use crate::blend::{ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use crate::commands::{CommandContext, Deck};
+use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
@@ -56,10 +57,35 @@ pub struct Show {
     preset_index_b: usize,
     fired_preset_a: Rc<RefCell<Option<String>>>,
     fired_preset_b: Rc<RefCell<Option<String>>>,
+    pub playlists: PlaylistStore,
+    pub lock_a: bool,
+    pub lock_b: bool,
 }
 
 impl Default for Show {
     fn default() -> Self {
+        // The PlaylistEngine on_preset closures can't re-borrow &mut Show to
+        // write into fired_preset_a/fired_preset_b (PlaylistStore's methods
+        // are already &mut self on show.playlists), so they close over
+        // clones of the Rc instead, made before PlaylistStore is built.
+        let fired_preset_a = Rc::new(RefCell::new(None));
+        let fired_preset_b = Rc::new(RefCell::new(None));
+        let (cell_a, cell_b) = (fired_preset_a.clone(), fired_preset_b.clone());
+        let mut playlists = PlaylistStore::new();
+        playlists.set_engines(
+            PlaylistEngine::new(
+                Vec::new(),
+                PlaylistMode::Sequential,
+                10_000.0,
+                Box::new(move |name| *cell_a.borrow_mut() = Some(name.to_string())),
+            ),
+            PlaylistEngine::new(
+                Vec::new(),
+                PlaylistMode::Sequential,
+                10_000.0,
+                Box::new(move |name| *cell_b.borrow_mut() = Some(name.to_string())),
+            ),
+        );
         Self {
             crossfader: 0.0,
             deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],
@@ -71,8 +97,11 @@ impl Default for Show {
             preset_catalog: Vec::new(),
             preset_index_a: 0,
             preset_index_b: 0,
-            fired_preset_a: Rc::new(RefCell::new(None)),
-            fired_preset_b: Rc::new(RefCell::new(None)),
+            fired_preset_a,
+            fired_preset_b,
+            playlists,
+            lock_a: false,
+            lock_b: false,
         }
     }
 }
@@ -175,12 +204,21 @@ impl CommandContext for Show {
         *cell.borrow_mut() = Some(name);
     }
 
-    // Playlists and the overlay queue are Phase 4/M2+ territory (see
-    // commands.rs's own header note: most CommandId variants are no-op
-    // stubs in the TS source too, wired up by later milestones).
-    fn toggle_playlist(&mut self, _deck: Deck) {}
-    fn playlist_next(&mut self, _deck: Deck) {}
-    fn playlist_prev(&mut self, _deck: Deck) {}
+    fn toggle_playlist(&mut self, deck: Deck) {
+        self.playlists.toggle_playlist(deck);
+    }
+
+    fn playlist_next(&mut self, deck: Deck) {
+        self.playlists.playlist_next(deck);
+    }
+
+    fn playlist_prev(&mut self, deck: Deck) {
+        self.playlists.playlist_prev(deck);
+    }
+
+    // The overlay queue is Phase 4/M2+ territory (see commands.rs's own
+    // header note: most CommandId variants are no-op stubs in the TS
+    // source too, wired up by later milestones).
     fn advance_overlay_queue(&mut self, _direction: i32) {}
 }
 
@@ -246,6 +284,13 @@ mod tests {
             let show = Show::default();
             assert_eq!(show.color_params_a, DEFAULT_COLOR_PARAMS);
             assert_eq!(show.color_params_b, DEFAULT_COLOR_PARAMS);
+        }
+
+        #[test]
+        fn locks_start_false() {
+            let show = Show::default();
+            assert!(!show.lock_a);
+            assert!(!show.lock_b);
         }
     }
 
@@ -469,6 +514,63 @@ mod tests {
             show.navigate_preset(Deck::A, 1);
             assert_eq!(show.preset_index_a, 0);
             assert!(show.fired_preset_a.borrow().is_none());
+        }
+    }
+
+    mod playlist_wiring {
+        use super::*;
+
+        #[test]
+        fn toggle_playlist_delegates_to_the_playlist_store() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.toggle_playlist(Deck::A);
+            assert!(show.playlists.a_playing);
+        }
+
+        #[test]
+        fn toggle_playlist_twice_starts_then_stops() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.toggle_playlist(Deck::A);
+            assert!(show.playlists.a_playing);
+            show.toggle_playlist(Deck::A);
+            assert!(!show.playlists.a_playing);
+        }
+
+        #[test]
+        fn playlist_next_delegates_to_the_playlist_store() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.playlists.add_to_playlist(Deck::A, "p2".to_string());
+            show.playlist_next(Deck::A);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 1);
+        }
+
+        #[test]
+        fn playlist_prev_delegates_to_the_playlist_store() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::B, "p1".to_string());
+            show.playlists.add_to_playlist(Deck::B, "p2".to_string());
+            show.playlist_next(Deck::B);
+            show.playlist_prev(Deck::B);
+            assert_eq!(show.playlists.engine_b_mut().unwrap().current_index(), 0);
+        }
+
+        #[test]
+        fn playlist_next_on_deck_a_surfaces_the_preset_in_fired_preset_a() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.playlist_next(Deck::A);
+            assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("p1"));
+        }
+
+        #[test]
+        fn playlist_next_on_deck_b_surfaces_the_preset_in_fired_preset_b() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::B, "p1".to_string());
+            show.playlist_next(Deck::B);
+            assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("p1"));
         }
     }
 

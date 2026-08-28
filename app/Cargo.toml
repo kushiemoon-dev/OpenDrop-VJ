@@ -12,3 +12,6 @@ glutin = "0.32.3"
 glutin-winit = "0.5.0"
 glow = "0.17"
 raw-window-handle = "0.6"
+egui = "0.36.1"
+egui_glow = { version = "0.36.1", features = ["winit"] }
+khronos-egl = { version = "6", features = ["dynamic"] }

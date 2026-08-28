@@ -2,4 +2,5 @@
 //! panel; later steps add more under this module).
 
 pub mod decks;
+pub mod playlists;
 pub mod preset_browser;

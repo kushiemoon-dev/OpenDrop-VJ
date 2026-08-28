@@ -173,7 +173,12 @@ fn tile(
                         *thumb_queue = enqueue_front(std::mem::take(thumb_queue), ThumbJob { slot_key: name.to_string(), name: name.to_string() });
                     }
                 }
-                ui.label(name);
+                // Truncated to a single line, not wrapped: a wrapped name
+                // makes the tile's height depend on the name's length, and
+                // `show_rows` above needs every row to actually be
+                // `ROW_HEIGHT` tall. The full name stays reachable on
+                // hover.
+                ui.add(egui::Label::new(name).truncate()).on_hover_text(name);
             });
             // Own interaction on top of the card's contents, same pattern
             // as `ui::decks::deck_card`: click-to-load reads the card's

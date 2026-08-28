@@ -48,11 +48,21 @@ impl Deck {
     /// the file first, so a bad preset can't take down a running deck)
     /// hooks in here without touching how contexts are structured. Must be
     /// called while this deck's context is current.
-    pub fn load_preset(&self, path: &Path) -> Result<(), String> {
+    pub fn load_preset(&self, path: &Path, smooth_transition: bool) -> Result<(), String> {
         let c_path = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|e| format!("preset path {} is not a valid C string: {e}", path.display()))?;
-        unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), false) };
+        unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), smooth_transition) };
         Ok(())
+    }
+
+    /// Sets the soft-cut transition duration in seconds.
+    pub fn set_soft_cut_duration(&self, seconds: f64) {
+        unsafe { ffi::projectm_set_soft_cut_duration(self.handle, seconds) };
+    }
+
+    /// Sets the mesh size (width and height) for the visualization.
+    pub fn set_mesh_size(&self, width: usize, height: usize) {
+        unsafe { ffi::projectm_set_mesh_size(self.handle, width, height) };
     }
 
     /// Injects one chunk of PCM, renders one projectM frame: GL state

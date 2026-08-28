@@ -13,6 +13,19 @@ use std::collections::{HashMap, HashSet};
 
 const THUMB_SIZE: egui::Vec2 = egui::vec2(160.0, 90.0);
 
+/// `Deck::texture` is filled by `glCopyTexSubImage2D` from the deck's own
+/// FBO 0, so its texel row 0 is the framebuffer's *bottom* scanline: GL's
+/// lower-left origin, the convention `engine::compositor` deliberately
+/// keeps end to end (its vertex shader drops the source's `1.0 - vUV.y`).
+/// egui's origin is top-left instead: `epaint::Mesh::add_rect_with_uv`
+/// pairs `rect.left_top()` with `uv.left_top()`, and egui_glow's vertex
+/// shader passes that straight into `texture()`. So the default
+/// `(0,0)-(1,1)` rect would draw the live deck texture upside down; this
+/// one flips V. Fixed here rather than in the GL pipeline on purpose: the
+/// live output window is correct as-is, only egui's view of the texture
+/// needs the compensation.
+const FLIPPED_V_UV: egui::Rect = egui::Rect { min: egui::pos2(0.0, 1.0), max: egui::pos2(1.0, 0.0) };
+
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
@@ -69,7 +82,7 @@ fn deck_card(
     ui.push_id(i, |ui| {
         frame.show(ui, |ui| {
             let card = ui.vertical(|ui| {
-                ui.image((deck_tex_ids[i], THUMB_SIZE));
+                ui.add(egui::Image::new((deck_tex_ids[i], THUMB_SIZE)).uv(FLIPPED_V_UV));
                 if pending_validations.contains(&i) {
                     ui.label("Validating…");
                 } else if let Some(err) = preset_errors.get(&i) {

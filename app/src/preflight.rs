@@ -120,7 +120,6 @@ pub enum PreflightVerdict {
 /// same binary re-invoked with `--preflight-check`, killed if it hasn't
 /// exited within `TIMEOUT`. Result goes back over `result_tx`, read by
 /// `about_to_wait`'s non-blocking drain.
-#[allow(dead_code)] // wired up to the UI by Task 14
 pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc::Sender<(usize, String, PreflightVerdict)>) {
     std::thread::spawn(move || {
         let exe = std::env::current_exe().expect("current_exe() failed");

@@ -236,6 +236,14 @@ struct AppState {
     active_panel: Panel,
     /// Live text in the preset-browser search box.
     preset_search_query: String,
+    /// Memoized `search` results for `preset_search_query`: see
+    /// `ui::preset_browser::SearchCache`.
+    preset_search_cache: ui::preset_browser::SearchCache,
+    /// Presets whose thumbnail render failed once already. Both
+    /// `thumbnails::pump_thumbnail_queue` (writer) and the preset-browser
+    /// panel (reader) consult it, so a failure can't turn into a per-tick
+    /// retry loop for as long as its tile is on screen.
+    failed_thumbnails: HashSet<String>,
     /// Job queue feeding `thumbnails::pump_thumbnail_queue` (Step 15):
     /// `enqueue_front`-ed by the preset-browser panel for each visible tile
     /// still missing a texture.
@@ -300,8 +308,10 @@ fn ui_root(
     transition_seconds: &mut f64,
     active_panel: &mut Panel,
     preset_search_query: &mut String,
+    preset_search_cache: &mut ui::preset_browser::SearchCache,
     thumb_queue: &mut Vec<ThumbJob>,
     thumbnail_textures: &HashMap<String, egui::TextureHandle>,
+    failed_thumbnails: &HashSet<String>,
     audio: &opendrop_audio::AudioHandle,
     input_devices: &Vec<String>,
     selected_input_device: &mut Option<String>,
@@ -330,7 +340,16 @@ fn ui_root(
                 ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
             }
             Panel::PresetBrowser => {
-                ui::preset_browser::show(ui, show, preset_search_query, thumb_queue, thumbnail_textures, load_request);
+                ui::preset_browser::show(
+                    ui,
+                    show,
+                    preset_search_query,
+                    preset_search_cache,
+                    thumb_queue,
+                    thumbnail_textures,
+                    failed_thumbnails,
+                    load_request,
+                );
             }
             Panel::Playlists => {
                 ui::playlists::show(ui, show, t0);
@@ -538,6 +557,7 @@ impl ApplicationHandler for App {
                     &state.path_by_name,
                     &state.egui_glow.egui_ctx,
                     &mut state.thumbnail_textures,
+                    &mut state.failed_thumbnails,
                 ) {
                     eprintln!("[app] thumbnail pump failed: {e}");
                 }
@@ -583,8 +603,10 @@ impl ApplicationHandler for App {
                 transition_seconds,
                 active_panel,
                 preset_search_query,
+                preset_search_cache,
                 thumb_queue,
                 thumbnail_textures,
+                failed_thumbnails,
                 audio,
                 input_devices,
                 selected_input_device,
@@ -611,8 +633,10 @@ impl ApplicationHandler for App {
                     transition_seconds,
                     active_panel,
                     preset_search_query,
+                    preset_search_cache,
                     thumb_queue,
                     thumbnail_textures,
+                    failed_thumbnails,
                     audio,
                     input_devices,
                     selected_input_device,
@@ -746,6 +770,34 @@ fn preset_dir() -> PathBuf {
     PathBuf::from(raw)
 }
 
+/// Display name for a preset file: its path relative to `preset_dir`, with
+/// the extension stripped and `/` replaced by ` - `. Stable and
+/// manifest-free, and it doubles as the categorization key
+/// `category_from_name` expects. The full catalog scan and the 4-deck
+/// bootstrap load both derive names through here, so a deck card shows
+/// exactly the name the preset browser lists for the same file.
+fn preset_display_name(preset_dir: &Path, path: &Path) -> String {
+    path.strip_prefix(preset_dir).unwrap_or(path).with_extension("").to_string_lossy().replace('/', " - ")
+}
+
+/// Disk-cache root for rendered preset thumbnails:
+/// `$XDG_CACHE_HOME/opendrop/thumbnails`, falling back to
+/// `$HOME/.cache/opendrop/thumbnails`. Deliberately not
+/// `std::env::temp_dir()`: a fixed, world-predictable `/tmp` path can be
+/// pre-created by another user as a symlink pointing anywhere, and it is
+/// not multi-user-safe on a shared machine either. A non-absolute
+/// `XDG_CACHE_HOME` is ignored, as the XDG spec requires.
+fn thumbnail_cache_dir() -> PathBuf {
+    let xdg = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from);
+    let home_cache = std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".cache"));
+    xdg.into_iter()
+        .chain(home_cache)
+        .find(|p| p.is_absolute())
+        .unwrap_or_else(std::env::temp_dir)
+        .join("opendrop")
+        .join("thumbnails")
+}
+
 fn walk_milk_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(dir) {
@@ -843,7 +895,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // for the preset browser panel (Step 17; renderer built by Step 11).
     let thumbnail_renderer = ThumbnailRenderer::new(&display, &gl_config, &main_ctx)?;
 
-    let presets = pick_distinct_presets(&preset_dir(), deck::DECK_COUNT);
+    let preset_root = preset_dir();
+    let presets = pick_distinct_presets(&preset_root, deck::DECK_COUNT);
     if presets.len() < deck::DECK_COUNT {
         return Err(format!(
             "found only {} distinct, non-transition preset(s) under OPENDROP_PRESET_DIR, need {}",
@@ -860,15 +913,13 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // Full catalog scan (all presets, not just the 4 bootstrap picks above):
     // builds the name→path lookup for resolving UI selections back to a
     // file, plus the Vec<PresetMeta> (name + category) shown in the preset
-    // browser. The name is derived from the file's path relative to the
-    // preset dir, with `/` replaced by ` - ` and the extension stripped:
-    // stable and manifest-free, and it doubles as the categorization key
-    // `category_from_name` expects.
-    let all_milk = walk_milk_files(&preset_dir());
+    // browser. Names come from `preset_display_name`, the same helper the
+    // 4 bootstrap picks above are named through.
+    let all_milk = walk_milk_files(&preset_root);
     let mut path_by_name: HashMap<String, PathBuf> = HashMap::with_capacity(all_milk.len());
     let mut catalog: Vec<opendrop_core::preset_index::PresetMeta> = Vec::with_capacity(all_milk.len());
     for p in &all_milk {
-        let name = p.strip_prefix(&preset_dir()).unwrap_or(p).with_extension("").to_string_lossy().replace('/', " - ");
+        let name = preset_display_name(&preset_root, p);
         let category = opendrop_core::preset_index::category_from_name(&name);
         catalog.push(opendrop_core::preset_index::PresetMeta { name: name.clone(), category });
         path_by_name.insert(name, p.clone());
@@ -997,15 +1048,21 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         path_by_name,
         pending_validations: HashSet::new(),
         preset_errors: HashMap::new(),
-        deck_preset_names: Default::default(),
+        // Seeded from the 4 presets the bootstrap loop above actually
+        // loaded: leaving these empty until the first UI-driven load meant
+        // every deck card started blank even though a preset was running
+        // on it.
+        deck_preset_names: std::array::from_fn(|i| preset_display_name(&preset_root, &presets[i])),
         transition_seconds: 0.0,
         deck_tex_ids,
         active_panel: Panel::default(),
         preset_search_query: String::new(),
+        preset_search_cache: ui::preset_browser::SearchCache::default(),
+        failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
         thumbnail_renderer,
-        thumbnail_cache_dir: std::env::temp_dir().join("opendrop-thumbs"),
+        thumbnail_cache_dir: thumbnail_cache_dir(),
         selected_output_monitor: None,
     })
 }

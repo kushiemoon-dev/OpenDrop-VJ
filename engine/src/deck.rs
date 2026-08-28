@@ -117,24 +117,7 @@ impl Drop for Deck {
 }
 
 pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrentContext) -> Result<Vec<Deck>, String> {
-    let deck_ctx_attrs = ContextAttributesBuilder::new()
-        .with_debug(cfg!(debug_assertions))
-        .with_profile(GlProfile::Core)
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
-        .with_sharing(anchor)
-        .build(None);
-
-    // All 4 created: none made current yet: before any of the 5 total
-    // contexts (this anchor included) is ever made current.
-    let mut not_current = Vec::with_capacity(DECK_COUNT);
-    for i in 0..DECK_COUNT {
-        let ctx = unsafe { display.create_context(config, &deck_ctx_attrs) }
-            .map_err(|e| format!("failed to create deck {i} GL context: {e}"))?;
-        not_current.push(ctx);
-    }
-    let mut contexts = not_current.into_iter().map(|c| c.treat_as_possibly_current());
-
-    let mut surfaces = Vec::with_capacity(DECK_COUNT);
+    let mut decks = Vec::with_capacity(DECK_COUNT);
     for i in 0..DECK_COUNT {
         let attrs = SurfaceAttributesBuilder::<PbufferSurface>::new().build(
             NonZeroU32::new(DECK_W).expect("DECK_W is nonzero"),
@@ -142,48 +125,78 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
         );
         let surface = unsafe { display.create_pbuffer_surface(config, &attrs) }
             .map_err(|e| format!("failed to create deck {i} pbuffer surface: {e}"))?;
-        surfaces.push(surface);
+
+        let label: &'static str = match i {
+            0 => "deck0",
+            1 => "deck1",
+            2 => "deck2",
+            _ => "deck3",
+        };
+        decks.push(create_one_deck_context(display, config, anchor, surface, DECK_W, DECK_H, label)?);
     }
-    let mut surfaces = surfaces.into_iter();
-
-    let mut decks = Vec::with_capacity(DECK_COUNT);
-    for i in 0..DECK_COUNT {
-        let context = contexts.next().expect("exactly DECK_COUNT contexts were created above");
-        let surface = surfaces.next().expect("exactly DECK_COUNT surfaces were created above");
-        context.make_current(&surface).map_err(|e| format!("failed to make deck {i} context current: {e}"))?;
-
-        let mut gl = unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
-        if cfg!(debug_assertions) {
-            let label: &'static str = match i {
-                0 => "deck0",
-                1 => "deck1",
-                2 => "deck2",
-                _ => "deck3",
-            };
-            gl_debug::install(&mut gl, label);
-        }
-
-        let version = unsafe { gl.get_parameter_string(glow::VERSION) };
-        println!("[engine] deck context {i}: GL {version}");
-
-        let texture = create_shared_deck_texture(&gl);
-
-        // projectm_create() allocates GL resources immediately, so it needs
-        // this deck's context current (it is, from make_current above):
-        // those resources end up private to this context, same as the FBO.
-        let handle = unsafe { ffi::projectm_create() };
-        if handle.is_null() {
-            return Err(format!("projectm_create() returned NULL in deck {i} context"));
-        }
-        unsafe { ffi::projectm_set_window_size(handle, DECK_W as usize, DECK_H as usize) };
-
-        let render_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} render_timer: {e}"))?;
-        let copy_timer = PassTimer::new(&gl).map_err(|e| format!("deck {i} copy_timer: {e}"))?;
-
-        decks.push(Deck { context, surface, gl, texture, handle, render_timer, copy_timer });
-    }
-
     Ok(decks)
+}
+
+/// Builds one GL context sharing `anchor`'s object namespace, made current
+/// against the given (already-created) pbuffer `surface`, with its own
+/// `glow::Context` and projectM instance: the extracted per-deck body of
+/// `create_decks`. Reused for the dedicated thumbnail-rendering context
+/// (`thumbnail::ThumbnailRenderer::new`) with its own smaller `w`/`h`: same
+/// `anchor` share group as the 4 decks, but its own, 6th, distinct context:
+/// never one of the 4 deck contexts themselves.
+///
+/// Note: this used to be split across 3 loops in `create_decks` so that all
+/// 4 deck contexts were created before any of them (or `anchor`) was made
+/// current. That ordering isn't an EGL requirement (a share-group context
+/// can be created at any time regardless of which sibling is current) and
+/// can't be preserved once this is reused for the thumbnail context anyway
+///: it's built well after decks 0-3 are already current, whenever it's
+/// first needed.
+pub fn create_one_deck_context(
+    display: &Display,
+    config: &Config,
+    anchor: &PossiblyCurrentContext,
+    surface: Surface<PbufferSurface>,
+    w: u32,
+    h: u32,
+    debug_label: &'static str,
+) -> Result<Deck, String> {
+    let deck_ctx_attrs = ContextAttributesBuilder::new()
+        .with_debug(cfg!(debug_assertions))
+        .with_profile(GlProfile::Core)
+        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_sharing(anchor)
+        .build(None);
+    let not_current = unsafe { display.create_context(config, &deck_ctx_attrs) }
+        .map_err(|e| format!("failed to create {debug_label} GL context: {e}"))?;
+    let context = not_current.treat_as_possibly_current();
+    context
+        .make_current(&surface)
+        .map_err(|e| format!("failed to make {debug_label} context current: {e}"))?;
+
+    let mut gl = unsafe { glow::Context::from_loader_function_cstr(|s| display.get_proc_address(s)) };
+    if cfg!(debug_assertions) {
+        gl_debug::install(&mut gl, debug_label);
+    }
+
+    let version = unsafe { gl.get_parameter_string(glow::VERSION) };
+    println!("[engine] {debug_label} context: GL {version}");
+
+    let texture = create_shared_deck_texture(&gl);
+
+    // projectm_create() allocates GL resources immediately, so it needs
+    // this deck's context current (it is, from make_current above):
+    // those resources end up private to this context, same as the FBO.
+    let handle = unsafe { ffi::projectm_create() };
+    if handle.is_null() {
+        return Err(format!("projectm_create() returned NULL in {debug_label} context"));
+    }
+    unsafe { ffi::projectm_set_window_size(handle, w as usize, h as usize) };
+
+    let render_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} render_timer: {e}"))?;
+    let copy_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} copy_timer: {e}"))?;
+
+    Ok(Deck { context, surface, gl, texture, handle, render_timer, copy_timer })
 }
 
 /// Copies this context's own pbuffer (FBO 0) into its shared deck texture.

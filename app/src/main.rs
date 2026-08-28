@@ -12,7 +12,7 @@ use opendrop_engine::compositor::{Compositor, LayerInput};
 use opendrop_engine::deck::{self, Deck};
 use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
@@ -139,21 +139,45 @@ struct AppState {
     blit_output_timer: PassTimer,
     last_output_swap_at: Option<Instant>,
     perf_tick: u64,
-    /// Sender handed to `preflight::spawn_preflight`: kept for Task 14,
-    /// which triggers validations from the UI; unused until then.
-    #[allow(dead_code)]
+    /// Sender handed to `preflight::spawn_preflight`: cloned once per
+    /// `request_preset_load` call so each validation request gets its own
+    /// handle back to `preflight_rx`.
     preflight_tx: mpsc::Sender<(usize, String, preflight::PreflightVerdict)>,
     preflight_rx: mpsc::Receiver<(usize, String, preflight::PreflightVerdict)>,
     /// Name→path lookup for the full preset catalog (`show.preset_catalog`
     /// carries the name+category metadata; resolving a selected name back
     /// to a file for loading is app-side, since it's filesystem-backed).
-    #[allow(dead_code)]
     path_by_name: HashMap<String, PathBuf>,
+    /// Slots currently awaiting a preflight verdict: the UI shows
+    /// "validating…" on a deck-card while its slot is in here.
+    pending_validations: HashSet<usize>,
+    /// Most recent load failure per slot (preflight rejection, or a GL/load
+    /// error on an otherwise-passed preset): cleared on that slot's next
+    /// successful load.
+    preset_errors: HashMap<usize, String>,
+    /// Name of the preset currently loaded on each slot, for display on the
+    /// deck-card.
+    deck_preset_names: [String; 4],
+    /// Soft-cut transition duration applied to every load routed through
+    /// `request_preset_load`: one global setting, not per-slot (see Step 16).
+    transition_seconds: f64,
 }
 
 #[derive(Default)]
 struct App {
     state: Option<AppState>,
+}
+
+/// Single entry point for loading a preset onto a live deck: used by both
+/// the preset-browser click (Step 17) and `Show::take_fired_presets()`
+/// (keyboard navigation + playlist/beat-sync advances). Never touches a
+/// deck directly: it only marks the slot pending and hands the request off
+/// to `preflight::spawn_preflight`. `about_to_wait`'s verdict-handling drain
+/// is the only place that actually calls `Deck::load_preset`.
+fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
+    let Some(path) = state.path_by_name.get(&name).cloned() else { return };
+    state.pending_validations.insert(slot); // for the UI: "validating…" on this card
+    preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
 }
 
 impl ApplicationHandler for App {
@@ -211,16 +235,36 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else { return };
 
         // Non-blocking drain so results from spawn_preflight's threads
-        // never back up in the channel. Verdict-handling (load the preset
-        // onto a live deck, surface it in the UI, etc.) is Task 14's job:
-        // this just logs for now.
+        // never back up in the channel. This is the only place that ever
+        // calls `Deck::load_preset` on a running deck (besides the
+        // untouched 4-preset bootstrap load): a preset only reaches here
+        // after its own preflight child process has already loaded it
+        // successfully in isolation.
         while let Ok((slot, name, verdict)) = state.preflight_rx.try_recv() {
+            state.pending_validations.remove(&slot);
             match verdict {
-                preflight::PreflightVerdict::Ok => println!("[app] preflight ok: slot {slot} preset {name}"),
-                preflight::PreflightVerdict::Failed(reason) => {
-                    println!("[app] preflight failed: slot {slot} preset {name}: {reason}")
+                preflight::PreflightVerdict::Ok => {
+                    if let Some(path) = state.path_by_name.get(&name) {
+                        if let Err(e) = state.decks[slot].context.make_current(&state.decks[slot].surface) {
+                            state.preset_errors.insert(slot, format!("GL error: {e}"));
+                        } else {
+                            state.decks[slot].set_soft_cut_duration(state.transition_seconds);
+                            if let Err(e) = state.decks[slot].load_preset(path, state.transition_seconds > 0.0) {
+                                state.preset_errors.insert(slot, e);
+                            } else {
+                                state.preset_errors.remove(&slot);
+                                state.deck_preset_names[slot] = name;
+                            }
+                        }
+                    }
+                }
+                preflight::PreflightVerdict::Failed(msg) => {
+                    state.preset_errors.insert(slot, msg);
                 }
             }
+        }
+        for load in state.show.take_fired_presets() {
+            request_preset_load(state, load.slot, load.name);
         }
 
         let now = Instant::now();
@@ -614,6 +658,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         preflight_tx,
         preflight_rx,
         path_by_name,
+        pending_validations: HashSet::new(),
+        preset_errors: HashMap::new(),
+        deck_preset_names: Default::default(),
+        transition_seconds: 0.0,
     })
 }
 

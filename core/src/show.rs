@@ -234,6 +234,24 @@ impl Show {
         }
     }
 
+    /// Drives the interval half of the two playlist engines, once per
+    /// render tick, the way `on_beat` drives the beat half. `dt_ms` is the
+    /// same elapsed time `Clock::step` is fed, in milliseconds.
+    ///
+    /// Both engines' intervals are re-derived from the live state on every
+    /// tick, rather than only when `toggle_playlist`/`toggle_beat_sync`
+    /// runs: that is what makes the panel's "Interval (s)" slider take
+    /// effect on a deck that is already playing, and it re-asserts the
+    /// infinite (fully beat-driven) interval on a beat-synced deck that
+    /// `toggle_playlist` would otherwise have reset to a finite one.
+    pub fn tick_playlists(&mut self, dt_ms: f64) {
+        let interval_ms = self.playlists.interval_sec * 1000.0;
+        for (deck, synced) in [(Deck::A, self.beat_sync_a), (Deck::B, self.beat_sync_b)] {
+            self.playlists.set_beat_sync_interval(deck, if synced { f64::INFINITY } else { interval_ms });
+        }
+        self.playlists.tick(dt_ms);
+    }
+
     /// Port of `toggleBeatSync`, `beat-tempo-actions.ts:83-97`: flips the
     /// deck's beat-sync flag and switches the playlist engine's own timer
     /// between infinite (fully beat-driven) and the configured interval.
@@ -732,6 +750,89 @@ mod tests {
             show.playlists.add_to_playlist(Deck::B, "p1".to_string());
             show.playlist_next(Deck::B);
             assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("p1"));
+        }
+    }
+
+    mod tick_playlists {
+        use super::*;
+
+        fn deck_a_with_three_items() -> Show {
+            let mut show = Show::default();
+            for name in ["p1", "p2", "p3"] {
+                show.playlists.add_to_playlist(Deck::A, name.to_string());
+            }
+            show
+        }
+
+        #[test]
+        fn advances_a_playing_deck_once_the_interval_has_elapsed() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 2.0;
+            show.toggle_playlist(Deck::A);
+            show.tick_playlists(2000.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 1);
+        }
+
+        #[test]
+        fn does_not_advance_before_the_interval_has_elapsed() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 2.0;
+            show.toggle_playlist(Deck::A);
+            show.tick_playlists(1900.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 0);
+        }
+
+        #[test]
+        fn does_not_advance_a_deck_that_is_not_playing() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 2.0;
+            show.tick_playlists(100_000.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 0);
+        }
+
+        #[test]
+        fn surfaces_the_advanced_preset_through_take_fired_presets() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 2.0;
+            show.toggle_playlist(Deck::A);
+            let _ = show.take_fired_presets(); // drop the one `start()` fired
+            show.tick_playlists(2000.0);
+            let out = show.take_fired_presets();
+            assert_eq!(out.len(), 1);
+            assert_eq!(out[0].name, "p2");
+        }
+
+        #[test]
+        fn does_not_advance_a_beat_synced_deck() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 2.0;
+            show.toggle_beat_sync(Deck::A);
+            show.toggle_playlist(Deck::A);
+            show.tick_playlists(100_000.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 0);
+        }
+
+        #[test]
+        fn an_interval_change_takes_effect_on_an_already_playing_deck() {
+            let mut show = deck_a_with_three_items();
+            show.playlists.interval_sec = 60.0;
+            show.toggle_playlist(Deck::A);
+            show.tick_playlists(3000.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 0);
+            show.playlists.interval_sec = 2.0; // the panel's slider moved mid-play
+            show.tick_playlists(16.0);
+            assert_eq!(show.playlists.engine_a_mut().unwrap().current_index(), 1);
+        }
+
+        #[test]
+        fn drives_deck_b_as_well_as_deck_a() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::B, "b1".to_string());
+            show.playlists.add_to_playlist(Deck::B, "b2".to_string());
+            show.playlists.interval_sec = 2.0;
+            show.toggle_playlist(Deck::B);
+            show.tick_playlists(2000.0);
+            assert_eq!(show.playlists.engine_b_mut().unwrap().current_index(), 1);
         }
     }
 

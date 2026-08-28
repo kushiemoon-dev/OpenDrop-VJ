@@ -113,6 +113,14 @@ impl PlaylistEngine {
     }
 
     pub fn set_interval(&mut self, ms: f64) {
+        // Time already banked under a longer interval must not turn into a
+        // burst of catch-up advances the moment the interval shrinks: the
+        // caller re-applies the live `interval_sec` on every tick (see
+        // `Show::tick_playlists`), so dropping the slider from 120s to 2s
+        // would otherwise fire one advance per skipped 2s window at once.
+        // Capped, not reset: a reset every tick would stop auto-advance
+        // outright.
+        self.elapsed_ms = self.elapsed_ms.min(ms);
         self.interval_ms = ms;
     }
 
@@ -275,6 +283,16 @@ impl PlaylistStore {
         }
     }
 
+    /// Drives both engines' own auto-advance timers by `delta_ms`. Engines
+    /// whose interval is not finite (a beat-synced deck, see
+    /// `set_beat_sync_interval`) skip themselves inside `PlaylistEngine::
+    /// tick`, so no filtering is needed here.
+    pub fn tick(&mut self, delta_ms: f64) {
+        for engine in [self.engine_a.as_mut(), self.engine_b.as_mut()].into_iter().flatten() {
+            engine.tick(delta_ms);
+        }
+    }
+
     /// Used by beat-sync toggles (Infinity = fully beat-driven, no own timer).
     pub fn set_beat_sync_interval(&mut self, deck: Deck, ms: f64) {
         if let Some(engine) = self.engine_mut(deck) {
@@ -417,6 +435,18 @@ mod tests {
             pl.start();
             pl.tick(1000.0);
             assert_eq!(calls.borrow().last(), Some(&"B".to_string()));
+        }
+
+        #[test]
+        fn shrinking_the_interval_does_not_fire_a_burst_of_catch_up_advances() {
+            let (calls, cb) = spy();
+            let mut pl =
+                PlaylistEngine::new(items(&["A", "B", "C", "D"]), PlaylistMode::Sequential, 60_000.0, cb);
+            pl.start();
+            pl.tick(50_000.0); // 50s banked under the old 60s interval
+            pl.set_interval(2_000.0); // the UI slider dropped to 2s
+            pl.tick(16.0);
+            assert_eq!(*calls.borrow(), vec!["A", "B"]); // one advance, not 25
         }
 
         #[test]
@@ -569,6 +599,34 @@ mod tests {
                 store.playlist_next(Deck::A);
                 store.playlist_prev(Deck::A);
                 assert_eq!(*calls_a.borrow(), vec!["p2", "p1"]);
+            }
+        }
+
+        mod tick {
+            use super::*;
+
+            #[test]
+            fn drives_both_engines_own_timers() {
+                let mut store = PlaylistStore::new();
+                let (calls_a, cb_a) = spy();
+                let (calls_b, cb_b) = spy();
+                let engine_a =
+                    PlaylistEngine::new(items(&["a1", "a2"]), PlaylistMode::Sequential, 1000.0, cb_a);
+                let engine_b =
+                    PlaylistEngine::new(items(&["b1", "b2"]), PlaylistMode::Sequential, 1000.0, cb_b);
+                store.set_engines(engine_a, engine_b);
+                store.interval_sec = 1.0; // toggle_playlist re-applies this to both engines
+                store.toggle_playlist(Deck::A);
+                store.toggle_playlist(Deck::B);
+                store.tick(1000.0);
+                assert_eq!(*calls_a.borrow(), vec!["a1", "a2"]);
+                assert_eq!(*calls_b.borrow(), vec!["b1", "b2"]);
+            }
+
+            #[test]
+            fn is_a_no_op_before_the_engines_exist() {
+                let mut store = PlaylistStore::new();
+                store.tick(10_000.0); // must not panic
             }
         }
 

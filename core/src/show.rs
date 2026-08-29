@@ -395,6 +395,13 @@ impl CommandContext for Show {
         self.playlists.playlist_prev(deck);
     }
 
+    fn get_playlist_playing(&self, deck: Deck) -> bool {
+        match deck {
+            Deck::A => self.playlists.a_playing,
+            Deck::B => self.playlists.b_playing,
+        }
+    }
+
     // The overlay queue is Phase 4/M2+ territory (see commands.rs's own
     // header note: most CommandId variants are no-op stubs in the TS
     // source too, wired up by later milestones).
@@ -715,6 +722,15 @@ mod tests {
             assert!(show.playlists.a_playing);
             show.toggle_playlist(Deck::A);
             assert!(!show.playlists.a_playing);
+        }
+
+        #[test]
+        fn get_playlist_playing_reflects_toggle_state() {
+            let mut show = Show::default();
+            show.playlists.add_to_playlist(Deck::A, "p1".to_string());
+            show.toggle_playlist(Deck::A);
+            assert!(show.get_playlist_playing(Deck::A));
+            assert!(!show.get_playlist_playing(Deck::B));
         }
 
         #[test]

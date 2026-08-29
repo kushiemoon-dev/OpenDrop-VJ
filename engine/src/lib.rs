@@ -3,6 +3,7 @@ pub mod deck;
 pub mod ffi;
 pub mod gl_debug;
 pub mod gl_state;
+pub mod readback;
 pub mod thumbnail;
 pub mod timing;
 

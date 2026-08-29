@@ -22,6 +22,7 @@ pub trait CommandContext {
     fn toggle_playlist(&mut self, deck: Deck);
     fn playlist_next(&mut self, deck: Deck);
     fn playlist_prev(&mut self, deck: Deck);
+    fn get_playlist_playing(&self, deck: Deck) -> bool;
     fn advance_overlay_queue(&mut self, direction: i32);
 }
 
@@ -582,6 +583,9 @@ mod tests {
         }
         fn playlist_prev(&mut self, deck: Deck) {
             self.playlist_prev_calls.push(deck);
+        }
+        fn get_playlist_playing(&self, _deck: Deck) -> bool {
+            false
         }
         fn advance_overlay_queue(&mut self, direction: i32) {
             self.advance_overlay_queue_calls.push(direction);

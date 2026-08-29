@@ -139,6 +139,7 @@ enum Panel {
     Streaming,
     #[cfg(feature = "link")]
     Link,
+    V4l2,
 }
 
 struct WindowSlot {
@@ -215,11 +216,19 @@ struct AppState {
     /// idle sessions never pay the readback cost.
     compositor_readback: FrameReadback,
     deck_readback: [FrameReadback; deck::DECK_COUNT],
-    /// Outlet for `compositor_readback`'s polled RGBA bytes. The `Receiver`
-    /// end is held here too, for now: no consumer exists on this branch
-    /// yet; the not-yet-built NDI output and v4l2loopback output threads
-    /// take it over once they exist.
+    /// Outlet for `compositor_readback`'s polled RGBA bytes, feeding the NDI
+    /// output thread's `compositor_rx` (its `Receiver` end was moved into
+    /// `opendrop_io::ndi::spawn` at construction time: see `ndi`'s doc
+    /// comment).
     compositor_frame_tx: mpsc::Sender<Vec<u8>>,
+    /// Same compositor bytes as `compositor_frame_tx`, on a second channel
+    /// pair feeding the v4l2loopback output thread's own `compositor_rx`
+    /// (Task 19): each consumer needs its own `Sender`, since Task 9/10
+    /// already moved the original single receiver into `opendrop_io::
+    /// ndi::spawn`. Unlike `compositor_frame_tx`/`deck_frame_tx`, there is
+    /// no per-deck counterpart: v4l2loopback only ever pipes the composite
+    /// stream (see `io::v4l2loopback`'s module doc comment).
+    v4l2_frame_tx: mpsc::Sender<Vec<u8>>,
     /// Same as `compositor_frame_tx`, one channel pair per deck.
     deck_frame_tx: [mpsc::Sender<Vec<u8>>; deck::DECK_COUNT],
     /// Handle to the dedicated NDI output thread (Task 9): owns the
@@ -249,9 +258,22 @@ struct AppState {
     /// toggle state, not `NdiSnapshot::receive_active` (which reflects
     /// whether the receiver actually started).
     ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
-    /// Whether a v4l2loopback output consumer is active: set by its panel
-    /// (Step 19), not yet wired on this branch. Gates the readback loop.
+    /// Whether a v4l2loopback output consumer is active: this panel's own
+    /// Start/Stop toggle (Task 19), driven directly by `ui::v4l2loopback::
+    /// show` (no per-slot array to OR together, unlike `ndi_active`, so no
+    /// separate aggregate field is needed). Gates the readback loop.
     v4l2_active: bool,
+    /// Handle to the dedicated v4l2loopback output thread (Task 19): owns
+    /// the `Receiver` end of `v4l2_frame_tx` (handed to `opendrop_io::
+    /// v4l2loopback::spawn` once, at construction time), and takes
+    /// start/stop control messages from the v4l2loopback panel.
+    v4l2: opendrop_io::v4l2loopback::V4l2Handle,
+    /// Lazily-resolved v4l2loopback device path, checked at most once per
+    /// session: outer `None` means "not checked yet", `Some(None)` means
+    /// "checked, no device found". Populated by `ui::v4l2loopback::show`
+    /// the first frame that panel is shown: see that module's doc comment
+    /// for why this is deliberately not re-queried per frame.
+    v4l2_device: Option<Option<PathBuf>>,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -571,6 +593,9 @@ fn ui_root(
     kick_cookies_input: &mut String,
     #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
     #[cfg(feature = "link")] link_tempo_input: &mut f64,
+    v4l2: &opendrop_io::v4l2loopback::V4l2Handle,
+    v4l2_active: &mut bool,
+    v4l2_device: &mut Option<Option<PathBuf>>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -587,6 +612,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
             #[cfg(feature = "link")]
             ui.selectable_value(active_panel, Panel::Link, "Link");
+            ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
         });
         ui.separator();
         match active_panel {
@@ -648,6 +674,9 @@ fn ui_root(
             #[cfg(feature = "link")]
             Panel::Link => {
                 ui::link::show(ui, link, link_tempo_input);
+            }
+            Panel::V4l2 => {
+                ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
             }
         }
     });
@@ -1081,6 +1110,9 @@ impl ApplicationHandler for App {
             if state.ndi_active || state.v4l2_active {
                 state.compositor_readback.begin_read(&state.gl);
                 if let Some(bytes) = state.compositor_readback.poll(&state.gl) {
+                    // Two consumers, two channels (see `v4l2_frame_tx`'s doc
+                    // comment): one clone so each gets its own owned copy.
+                    let _ = state.v4l2_frame_tx.send(bytes.clone());
                     let _ = state.compositor_frame_tx.send(bytes);
                 }
                 for i in 0..deck::DECK_COUNT {
@@ -1153,6 +1185,9 @@ impl ApplicationHandler for App {
                 link,
                 #[cfg(feature = "link")]
                 link_tempo_input,
+                v4l2,
+                v4l2_active,
+                v4l2_device,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1213,6 +1248,9 @@ impl ApplicationHandler for App {
                     link,
                     #[cfg(feature = "link")]
                     link_tempo_input,
+                    v4l2,
+                    v4l2_active,
+                    v4l2_device,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1566,10 +1604,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         v.try_into().unwrap_or_else(|_| unreachable!("DECK_COUNT readbacks pushed"))
     };
 
-    // Output channels for the readback bytes above. No consumer exists on
-    // this branch: the `Receiver` ends are just held on `AppState` until
-    // the future NDI / v4l2loopback output threads take them over.
+    // Output channels for the readback bytes above. `compositor_frame_rx`/
+    // `deck_frame_rx` are moved into the NDI thread below; `v4l2_frame_rx`
+    // is a second, v4l2loopback-only channel for the same compositor bytes
+    // (Task 19: see `v4l2_frame_tx`'s doc comment on `AppState`).
     let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
+    let (v4l2_frame_tx, v4l2_frame_rx) = mpsc::channel::<Vec<u8>>();
     let (deck_frame_tx, deck_frame_rx): ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]) = {
         let mut tx_v = Vec::with_capacity(deck::DECK_COUNT);
         let mut rx_v = Vec::with_capacity(deck::DECK_COUNT);
@@ -1637,6 +1677,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         compositor_readback,
         deck_readback,
         compositor_frame_tx,
+        v4l2_frame_tx,
         deck_frame_tx,
         // Receivers moved into the NDI thread here, once: they are no
         // longer needed as `AppState` fields once `spawn` takes ownership.
@@ -1656,6 +1697,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         ndi_in_texture: None,
         ndi_in_selected_source: None,
         v4l2_active: false,
+        v4l2: opendrop_io::v4l2loopback::spawn(v4l2_frame_rx),
+        v4l2_device: None,
         gl,
         egui_glow,
         refresh_interval,

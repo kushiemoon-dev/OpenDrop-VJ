@@ -15,3 +15,4 @@ pub mod osc;
 pub mod remote_ws;
 pub mod secrets;
 pub mod twitch;
+pub mod v4l2loopback;

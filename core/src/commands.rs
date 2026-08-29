@@ -264,36 +264,81 @@ pub struct Command {
     pub id: CommandId,
     pub label: &'static str,
     pub kind: CommandKind,
+    /// See `CommandRegistry`'s doc comment: 205 of the 223 commands
+    /// registered by `create_default_registry` share the `noop` stub here,
+    /// intentionally: this is not a signature to widen casually.
     pub run: fn(f64, &mut dyn CommandContext),
 }
 
+/// Dispatches by `CommandId` to a `Command`'s `run` fn.
+///
+/// **Known, intentional debt** (whole-branch review): of the 223
+/// `CommandId` variants `create_default_registry` registers, 205: most
+/// `Range` commands (color/blend/lumakey/colorkey per slot, all 32 time-param
+/// families, all 128 q-var slots) and several `Trigger` commands (strobe,
+/// LFO rate, recall-snapshot, timeline-toggle): are permanent `noop` stubs,
+/// not placeholders forgotten mid-port. `run` only ever receives `&mut dyn
+/// CommandContext`, and `CommandContext`'s current surface (crossfader
+/// get/set, active-deck get/switch, `navigate_preset`, the playlist
+/// toggle/next/prev trio, `get_playlist_playing`, `advance_overlay_queue`)
+/// has no setters for color params, blend/lumakey/colorkey config,
+/// time-param multipliers, or q-var overrides. Building those out means
+/// wiring most of the app's command surface: a large, deliberately
+/// out-of-scope feature gap the whole-branch review flagged as known debt
+/// for a future dedicated phase, not something to grow inside a cleanup
+/// pass. `CommandContext`'s minimal surface (in particular `get_crossfader`/
+/// `get_playlist_playing`) is a deliberate boundary, not an oversight: do
+/// not add `CommandContext` methods or wire a stub's `run` body without that
+/// future phase's explicit go-ahead.
 #[derive(Default)]
 pub struct CommandRegistry {
-    commands: HashMap<CommandId, Command>,
+    /// Insertion order matters here (whole-branch review Finding I2): 3
+    /// reference UI panels: and this app's own `ui::midi`: expect `all()`
+    /// to come back in the curated `DEFAULT_COMMANDS`/`default_commands()`
+    /// grouping (deck controls -> active-deck shortcuts -> M2/M3 ->
+    /// compositing -> snapshots -> time params -> overlay -> timeline ->
+    /// q-vars), the same order the TS reference's `Map` preserved. A
+    /// `HashMap<CommandId, Command>` here used to make `all()`'s order
+    /// nondeterministic across runs. `commands` holds the ordered storage;
+    /// `index` is a `CommandId -> position` side table for O(1) `get`/
+    /// `dispatch` lookups without giving up that order.
+    commands: Vec<Command>,
+    index: HashMap<CommandId, usize>,
 }
 
 impl CommandRegistry {
     pub fn new() -> Self {
-        Self { commands: HashMap::new() }
+        Self { commands: Vec::new(), index: HashMap::new() }
     }
 
     pub fn register(&mut self, cmd: Command) {
-        self.commands.insert(cmd.id, cmd);
+        match self.index.get(&cmd.id) {
+            // Re-registering an id replaces it in place, preserving its
+            // original position: matches the TS `Map`'s `set()` semantics
+            // (an existing key keeps its insertion-order slot).
+            Some(&pos) => self.commands[pos] = cmd,
+            None => {
+                self.index.insert(cmd.id, self.commands.len());
+                self.commands.push(cmd);
+            }
+        }
     }
 
     /// Dispatch a command. value01 must be 0..1 (callers normalize MIDI 0-127 before calling).
     pub fn dispatch(&self, id: CommandId, value01: f64, ctx: &mut dyn CommandContext) {
-        if let Some(cmd) = self.commands.get(&id) {
+        if let Some(cmd) = self.get(id) {
             (cmd.run)(value01, ctx);
         }
     }
 
     pub fn get(&self, id: CommandId) -> Option<&Command> {
-        self.commands.get(&id)
+        self.index.get(&id).map(|&pos| &self.commands[pos])
     }
 
+    /// Commands in construction/insertion order: see this struct's doc
+    /// comment.
     pub fn all(&self) -> Vec<&Command> {
-        self.commands.values().collect()
+        self.commands.iter().collect()
     }
 }
 
@@ -632,6 +677,65 @@ mod tests {
             reg.register(Command { id: CommandId::Crossfader, label: "X", kind: CommandKind::Range, run: noop });
             reg.register(Command { id: CommandId::DeckSwitch, label: "Y", kind: CommandKind::Trigger, run: noop });
             assert_eq!(reg.all().len(), 2);
+        }
+
+        #[test]
+        fn all_preserves_insertion_order_not_hashmap_order() {
+            // Finding I2 regression test: register a batch of ids that would
+            // NOT come back sorted by any single obvious key (id/label/enum
+            // discriminant), then repeat register() with a different batch:
+            // if `all()` were ever backed by a HashMap again, at least one of
+            // these arrangements would very likely trip a hash-order mismatch.
+            let mut reg = CommandRegistry::new();
+            let ids = [
+                CommandId::Qvar12_2,
+                CommandId::Crossfader,
+                CommandId::TimeWave3,
+                CommandId::DeckSwitch,
+                CommandId::RecallSnapshot4,
+            ];
+            for id in ids {
+                reg.register(Command { id, label: "X", kind: CommandKind::Trigger, run: noop });
+            }
+            let order: Vec<CommandId> = reg.all().iter().map(|cmd| cmd.id).collect();
+            assert_eq!(order, ids);
+        }
+
+        #[test]
+        fn register_replaces_an_existing_id_in_place_without_moving_it() {
+            let mut reg = CommandRegistry::new();
+            reg.register(Command { id: CommandId::Crossfader, label: "first", kind: CommandKind::Range, run: noop });
+            reg.register(Command { id: CommandId::DeckSwitch, label: "second", kind: CommandKind::Trigger, run: noop });
+            reg.register(Command { id: CommandId::Crossfader, label: "replaced", kind: CommandKind::Range, run: noop });
+            let order: Vec<CommandId> = reg.all().iter().map(|cmd| cmd.id).collect();
+            assert_eq!(order, vec![CommandId::Crossfader, CommandId::DeckSwitch]);
+            assert_eq!(reg.get(CommandId::Crossfader).unwrap().label, "replaced");
+        }
+    }
+
+    mod default_registry_order {
+        use super::*;
+
+        #[test]
+        fn all_matches_the_curated_default_commands_construction_order() {
+            // Finding I2: `all()`'s order must match `default_commands()`'s
+            // construction order (deck controls -> active-deck shortcuts ->
+            // M2/M3 -> compositing -> snapshots -> time params -> overlay ->
+            // timeline -> q-vars): not alphabetical, not hash order.
+            let reg = create_default_registry();
+            let order: Vec<CommandId> = reg.all().iter().map(|cmd| cmd.id).collect();
+            assert_eq!(order.first(), Some(&CommandId::Crossfader));
+            // CompositeBlend0 (compositing group) must come before
+            // TimeSpeed0 (time-params group), a relationship no hash-map
+            // iteration order could be relied on to reproduce.
+            let composite_pos = order.iter().position(|&id| id == CommandId::CompositeBlend0).unwrap();
+            let time_pos = order.iter().position(|&id| id == CommandId::TimeSpeed0).unwrap();
+            assert!(composite_pos < time_pos);
+            // Qvar1_0 (last group) must come after TimelineToggle (second to last).
+            let timeline_pos = order.iter().position(|&id| id == CommandId::TimelineToggle).unwrap();
+            let qvar_pos = order.iter().position(|&id| id == CommandId::Qvar1_0).unwrap();
+            assert!(timeline_pos < qvar_pos);
+            assert_eq!(order.last(), Some(&CommandId::Qvar32_3));
         }
     }
 

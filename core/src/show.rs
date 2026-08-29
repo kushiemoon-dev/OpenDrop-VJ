@@ -152,6 +152,22 @@ pub struct PendingPresetLoad {
 }
 
 impl Show {
+    /// Reseeds both playlist engines' shuffle-mode RNGs with real
+    /// per-launch entropy supplied by the caller (`app`'s bootstrap:
+    /// `core` stays zero-I/O and has no clock of its own). Deck A and B get
+    /// distinct-but-derived seeds so they don't draw identical shuffle
+    /// sequences from the same source entropy. Whole-branch review Finding
+    /// I4: without this, shuffle mode replayed the exact same sequence
+    /// every single app launch.
+    pub fn reseed_rng(&mut self, seed: u64) {
+        if let Some(engine) = self.playlists.engine_a_mut() {
+            engine.reseed_rng(seed);
+        }
+        if let Some(engine) = self.playlists.engine_b_mut() {
+            engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
+        }
+    }
+
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
     pub fn slot_opacities(&self) -> [f64; 4] {
         std::array::from_fn(|i| bus_gain(self.deck_bus[i], self.crossfader))
@@ -1264,6 +1280,54 @@ mod tests {
             show.check_volume_peak_triggers(0.9, 1600.0);
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
             assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("P1"));
+        }
+    }
+
+    mod reseed_rng {
+        use super::*;
+
+        #[test]
+        fn makes_deck_a_shuffle_draws_actually_differ_across_seeds() {
+            let draws = |seed: u64| -> Vec<usize> {
+                let mut show = Show::default();
+                for name in ["p1", "p2", "p3", "p4", "p5"] {
+                    show.playlists.add_to_playlist(Deck::A, name.to_string());
+                }
+                show.playlists.engine_a_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+                show.reseed_rng(seed);
+                (0..10)
+                    .map(|_| {
+                        show.playlist_next(Deck::A);
+                        show.playlists.engine_a_mut().unwrap().current_index()
+                    })
+                    .collect()
+            };
+            assert_ne!(draws(1), draws(2));
+        }
+
+        #[test]
+        fn seeds_deck_a_and_deck_b_differently_so_they_do_not_lockstep() {
+            let mut show = Show::default();
+            for name in ["p1", "p2", "p3", "p4", "p5"] {
+                show.playlists.add_to_playlist(Deck::A, name.to_string());
+                show.playlists.add_to_playlist(Deck::B, name.to_string());
+            }
+            show.playlists.engine_a_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+            show.playlists.engine_b_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+            show.reseed_rng(42);
+            let draws_a: Vec<usize> = (0..10)
+                .map(|_| {
+                    show.playlist_next(Deck::A);
+                    show.playlists.engine_a_mut().unwrap().current_index()
+                })
+                .collect();
+            let draws_b: Vec<usize> = (0..10)
+                .map(|_| {
+                    show.playlist_next(Deck::B);
+                    show.playlists.engine_b_mut().unwrap().current_index()
+                })
+                .collect();
+            assert_ne!(draws_a, draws_b);
         }
     }
 }

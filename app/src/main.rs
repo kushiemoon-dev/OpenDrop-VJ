@@ -13,6 +13,7 @@ use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
 use opendrop_engine::readback::FrameReadback;
 use opendrop_engine::timing::PassTimer;
+use opendrop_io::midi::MidiTriggerKey;
 use raw_window_handle::HasWindowHandle;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
@@ -314,12 +315,17 @@ struct AppState {
     /// (detected via `hotplug_epoch`) can replay every known LED state to
     /// the freshly reopened output port instead of leaving it dark.
     midi_led_state: HashMap<CommandId, bool>,
-    /// Command currently in MIDI learn mode, if any: set when the panel's
-    /// Learn button is clicked, cleared once that command's mapping shows
-    /// up in the MIDI snapshot (learn completed). Drives the panel's
-    /// "waiting..." button state; nothing in `MidiSnapshot` signals
-    /// learn-mode directly.
-    midi_learning: Option<CommandId>,
+    /// Command currently in MIDI learn mode, if any, paired with whatever
+    /// that command's mapping entry was at the moment Learn was clicked.
+    /// Set when the panel's Learn button is clicked, cleared once the
+    /// snapshot's mapping entry for that command no longer equals the
+    /// paired value (see `midi_learn_completed`): comparing against
+    /// "changed" rather than merely "exists" matters because
+    /// `MidiControl::StartLearn` does not clear the pre-existing mapping
+    /// entry, so re-learning an already-mapped command would otherwise
+    /// read as instantly complete. Drives the panel's "waiting..." button
+    /// state; nothing in `MidiSnapshot` signals learn-mode directly.
+    midi_learning: Option<(CommandId, Option<MidiTriggerKey>)>,
     /// Whether the crossfader's soft-takeover gate has already let a MIDI
     /// value through this session: until then, incoming crossfader values
     /// are compared against `show.get_crossfader()` and only dispatched
@@ -355,6 +361,18 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
     let Some(path) = state.path_by_name.get(&name).cloned() else { return };
     state.pending_validations.insert(slot); // for the UI: "validating…" on this card
     preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
+}
+
+/// Whether MIDI learn mode has finished for the command being learned: the
+/// snapshot's current mapping entry no longer equals what it was when
+/// Learn was clicked (`prev_trigger`). Deliberately compares for a
+/// *change*, not merely "is now `Some`": `MidiControl::StartLearn`
+/// doesn't clear the pre-existing mapping entry (`io/src/midi/control.rs`),
+/// so re-learning an already-mapped command would otherwise read as
+/// complete on the very next frame, before the controller was even
+/// touched.
+fn midi_learn_completed(prev_trigger: Option<&MidiTriggerKey>, current_trigger: Option<&MidiTriggerKey>) -> bool {
+    current_trigger != prev_trigger
 }
 
 /// Root of the control window's egui content for this frame. `ui` here is
@@ -399,7 +417,7 @@ fn ui_root(
     selected_output_monitor: &mut Option<String>,
     registry: &CommandRegistry,
     midi: &opendrop_io::midi::MidiHandle,
-    midi_learning: &mut Option<CommandId>,
+    midi_learning: &mut Option<(CommandId, Option<MidiTriggerKey>)>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -573,19 +591,22 @@ impl ApplicationHandler for App {
         }
 
         // LED flash expiry: a per-frame `Instant` deadline check, not a
-        // blocking timer (this thread has no async runtime).
+        // blocking timer (this thread has no async runtime). Swapped out
+        // via `mem::take` so the `retain` closure can freely touch
+        // `state.midi`/`state.midi_led_state` without aliasing the very
+        // map it's iterating.
         let midi_flash_now = Instant::now();
-        let expired_led_flashes: Vec<CommandId> = state
-            .midi_led_flash_off_at
-            .iter()
-            .filter(|&(_, &deadline)| midi_flash_now >= deadline)
-            .map(|(&id, _)| id)
-            .collect();
-        for id in expired_led_flashes {
-            state.midi.push_led(id, false);
-            state.midi_led_state.insert(id, false);
-            state.midi_led_flash_off_at.remove(&id);
-        }
+        let mut midi_led_flash_off_at = std::mem::take(&mut state.midi_led_flash_off_at);
+        midi_led_flash_off_at.retain(|&id, &mut deadline| {
+            if midi_flash_now >= deadline {
+                state.midi.push_led(id, false);
+                state.midi_led_state.insert(id, false);
+                false
+            } else {
+                true
+            }
+        });
+        state.midi_led_flash_off_at = midi_led_flash_off_at;
 
         // Clock sync, hotplug LED replay, and learn-mode completion: all
         // diffed against the same snapshot fetch. A learning command never
@@ -596,6 +617,15 @@ impl ApplicationHandler for App {
         let midi_new_beats = midi_snapshot.clock_beat_count.wrapping_sub(state.midi_last_beat_count);
         for _ in 0..midi_new_beats {
             state.show.clock.pulse(Some(midi_snapshot.clock_bpm));
+            // Pulse-only mode (bpm unknown/0, e.g. right as the MIDI clock
+            // locks on): `step()` never advances phase at bpm 0, so this
+            // mirrors the audio-detector's own `if clock.bpm() == 0.0 {
+            // on_beat() }` fallback a few lines below: without it a MIDI
+            // clock beat fired while bpm is still 0 would silently never
+            // call `on_beat()`.
+            if state.show.clock.bpm() == 0.0 {
+                state.show.on_beat();
+            }
         }
         state.midi_last_beat_count = midi_snapshot.clock_beat_count;
 
@@ -604,12 +634,21 @@ impl ApplicationHandler for App {
                 state.midi.push_led(id, on);
             }
             state.midi_last_hotplug_epoch = midi_snapshot.hotplug_epoch;
+            // A (re)connection may bring in a different controller (or the
+            // same one moved) now out of phase with the live crossfader
+            // value: mirrors the JS reference's per-connection `takenOver`
+            // reset (a fresh `Set` on every `toggleMidi` call).
+            state.midi_crossfader_taken_over = false;
         }
 
-        if let Some(learning_id) = state.midi_learning {
-            if midi_snapshot.mapping.contains_key(&learning_id) {
-                state.midi_learning = None;
+        let midi_learn_done = match &state.midi_learning {
+            Some((learning_id, prev_trigger)) => {
+                midi_learn_completed(prev_trigger.as_ref(), midi_snapshot.mapping.get(learning_id))
             }
+            None => false,
+        };
+        if midi_learn_done {
+            state.midi_learning = None;
         }
 
         let now = Instant::now();
@@ -1338,6 +1377,39 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod midi_learn_completed_tests {
+        use super::*;
+        use opendrop_io::midi::TriggerKind;
+
+        fn key(number: u8) -> MidiTriggerKey {
+            MidiTriggerKey { device_id: "dev".to_string(), kind: TriggerKind::Cc, channel: 1, number }
+        }
+
+        #[test]
+        fn unmapped_to_freshly_mapped_is_complete() {
+            assert!(midi_learn_completed(None, Some(&key(1))));
+        }
+
+        #[test]
+        fn still_unmapped_is_not_complete() {
+            assert!(!midi_learn_completed(None, None));
+        }
+
+        #[test]
+        fn remapping_and_still_seeing_the_old_entry_is_not_complete() {
+            // Regression: StartLearn doesn't clear the pre-existing mapping
+            // entry, so the snapshot briefly still holds the OLD trigger
+            // while the thread waits for the next MIDI message.
+            let old = key(1);
+            assert!(!midi_learn_completed(Some(&old), Some(&old)));
+        }
+
+        #[test]
+        fn remapping_to_a_different_trigger_is_complete() {
+            assert!(midi_learn_completed(Some(&key(1)), Some(&key(2))));
+        }
+    }
 
     mod preset_display_name_tests {
         use super::*;

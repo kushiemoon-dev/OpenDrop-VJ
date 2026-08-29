@@ -25,7 +25,12 @@ fn format_trigger(key: &MidiTriggerKey) -> String {
     }
 }
 
-pub fn show(ui: &mut egui::Ui, midi: &MidiHandle, registry: &CommandRegistry, midi_learning: &mut Option<CommandId>) {
+pub fn show(
+    ui: &mut egui::Ui,
+    midi: &MidiHandle,
+    registry: &CommandRegistry,
+    midi_learning: &mut Option<(CommandId, Option<MidiTriggerKey>)>,
+) {
     let snapshot = midi.latest();
 
     ui.horizontal(|ui| {
@@ -66,11 +71,14 @@ pub fn show(ui: &mut egui::Ui, midi: &MidiHandle, registry: &CommandRegistry, mi
                 let trigger_text = snapshot.mapping.get(&cmd.id).map(format_trigger).unwrap_or_else(|| "not mapped".to_string());
                 ui.label(trigger_text);
 
-                let is_learning = *midi_learning == Some(cmd.id);
+                let is_learning = matches!(midi_learning, Some((id, _)) if *id == cmd.id);
                 let learn_label = if is_learning { "waiting..." } else { "Learn" };
                 if ui.add_enabled(!is_learning, egui::Button::new(learn_label)).clicked() {
                     let _ = midi.control_tx.send(MidiControl::StartLearn(cmd.id));
-                    *midi_learning = Some(cmd.id);
+                    // Snapshot the pre-existing mapping entry (if any) so
+                    // `about_to_wait` can tell "learn completed" apart from
+                    // "still the old entry": StartLearn doesn't clear it.
+                    *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
                 }
                 if ui.button("Clear").clicked() {
                     let _ = midi.control_tx.send(MidiControl::ClearMapping(cmd.id));

@@ -1795,6 +1795,7 @@ dependencies = [
  "opendrop-audio",
  "opendrop-core",
  "opendrop-engine",
+ "opendrop-io",
  "raw-window-handle",
  "winit",
 ]

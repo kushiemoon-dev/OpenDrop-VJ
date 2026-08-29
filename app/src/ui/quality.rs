@@ -26,8 +26,16 @@ pub fn show(
 ) {
     ui.label("Target FPS");
     ui.horizontal(|ui| {
+        // Minor #17: selected-state indication, matching the invisible-
+        // mode row's `selectable_value` pattern below, instead of plain
+        // buttons that never showed which target was actually active.
+        // Rounded rather than compared bit-exact against `refresh_interval`
+        // so it still lights up correctly for the value bootstrap derived
+        // from the monitor's real refresh rate, not just one set by a
+        // click here.
+        let current_fps = (1.0 / refresh_interval.as_secs_f64()).round() as u32;
         for fps in [30u32, 45, 60] {
-            if ui.button(fps.to_string()).clicked() {
+            if ui.selectable_label(current_fps == fps, fps.to_string()).clicked() {
                 *refresh_interval = Duration::from_secs_f64(1.0 / fps as f64);
             }
         }
@@ -58,6 +66,14 @@ pub fn show(
                     }
                     if ui.button("High").clicked() {
                         pending_mesh_size[i] = Some(MESH_HIGH);
+                    }
+                    // Minor #18: a mesh-size change only applies once
+                    // `about_to_wait`'s per-deck loop actually renders this
+                    // deck, which an invisible deck in `Pause` mode may not
+                    // do for a while: previously silent, so a click could
+                    // look like it did nothing.
+                    if pending_mesh_size[i].is_some() {
+                        ui.label("(queued)");
                     }
                 });
             });

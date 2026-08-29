@@ -24,11 +24,14 @@
 //! Svelte `$state` reactivity is likewise dropped: `OverlayStore` fields
 //! are plain struct fields mutated through `&mut self` methods.
 
+use std::collections::HashSet;
+
 use crate::beat_trigger::{
     apply_beat_trigger_patch, default_beat_trigger_config, BeatTriggerConfig,
     BeatTriggerConfigPatch,
 };
 use crate::playlist::PlaylistMode;
+use crate::rng::Xorshift64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayKind {
@@ -186,6 +189,23 @@ fn clamp_queue_index(index: usize, queue_length: usize) -> usize {
     }
 }
 
+/// Port of OpenDrop-VJ `overlay-queue.ts:41-49` `visibleOverlayIds`: Finding
+/// I3 (this was never ported, unlike the rest of `overlay-queue.ts`).
+/// Overlays to render: every non-queued overlay (always visible) plus the
+/// single active overlay from the queue rotation, if at least one overlay is
+/// queued. Returns borrowed ids (like `pick_queued_overlays`/
+/// `filter_shareable_overlays` in `share_set.rs`) rather than cloning them.
+pub fn visible_overlay_ids(overlays: &[Overlay], active_queue_index: usize) -> HashSet<&str> {
+    let queued = pick_queued_overlays(overlays);
+    let mut ids: HashSet<&str> =
+        overlays.iter().filter(|o| !o.in_queue).map(|o| o.id.as_str()).collect();
+    if !queued.is_empty() {
+        let idx = clamp_queue_index(active_queue_index, queued.len());
+        ids.insert(queued[idx].id.as_str());
+    }
+    ids
+}
+
 pub struct OverlayStore {
     pub overlays: Vec<Overlay>,
     pub drag_over: bool,
@@ -193,7 +213,7 @@ pub struct OverlayStore {
     pub queue_index: usize,
     pub queue_trigger: BeatTriggerConfig,
     pub queue_mode: PlaylistMode,
-    rng_state: u64,
+    rng: Xorshift64,
 }
 
 impl Default for OverlayStore {
@@ -211,8 +231,18 @@ impl OverlayStore {
             queue_index: 0,
             queue_trigger: default_beat_trigger_config(),
             queue_mode: PlaylistMode::Sequential,
-            rng_state: 0x9E3779B97F4A7C15,
+            rng: Xorshift64::default(),
         }
+    }
+
+    /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
+    /// the caller (`core` stays zero-I/O and has no clock of its own). See
+    /// `rng.rs`'s module doc comment: whole-branch review Finding I4. Not
+    /// currently called by `app`: `OverlayStore` isn't wired into `app` yet
+    /// (see `share_set.rs`'s module doc comment), but this keeps it correct
+    /// for whenever that wiring lands.
+    pub fn reseed_rng(&mut self, seed: u64) {
+        self.rng.reseed(seed);
     }
 
     pub fn add_text_overlay(&mut self, id: String) -> String {
@@ -245,6 +275,13 @@ impl OverlayStore {
         self.queue_index = clamp_queue_index(self.queue_index, pick_queued_overlays(&self.overlays).len());
     }
 
+    /// `mem::take` moves the found `Overlay` out (leaving `Overlay::default
+    /// ()` behind momentarily) so `apply_overlay_patch` can consume its
+    /// `String` fields by value instead of cloning them; the taken slot is
+    /// immediately overwritten with the patched result on the next line, all
+    /// synchronously within this one call, so the transient default is never
+    /// observed by any other code. Relies on `Overlay: Default`: see
+    /// `Overlay`'s own `impl Default` above.
     pub fn update_overlay(&mut self, id: &str, patch: OverlayPatch) {
         if let Some(ov) = self.overlays.iter_mut().find(|o| o.id == id) {
             let current = std::mem::take(ov);
@@ -299,19 +336,12 @@ impl OverlayStore {
             return 0;
         }
         loop {
-            let idx = (self.next_random() * queue_length as f64) as usize;
+            let idx = (self.rng.next_f64() * queue_length as f64) as usize;
             let idx = idx.min(queue_length - 1);
             if idx != self.queue_index {
                 return idx;
             }
         }
-    }
-
-    fn next_random(&mut self) -> f64 {
-        self.rng_state ^= self.rng_state << 13;
-        self.rng_state ^= self.rng_state >> 7;
-        self.rng_state ^= self.rng_state << 17;
-        (self.rng_state >> 11) as f64 / (1u64 << 53) as f64
     }
 }
 
@@ -533,6 +563,69 @@ mod tests {
             let should_prevent_default = store.on_visualizer_drag_over(false);
             assert!(!store.drag_over);
             assert!(!should_prevent_default);
+        }
+
+        #[test]
+        fn reseed_rng_makes_shuffle_draws_actually_differ_across_seeds() {
+            let mut store = OverlayStore::new();
+            store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "c".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "d".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "e".to_string(), in_queue: true, ..Default::default() },
+            ];
+            store.queue_mode = PlaylistMode::Shuffle;
+            let draws = |store: &mut OverlayStore, seed: u64| -> Vec<usize> {
+                store.reseed_rng(seed);
+                store.queue_index = 0;
+                (0..10)
+                    .map(|_| {
+                        store.advance_overlay_queue(1);
+                        store.queue_index
+                    })
+                    .collect()
+            };
+            let seq_1 = draws(&mut store, 1);
+            let seq_2 = draws(&mut store, 2);
+            assert_ne!(seq_1, seq_2);
+        }
+    }
+
+    /// Port of `overlay-queue.test.ts:81-108`'s `visibleOverlayIds` tests.
+    mod visible_overlay_ids_tests {
+        use super::*;
+
+        fn overlay(id: &str, in_queue: bool) -> Overlay {
+            Overlay { id: id.to_string(), in_queue, ..Default::default() }
+        }
+
+        #[test]
+        fn zero_checked_all_unchecked_ones_are_visible() {
+            let overlays = vec![overlay("a", false), overlay("b", false)];
+            let ids = visible_overlay_ids(&overlays, 0);
+            assert_eq!(ids, HashSet::from(["a", "b"]));
+        }
+
+        #[test]
+        fn one_checked_always_visible_plus_the_unchecked_ones() {
+            let overlays = vec![overlay("a", true), overlay("b", false)];
+            let ids = visible_overlay_ids(&overlays, 0);
+            assert_eq!(ids, HashSet::from(["a", "b"]));
+        }
+
+        #[test]
+        fn multiple_checked_only_the_one_at_the_active_index_plus_the_unchecked_ones() {
+            let overlays = vec![overlay("a", true), overlay("b", true), overlay("c", false)];
+            let ids = visible_overlay_ids(&overlays, 1);
+            assert_eq!(ids, HashSet::from(["b", "c"]));
+        }
+
+        #[test]
+        fn out_of_bounds_index_clean_fallback_no_crash_first_checked_one_visible() {
+            let overlays = vec![overlay("a", true), overlay("b", true)];
+            let ids = visible_overlay_ids(&overlays, 99);
+            assert_eq!(ids, HashSet::from(["a"]));
         }
     }
 }

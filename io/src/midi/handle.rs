@@ -191,6 +191,7 @@ fn publish(state: &Arc<ArcSwap<MidiSnapshot>>, ts: &ThreadState) {
         clock_bpm: ts.clock_bpm,
         clock_beat_count: ts.clock_beat_count,
         hotplug_epoch: ts.hotplug_epoch,
+        mapping: ts.mapping.clone(),
     }));
 }
 

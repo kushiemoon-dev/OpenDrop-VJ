@@ -60,11 +60,23 @@ pub struct MidiSnapshot {
     pub clock_bpm: f64,
     pub clock_beat_count: u64,
     pub hotplug_epoch: u64,
+    /// The learned CC/note/pitchbend -> command mapping, mirrored here so
+    /// `app`'s MIDI panel (Task 8) can show each `CommandId`'s current
+    /// trigger without a dedicated "mapping changed" event: `events` only
+    /// ever reports resolved dispatches, never mapping-change notices.
+    pub mapping: MidiMapping,
 }
 
 impl MidiSnapshot {
     pub fn disconnected() -> Self {
-        MidiSnapshot { connected: false, device_names: Vec::new(), clock_bpm: 0.0, clock_beat_count: 0, hotplug_epoch: 0 }
+        MidiSnapshot {
+            connected: false,
+            device_names: Vec::new(),
+            clock_bpm: 0.0,
+            clock_beat_count: 0,
+            hotplug_epoch: 0,
+            mapping: MidiMapping::new(),
+        }
     }
 }
 

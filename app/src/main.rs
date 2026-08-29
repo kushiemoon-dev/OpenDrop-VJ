@@ -130,9 +130,8 @@ fn create_ndi_in_texture(
 
 /// Which top-level panel the control window is currently showing: gates
 /// per-tick work that only matters while its panel is visible (Step 17: the
-/// thumbnail pump only runs while `PresetBrowser` is on screen). Deliberately
-/// minimal: just enough to gate that one thing, not a general tabbed-panel
-/// system.
+/// thumbnail pump only runs while `PresetBrowser` is on screen), besides
+/// driving `ui_root`'s own tab row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Panel {
     #[default]
@@ -684,9 +683,8 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
 /// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). Decks (Step 16) and preset-browser
-/// (Step 17) panels so far, switched via the tab row; later steps add more
-/// panels here.
+/// Task 2's notes on this same drift). One panel per `Panel` variant,
+/// switched via the tab row.
 ///
 /// Takes individual `AppState` fields, not `&mut AppState`: see
 /// `ui::decks::show`'s doc comment for why. `load_request` is an out-param:
@@ -1502,7 +1500,9 @@ impl ApplicationHandler for App {
 
             state.perf_tick += 1;
             if state.perf_tick % 60 == 0 {
-                let active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001).unwrap_or(0);
+                // Minor #21: same expression as `lowest_active` above,
+                // computed once and reused instead of twice.
+                let active = lowest_active.unwrap_or(0);
                 let fmt = |v: Option<f64>| v.map(|ms| format!("{ms:.3}ms")).unwrap_or_else(|| "n/a".to_string());
                 println!(
                     "[timing] deck{active} render={} copy={} | composite={} | blit control={} output={} | wall(swap-to-swap)={}",

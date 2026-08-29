@@ -5,7 +5,7 @@ use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
-use opendrop_core::blend::DEFAULT_COLOR_PARAMS;
+use opendrop_core::blend::{DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
@@ -83,6 +83,39 @@ fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
         };
         LayerInput { opacity: opacities[i] as f32, composite: show.slot_composites[i], color }
     })
+}
+
+/// Creates a new GL texture sized/uploaded from `frame`'s own dimensions
+/// and bytes, storing it (with its size) into `slot`. Used by the NDI-in
+/// poll in `about_to_wait` both when no texture exists yet and when the
+/// source's resolution changed (the caller deletes the old texture first in
+/// that case): NDI-in sources can be any resolution, so this never assumes
+/// a fixed size the way the compositor/deck textures do.
+fn create_ndi_in_texture(
+    gl: &glow::Context,
+    frame: &opendrop_io::ndi::NdiFrame,
+    slot: &mut Option<(glow::NativeTexture, u32, u32)>,
+) {
+    unsafe {
+        let tex = gl.create_texture().expect("glGenTextures failed for the NDI-in texture");
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            frame.width as i32,
+            frame.height as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(Some(&frame.data)),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        *slot = Some((tex, frame.width, frame.height));
+    }
 }
 
 /// Which top-level panel the control window is currently showing: gates
@@ -198,6 +231,19 @@ struct AppState {
     /// `ndi_composite_active` or any of `ndi_deck_active` is set, recomputed
     /// every frame right after the NDI panel runs. Gates the readback loop.
     ndi_active: bool,
+    /// GL texture holding the most recently received NDI-in frame (Task
+    /// 12), composited as the topmost layer over the 4 decks: `None`
+    /// until the first frame of an active receive arrives. Carries its own
+    /// `(width, height)` alongside the texture handle so a same-size frame
+    /// can `tex_sub_image_2d` in place, while a resolution change (or a
+    /// freshly connected source) recreates it: NDI-in sources can be any
+    /// resolution, unlike the fixed-size compositor/deck textures.
+    ndi_in_texture: Option<(glow::NativeTexture, u32, u32)>,
+    /// Source currently selected in the NDI panel's dropdown (Task 12),
+    /// same convention as `ndi_composite_active`: this is the panel's own
+    /// toggle state, not `NdiSnapshot::receive_active` (which reflects
+    /// whether the receiver actually started).
+    ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
     /// Whether a v4l2loopback output consumer is active: set by its panel
     /// (Step 19), not yet wired on this branch. Gates the readback loop.
     v4l2_active: bool,
@@ -429,6 +475,7 @@ fn ui_root(
     ndi: &opendrop_io::ndi::NdiHandle,
     ndi_composite_active: &mut bool,
     ndi_deck_active: &mut [bool; deck::DECK_COUNT],
+    ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -474,7 +521,7 @@ fn ui_root(
                 ui::midi::show(ui, midi, registry, midi_learning);
             }
             Panel::Ndi => {
-                ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active);
+                ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active, ndi_in_selected_source);
             }
         }
     });
@@ -791,11 +838,75 @@ impl ApplicationHandler for App {
             if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
+
+            // NDI-in (Task 12): one non-blocking poll per tick, before
+            // compositing. `frame_rx` only yields a frame once
+            // `NdiControl::StartReceive` is active and a source is actually
+            // connected (io/src/ndi/in_.rs): most ticks this is empty. The
+            // texture is sized from the frame's own width/height (`NdiFrame`,
+            // see io's Task-12 prerequisite fix) rather than a fixed
+            // constant, since NDI-in sources can be any resolution; a
+            // same-size frame is uploaded in place, a resolution change (or
+            // first connect) recreates the texture.
+            if let Ok(frame) = state.ndi.frame_rx.try_recv() {
+                let expected_len = frame.width as usize * frame.height as usize * 4;
+                if frame.data.len() != expected_len {
+                    eprintln!(
+                        "[app] dropping NDI-in frame with unexpected size: {} bytes, expected {expected_len} for {}x{}",
+                        frame.data.len(),
+                        frame.width,
+                        frame.height
+                    );
+                } else if let Some((tex, w, h)) = state.ndi_in_texture {
+                    if (w, h) == (frame.width, frame.height) {
+                        unsafe {
+                            state.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                            state.gl.tex_sub_image_2d(
+                                glow::TEXTURE_2D,
+                                0,
+                                0,
+                                0,
+                                frame.width as i32,
+                                frame.height as i32,
+                                glow::RGBA,
+                                glow::UNSIGNED_BYTE,
+                                glow::PixelUnpackData::Slice(Some(&frame.data)),
+                            );
+                        }
+                    } else {
+                        unsafe { state.gl.delete_texture(tex) };
+                        state.ndi_in_texture = None;
+                        create_ndi_in_texture(&state.gl, &frame, &mut state.ndi_in_texture);
+                    }
+                } else {
+                    create_ndi_in_texture(&state.gl, &frame, &mut state.ndi_in_texture);
+                }
+            }
+
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for i in 0..deck::DECK_COUNT {
                 let force_normal = lowest_active == Some(i);
                 state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
+            }
+            // NDI-in layer, composited last, over every deck, as part of
+            // this same shared pass: `render_and_swap*` later just blits
+            // the resulting `color_tex` to each window, so drawing this
+            // here (not per-window) is what makes it appear in both control
+            // and output. `force_normal: false`: this layer is never the
+            // lowest/first-drawn slot (see `force_normal`'s doc comment in
+            // `compositor.rs`), so there is nothing to override:
+            // `DEFAULT_SLOT_COMPOSITE` already carries `BlendMode::Normal`,
+            // full opacity, no keying. Gated on `receive_active`, not just
+            // `ndi_in_texture.is_some()`: the texture is never deleted on
+            // `StopReceive` (cheap to keep around for a fast reconnect), so
+            // without this check a disconnected session would keep drawing
+            // its last received frame forever instead of nothing.
+            if state.ndi.latest().receive_active {
+                if let Some((tex, _, _)) = state.ndi_in_texture {
+                    let ndi_in_input = LayerInput { opacity: 1.0, composite: DEFAULT_SLOT_COMPOSITE, color: DEFAULT_COLOR_PARAMS };
+                    state.compositor.composite_layer(&state.gl, tex, &ndi_in_input, false);
+                }
             }
             state.compositor.end_frame(&state.gl);
 
@@ -862,6 +973,7 @@ impl ApplicationHandler for App {
                 ndi,
                 ndi_composite_active,
                 ndi_deck_active,
+                ndi_in_selected_source,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -903,6 +1015,7 @@ impl ApplicationHandler for App {
                     ndi,
                     ndi_composite_active,
                     ndi_deck_active,
+                    ndi_in_selected_source,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1324,10 +1437,21 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_frame_tx,
         // Receivers moved into the NDI thread here, once: they are no
         // longer needed as `AppState` fields once `spawn` takes ownership.
-        ndi: opendrop_io::ndi::spawn(compositor_frame_rx, deck_frame_rx),
+        ndi: {
+            let handle = opendrop_io::ndi::spawn(compositor_frame_rx, deck_frame_rx);
+            // Task 12: discovery is started once, here, rather than behind a
+            // manual "Scan" button: it's a cheap, non-blocking poll on the
+            // NDI thread's own tick (`in_::find` with `timeout_ms = 0`, see
+            // that function's doc comment), and the source dropdown should
+            // just work whenever the NDI panel is opened, with no extra step.
+            let _ = handle.control_tx.send(opendrop_io::ndi::NdiControl::StartDiscovery);
+            handle
+        },
         ndi_composite_active: false,
         ndi_deck_active: [false; deck::DECK_COUNT],
         ndi_active: false,
+        ndi_in_texture: None,
+        ndi_in_selected_source: None,
         v4l2_active: false,
         gl,
         egui_glow,

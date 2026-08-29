@@ -16,7 +16,12 @@
 //! other panels. `active` is `AppState::v4l2_active` itself (not a
 //! separate panel-only toggle re-derived elsewhere): unlike `ui::ndi`,
 //! there is no per-slot array to OR together here, just the one stream, so
-//! the panel drives the gate flag directly.
+//! the panel drives the gate flag directly. Resynced from `V4l2Snapshot::
+//! running` at the top of every `show` call (whole-branch review Finding
+//! M5): if ffmpeg exits on its own (bad/removed device, killed externally),
+//! `running` flips to `false` on its own (`io::v4l2loopback::run`'s
+//! liveness check), and without this resync the Start/Stop button would
+//! stay stuck showing "Stop" for a pipe that no longer exists.
 
 use opendrop_io::v4l2loopback::{find_device, V4l2Control, V4l2Handle};
 use std::path::PathBuf;
@@ -32,6 +37,9 @@ pub fn show(ui: &mut egui::Ui, v4l2: &V4l2Handle, active: &mut bool, device: &mu
     ui.separator();
 
     let snapshot = v4l2.latest();
+    // See the module doc comment: resync before the button is drawn so a
+    // click made this same frame still takes effect and is still sent.
+    *active = snapshot.running;
     ui.horizontal(|ui| {
         ui.label(if snapshot.running { "v4l2loopback: running" } else { "v4l2loopback: stopped" });
         if *active {

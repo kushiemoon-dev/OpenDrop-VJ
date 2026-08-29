@@ -65,6 +65,10 @@ pub fn show(
         ui.label("Port");
         ui.add_enabled(!snapshot.connected, egui::DragValue::new(obs_port).range(1..=65535));
     });
+    ui.horizontal(|ui| {
+        ui.label("Password");
+        clear_secret_button(ui, "OBS password", opendrop_io::secrets::OBS_PASSWORD, secret_save_error);
+    });
 
     ui.horizontal(|ui| {
         ui.label(if snapshot.connected { "OBS: connected" } else { "OBS: not connected" });
@@ -121,7 +125,7 @@ pub fn show(
     ui.label("Kick");
     ui.colored_label(
         egui::Color32::from_rgb(230, 160, 40),
-        "protocole non-officiel, reverse-engineered, peut casser sans préavis si Kick change son implémentation serveur, aucune garantie de service",
+        "unofficial, reverse-engineered protocol: may break without notice if Kick changes its server implementation, no service guarantee",
     );
 
     let kick_snapshot = kick.latest();
@@ -174,7 +178,8 @@ pub fn show(
 /// `error` is `show`'s shared panel-local save-error field (whole-branch
 /// review Finding 1: AC-12): a `set_secret` failure used to be an
 /// `eprintln!` only; it's now also written there (and rendered by `show`),
-/// and cleared on the next successful save.
+/// and cleared on the next successful save. Also renders a `Clear` button
+/// (whole-branch review Finding M8): see `clear_secret_button`.
 fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &str, error: &mut Option<String>) {
     ui.horizontal(|ui| {
         ui.label(label);
@@ -189,5 +194,27 @@ fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &s
             }
             input.clear();
         }
+        clear_secret_button(ui, label, key, error);
     });
+}
+
+/// A `Clear` button that deletes the secret stored under `key` from the OS
+/// keyring on click: `io::secrets::clear_secret` finally gets a caller
+/// (whole-branch review Finding M8: it existed with no way to reach it from
+/// the UI, so a saved Twitch/Kick/OBS credential could never be removed
+/// again short of editing the OS keyring directly). Never redisplays
+/// anything on success: this is a delete action, not a reveal, same
+/// "never redisplay in cleartext" discipline as `save_secret_field`. A
+/// failure is surfaced through the same panel-local `error` field
+/// `save_secret_field` uses for save failures.
+fn clear_secret_button(ui: &mut egui::Ui, label: &str, key: &str, error: &mut Option<String>) {
+    if ui.button("Clear").clicked() {
+        match opendrop_io::secrets::clear_secret(key) {
+            Ok(()) => *error = None,
+            Err(e) => {
+                eprintln!("opendrop-app: failed to clear secret '{key}': {e}");
+                *error = Some(format!("Failed to clear secret '{label}': {e}"));
+            }
+        }
+    }
 }

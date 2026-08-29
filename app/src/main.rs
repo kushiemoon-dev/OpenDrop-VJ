@@ -54,6 +54,11 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// thread has no async runtime (Task 8).
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
+/// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
+/// real elapsed-time measurement, matching the TS reference's
+/// `Math.min(dt, 0.1)` (`clock.ts:53`).
+const MAX_TICK_DT: Duration = Duration::from_millis(100);
+
 /// Max messages kept in `AppState::chat_log` (whole-branch review Finding
 /// 2): a bounded ring buffer, oldest dropped first, so the Streaming
 /// panel's chat display can't grow unbounded over a long-running session.
@@ -337,6 +342,12 @@ struct AppState {
     keymap: HashMap<Key, CommandId>,
     blit_control_timer: PassTimer,
     blit_output_timer: PassTimer,
+    /// Wall-clock instant the output window's surface was last swapped, or
+    /// `None` before the first tick. Doubles as `compute_tick_dt`'s
+    /// `last_tick_at`, read near the top of the same gated tick that
+    /// overwrites it near the bottom (Finding 3): the two ends of one
+    /// tick are close enough together that this is a faithful "previous
+    /// tick's real elapsed-time reference", without a second field.
     last_output_swap_at: Option<Instant>,
     perf_tick: u64,
     /// Sender handed to `preflight::spawn_preflight`: cloned once per
@@ -383,8 +394,12 @@ struct AppState {
     /// still missing a texture.
     thumb_queue: Vec<ThumbJob>,
     /// Cached preset thumbnails, keyed by preset name: populated by
-    /// `pump_thumbnail_queue`, read by the preset-browser panel.
+    /// `pump_thumbnail_queue`, read by the preset-browser panel. Bounded to
+    /// `thumbnails::MAX_RESIDENT_THUMBNAILS` entries (whole-branch review
+    /// Finding 4): `thumbnail_order` is its insertion-order companion,
+    /// see `thumbnails::insert_bounded`.
     thumbnail_textures: HashMap<String, egui::TextureHandle>,
+    thumbnail_order: VecDeque<String>,
     /// The one outstanding `--render-thumbnail` child process, if any.
     /// Thumbnails are rendered out of process (see `thumbnails`' module doc:
     /// a preset that crashes projectM must not take the app down just
@@ -609,6 +624,35 @@ fn midi_learn_completed(prev_trigger: Option<&MidiTriggerKey>, current_trigger: 
 /// entry for.
 fn should_flash_led(kind: Option<CommandKind>) -> bool {
     kind == Some(CommandKind::Trigger)
+}
+
+/// Whole-branch review Finding 3: real (measured) dt for
+/// `Show::clock.step`/`Show::tick_playlists`, instead of the nominal
+/// `refresh_interval` the render-pacing loop targets. `about_to_wait`'s
+/// pacing resyncs `next_frame_at = now + refresh_interval` whenever the
+/// loop falls behind, discarding the overrun (see that resync branch's own
+/// comment): feeding nominal dt into the beat-sync clock silently
+/// under-counted exactly the time a tick that fell behind actually took.
+/// At 4 decks + egui + dual-window blit genuinely running at 40fps against
+/// a 60fps target, a 128 BPM beat-sync played back around 85 BPM.
+///
+/// `last_tick_at` is `None` only on the very first tick, before there is
+/// anything to measure against yet, where nominal dt is the only sane
+/// fallback. `max_dt` matches the TS reference's `Math.min(dt, 0.1)`
+/// (`clock.ts:53`, "avoid large jumps on tab-visibility change"): the same
+/// rationale covers a debugger pause or any other long stall here, so a
+/// real one doesn't feed a huge jump into beat-sync.
+///
+/// Frame-pacing itself (the `WaitUntil(next_frame_at)` scheduling) is
+/// unaffected: it keeps targeting `refresh_interval` as before. Only the
+/// clock/playlist tick inputs change to real elapsed time. Pure, so it's
+/// testable without a real event loop.
+fn compute_tick_dt(now: Instant, last_tick_at: Option<Instant>, nominal: Duration, max_dt: Duration) -> f64 {
+    let elapsed = match last_tick_at {
+        Some(prev) => now.saturating_duration_since(prev),
+        None => nominal,
+    };
+    elapsed.min(max_dt).as_secs_f64()
 }
 
 /// Drains `rx` completely, returning only the most recently received item
@@ -1076,7 +1120,9 @@ impl ApplicationHandler for App {
             // which drifts by design, see the resync branch below). Never
             // derive it from `next_frame_at`.
             let now_ms = state.t0.elapsed().as_secs_f64() * 1000.0;
-            let dt = state.refresh_interval.as_secs_f64();
+            // Real elapsed time, not the nominal refresh_interval (Finding
+            // 3): see `compute_tick_dt`'s doc comment.
+            let dt = compute_tick_dt(now, state.last_output_swap_at, state.refresh_interval, MAX_TICK_DT);
             if state.show.manual_bpm == 0.0 {
                 let r = state.show.beat_detector.process_sample(audio.energy_byte, now_ms);
                 if r.beat_triggered {
@@ -1154,6 +1200,7 @@ impl ApplicationHandler for App {
                     &state.path_by_name,
                     &state.egui_glow.egui_ctx,
                     &mut state.thumbnail_textures,
+                    &mut state.thumbnail_order,
                     &mut state.failed_thumbnails,
                 ) {
                     eprintln!("[app] thumbnail pump failed: {e}");
@@ -1900,6 +1947,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
+        thumbnail_order: VecDeque::new(),
         thumbnail_in_flight: None,
         thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
@@ -1957,6 +2005,45 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whole-branch review Finding 3: real elapsed-time dt for beat-sync/
+    /// playlist ticking.
+    mod compute_tick_dt_tests {
+        use super::*;
+
+        #[test]
+        fn first_tick_uses_nominal_dt() {
+            let now = Instant::now();
+            let dt = compute_tick_dt(now, None, Duration::from_millis(16), Duration::from_millis(100));
+            assert!((dt - 0.016).abs() < 1e-6);
+        }
+
+        #[test]
+        fn measures_real_elapsed_time_not_nominal() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_millis(25);
+            // Nominal would be 16ms (60fps), but the tick actually took
+            // 25ms (fell behind): the real, measured value has to win.
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert!((dt - 0.025).abs() < 1e-6);
+        }
+
+        #[test]
+        fn clamps_a_long_stall_to_max_dt() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_secs(2);
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert_eq!(dt, 0.1);
+        }
+
+        #[test]
+        fn exactly_at_the_clamp_boundary_is_not_reduced() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_millis(100);
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert_eq!(dt, 0.1);
+        }
+    }
 
     /// Whole-branch review Finding 1/2: the preset-load dedup/backpressure
     /// guard.

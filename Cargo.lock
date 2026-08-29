@@ -191,6 +191,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -977,6 +979,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c4ee00b289aba7a9e5306d57c2d05499b2e5dc427f84ac708bd2c090212cf3e"
 dependencies = [
  "gl_generator",
+]
+
+[[package]]
+name = "grafton-ndi"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9c5135de4b600d1f1de31d89033457faab08f215204b90066591bf1a05c6aa6"
+dependencies = [
+ "bindgen 0.72.1",
+ "num_enum",
+ "once_cell",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1833,6 +1847,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "directories",
+ "grafton-ndi",
  "midir",
  "opendrop-core",
  "serde",

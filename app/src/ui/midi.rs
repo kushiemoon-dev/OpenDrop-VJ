@@ -61,8 +61,13 @@ pub fn show(
 
     ui.separator();
 
-    let mut commands = registry.all();
-    commands.sort_by_key(|cmd| cmd.label);
+    // `registry.all()` now comes back in the curated `DEFAULT_COMMANDS`
+    // grouping (deck controls -> active-deck shortcuts -> ... -> q-vars),
+    // matching the 3 reference UI panels: no longer needs the alphabetical
+    // `.sort_by_key(|cmd| cmd.label)` workaround this panel used to carry
+    // for the registry's old nondeterministic HashMap order (whole-branch
+    // review Finding I2).
+    let commands = registry.all();
 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         for cmd in commands {

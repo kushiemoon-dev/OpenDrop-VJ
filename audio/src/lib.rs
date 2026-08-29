@@ -24,26 +24,6 @@ pub(crate) fn silent_snapshot() -> AudioSnapshot {
     AudioSnapshot { pcm: vec![0.0; SILENT_PLACEHOLDER_FRAMES * 2], energy_byte: 0.0 }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn silent_snapshot_is_actually_silent() {
-        let s = silent_snapshot();
-        assert!(s.pcm.iter().all(|&sample| sample == 0.0));
-        assert_eq!(s.energy_byte, 0.0);
-    }
-
-    #[test]
-    fn silent_snapshot_is_a_nonempty_even_length_stereo_buffer() {
-        // render_frame's PCM contract: interleaved stereo, always even.
-        let s = silent_snapshot();
-        assert!(!s.pcm.is_empty());
-        assert_eq!(s.pcm.len() % 2, 0);
-    }
-}
-
 pub struct AudioHandle {
     snapshot: std::sync::Arc<arc_swap::ArcSwap<AudioSnapshot>>,
     device_tx: std::sync::mpsc::Sender<String>,
@@ -78,4 +58,24 @@ pub fn spawn_capture() -> AudioHandle {
 /// Lists the labels of every available input device, for UI device pickers.
 pub fn list_input_devices() -> Vec<String> {
     device::list_input_devices(&cpal::default_host())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn silent_snapshot_is_actually_silent() {
+        let s = silent_snapshot();
+        assert!(s.pcm.iter().all(|&sample| sample == 0.0));
+        assert_eq!(s.energy_byte, 0.0);
+    }
+
+    #[test]
+    fn silent_snapshot_is_a_nonempty_even_length_stereo_buffer() {
+        // render_frame's PCM contract: interleaved stereo, always even.
+        let s = silent_snapshot();
+        assert!(!s.pcm.is_empty());
+        assert_eq!(s.pcm.len() % 2, 0);
+    }
 }

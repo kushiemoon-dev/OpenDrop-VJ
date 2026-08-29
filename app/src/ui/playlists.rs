@@ -51,7 +51,27 @@ pub fn show(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
         if ui.button("Clear").clicked() {
             show.clear_manual_bpm();
         }
-        ui.toggle_value(&mut show.auto_xfade, "⇄");
+        // Whole-branch review Finding 6: `Show::beats_per_change` (auto-
+        // crossfade cadence, distinct from the per-deck trigger configs
+        // below) had no UI control. Same fixed option set as the TS
+        // reference's `<select>` (`SidebarPlaylist.svelte:118`).
+        egui::ComboBox::from_id_salt("beats_per_change")
+            .selected_text(show.beats_per_change.to_string())
+            .show_ui(ui, |ui| {
+                for n in [4u32, 8, 16, 32] {
+                    if ui.selectable_label(show.beats_per_change == n, n.to_string()).clicked() {
+                        show.beats_per_change = n;
+                    }
+                }
+            });
+        // Whole-branch review Finding 7: resets the cadence on every
+        // toggle (either direction), matching the TS reference's
+        // unconditional `resetAutoXfadeCount()` call (`+page.svelte:1754`)
+        //: without it, re-enabling auto-xfade resumed mid-cycle instead
+        // of restarting it.
+        if ui.toggle_value(&mut show.auto_xfade, "⇄").changed() {
+            show.reset_auto_xfade_count();
+        }
     });
 
     ui.separator();

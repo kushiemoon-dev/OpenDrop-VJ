@@ -21,6 +21,7 @@ pub fn show(
     selected_output_monitor: &mut Option<String>,
 ) {
     let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+    let is_fullscreen = output_window.fullscreen().is_some();
 
     ui.label("Output monitor");
     if monitors.is_empty() {
@@ -33,7 +34,19 @@ pub fn show(
                     let name = monitor.name().unwrap_or_else(|| "Unknown".to_string());
                     let is_selected = selected_output_monitor.as_deref() == Some(name.as_str());
                     if ui.selectable_label(is_selected, &name).clicked() {
-                        *selected_output_monitor = Some(name);
+                        *selected_output_monitor = Some(name.clone());
+                        if is_fullscreen {
+                            // Whole-branch review Finding 8: the picker
+                            // used to be inert while the output window was
+                            // already fullscreen: the button below reads
+                            // "Exit fullscreen" at that point, so there was
+                            // no path back through its "enter fullscreen"
+                            // branch to pick up a new selection. Retarget
+                            // immediately instead, reusing that branch's
+                            // own Borderless-on-this-monitor call.
+                            let target = monitors.iter().find(|m| m.name().as_deref() == Some(name.as_str())).cloned();
+                            output_window.set_fullscreen(Some(Fullscreen::Borderless(target)));
+                        }
                     }
                 }
             });
@@ -41,7 +54,6 @@ pub fn show(
 
     ui.separator();
 
-    let is_fullscreen = output_window.fullscreen().is_some();
     if ui.button(if is_fullscreen { "Exit fullscreen" } else { "Fullscreen" }).clicked() {
         if is_fullscreen {
             output_window.set_fullscreen(None);

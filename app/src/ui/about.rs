@@ -24,4 +24,10 @@ pub fn show(ui: &mut egui::Ui) {
         "https://github.com/projectM-visualizer/projectm/releases/tag/v4.1.6",
     );
     ui.label("Licensed under LGPL-2.1.");
+
+    ui.separator();
+
+    ui.label("Network video powered by NDI®.");
+    ui.hyperlink_to("NDI", "https://ndi.video");
+    ui.label("NDI® is a registered trademark of Vizrt NDI AB");
 }

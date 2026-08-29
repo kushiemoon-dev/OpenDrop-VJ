@@ -158,7 +158,11 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                 if let Some(mut old) = client.take() {
                     old.disconnect().await;
                 }
-                let password = password_for_connect(secrets::get_secret(secrets::OBS_PASSWORD));
+                let secret_result = secrets::get_secret(secrets::OBS_PASSWORD);
+                if let Err(e) = &secret_result {
+                    eprintln!("opendrop-io: obs password lookup failed, connecting without a password: {e}");
+                }
+                let password = password_for_connect(secret_result);
                 match obws::Client::connect(host, port, password).await {
                     Ok(new_client) => match new_client.scenes().list().await {
                         Ok(scene_list) => {
@@ -207,6 +211,11 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
 /// matching the JS reference's lenient `secretsStore.getSecret('obs-
 /// password') || undefined`: neither should abort the connect attempt.
 /// Only `Ok(Some(_))` yields an actual password.
+///
+/// Pure on purpose (no logging here): the `Err` case is logged once by
+/// `ObsControl::Connect`'s handler, right before calling this, so the
+/// distinction between "no password configured" and "couldn't check" isn't
+/// lost: only the password value itself is discarded here.
 fn password_for_connect(result: Result<Option<String>, String>) -> Option<String> {
     result.ok().flatten()
 }

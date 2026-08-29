@@ -100,6 +100,7 @@ enum Panel {
     Quality,
     Output,
     Midi,
+    Ndi,
 }
 
 struct WindowSlot {
@@ -181,14 +182,21 @@ struct AppState {
     /// yet; the not-yet-built NDI output and v4l2loopback output threads
     /// take it over once they exist.
     compositor_frame_tx: mpsc::Sender<Vec<u8>>,
-    #[allow(dead_code)] // held for the not-yet-built NDI/v4l2loopback output threads to take over; unread on this branch
-    compositor_frame_rx: mpsc::Receiver<Vec<u8>>,
-    /// Same as `compositor_frame_tx`/`_rx`, one channel pair per deck.
+    /// Same as `compositor_frame_tx`, one channel pair per deck.
     deck_frame_tx: [mpsc::Sender<Vec<u8>>; deck::DECK_COUNT],
-    #[allow(dead_code)] // held for the not-yet-built NDI/v4l2loopback output threads to take over; unread on this branch
-    deck_frame_rx: [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT],
-    /// Whether an NDI output consumer is active: set by the NDI panel
-    /// (Step 10), not yet wired on this branch. Gates the readback loop.
+    /// Handle to the dedicated NDI output thread (Task 9): owns the
+    /// `Receiver` ends of `compositor_frame_tx`/`deck_frame_tx` (handed to
+    /// `opendrop_io::ndi::spawn` once, at construction time), and takes
+    /// start/stop control messages from the NDI panel (Task 10).
+    ndi: opendrop_io::ndi::NdiHandle,
+    /// The NDI panel's own composite toggle state, driving `ndi_active`
+    /// each frame (see `ndi_active`'s doc comment).
+    ndi_composite_active: bool,
+    /// Same as `ndi_composite_active`, one per deck.
+    ndi_deck_active: [bool; deck::DECK_COUNT],
+    /// Whether an NDI output consumer is active: true whenever
+    /// `ndi_composite_active` or any of `ndi_deck_active` is set, recomputed
+    /// every frame right after the NDI panel runs. Gates the readback loop.
     ndi_active: bool,
     /// Whether a v4l2loopback output consumer is active: set by its panel
     /// (Step 19), not yet wired on this branch. Gates the readback loop.
@@ -418,6 +426,9 @@ fn ui_root(
     registry: &CommandRegistry,
     midi: &opendrop_io::midi::MidiHandle,
     midi_learning: &mut Option<(CommandId, Option<MidiTriggerKey>)>,
+    ndi: &opendrop_io::ndi::NdiHandle,
+    ndi_composite_active: &mut bool,
+    ndi_deck_active: &mut [bool; deck::DECK_COUNT],
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -428,6 +439,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Quality, "Quality");
             ui.selectable_value(active_panel, Panel::Output, "Output");
             ui.selectable_value(active_panel, Panel::Midi, "MIDI");
+            ui.selectable_value(active_panel, Panel::Ndi, "NDI");
         });
         ui.separator();
         match active_panel {
@@ -460,6 +472,9 @@ fn ui_root(
             }
             Panel::Midi => {
                 ui::midi::show(ui, midi, registry, midi_learning);
+            }
+            Panel::Ndi => {
+                ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active);
             }
         }
     });
@@ -844,6 +859,9 @@ impl ApplicationHandler for App {
                 registry,
                 midi,
                 midi_learning,
+                ndi,
+                ndi_composite_active,
+                ndi_deck_active,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -882,8 +900,15 @@ impl ApplicationHandler for App {
                     registry,
                     midi,
                     midi_learning,
+                    ndi,
+                    ndi_composite_active,
+                    ndi_deck_active,
                 );
             });
+            // Recomputed every frame from the panel's own toggle state
+            // (not `NdiSnapshot`, which reflects whether the sender actually
+            // started): gates the readback loop above (Step 5).
+            state.ndi_active = state.ndi_composite_active || state.ndi_deck_active.iter().any(|&x| x);
             if let Some(name) = preset_load_request {
                 // Same pipeline as keyboard navigation and playlist/beat-sync
                 // advances (`take_fired_presets`, above): never a direct
@@ -1296,9 +1321,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         compositor_readback,
         deck_readback,
         compositor_frame_tx,
-        compositor_frame_rx,
         deck_frame_tx,
-        deck_frame_rx,
+        // Receivers moved into the NDI thread here, once: they are no
+        // longer needed as `AppState` fields once `spawn` takes ownership.
+        ndi: opendrop_io::ndi::spawn(compositor_frame_rx, deck_frame_rx),
+        ndi_composite_active: false,
+        ndi_deck_active: [false; deck::DECK_COUNT],
         ndi_active: false,
         v4l2_active: false,
         gl,

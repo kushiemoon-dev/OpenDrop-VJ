@@ -4,6 +4,7 @@
 pub mod audio;
 pub mod decks;
 pub mod midi;
+pub mod ndi;
 pub mod output;
 pub mod playlists;
 pub mod preset_browser;

@@ -6,6 +6,7 @@
 //! that per-frame allocation while keeping identical output semantics.
 
 use crate::commands::CommandId;
+use crate::rng::Xorshift64;
 
 const LFO_SLOTS: usize = 4;
 
@@ -57,6 +58,7 @@ pub struct LfoEngine {
     pub slots: [LfoSlot; LFO_SLOTS],
     /// S&H values: randomized per-slot on each downbeat.
     sh_values: [f64; LFO_SLOTS],
+    rng: Xorshift64,
 }
 
 impl LfoEngine {
@@ -64,13 +66,23 @@ impl LfoEngine {
         Self {
             slots: [LfoSlot::default(); LFO_SLOTS],
             sh_values: [0.5; LFO_SLOTS],
+            rng: Xorshift64::default(),
         }
+    }
+
+    /// Reseeds the S&H RNG with real per-launch entropy supplied by the
+    /// caller (`core` stays zero-I/O and has no clock of its own). See
+    /// `rng.rs`'s module doc comment: whole-branch review Finding I4. Not
+    /// currently called by `app`: `LfoEngine` isn't wired into `app` yet,
+    /// but this keeps it correct for whenever that wiring lands.
+    pub fn reseed_rng(&mut self, seed: u64) {
+        self.rng.reseed(seed);
     }
 
     /// Call on each downbeat (beat 0 mod N) to refresh S&H samples.
     pub fn randomize_sh(&mut self) {
         for v in self.sh_values.iter_mut() {
-            *v = rand::random::<f64>();
+            *v = self.rng.next_f64();
         }
     }
 

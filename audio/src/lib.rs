@@ -17,8 +17,31 @@ pub struct AudioSnapshot {
 /// or forever if capture fails at startup: never a crash, never a fallback
 /// to `synth_audio_chunk` (AC-4).
 const SILENT_PLACEHOLDER_FRAMES: usize = 480;
-fn silent_snapshot() -> AudioSnapshot {
+/// `pub(crate)`, not private: also published by `capture::run` on a failed
+/// device hot-swap (whole-branch review Finding 5), not just here at
+/// bootstrap: see that call site's doc comment.
+pub(crate) fn silent_snapshot() -> AudioSnapshot {
     AudioSnapshot { pcm: vec![0.0; SILENT_PLACEHOLDER_FRAMES * 2], energy_byte: 0.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn silent_snapshot_is_actually_silent() {
+        let s = silent_snapshot();
+        assert!(s.pcm.iter().all(|&sample| sample == 0.0));
+        assert_eq!(s.energy_byte, 0.0);
+    }
+
+    #[test]
+    fn silent_snapshot_is_a_nonempty_even_length_stereo_buffer() {
+        // render_frame's PCM contract: interleaved stereo, always even.
+        let s = silent_snapshot();
+        assert!(!s.pcm.is_empty());
+        assert_eq!(s.pcm.len() % 2, 0);
+    }
 }
 
 pub struct AudioHandle {

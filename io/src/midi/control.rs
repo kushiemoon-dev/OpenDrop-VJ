@@ -114,6 +114,13 @@ fn handle_select_port(ts: &mut ThreadState, name: String, midi_tx: &Sender<RawMi
 /// name-matched output connection is open, and the trigger kind supports
 /// LED feedback (not pitchbend). Any other case is a silent no-op:
 /// mirrors every early `return` in `MidiEngine.sendFeedback`.
+///
+/// A `send()` failure (the expected outcome once the output device is
+/// physically unplugged) drops `ts.output_conn` back to `None`: this is
+/// what actually makes hotplug reconnection work: `check_hotplug` only
+/// retries `try_open_output` while `ts.output_conn` is `None`, so a
+/// connection that died silently (no error at unplug time, only at the
+/// next failed `send`) would otherwise never be retried.
 fn handle_push_led(ts: &mut ThreadState, id: CommandId, on: bool) {
     let Some(key) = ts.mapping.get(&id) else { return };
     let Some((input_name, _)) = &ts.input_conn else { return };
@@ -125,6 +132,7 @@ fn handle_push_led(ts: &mut ThreadState, id: CommandId, on: bool) {
     let velocity = if on { 127 } else { 0 };
     if let Err(e) = output.send(&[status, key.number, velocity]) {
         eprintln!("[midi] LED feedback send failed: {e}");
+        ts.output_conn = None; // let check_hotplug retry the reconnect
     }
 }
 

@@ -432,6 +432,36 @@ struct AppState {
     /// `obs-link-store.svelte.ts` (`localhost`/`4455`).
     obs_host: String,
     obs_port: u16,
+    /// Handle to the dedicated Twitch IRC thread (Task 17): `latest()`
+    /// gives the current connected snapshot, `control_tx` sends Connect/
+    /// Disconnect. Chat messages are forwarded to `chat_events` (below),
+    /// not read through this handle.
+    twitch: opendrop_io::twitch::TwitchHandle,
+    /// The Streaming panel's own Twitch channel field, read by `Connect` at
+    /// click time: same reasoning as `obs_host`/`obs_port`.
+    twitch_channel: String,
+    /// Draft text for the Twitch OAuth-token secret field: never holds a
+    /// value after a successful save (see `ui::streaming`'s doc comment).
+    twitch_oauth_token_input: String,
+    /// Handle to the dedicated Kick thread (Task 17): same shape as
+    /// `twitch` above.
+    kick: opendrop_io::kick::KickHandle,
+    /// The Streaming panel's own Kick channel field.
+    kick_channel: String,
+    /// Draft text for the 3 Kick credential secret fields: same "cleared
+    /// after save" contract as `twitch_oauth_token_input`.
+    kick_bearer_token_input: String,
+    kick_xsrf_token_input: String,
+    kick_cookies_input: String,
+    /// Receiving end of the shared chat-message channel both `twitch` and
+    /// `kick` feed (mirrors `broadcastChatMessage`, `main.cjs:425-429`:
+    /// see `opendrop_io::chat`'s module doc comment). Not drained
+    /// anywhere yet: the brief for Task 17 doesn't ask for an app-side
+    /// chat display, only for the plumbing to exist: a later task can
+    /// drain this the same way `about_to_wait` drains `osc`/`remote_ws`'s
+    /// `events`.
+    #[allow(dead_code)] // wired up, not yet consumed: see doc comment above
+    chat_events: std::sync::mpsc::Receiver<opendrop_io::chat::ChatMessage>,
 }
 
 #[derive(Default)]
@@ -516,6 +546,14 @@ fn ui_root(
     obs: &opendrop_io::obs::ObsHandle,
     obs_host: &mut String,
     obs_port: &mut u16,
+    twitch: &opendrop_io::twitch::TwitchHandle,
+    twitch_channel: &mut String,
+    twitch_oauth_token_input: &mut String,
+    kick: &opendrop_io::kick::KickHandle,
+    kick_channel: &mut String,
+    kick_bearer_token_input: &mut String,
+    kick_xsrf_token_input: &mut String,
+    kick_cookies_input: &mut String,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -573,7 +611,20 @@ fn ui_root(
                 ui::remote::show(ui, remote_ws);
             }
             Panel::Streaming => {
-                ui::streaming::show(ui, obs, obs_host, obs_port);
+                ui::streaming::show(
+                    ui,
+                    obs,
+                    obs_host,
+                    obs_port,
+                    twitch,
+                    twitch_channel,
+                    twitch_oauth_token_input,
+                    kick,
+                    kick_channel,
+                    kick_bearer_token_input,
+                    kick_xsrf_token_input,
+                    kick_cookies_input,
+                );
             }
         }
     });
@@ -1050,6 +1101,14 @@ impl ApplicationHandler for App {
                 obs,
                 obs_host,
                 obs_port,
+                twitch,
+                twitch_channel,
+                twitch_oauth_token_input,
+                kick,
+                kick_channel,
+                kick_bearer_token_input,
+                kick_xsrf_token_input,
+                kick_cookies_input,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1098,6 +1157,14 @@ impl ApplicationHandler for App {
                     obs,
                     obs_host,
                     obs_port,
+                    twitch,
+                    twitch_channel,
+                    twitch_oauth_token_input,
+                    kick,
+                    kick_channel,
+                    kick_bearer_token_input,
+                    kick_xsrf_token_input,
+                    kick_cookies_input,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1502,6 +1569,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     }
 
     let (preflight_tx, preflight_rx) = mpsc::channel();
+    // One shared channel for both Twitch and Kick chat messages, mirroring
+    // `broadcastChatMessage` fanning both platforms into one function
+    // (`main.cjs:425-429`: see `opendrop_io::chat`'s module doc comment).
+    // `chat_tx` is cloned once per platform thread below; `chat_events` is
+    // the receiving end, stored on `AppState`.
+    let (chat_tx, chat_events) = mpsc::channel();
 
     let mut show = Show::default();
     show.preset_catalog = catalog;
@@ -1592,6 +1665,15 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         obs: opendrop_io::obs::spawn(),
         obs_host: "localhost".to_string(),
         obs_port: 4455,
+        twitch: opendrop_io::twitch::spawn(chat_tx.clone()),
+        twitch_channel: String::new(),
+        twitch_oauth_token_input: String::new(),
+        kick: opendrop_io::kick::spawn(chat_tx),
+        kick_channel: String::new(),
+        kick_bearer_token_input: String::new(),
+        kick_xsrf_token_input: String::new(),
+        kick_cookies_input: String::new(),
+        chat_events,
     })
 }
 

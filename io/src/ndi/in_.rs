@@ -9,9 +9,10 @@
 //! timeoutMs)`, and [`ActiveReceive`] mirrors `grandiose.receive({source,
 //! colorFormat: COLOR_FORMAT_RGBX_RGBA, bandwidth: BANDWIDTH_LOWEST})`'s read
 //! loop, which pushed each captured frame out over Electron IPC: here it
-//! pushes each frame's RGBA bytes on an `mpsc::Sender<Vec<u8>>` instead,
-//! whose `Receiver` end is exposed as `NdiHandle::frame_rx` for `app` (Task
-//! 12) to read directly, no IPC involved.
+//! pushes each frame (RGBA bytes plus resolution, see [`NdiFrame`]) on an
+//! `mpsc::Sender<NdiFrame>` instead, whose `Receiver` end is exposed as
+//! `NdiHandle::frame_rx` for `app` (Task 12) to read directly, no IPC
+//! involved.
 
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -106,14 +107,27 @@ pub(super) fn open_finder(ndi: &NDI) -> Option<Finder> {
     }
 }
 
+/// One captured frame from an active receive: RGBA bytes plus the
+/// resolution needed to interpret them. Unlike [`super::out`]'s
+/// compositor/deck channels (fixed `COMP_W`/`COMP_H`/`DECK_W`/`DECK_H`), an
+/// NDI-in source can be any resolution, so `app` (Task 12) needs the
+/// dimensions alongside the bytes to size/recreate its GL texture: byte
+/// count alone can't disambiguate width×height.
+#[derive(Debug, Clone)]
+pub struct NdiFrame {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
 /// One active receive: the SDK receiver plus the channel each captured
-/// frame's RGBA bytes are pushed on. Mirrors `out::SlotSender`'s shape (SDK
-/// handle + per-connection state), but there is no reusable frame buffer to
-/// keep here: `VideoFrame::data()` already hands back an owned,
-/// independently sized buffer per call.
+/// frame is pushed on. Mirrors `out::SlotSender`'s shape (SDK handle +
+/// per-connection state), but there is no reusable frame buffer to keep
+/// here: `VideoFrame::data()` already hands back an owned, independently
+/// sized buffer per call.
 pub(super) struct ActiveReceive {
     receiver: GraftonReceiver,
-    frame_tx: Sender<Vec<u8>>,
+    frame_tx: Sender<NdiFrame>,
 }
 
 impl ActiveReceive {
@@ -123,7 +137,7 @@ impl ActiveReceive {
     /// (`electron/main.cjs:687-689`). That reason (keeping an Electron
     /// IPC/relay path affordable) doesn't apply to this native app, but
     /// nothing argues for a different default either, so it's kept as-is.
-    pub(super) fn start(ndi: &NDI, source: NdiSource, frame_tx: Sender<Vec<u8>>) -> Option<Self> {
+    pub(super) fn start(ndi: &NDI, source: NdiSource, frame_tx: Sender<NdiFrame>) -> Option<Self> {
         let options = ReceiverOptions::builder(source.into())
             .color(ReceiverColorFormat::RGBX_RGBA)
             .bandwidth(ReceiverBandwidth::Lowest)
@@ -149,7 +163,11 @@ impl ActiveReceive {
                 // receiver (app dropped that Receiver) just means these
                 // sends fail silently from here on, until StopReceive
                 // tears this down.
-                let _ = self.frame_tx.send(frame.data().to_vec());
+                let _ = self.frame_tx.send(NdiFrame {
+                    width: frame.width() as u32,
+                    height: frame.height() as u32,
+                    data: frame.data().to_vec(),
+                });
             }
             Ok(None) => {}
             Err(e) => eprintln!("[ndi] receive error: {e}"),

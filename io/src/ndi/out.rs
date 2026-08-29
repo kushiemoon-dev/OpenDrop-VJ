@@ -38,7 +38,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use grafton_ndi::{Finder, PixelFormat, Sender as GraftonSender, SenderOptions, VideoFrame, NDI};
 
-use super::in_::{self, NdiSource};
+use super::in_::{self, NdiFrame, NdiSource};
 
 /// Mirrors `engine::compositor::COMP_W`/`COMP_H`: hardcoded here rather
 /// than depending on `opendrop-engine` (a GL/projectM crate) from this
@@ -79,14 +79,16 @@ pub struct NdiHandle {
     state: Arc<ArcSwap<NdiSnapshot>>,
     pub control_tx: Sender<NdiControl>,
     /// Receive end of the channel [`in_::ActiveReceive`] pushes captured
-    /// frames' RGBA bytes on. The channel is created in this module
-    /// (`spawn`, alongside `control_tx`'s channel); the `Sender` half stays
-    /// internal to the NDI thread (owned by `ThreadState`, cloned into each
-    /// `ActiveReceive`), and this `Receiver` half is handed out here for
-    /// `app` (Task 12) to read frames from directly: same shape as
-    /// `control_tx`: a public field, no wrapper method, since there is
-    /// nothing to validate on either send or receive.
-    pub frame_rx: Receiver<Vec<u8>>,
+    /// frames on (RGBA bytes plus resolution: see [`NdiFrame`]; NDI
+    /// sources can be any resolution, unlike the fixed-size compositor/deck
+    /// channels). The channel is created in this module (`spawn`, alongside
+    /// `control_tx`'s channel); the `Sender` half stays internal to the NDI
+    /// thread (owned by `ThreadState`, cloned into each `ActiveReceive`),
+    /// and this `Receiver` half is handed out here for `app` (Task 12) to
+    /// read frames from directly: same shape as `control_tx`: a public
+    /// field, no wrapper method, since there is nothing to validate on
+    /// either send or receive.
+    pub frame_rx: Receiver<NdiFrame>,
 }
 
 impl NdiHandle {
@@ -220,11 +222,11 @@ struct ThreadState {
     receive: Option<in_::ActiveReceive>,
     /// Sender half of the frame channel `spawn` created; cloned into each
     /// new `in_::ActiveReceive` on `StartReceive`.
-    frame_tx: Sender<Vec<u8>>,
+    frame_tx: Sender<NdiFrame>,
 }
 
 impl ThreadState {
-    fn new(frame_tx: Sender<Vec<u8>>) -> Self {
+    fn new(frame_tx: Sender<NdiFrame>) -> Self {
         ThreadState {
             ndi: None,
             composite: None,
@@ -242,7 +244,7 @@ fn run(
     compositor_rx: Receiver<Vec<u8>>,
     deck_rx: [Receiver<Vec<u8>>; DECK_COUNT],
     control_rx: Receiver<NdiControl>,
-    frame_tx: Sender<Vec<u8>>,
+    frame_tx: Sender<NdiFrame>,
 ) {
     let mut ts = ThreadState::new(frame_tx);
     publish(&state, &ts);

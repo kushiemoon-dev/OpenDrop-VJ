@@ -152,6 +152,22 @@ pub struct PendingPresetLoad {
 }
 
 impl Show {
+    /// Reseeds both playlist engines' shuffle-mode RNGs with real
+    /// per-launch entropy supplied by the caller (`app`'s bootstrap:
+    /// `core` stays zero-I/O and has no clock of its own). Deck A and B get
+    /// distinct-but-derived seeds so they don't draw identical shuffle
+    /// sequences from the same source entropy. Whole-branch review Finding
+    /// I4: without this, shuffle mode replayed the exact same sequence
+    /// every single app launch.
+    pub fn reseed_rng(&mut self, seed: u64) {
+        if let Some(engine) = self.playlists.engine_a_mut() {
+            engine.reseed_rng(seed);
+        }
+        if let Some(engine) = self.playlists.engine_b_mut() {
+            engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
+        }
+    }
+
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
     pub fn slot_opacities(&self) -> [f64; 4] {
         std::array::from_fn(|i| bus_gain(self.deck_bus[i], self.crossfader))
@@ -204,6 +220,17 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
+    }
+
+    /// Restarts the auto-crossfade cadence from the top. Port of the
+    /// unconditional `resetAutoXfadeCount()` call the TS reference makes on
+    /// every auto-xfade toggle, either direction (`+page.svelte:1754`).
+    /// Whole-branch review Finding 7: `app` never called an equivalent of
+    /// this: toggling auto-xfade off then back on resumed the crossfade
+    /// cycle mid-count instead of restarting it, so the first crossfade
+    /// after re-enabling could land 1-7 beats early/late.
+    pub fn reset_auto_xfade_count(&mut self) {
+        self.auto_xfade_count = 0;
     }
 
     fn maybe_advance_on_beat(&mut self, deck: Deck) {
@@ -353,6 +380,19 @@ impl CommandContext for Show {
             Deck::A => Deck::B,
             Deck::B => Deck::A,
         };
+        // Whole-branch review Finding 19: keep `selected_slot` (what the
+        // Decks panel highlights) in sync on a keyboard-driven switch too.
+        // `select_slot` already derives `active_deck` from a clicked
+        // slot's bus; without this, the reverse direction let the
+        // highlighted card and the deck `PresetNextActive`/
+        // `PlaylistNextActive` actually act on disagree. A deck whose bus
+        // isn't assigned to any slot (both `Off`, or both slots on the
+        // other letter) leaves `selected_slot` where it was, same
+        // "no visible effect" contract `take_fired_presets` already has
+        // for that case.
+        if let Some(slot) = self.deck_bus_slot_for(self.active_deck) {
+            self.selected_slot = slot;
+        }
     }
 
     /// Cycles the deck's index through the full preset catalog (not the
@@ -599,6 +639,29 @@ mod tests {
             assert_eq!(show.get_active_deck(), Deck::B);
             show.switch_active_deck();
             assert_eq!(show.get_active_deck(), Deck::A);
+        }
+
+        #[test]
+        fn switch_active_deck_keeps_selected_slot_in_sync() {
+            // Whole-branch review Finding 19: a keyboard-driven active-deck
+            // switch used to leave `selected_slot` (what the Decks panel
+            // highlights) pointing at the previous deck's slot.
+            let mut show = Show::default(); // deck_bus: [A, B, Off, Off]
+            assert_eq!(show.selected_slot, 0);
+            show.switch_active_deck(); // now active_deck == B, which is slot 1
+            assert_eq!(show.selected_slot, 1);
+            show.switch_active_deck(); // back to A, slot 0
+            assert_eq!(show.selected_slot, 0);
+        }
+
+        #[test]
+        fn switch_active_deck_leaves_selected_slot_alone_when_the_new_active_deck_has_no_slot() {
+            let mut show = Show::default();
+            show.deck_bus = [DeckBus::A, DeckBus::A, DeckBus::Off, DeckBus::Off]; // no slot is on B
+            show.selected_slot = 0;
+            show.switch_active_deck(); // active_deck becomes B, but no slot maps to it
+            assert_eq!(show.get_active_deck(), Deck::B);
+            assert_eq!(show.selected_slot, 0); // unchanged, not reset to something wrong
         }
     }
 
@@ -996,6 +1059,26 @@ mod tests {
         }
 
         #[test]
+        fn reset_auto_xfade_count_restarts_the_cadence_from_the_top() {
+            // Whole-branch review Finding 7: without a reset, re-enabling
+            // auto-xfade mid-count would fire the next crossfade early.
+            let mut show = Show::default();
+            show.auto_xfade = true;
+            show.beats_per_change = 4;
+            show.on_beat();
+            show.on_beat();
+            show.on_beat(); // 3 beats in, one short of the 4-beat cadence
+            assert_eq!(show.crossfader, 0.0);
+            show.reset_auto_xfade_count();
+            show.on_beat(); // would have flipped here without the reset
+            assert_eq!(show.crossfader, 0.0);
+            show.on_beat();
+            show.on_beat();
+            show.on_beat();
+            assert_eq!(show.crossfader, 1.0); // flips a full 4 beats after the reset
+        }
+
+        #[test]
         fn does_not_touch_crossfader_when_auto_xfade_is_off() {
             let mut show = Show::default();
             show.beats_per_change = 1;
@@ -1264,6 +1347,54 @@ mod tests {
             show.check_volume_peak_triggers(0.9, 1600.0);
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
             assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("P1"));
+        }
+    }
+
+    mod reseed_rng {
+        use super::*;
+
+        #[test]
+        fn makes_deck_a_shuffle_draws_actually_differ_across_seeds() {
+            let draws = |seed: u64| -> Vec<usize> {
+                let mut show = Show::default();
+                for name in ["p1", "p2", "p3", "p4", "p5"] {
+                    show.playlists.add_to_playlist(Deck::A, name.to_string());
+                }
+                show.playlists.engine_a_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+                show.reseed_rng(seed);
+                (0..10)
+                    .map(|_| {
+                        show.playlist_next(Deck::A);
+                        show.playlists.engine_a_mut().unwrap().current_index()
+                    })
+                    .collect()
+            };
+            assert_ne!(draws(1), draws(2));
+        }
+
+        #[test]
+        fn seeds_deck_a_and_deck_b_differently_so_they_do_not_lockstep() {
+            let mut show = Show::default();
+            for name in ["p1", "p2", "p3", "p4", "p5"] {
+                show.playlists.add_to_playlist(Deck::A, name.to_string());
+                show.playlists.add_to_playlist(Deck::B, name.to_string());
+            }
+            show.playlists.engine_a_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+            show.playlists.engine_b_mut().unwrap().set_mode(PlaylistMode::Shuffle);
+            show.reseed_rng(42);
+            let draws_a: Vec<usize> = (0..10)
+                .map(|_| {
+                    show.playlist_next(Deck::A);
+                    show.playlists.engine_a_mut().unwrap().current_index()
+                })
+                .collect();
+            let draws_b: Vec<usize> = (0..10)
+                .map(|_| {
+                    show.playlist_next(Deck::B);
+                    show.playlists.engine_b_mut().unwrap().current_index()
+                })
+                .collect();
+            assert_ne!(draws_a, draws_b);
         }
     }
 }

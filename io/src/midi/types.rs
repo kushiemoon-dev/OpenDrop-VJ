@@ -55,6 +55,12 @@ pub type MidiDispatch = (CommandId, f64);
 /// checked", without needing a second channel (see task report for why this
 /// was chosen over a dedicated clock/hotplug channel).
 pub struct MidiSnapshot {
+    /// `true` only once an input port is actually open (set by a successful
+    /// `MidiControl::SelectPort`): NOT merely once `Connect` has
+    /// initialized the `midir` backend and enumerated `device_names`.
+    /// Whole-branch review Finding M7: the MIDI panel surfaces this as
+    /// "MIDI: connected", so it must not go true until something is
+    /// actually wired to a controller.
     pub connected: bool,
     pub device_names: Vec<String>,
     pub clock_bpm: f64,
@@ -88,6 +94,12 @@ pub enum MidiControl {
     Disconnect,
     SelectPort(String),
     StartLearn(CommandId),
+    /// Cancels learn mode without changing the mapping: a no-op if nothing
+    /// is currently being learned. Whole-branch review Finding M10: the
+    /// only previous way out of learn mode was a real MIDI message arriving
+    /// (or an app restart); this gives the panel's Cancel button something
+    /// to send.
+    StopLearn,
     ClearMapping(CommandId),
     PushLed(CommandId, bool),
 }
@@ -133,6 +145,20 @@ pub(crate) fn is_note_off(event: &MidiEvent) -> bool {
 /// second, easily-desynced reverse index.
 pub(crate) fn resolve_mapping(mapping: &MidiMapping, key: &MidiTriggerKey) -> Option<CommandId> {
     mapping.iter().find(|(_, k)| *k == key).map(|(id, _)| *id)
+}
+
+/// Binds `id` to `key` in `mapping`, first removing any OTHER command
+/// already bound to the same `key`: a `MidiTriggerKey` can be owned by at
+/// most one `CommandId` at a time, mirroring the JS reference's
+/// `takenOver.add(key)` "one trigger, one owner" intent
+/// (`midi-connection-actions.ts`). Whole-branch review Finding M6: without
+/// this, learn-mode binding a trigger already bound to a DIFFERENT command
+/// left both entries in the map, making [`resolve_mapping`]'s reverse
+/// lookup ambiguous and its winner nondeterministic across runs (HashMap
+/// iteration order).
+pub(crate) fn bind_trigger(mapping: &mut MidiMapping, id: CommandId, key: MidiTriggerKey) {
+    mapping.retain(|_, k| k != &key);
+    mapping.insert(id, key);
 }
 
 /// The raw MIDI status byte for LED on/off feedback, or `None` for
@@ -205,6 +231,51 @@ mod tests {
         assert_eq!(resolve_mapping(&mapping, &key("dev", TriggerKind::Note, 1, 60)), Some(CommandId::DeckSwitch));
         assert_eq!(resolve_mapping(&mapping, &key("other-dev", TriggerKind::Cc, 1, 7)), None);
         assert_eq!(resolve_mapping(&mapping, &key("dev", TriggerKind::Cc, 1, 99)), None);
+    }
+
+    /// Whole-branch review Finding M6: binding a trigger already owned by a
+    /// DIFFERENT command must evict that command's entry, so the trigger
+    /// has exactly one owner and `resolve_mapping` stays unambiguous.
+    #[test]
+    fn bind_trigger_evicts_the_other_command_bound_to_the_same_key() {
+        let mut mapping = MidiMapping::new();
+        let k = key("dev", TriggerKind::Cc, 1, 7);
+        mapping.insert(CommandId::Crossfader, k.clone());
+
+        bind_trigger(&mut mapping, CommandId::DeckSwitch, k.clone());
+
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping.get(&CommandId::DeckSwitch), Some(&k));
+        assert_eq!(mapping.get(&CommandId::Crossfader), None);
+        assert_eq!(resolve_mapping(&mapping, &k), Some(CommandId::DeckSwitch));
+    }
+
+    /// Re-learning the same command to a new trigger must drop its own old
+    /// entry, not leave two entries for the same `CommandId`.
+    #[test]
+    fn bind_trigger_replaces_the_same_commands_previous_key() {
+        let mut mapping = MidiMapping::new();
+        let old_key = key("dev", TriggerKind::Cc, 1, 7);
+        let new_key = key("dev", TriggerKind::Note, 1, 60);
+        mapping.insert(CommandId::Crossfader, old_key);
+
+        bind_trigger(&mut mapping, CommandId::Crossfader, new_key.clone());
+
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping.get(&CommandId::Crossfader), Some(&new_key));
+    }
+
+    /// A key with no existing owner just gets inserted, same as a plain
+    /// `HashMap::insert`.
+    #[test]
+    fn bind_trigger_on_an_unbound_key_just_inserts() {
+        let mut mapping = MidiMapping::new();
+        let k = key("dev", TriggerKind::Note, 1, 60);
+
+        bind_trigger(&mut mapping, CommandId::Crossfader, k.clone());
+
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping.get(&CommandId::Crossfader), Some(&k));
     }
 
     #[test]

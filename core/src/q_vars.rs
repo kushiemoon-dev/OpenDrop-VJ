@@ -30,28 +30,44 @@ pub fn default_q_var_params() -> DeckQVarParams {
 pub type QVarParamsTuple = [DeckQVarParams; 4];
 
 /// Update a single q-var's value (1-indexed) for one deck slot, without
-/// touching `enabled`. Pure: returns a new tuple.
+/// touching `enabled`. Pure: returns a new tuple. Whole-branch review
+/// Finding M5: an out-of-range `slot` (>3) or `n` (0, or >32) used to panic
+/// via array indexing; both are now a no-op (the input tuple comes back
+/// unchanged) instead: the least invasive fix that doesn't change this
+/// function's `QVarParamsTuple -> QVarParamsTuple` contract into a
+/// `Result`/`Option`.
 pub fn with_q_var_value(
     mut params: QVarParamsTuple,
     slot: usize,
     n: usize,
     value: f64,
 ) -> QVarParamsTuple {
+    if slot >= params.len() || n == 0 || n > 32 {
+        return params;
+    }
     params[slot].value[n - 1] = value;
     params
 }
 
 /// Enable watching a q-var (1-indexed), resetting its value to 0. Pure:
-/// returns a new tuple.
+/// returns a new tuple. See `with_q_var_value`'s doc comment re: out-of-range
+/// `slot`/`n` (Finding M5).
 pub fn with_q_var_watch(mut params: QVarParamsTuple, slot: usize, n: usize) -> QVarParamsTuple {
+    if slot >= params.len() || n == 0 || n > 32 {
+        return params;
+    }
     params[slot].enabled[n - 1] = true;
     params[slot].value[n - 1] = 0.0;
     params
 }
 
 /// Disable watching a q-var (1-indexed), leaving its last value untouched.
-/// Pure: returns a new tuple.
+/// Pure: returns a new tuple. See `with_q_var_value`'s doc comment re:
+/// out-of-range `slot`/`n` (Finding M5).
 pub fn without_q_var_watch(mut params: QVarParamsTuple, slot: usize, n: usize) -> QVarParamsTuple {
+    if slot >= params.len() || n == 0 || n > 32 {
+        return params;
+    }
     params[slot].enabled[n - 1] = false;
     params
 }
@@ -184,6 +200,27 @@ mod tests {
             let _next = with_q_var_value(original, 2, 1, 2.0);
             assert_eq!(original[2].value[0], 0.0);
         }
+
+        #[test]
+        fn an_out_of_range_slot_is_a_no_op_instead_of_panicking() {
+            let original = params();
+            let next = with_q_var_value(original, 4, 1, 5.0); // slots are 0..=3
+            assert_eq!(next, original);
+        }
+
+        #[test]
+        fn n_0_is_a_no_op_instead_of_panicking() {
+            let original = params();
+            let next = with_q_var_value(original, 0, 0, 5.0); // n is 1-indexed
+            assert_eq!(next, original);
+        }
+
+        #[test]
+        fn n_above_32_is_a_no_op_instead_of_panicking() {
+            let original = params();
+            let next = with_q_var_value(original, 0, 33, 5.0);
+            assert_eq!(next, original);
+        }
     }
 
     mod with_q_var_watch_tests {
@@ -207,6 +244,14 @@ mod tests {
             assert!(!next[0].enabled[9]);
             assert_eq!(next[1].enabled.iter().filter(|&&e| e).count(), 1);
         }
+
+        #[test]
+        fn an_out_of_range_slot_or_n_is_a_no_op_instead_of_panicking() {
+            let original = params();
+            assert_eq!(with_q_var_watch(original, 4, 1), original);
+            assert_eq!(with_q_var_watch(original, 0, 0), original);
+            assert_eq!(with_q_var_watch(original, 0, 33), original);
+        }
     }
 
     mod without_q_var_watch_tests {
@@ -220,6 +265,14 @@ mod tests {
             let next = without_q_var_watch(valued, 0, 12);
             assert!(!next[0].enabled[11]);
             assert_eq!(next[0].value[11], 1.2);
+        }
+
+        #[test]
+        fn an_out_of_range_slot_or_n_is_a_no_op_instead_of_panicking() {
+            let original: QVarParamsTuple = [default_q_var_params(); 4];
+            assert_eq!(without_q_var_watch(original, 4, 1), original);
+            assert_eq!(without_q_var_watch(original, 0, 0), original);
+            assert_eq!(without_q_var_watch(original, 0, 33), original);
         }
     }
 }

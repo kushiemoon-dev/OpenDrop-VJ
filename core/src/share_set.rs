@@ -44,21 +44,21 @@ use crate::snapshot::Snapshot;
 use crate::time_params::TimeParamsTuple;
 use crate::timeline::TimelineKeyframe;
 
-/// Which deck (if any) feeds one crossfader-routed slot. Defined inline here,
-/// same as in the TS source (`Array<'A' | 'B' | 'off'>`): not part of any
-/// already-ported module.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeckBus {
-    A,
-    B,
-    Off,
-}
+/// Which deck (if any) feeds one crossfader-routed slot: the TS source
+/// defines this inline (`Array<'A' | 'B' | 'off'>`), but `show.rs` already
+/// has an identical Rust `DeckBus` enum for the same concept (`Show::
+/// deck_bus`), so this reuses it rather than redeclaring a second,
+/// structurally-identical type (whole-branch review Finding M6).
+pub use crate::show::DeckBus;
 
 pub struct SharedSet {
     pub name: String,
     pub preset_a: String,
     pub preset_b: String,
-    pub deck_bus: Vec<DeckBus>,
+    /// Fixed at 4, one per physical slot: same convention as
+    /// `slot_composites`/`time_params` below, not a `Vec` (whole-branch
+    /// review Finding M7).
+    pub deck_bus: [DeckBus; 4],
     pub crossfader: f64,
     pub transition_time: f64,
     pub color_params_a: ColorParams,
@@ -162,7 +162,7 @@ mod tests {
                 name: "Mon set de test".to_string(),
                 preset_a: "preset-a-slug".to_string(),
                 preset_b: "preset-b-slug".to_string(),
-                deck_bus: vec![DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],
+                deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],
                 crossfader: 0.3,
                 transition_time: 1.5,
                 color_params_a: ColorParams { hue_rotate: 0.2, ..DEFAULT_COLOR_PARAMS },

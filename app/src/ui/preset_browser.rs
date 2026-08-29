@@ -28,7 +28,7 @@
 use opendrop_core::commands::Deck;
 use opendrop_core::preset_index::search;
 use opendrop_core::show::Show;
-use opendrop_core::thumb_queue::{enqueue_front, ThumbJob};
+use opendrop_core::thumb_queue::{enqueue_front, prune_to_visible, ThumbJob};
 use std::collections::{HashMap, HashSet};
 
 /// Matches `opendrop_engine::thumbnail::{THUMB_W, THUMB_H}`'s 192:108
@@ -117,6 +117,14 @@ pub fn show(
     let results = search_cache.resolve(show, search_query.as_str());
     let total_rows = results.len().div_ceil(per_row);
 
+    // Whole-branch review Finding 4: names of the tiles actually on screen
+    // this frame, collected alongside the row layout below so
+    // `thumb_queue` can be pruned to just them afterwards: the queue
+    // previously grew unbounded across a fast scroll or a search-query
+    // change, since nothing ever removed a job for a tile that scrolled
+    // (or was filtered) away.
+    let mut visible_names: HashSet<String> = HashSet::new();
+
     // `show_rows`, not `vertical() + horizontal_wrapped()`: the free-flow
     // version built every one of the ~9800 tiles as real widgets every
     // frame: `is_rect_visible` only skipped the *painting*, never the
@@ -125,6 +133,7 @@ pub fn show(
         for row in rows {
             let start = row * per_row;
             let end = (start + per_row).min(results.len());
+            visible_names.extend(results[start..end].iter().cloned());
             ui.horizontal(|ui| {
                 ui.set_min_height(ROW_HEIGHT); // keeps the real pitch equal to ROW_HEIGHT
                 for name in &results[start..end] {
@@ -133,6 +142,17 @@ pub fn show(
             });
         }
     });
+
+    // A fast scroll through ~9800 tiles, or a search query that filters
+    // most of them out, must not leave thousands of stale jobs queued
+    // behind the ones actually on screen: see `prune_to_visible`'s doc
+    // comment. Also naturally handles the panel-loses-focus case: this
+    // function simply isn't called while the panel is hidden, so the
+    // queue stays frozen (never pruned, but also never growing) until the
+    // panel is shown again, at which point this prunes it fresh against
+    // whatever is visible then, before the next pump tick can grind
+    // through anything stale.
+    *thumb_queue = prune_to_visible(std::mem::take(thumb_queue), &visible_names);
 }
 
 /// One preset tile: thumbnail (or placeholder while it's still queued),

@@ -10,10 +10,14 @@
 //! brief says either is fine and there's no other panel field to hold a
 //! per-stream name.
 //!
-//! `composite_active`/`deck_active` are the caller's own toggle state (not
-//! `NdiSnapshot`, which reflects whether the sender actually started, e.g.
-//! could be `false` after an SDK failure): this panel drives them and the
-//! caller derives `AppState::ndi_active` from them each frame.
+//! `composite_active`/`deck_active` are the caller's own toggle state, but
+//! resynced from `NdiSnapshot::composite_active`/`deck_active` at the top of
+//! every `show` call (whole-branch review Finding M5): a sender that failed
+//! to start (SDK error) or died mid-session leaves the snapshot's flag
+//! false on its own, and without this resync the checkbox would stay
+//! checked forever for a stream that isn't actually running. The resync
+//! runs before the checkbox widgets below are drawn, so a click made this
+//! same frame still takes effect and is still sent to the thread.
 //!
 //! `selected_source` is likewise the caller's own state (`AppState::
 //! ndi_in_selected_source`), not derived from `NdiSnapshot`, which has no
@@ -24,6 +28,7 @@
 //! `NdiSnapshot::sources` is already populated (or empty, if nothing is on
 //! the network yet).
 
+use opendrop_engine::deck;
 use opendrop_io::ndi::{NdiControl, NdiHandle, NdiSource};
 
 const COMPOSITE_STREAM_NAME: &str = "OpenDrop";
@@ -36,12 +41,22 @@ pub fn show(
     ui: &mut egui::Ui,
     ndi: &NdiHandle,
     composite_active: &mut bool,
-    deck_active: &mut [bool; 4],
+    deck_active: &mut [bool; deck::DECK_COUNT],
     selected_source: &mut Option<NdiSource>,
 ) {
+    let snapshot = ndi.latest();
+
+    // See the module doc comment: resync before the checkboxes are drawn so
+    // an external failure (or a start that never succeeded) is visible,
+    // without discarding a click made this same frame.
+    *composite_active = snapshot.composite_active;
+    for (active, &snapshot_active) in deck_active.iter_mut().zip(snapshot.deck_active.iter()) {
+        *active = snapshot_active;
+    }
+
     ui.label("NDI output");
 
-    if ui.checkbox(composite_active, "Sortie NDI compositeur").changed() {
+    if ui.checkbox(composite_active, "NDI compositor output").changed() {
         let msg = if *composite_active {
             NdiControl::StartComposite(COMPOSITE_STREAM_NAME.to_string())
         } else {
@@ -62,7 +77,6 @@ pub fn show(
 
     ui.separator();
     ui.label("NDI input");
-    let snapshot = ndi.latest();
 
     ui.horizontal(|ui| {
         ui.label(if snapshot.receive_active { "Receive: connected" } else { "Receive: disconnected" });
@@ -80,16 +94,21 @@ pub fn show(
     if snapshot.sources.is_empty() {
         ui.label("(no sources found)");
     } else {
-        egui::ComboBox::from_id_salt("ndi_in_source")
-            .selected_text(selected_source.as_ref().map(|s| s.name.as_str()).unwrap_or("select a source"))
-            .show_ui(ui, |ui| {
-                for source in &snapshot.sources {
-                    let is_selected = selected_source.as_ref() == Some(source);
-                    if ui.selectable_label(is_selected, &source.name).clicked() {
-                        *selected_source = Some(source.clone());
+        // Disabled while a receive is active: matches `ui::osc`/
+        // `ui::streaming`'s convention of disabling fields while their
+        // respective connection is live (whole-branch review Finding M9).
+        ui.add_enabled_ui(!snapshot.receive_active, |ui| {
+            egui::ComboBox::from_id_salt("ndi_in_source")
+                .selected_text(selected_source.as_ref().map(|s| s.name.as_str()).unwrap_or("select a source"))
+                .show_ui(ui, |ui| {
+                    for source in &snapshot.sources {
+                        let is_selected = selected_source.as_ref() == Some(source);
+                        if ui.selectable_label(is_selected, &source.name).clicked() {
+                            *selected_source = Some(source.clone());
+                        }
                     }
-                }
-            });
+                });
+        });
     }
 
     ui.separator();

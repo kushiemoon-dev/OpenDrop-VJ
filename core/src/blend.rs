@@ -156,6 +156,22 @@ pub const DEFAULT_SLOT_COMPOSITE: SlotComposite = SlotComposite {
     color_tol: 0.0,
 };
 
+/// Port of OpenDrop-VJ `compositor.ts:140` `shouldForceNormalForLowestSlot`
+///: whole-branch review Finding I5. Whether the lowest active deck slot
+/// should be forced to `BlendMode::Normal`: multiply/screen/additive against
+/// a still-transparent framebuffer reads wrong (e.g. multiply -> black).
+/// Independent of any video/NDI-in layer, which draws last, on top of the
+/// deck stack, not underneath it.
+///
+/// `lowest_active` is `None` when no slot is active at all (every slot at or
+/// below the compositor's 0.001 opacity floor): the idiomatic Rust
+/// equivalent of the TS caller's `lowestActive: number` sentinel, and the
+/// same `Option<usize>` shape `app`'s own `(0..DECK_COUNT).find(...)` call
+/// site already produces.
+pub fn should_force_normal_for_lowest_slot(slot: usize, lowest_active: Option<usize>) -> bool {
+    lowest_active == Some(slot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +375,26 @@ mod tests {
         fn multiple_non_default_channels_join_with_a_space_in_declared_order() {
             let p = ColorParams { hue_rotate: 0.5, invert: 1.0, ..DEFAULT_COLOR_PARAMS };
             assert_eq!(color_params_to_filter(p), "hue-rotate(180deg) invert(100%)");
+        }
+    }
+
+    /// Port of `compositor.test.ts`'s `shouldForceNormalForLowestSlot` tests.
+    mod should_force_normal_for_lowest_slot {
+        use super::*;
+
+        #[test]
+        fn forces_normal_on_the_lowest_active_slot() {
+            assert!(should_force_normal_for_lowest_slot(0, Some(0)));
+        }
+
+        #[test]
+        fn never_forces_a_non_lowest_slot() {
+            assert!(!should_force_normal_for_lowest_slot(1, Some(0)));
+        }
+
+        #[test]
+        fn no_slot_active_at_all_forces_nothing() {
+            assert!(!should_force_normal_for_lowest_slot(0, None));
         }
     }
 

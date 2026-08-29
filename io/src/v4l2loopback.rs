@@ -256,13 +256,24 @@ fn run(state: Arc<ArcSwap<V4l2Snapshot>>, compositor_rx: Receiver<Vec<u8>>, cont
 
     loop {
         let mut owner_gone = false;
-        match control_rx.recv_timeout(POLL_TICK) {
-            Ok(ctrl) => handle_control(&mut pipe, ctrl, &state),
-            Err(RecvTimeoutError::Timeout) => {}
-            // Never actually happens in practice: control_tx is held alive
-            // by `app`'s AppState/V4l2Handle for the whole process
-            // lifetime, same as `io::ndi::out::run`'s equivalent comment.
-            Err(RecvTimeoutError::Disconnected) => owner_gone = true,
+        if pipe.is_none() {
+            // Idle: no ffmpeg process to feed or watch, so block until a
+            // control message arrives instead of spinning the 5ms poll for
+            // nothing (whole-branch review Finding M2): same idle/active
+            // split as `io::ndi::out::run`.
+            match control_rx.recv() {
+                Ok(ctrl) => handle_control(&mut pipe, ctrl, &state),
+                Err(_) => owner_gone = true,
+            }
+        } else {
+            match control_rx.recv_timeout(POLL_TICK) {
+                Ok(ctrl) => handle_control(&mut pipe, ctrl, &state),
+                Err(RecvTimeoutError::Timeout) => {}
+                // Never actually happens in practice: control_tx is held alive
+                // by `app`'s AppState/V4l2Handle for the whole process
+                // lifetime, same as `io::ndi::out::run`'s equivalent comment.
+                Err(RecvTimeoutError::Disconnected) => owner_gone = true,
+            }
         }
         while !owner_gone {
             match control_rx.try_recv() {

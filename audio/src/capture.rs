@@ -47,6 +47,19 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
     while let Ok(name) = rx.recv() {
         drop(current_stream.take()); // Drop stops the old cpal stream before opening the new one
         current_stream = crate::device::select_input_device_by_name(&host, &name).and_then(|d| open_and_play(&d, snapshot.clone()));
+        if current_stream.is_none() {
+            // Whole-branch review Finding 5: the old stream is already
+            // dropped above, but without this `AudioHandle::latest()`
+            // would keep returning the LAST successful PCM chunk from the
+            // now-dead old device forever: decks keep reacting to frozen
+            // audio, the VU meter shows a frozen level, the beat detector
+            // gets fed constant energy, with only the eprintln inside
+            // `select_input_device_by_name`/`open_and_play` as a (silent
+            // to the user) signal anything went wrong. Publishing a fresh
+            // silent snapshot here is what makes a failed hot-swap
+            // actually go silent instead.
+            snapshot.store(std::sync::Arc::new(crate::silent_snapshot()));
+        }
     }
     // rx.recv() returned Err: sender (AudioHandle) dropped: process shutting down.
 }

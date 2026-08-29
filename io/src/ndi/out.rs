@@ -6,16 +6,18 @@
 //! channel internally): those 5 receivers already exist upstream in `app`
 //! and are handed to [`spawn`] once, by value, at construction time.
 //!
-//! **Correctness requirement driving the whole run loop**: Step 5 gates its
-//! GPU readback behind `ndi_active || v4l2_active`: an OR over the whole
-//! feature, not per-slot: so this thread can receive frames on any of the
-//! 5 channels even when that particular slot's NDI stream was never
-//! started (e.g. only v4l2loopback is active, or NDI is active for the
-//! composite but not deck 2). Every receiver is drained every tick
-//! regardless of whether its slot is started ([`drain_slot`]); an unstarted
-//! slot's bytes are simply discarded. Skipping this would leave the
-//! upstream `mpsc::Sender` (unbounded) filling up forever: a real memory
-//! leak, not a hypothetical one.
+//! **Correctness requirement driving the whole run loop**: `app`'s Step 5
+//! readback is gated per consumer (whole-branch review Finding I5:
+//! composite on `ndi_composite_active || v4l2_active`, each deck on its own
+//! `ndi_deck_active[i]`), but this thread can still receive frames on a
+//! channel whose slot isn't started here yet: e.g. right after the
+//! app-side toggle flips, before the matching `NdiControl::Start*` has been
+//! processed, or if that control message's `SlotSender` failed to start
+//! (SDK error). Every receiver is drained every tick regardless of whether
+//! its slot is started ([`drain_slot`]); an unstarted slot's bytes are
+//! simply discarded. Skipping this would leave the upstream `mpsc::Sender`
+//! (unbounded) filling up forever: a real memory leak, not a hypothetical
+//! one.
 //!
 //! **RGBA, not BGRA, for both streams**: Step 4/5's readback is native GL
 //! RGBA8 (no swizzle) for the compositor's texture and all 4 deck
@@ -256,6 +258,26 @@ impl ThreadState {
     }
 }
 
+/// Pure predicate behind [`is_idle`], split out so it's testable without a
+/// real `ThreadState`: `finder`/`composite`/`decks`/`receive` all wrap real
+/// NDI SDK types that can't be constructed in a unit test without a live
+/// NDI runtime, same reasoning as `is_valid_deck_slot`'s extraction above.
+fn is_idle_from(has_finder: bool, has_composite: bool, any_deck_active: bool, has_receive: bool) -> bool {
+    !has_finder && !has_composite && !any_deck_active && !has_receive
+}
+
+/// Nothing that needs periodic tick-driven work is running: no discovery
+/// (`ts.finder`, which polls `in_::find` every tick once started), no
+/// composite/deck sender (which drain their frame channels every tick), and
+/// no active receive (whose `poll()` needs to run every tick to pull
+/// incoming frames): whole-branch review Finding M2. While idle the run
+/// loop below blocks on `control_rx.recv()` instead of a 5ms poll; the
+/// moment any of these starts, the next tick already sees `is_idle() ==
+/// false` and switches to the timed-poll loop.
+fn is_idle(ts: &ThreadState) -> bool {
+    is_idle_from(ts.finder.is_some(), ts.composite.is_some(), ts.decks.iter().any(Option::is_some), ts.receive.is_some())
+}
+
 fn run(
     state: Arc<ArcSwap<NdiSnapshot>>,
     compositor_rx: Receiver<Vec<u8>>,
@@ -268,13 +290,26 @@ fn run(
 
     loop {
         let mut owner_gone = false;
-        match control_rx.recv_timeout(POLL_TICK) {
-            Ok(ctrl) => handle_control(&mut ts, ctrl),
-            Err(RecvTimeoutError::Timeout) => {}
-            // Never actually happens: every sender (compositor_rx's/deck_rx's
-            // producer side, and control_tx) is held alive by `app`'s
-            // AppState/NdiHandle for the whole process lifetime.
-            Err(RecvTimeoutError::Disconnected) => owner_gone = true,
+        if is_idle(&ts) {
+            // Fully idle: nothing needs a periodic tick, so block until a
+            // control message arrives instead of spinning the 5ms poll for
+            // nothing (Finding M2). In practice `app` sends `StartDiscovery`
+            // unconditionally right after `spawn` returns (see `spawn`'s
+            // doc comment), so this branch is mainly hit for the brief
+            // instant before that first message arrives.
+            match control_rx.recv() {
+                Ok(ctrl) => handle_control(&mut ts, ctrl),
+                Err(_) => owner_gone = true,
+            }
+        } else {
+            match control_rx.recv_timeout(POLL_TICK) {
+                Ok(ctrl) => handle_control(&mut ts, ctrl),
+                Err(RecvTimeoutError::Timeout) => {}
+                // Never actually happens: every sender (compositor_rx's/deck_rx's
+                // producer side, and control_tx) is held alive by `app`'s
+                // AppState/NdiHandle for the whole process lifetime.
+                Err(RecvTimeoutError::Disconnected) => owner_gone = true,
+            }
         }
         while !owner_gone {
             match control_rx.try_recv() {
@@ -458,6 +493,21 @@ mod tests {
         assert!(snapshot.deck_active.iter().all(|&a| !a));
         assert!(snapshot.sources.is_empty());
         assert!(!snapshot.receive_active);
+
+        assert!(is_idle(&ts));
+    }
+
+    /// Whole-branch review Finding M2: any one of discovery/composite/a
+    /// deck/receive being active is enough to take the run loop out of its
+    /// idle (blocking-`recv`) branch.
+    #[test]
+    fn is_idle_true_only_when_nothing_needs_periodic_work() {
+        assert!(is_idle_from(false, false, false, false));
+        assert!(!is_idle_from(true, false, false, false)); // discovery running
+        assert!(!is_idle_from(false, true, false, false)); // composite sender active
+        assert!(!is_idle_from(false, false, true, false)); // a deck sender active
+        assert!(!is_idle_from(false, false, false, true)); // a receive session active
+        assert!(!is_idle_from(true, true, true, true)); // everything active
     }
 
     #[test]

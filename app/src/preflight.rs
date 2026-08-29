@@ -74,7 +74,17 @@ pub enum PreflightVerdict {
 /// `about_to_wait`'s non-blocking drain.
 pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc::Sender<(usize, String, PreflightVerdict)>) {
     std::thread::spawn(move || {
-        let exe = std::env::current_exe().expect("current_exe() failed");
+        // Minor #11: fallible, not `.expect()`. A panic here would drop
+        // `result_tx` without ever sending on it, leaving this slot stuck
+        // in `pending_validations` forever (the UI shows "Validating…"
+        // indefinitely, since nothing else ever clears it).
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                let _ = result_tx.send((slot, name, PreflightVerdict::Failed(format!("current_exe() failed: {e}"))));
+                return;
+            }
+        };
         let mut child = match Command::new(&exe).arg("--preflight-check").arg(&path).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
         {
             Ok(c) => c,
@@ -95,7 +105,14 @@ pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc
                     break PreflightVerdict::Failed("preflight check timed out".to_string());
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-                Err(e) => break PreflightVerdict::Failed(format!("wait failed: {e}")),
+                Err(e) => {
+                    // Minor #10: still attempt to reap the child on this
+                    // error path too, same as the timeout branch above,
+                    // instead of leaking it.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break PreflightVerdict::Failed(format!("wait failed: {e}"));
+                }
             }
         };
         let _ = result_tx.send((slot, name, verdict));

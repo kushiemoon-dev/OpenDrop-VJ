@@ -22,6 +22,7 @@ pub(super) fn handle_control(ts: &mut ThreadState, ctrl: MidiControl, midi_tx: &
         MidiControl::Disconnect => handle_disconnect(ts),
         MidiControl::SelectPort(name) => handle_select_port(ts, name, midi_tx),
         MidiControl::StartLearn(id) => ts.learning = Some(id),
+        MidiControl::StopLearn => ts.learning = None,
         MidiControl::ClearMapping(id) => {
             ts.mapping.remove(&id);
             mapping::save_mapping(ts.mapping_path.as_deref(), &ts.mapping);
@@ -32,7 +33,11 @@ pub(super) fn handle_control(ts: &mut ThreadState, ctrl: MidiControl, midi_tx: &
 
 /// Initializes the MIDI backend and loads the persisted mapping from disk
 /// ("chargé une fois à la connexion" per the brief): never opens a port by
-/// itself, that's `SelectPort`'s job.
+/// itself, that's `SelectPort`'s job. Whole-branch review Finding M7:
+/// `ts.connected` (surfaced by the panel as "MIDI: connected") must NOT be
+/// set here: this only probes the backend and lists ports, it doesn't open
+/// one. `ts.connected` only goes `true` once `handle_select_port` actually
+/// opens an input connection.
 fn handle_connect(ts: &mut ThreadState) {
     ts.mapping_path = mapping_file_path();
     ts.mapping = ts.mapping_path.as_deref().map(mapping::load_mapping).unwrap_or_default();
@@ -40,12 +45,10 @@ fn handle_connect(ts: &mut ThreadState) {
     match midir::MidiInput::new(CLIENT_NAME) {
         Ok(input) => {
             ts.device_names = list_port_names(&input);
-            ts.connected = true;
         }
         Err(_) => {
             eprintln!("[midi] MIDI backend unavailable: no controller I/O this session");
             ts.device_names = Vec::new();
-            ts.connected = false;
         }
     }
 }
@@ -171,5 +174,16 @@ mod tests {
     fn push_led_on_unmapped_command_is_a_no_op() {
         let mut ts = ThreadState::new();
         handle_push_led(&mut ts, CommandId::Crossfader, true); // must not panic
+    }
+
+    /// Whole-branch review Finding M7: `Connect` only probes the backend
+    /// and lists ports: it must never claim `connected`, regardless of
+    /// whether a real MIDI backend happens to be available in this test
+    /// environment. Only `SelectPort` actually opening a port may set it.
+    #[test]
+    fn connect_never_claims_a_port_is_open() {
+        let mut ts = ThreadState::new();
+        handle_connect(&mut ts);
+        assert!(!ts.connected);
     }
 }

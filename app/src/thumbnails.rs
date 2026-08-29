@@ -21,12 +21,23 @@
 
 use opendrop_core::thumb_queue::{dequeue_job, ThumbJob};
 use opendrop_engine::thumbnail::{THUMB_H, THUMB_W};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const RGBA_BYTES: usize = (THUMB_W * THUMB_H * 4) as usize;
+
+/// Whole-branch review Finding 4: max GPU textures kept resident in
+/// `thumbnail_textures` at once. Nothing previously removed an entry once
+/// created, so every tile ever scrolled past kept its texture alive for
+/// the whole session, up to ~812MB VRAM for the full ~9795-preset catalog
+/// (`9795 * THUMB_W * THUMB_H * 4` bytes). 500 textures is several
+/// screens' worth of scroll in either direction (a typical control-window
+/// grid shows on the order of 100 tiles at once) while capping worst-case
+/// memory at `500 * THUMB_W * THUMB_H * 4` bytes, ~41MB, roughly 20x
+/// smaller than the unbounded worst case.
+const MAX_RESIDENT_THUMBNAILS: usize = 500;
 
 /// Wall-clock budget for one `--render-thumbnail` child before it is killed
 /// and its preset written off. Longer than `preflight`'s 5s: that child
@@ -144,6 +155,28 @@ pub fn reap_killed(killed: &mut Vec<Child>) {
     killed.retain_mut(|child| matches!(child.try_wait(), Ok(None)));
 }
 
+/// Inserts `(key, tex)` into `textures`, tracking insertion order in
+/// `order` so the oldest entry can be evicted once
+/// `MAX_RESIDENT_THUMBNAILS` is exceeded (whole-branch review Finding 4).
+/// FIFO, not true LRU (no re-touch-on-view bump): the simplest structure
+/// that bounds memory. A tile evicted while still on screen just gets
+/// re-queued and re-rendered next time it's visible and missing (a cheap
+/// disk-cache hit via `read_cached`, not a re-render), which only happens
+/// after `MAX_RESIDENT_THUMBNAILS` other distinct tiles have been shown
+/// since. `order` and `textures` are kept in lockstep: a key is pushed to
+/// `order` only the first time it's inserted, since `pump_thumbnail_queue`
+/// never overwrites an already-resident key (see its `textures.contains_key`
+/// check): an overwrite would otherwise grow `order` past `textures`' size.
+fn insert_bounded(textures: &mut HashMap<String, egui::TextureHandle>, order: &mut VecDeque<String>, key: String, tex: egui::TextureHandle) {
+    if textures.insert(key.clone(), tex).is_none() {
+        order.push_back(key);
+    }
+    while textures.len() > MAX_RESIDENT_THUMBNAILS {
+        let Some(oldest) = order.pop_front() else { break };
+        textures.remove(&oldest);
+    }
+}
+
 /// Does at most one unit of work per tick, so a burst of newly-visible
 /// preset tiles never stalls the live render loop: either poll the
 /// outstanding render child, or take one job off `queue`. A job that hits
@@ -171,6 +204,7 @@ pub fn pump_thumbnail_queue(
     path_by_name: &HashMap<String, PathBuf>,
     ctx: &egui::Context,
     textures: &mut HashMap<String, egui::TextureHandle>,
+    texture_order: &mut VecDeque<String>,
     failed: &mut HashSet<String>,
 ) -> Result<(), String> {
     // A child spawned on an earlier tick takes priority, and every branch
@@ -190,6 +224,16 @@ pub fn pump_thumbnail_queue(
             }
             RenderPoll::TimedOut => {
                 failed.insert(pending.job.name.clone());
+                // Minor #12: best-effort cleanup of the temp file the
+                // child may have been mid-write on when SIGKILLed:
+                // `write_atomically` names it `<hash>.tmp<pid>` next to
+                // the final `.rgba` path, so both are derivable here. May
+                // not exist yet (killed before the write started) or may
+                // already be gone (renamed into place moments before the
+                // kill landed); either way a missing-file error is
+                // ignored, this is cleanup, not a correctness path.
+                let tmp = cache_path(cache_dir, &pending.job.name).with_extension(format!("tmp{}", pending.child.id()));
+                let _ = std::fs::remove_file(tmp);
                 // SIGKILLed but not waited on: see `poll_render`. Hand it
                 // to the non-blocking reaper rather than dropping it, which
                 // would leave a zombie for the rest of the session.
@@ -204,7 +248,7 @@ pub fn pump_thumbnail_queue(
                     failed.insert(pending.job.name.clone());
                     return Err(format!("{}: renderer exited cleanly but wrote no usable thumbnail", pending.job.name));
                 };
-                textures.insert(pending.job.slot_key, rgba_to_texture(ctx, &pending.job.name, &pixels));
+                insert_bounded(textures, texture_order, pending.job.slot_key, rgba_to_texture(ctx, &pending.job.name, &pixels));
                 return Ok(());
             }
         }
@@ -238,7 +282,7 @@ pub fn pump_thumbnail_queue(
     };
 
     if let Some(pixels) = read_cached(cache_dir, &job.name) {
-        textures.insert(job.slot_key, rgba_to_texture(ctx, &job.name, &pixels));
+        insert_bounded(textures, texture_order, job.slot_key, rgba_to_texture(ctx, &job.name, &pixels));
         return Ok(());
     }
 
@@ -303,6 +347,50 @@ mod tests {
             let mut killed: Vec<Child> = Vec::new();
             reap_killed(&mut killed);
             assert!(killed.is_empty());
+        }
+    }
+
+    /// Whole-branch review Finding 4: the bounded thumbnail-texture cache.
+    /// `egui::TextureHandle` needs no GL context to construct: its
+    /// texture manager is CPU-side bookkeeping only: so this is a real
+    /// unit test of the eviction logic, not just a description of it.
+    mod insert_bounded_tests {
+        use super::*;
+
+        fn tex(ctx: &egui::Context, tag: &str) -> egui::TextureHandle {
+            let image = egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]);
+            ctx.load_texture(tag, image, egui::TextureOptions::default())
+        }
+
+        #[test]
+        fn stays_under_the_cap_evicting_the_oldest_first() {
+            let ctx = egui::Context::default();
+            let mut textures = HashMap::new();
+            let mut order = VecDeque::new();
+            for i in 0..(MAX_RESIDENT_THUMBNAILS + 3) {
+                insert_bounded(&mut textures, &mut order, i.to_string(), tex(&ctx, &i.to_string()));
+            }
+            // Genuinely bounded, not just "less bad": never exceeds the cap.
+            assert_eq!(textures.len(), MAX_RESIDENT_THUMBNAILS);
+            assert_eq!(order.len(), MAX_RESIDENT_THUMBNAILS);
+            // The 3 oldest (inserted first) are gone...
+            assert!(!textures.contains_key("0"));
+            assert!(!textures.contains_key("1"));
+            assert!(!textures.contains_key("2"));
+            // ...and the most recent survives.
+            let last = (MAX_RESIDENT_THUMBNAILS + 2).to_string();
+            assert!(textures.contains_key(&last));
+        }
+
+        #[test]
+        fn under_the_cap_keeps_everything() {
+            let ctx = egui::Context::default();
+            let mut textures = HashMap::new();
+            let mut order = VecDeque::new();
+            insert_bounded(&mut textures, &mut order, "a".to_string(), tex(&ctx, "a"));
+            insert_bounded(&mut textures, &mut order, "b".to_string(), tex(&ctx, "b"));
+            assert_eq!(textures.len(), 2);
+            assert_eq!(order.len(), 2);
         }
     }
 

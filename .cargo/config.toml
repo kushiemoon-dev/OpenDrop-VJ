@@ -1,0 +1,10 @@
+# grafton-ndi's build.rs (io/Cargo.toml, Task 9) expects the NewTek NDI SDK
+# installer layout: headers under `<SDK>/include`, libs under
+# `<SDK>/lib/<arch-triple>`. This machine's `ndi-sdk` pacman package instead
+# drops headers straight into /usr/include and libndi.so straight into
+# /usr/lib (standard distro packaging, not the installer layout): see
+# engine/build.rs for the same kind of Arch-packaging workaround applied to
+# projectM-4. `ndi-sdk-shim/` symlinks into those system paths so
+# grafton-ndi's build.rs finds what it expects without forking the crate.
+[env]
+NDI_SDK_DIR = { value = "ndi-sdk-shim", relative = true }

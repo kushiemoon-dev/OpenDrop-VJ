@@ -134,6 +134,12 @@ enum Panel {
     Output,
     Midi,
     Ndi,
+    Osc,
+    RemoteWs,
+    Streaming,
+    #[cfg(feature = "link")]
+    Link,
+    V4l2,
 }
 
 struct WindowSlot {
@@ -210,11 +216,19 @@ struct AppState {
     /// idle sessions never pay the readback cost.
     compositor_readback: FrameReadback,
     deck_readback: [FrameReadback; deck::DECK_COUNT],
-    /// Outlet for `compositor_readback`'s polled RGBA bytes. The `Receiver`
-    /// end is held here too, for now: no consumer exists on this branch
-    /// yet; the not-yet-built NDI output and v4l2loopback output threads
-    /// take it over once they exist.
+    /// Outlet for `compositor_readback`'s polled RGBA bytes, feeding the NDI
+    /// output thread's `compositor_rx` (its `Receiver` end was moved into
+    /// `opendrop_io::ndi::spawn` at construction time: see `ndi`'s doc
+    /// comment).
     compositor_frame_tx: mpsc::Sender<Vec<u8>>,
+    /// Same compositor bytes as `compositor_frame_tx`, on a second channel
+    /// pair feeding the v4l2loopback output thread's own `compositor_rx`
+    /// (Task 19): each consumer needs its own `Sender`, since Task 9/10
+    /// already moved the original single receiver into `opendrop_io::
+    /// ndi::spawn`. Unlike `compositor_frame_tx`/`deck_frame_tx`, there is
+    /// no per-deck counterpart: v4l2loopback only ever pipes the composite
+    /// stream (see `io::v4l2loopback`'s module doc comment).
+    v4l2_frame_tx: mpsc::Sender<Vec<u8>>,
     /// Same as `compositor_frame_tx`, one channel pair per deck.
     deck_frame_tx: [mpsc::Sender<Vec<u8>>; deck::DECK_COUNT],
     /// Handle to the dedicated NDI output thread (Task 9): owns the
@@ -244,9 +258,22 @@ struct AppState {
     /// toggle state, not `NdiSnapshot::receive_active` (which reflects
     /// whether the receiver actually started).
     ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
-    /// Whether a v4l2loopback output consumer is active: set by its panel
-    /// (Step 19), not yet wired on this branch. Gates the readback loop.
+    /// Whether a v4l2loopback output consumer is active: this panel's own
+    /// Start/Stop toggle (Task 19), driven directly by `ui::v4l2loopback::
+    /// show` (no per-slot array to OR together, unlike `ndi_active`, so no
+    /// separate aggregate field is needed). Gates the readback loop.
     v4l2_active: bool,
+    /// Handle to the dedicated v4l2loopback output thread (Task 19): owns
+    /// the `Receiver` end of `v4l2_frame_tx` (handed to `opendrop_io::
+    /// v4l2loopback::spawn` once, at construction time), and takes
+    /// start/stop control messages from the v4l2loopback panel.
+    v4l2: opendrop_io::v4l2loopback::V4l2Handle,
+    /// Lazily-resolved v4l2loopback device path, checked at most once per
+    /// session: outer `None` means "not checked yet", `Some(None)` means
+    /// "checked, no device found". Populated by `ui::v4l2loopback::show`
+    /// the first frame that panel is shown: see that module's doc comment
+    /// for why this is deliberately not re-queried per frame.
+    v4l2_device: Option<Option<PathBuf>>,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -398,6 +425,80 @@ struct AppState {
     /// back off once the deadline passes (no `std::thread::sleep`, no
     /// async timer).
     midi_led_flash_off_at: HashMap<CommandId, Instant>,
+    /// Handle to the dedicated OSC UDP server thread (Task 13): `latest()`
+    /// gives the current listening/port snapshot, `events` carries
+    /// `(CommandId, value01)` dispatches drained in `about_to_wait` (no
+    /// soft-takeover, unlike MIDI's crossfader: the brief is explicit OSC
+    /// has none in the existing app), `control_tx` sends Start/Stop.
+    osc: opendrop_io::osc::OscHandle,
+    /// The OSC panel's own port field, read by `Start` at click time: not
+    /// `OscSnapshot::port`, which only reflects the port actually bound
+    /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
+    /// matching OpenDrop-VJ's `electron-features-store.svelte.ts` default.
+    osc_port: u16,
+    /// Handle to the dedicated remote-WS thread (Task 14): first async
+    /// integration in this codebase (its own tokio runtime lives entirely
+    /// inside that thread, see `opendrop_io::remote_ws`'s module doc
+    /// comment; no tokio type reaches `AppState` itself, only the same
+    /// kind of `std::sync::mpsc` handle `osc`/`midi` expose). `events`
+    /// carries `(CommandId, value01)` dispatches drained in
+    /// `about_to_wait`, same no-soft-takeover contract as OSC.
+    remote_ws: opendrop_io::remote_ws::RemoteWsHandle,
+    /// Handle to the dedicated OBS WebSocket thread (Task 16): app->OBS
+    /// direction only, no `events`/`about_to_wait` drain (see
+    /// `opendrop_io::obs`'s module doc comment): `latest()` gives the
+    /// current connected/scenes snapshot, `control_tx` sends Connect/
+    /// Disconnect/SetScene.
+    obs: opendrop_io::obs::ObsHandle,
+    /// The Streaming panel's own OBS host/port fields, read by `Connect` at
+    /// click time: not part of `ObsSnapshot`, same reasoning as `osc_port`
+    /// (see `ui::osc`'s doc comment). Defaults match OpenDrop-VJ's
+    /// `obs-link-store.svelte.ts` (`localhost`/`4455`).
+    obs_host: String,
+    obs_port: u16,
+    /// Handle to the dedicated Twitch IRC thread (Task 17): `latest()`
+    /// gives the current connected snapshot, `control_tx` sends Connect/
+    /// Disconnect. Chat messages are forwarded to `chat_events` (below),
+    /// not read through this handle.
+    twitch: opendrop_io::twitch::TwitchHandle,
+    /// The Streaming panel's own Twitch channel field, read by `Connect` at
+    /// click time: same reasoning as `obs_host`/`obs_port`.
+    twitch_channel: String,
+    /// Draft text for the Twitch OAuth-token secret field: never holds a
+    /// value after a successful save (see `ui::streaming`'s doc comment).
+    twitch_oauth_token_input: String,
+    /// Handle to the dedicated Kick thread (Task 17): same shape as
+    /// `twitch` above.
+    kick: opendrop_io::kick::KickHandle,
+    /// The Streaming panel's own Kick channel field.
+    kick_channel: String,
+    /// Draft text for the 3 Kick credential secret fields: same "cleared
+    /// after save" contract as `twitch_oauth_token_input`.
+    kick_bearer_token_input: String,
+    kick_xsrf_token_input: String,
+    kick_cookies_input: String,
+    /// Handle to the dedicated Ableton Link thread (Task 18): `latest()`
+    /// gives the current enabled/tempo/beat/phase/peers snapshot,
+    /// `control_tx` sends Start/Stop/SetTempo. Present only when the
+    /// `link` feature is enabled (OFF by default: GPL licensing
+    /// boundary, see `opendrop_io::link`'s module doc comment and the
+    /// root README).
+    #[cfg(feature = "link")]
+    link: opendrop_io::link::LinkHandle,
+    /// The Link panel's own tempo field, read by `SetTempo` at click
+    /// time: not `LinkSnapshot::tempo`, same reasoning as `osc_port`
+    /// (see `ui::osc`'s doc comment).
+    #[cfg(feature = "link")]
+    link_tempo_input: f64,
+    /// Receiving end of the shared chat-message channel both `twitch` and
+    /// `kick` feed (mirrors `broadcastChatMessage`, `main.cjs:425-429`:
+    /// see `opendrop_io::chat`'s module doc comment). Not drained
+    /// anywhere yet: the brief for Task 17 doesn't ask for an app-side
+    /// chat display, only for the plumbing to exist: a later task can
+    /// drain this the same way `about_to_wait` drains `osc`/`remote_ws`'s
+    /// `events`.
+    #[allow(dead_code)] // wired up, not yet consumed: see doc comment above
+    chat_events: std::sync::mpsc::Receiver<opendrop_io::chat::ChatMessage>,
 }
 
 #[derive(Default)]
@@ -476,6 +577,25 @@ fn ui_root(
     ndi_composite_active: &mut bool,
     ndi_deck_active: &mut [bool; deck::DECK_COUNT],
     ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
+    osc: &opendrop_io::osc::OscHandle,
+    osc_port: &mut u16,
+    remote_ws: &opendrop_io::remote_ws::RemoteWsHandle,
+    obs: &opendrop_io::obs::ObsHandle,
+    obs_host: &mut String,
+    obs_port: &mut u16,
+    twitch: &opendrop_io::twitch::TwitchHandle,
+    twitch_channel: &mut String,
+    twitch_oauth_token_input: &mut String,
+    kick: &opendrop_io::kick::KickHandle,
+    kick_channel: &mut String,
+    kick_bearer_token_input: &mut String,
+    kick_xsrf_token_input: &mut String,
+    kick_cookies_input: &mut String,
+    #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
+    #[cfg(feature = "link")] link_tempo_input: &mut f64,
+    v4l2: &opendrop_io::v4l2loopback::V4l2Handle,
+    v4l2_active: &mut bool,
+    v4l2_device: &mut Option<Option<PathBuf>>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -487,6 +607,12 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Output, "Output");
             ui.selectable_value(active_panel, Panel::Midi, "MIDI");
             ui.selectable_value(active_panel, Panel::Ndi, "NDI");
+            ui.selectable_value(active_panel, Panel::Osc, "OSC");
+            ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
+            ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
+            #[cfg(feature = "link")]
+            ui.selectable_value(active_panel, Panel::Link, "Link");
+            ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
         });
         ui.separator();
         match active_panel {
@@ -522,6 +648,35 @@ fn ui_root(
             }
             Panel::Ndi => {
                 ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active, ndi_in_selected_source);
+            }
+            Panel::Osc => {
+                ui::osc::show(ui, osc, osc_port);
+            }
+            Panel::RemoteWs => {
+                ui::remote::show(ui, remote_ws);
+            }
+            Panel::Streaming => {
+                ui::streaming::show(
+                    ui,
+                    obs,
+                    obs_host,
+                    obs_port,
+                    twitch,
+                    twitch_channel,
+                    twitch_oauth_token_input,
+                    kick,
+                    kick_channel,
+                    kick_bearer_token_input,
+                    kick_xsrf_token_input,
+                    kick_cookies_input,
+                );
+            }
+            #[cfg(feature = "link")]
+            Panel::Link => {
+                ui::link::show(ui, link, link_tempo_input);
+            }
+            Panel::V4l2 => {
+                ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
             }
         }
     });
@@ -711,6 +866,41 @@ impl ApplicationHandler for App {
         };
         if midi_learn_done {
             state.midi_learning = None;
+        }
+
+        // OSC (Task 13). `osc.events` carries `(CommandId, value01)`
+        // dispatches already filtered/clamped by the OSC thread (address
+        // prefix + command-name lookup + 0..1 clamp all happen in
+        // `opendrop_io::osc`, not here). No soft-takeover: unlike MIDI's
+        // crossfader, OSC has no such gate in the existing app.
+        while let Ok((id, value01)) = state.osc.events.try_recv() {
+            state.registry.dispatch(id, value01, &mut state.show);
+        }
+
+        // Remote WS (Task 14). Same shape as the OSC drain just above:
+        // `remote_ws.events` carries `(CommandId, value01)` dispatches
+        // already filtered (token check + command-name lookup) and
+        // clamped by the remote-WS thread itself (`opendrop_io::
+        // remote_ws`, not here). No soft-takeover, same as OSC.
+        while let Ok((id, value01)) = state.remote_ws.events.try_recv() {
+            state.registry.dispatch(id, value01, &mut state.show);
+        }
+
+        // Ableton Link (Task 18). The Link thread never touches `Show`
+        // itself (see `opendrop_io::link`'s module doc comment): it only
+        // publishes the latest polled `(tempo, phase01)`; applying that
+        // to the clock happens here, once per `about_to_wait` call, same
+        // as the MIDI clock-pulse handling above. `sync_external` forces
+        // both bpm and phase from Link's authoritative timeline and
+        // fires a beat when phase wraps.
+        #[cfg(feature = "link")]
+        {
+            let link_snapshot = state.link.latest();
+            if link_snapshot.enabled {
+                for _ in 0..state.show.clock.sync_external(link_snapshot.tempo, link_snapshot.phase01) {
+                    state.show.on_beat();
+                }
+            }
         }
 
         let now = Instant::now();
@@ -920,6 +1110,9 @@ impl ApplicationHandler for App {
             if state.ndi_active || state.v4l2_active {
                 state.compositor_readback.begin_read(&state.gl);
                 if let Some(bytes) = state.compositor_readback.poll(&state.gl) {
+                    // Two consumers, two channels (see `v4l2_frame_tx`'s doc
+                    // comment): one clone so each gets its own owned copy.
+                    let _ = state.v4l2_frame_tx.send(bytes.clone());
                     let _ = state.compositor_frame_tx.send(bytes);
                 }
                 for i in 0..deck::DECK_COUNT {
@@ -974,6 +1167,27 @@ impl ApplicationHandler for App {
                 ndi_composite_active,
                 ndi_deck_active,
                 ndi_in_selected_source,
+                osc,
+                osc_port,
+                remote_ws,
+                obs,
+                obs_host,
+                obs_port,
+                twitch,
+                twitch_channel,
+                twitch_oauth_token_input,
+                kick,
+                kick_channel,
+                kick_bearer_token_input,
+                kick_xsrf_token_input,
+                kick_cookies_input,
+                #[cfg(feature = "link")]
+                link,
+                #[cfg(feature = "link")]
+                link_tempo_input,
+                v4l2,
+                v4l2_active,
+                v4l2_device,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1016,6 +1230,27 @@ impl ApplicationHandler for App {
                     ndi_composite_active,
                     ndi_deck_active,
                     ndi_in_selected_source,
+                    osc,
+                    osc_port,
+                    remote_ws,
+                    obs,
+                    obs_host,
+                    obs_port,
+                    twitch,
+                    twitch_channel,
+                    twitch_oauth_token_input,
+                    kick,
+                    kick_channel,
+                    kick_bearer_token_input,
+                    kick_xsrf_token_input,
+                    kick_cookies_input,
+                    #[cfg(feature = "link")]
+                    link,
+                    #[cfg(feature = "link")]
+                    link_tempo_input,
+                    v4l2,
+                    v4l2_active,
+                    v4l2_device,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1369,10 +1604,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         v.try_into().unwrap_or_else(|_| unreachable!("DECK_COUNT readbacks pushed"))
     };
 
-    // Output channels for the readback bytes above. No consumer exists on
-    // this branch: the `Receiver` ends are just held on `AppState` until
-    // the future NDI / v4l2loopback output threads take them over.
+    // Output channels for the readback bytes above. `compositor_frame_rx`/
+    // `deck_frame_rx` are moved into the NDI thread below; `v4l2_frame_rx`
+    // is a second, v4l2loopback-only channel for the same compositor bytes
+    // (Task 19: see `v4l2_frame_tx`'s doc comment on `AppState`).
     let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
+    let (v4l2_frame_tx, v4l2_frame_rx) = mpsc::channel::<Vec<u8>>();
     let (deck_frame_tx, deck_frame_rx): ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]) = {
         let mut tx_v = Vec::with_capacity(deck::DECK_COUNT);
         let mut rx_v = Vec::with_capacity(deck::DECK_COUNT);
@@ -1420,6 +1657,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     }
 
     let (preflight_tx, preflight_rx) = mpsc::channel();
+    // One shared channel for both Twitch and Kick chat messages, mirroring
+    // `broadcastChatMessage` fanning both platforms into one function
+    // (`main.cjs:425-429`: see `opendrop_io::chat`'s module doc comment).
+    // `chat_tx` is cloned once per platform thread below; `chat_events` is
+    // the receiving end, stored on `AppState`.
+    let (chat_tx, chat_events) = mpsc::channel();
 
     let mut show = Show::default();
     show.preset_catalog = catalog;
@@ -1434,6 +1677,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         compositor_readback,
         deck_readback,
         compositor_frame_tx,
+        v4l2_frame_tx,
         deck_frame_tx,
         // Receivers moved into the NDI thread here, once: they are no
         // longer needed as `AppState` fields once `spawn` takes ownership.
@@ -1453,6 +1697,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         ndi_in_texture: None,
         ndi_in_selected_source: None,
         v4l2_active: false,
+        v4l2: opendrop_io::v4l2loopback::spawn(v4l2_frame_rx),
+        v4l2_device: None,
         gl,
         egui_glow,
         refresh_interval,
@@ -1504,6 +1750,25 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_last_hotplug_epoch: 0,
         midi_last_beat_count: 0,
         midi_led_flash_off_at: HashMap::new(),
+        osc: opendrop_io::osc::spawn(),
+        osc_port: 7000,
+        remote_ws: opendrop_io::remote_ws::spawn(),
+        obs: opendrop_io::obs::spawn(),
+        obs_host: "localhost".to_string(),
+        obs_port: 4455,
+        twitch: opendrop_io::twitch::spawn(chat_tx.clone()),
+        twitch_channel: String::new(),
+        twitch_oauth_token_input: String::new(),
+        kick: opendrop_io::kick::spawn(chat_tx),
+        kick_channel: String::new(),
+        kick_bearer_token_input: String::new(),
+        kick_xsrf_token_input: String::new(),
+        kick_cookies_input: String::new(),
+        #[cfg(feature = "link")]
+        link: opendrop_io::link::spawn(),
+        #[cfg(feature = "link")]
+        link_tempo_input: 120.0,
+        chat_events,
     })
 }
 

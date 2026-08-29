@@ -142,10 +142,21 @@ pub enum NdiControl {
 
 /// Spawns the dedicated NDI thread and returns immediately. The thread
 /// starts with every slot inactive (mirrors `MidiHandle`'s start-idle
-/// convention): no NDI sender exists, and the process-global `NDI` runtime
-/// itself is only acquired lazily, on the first `StartComposite`/
-/// `StartDeck`, so a session that never touches NDI (v4l2loopback-only)
-/// never pays for it and never logs a spurious "SDK not found".
+/// convention): no NDI sender exists yet, and the process-global `NDI`
+/// runtime itself is still only acquired lazily, inside `ensure_ndi`, on
+/// whichever of `StartComposite`/`StartDeck`/`StartDiscovery` arrives
+/// first.
+///
+/// **No longer true as of Task 12's `app` bootstrap** (whole-branch review
+/// Finding 4): `app` sends `StartDiscovery` unconditionally right after
+/// this call returns, so "first" is now effectively every session's
+/// bootstrap: the NDI runtime is acquired, and `in_::find` starts polling
+/// every ~5ms, in every session whether or not the user ever opens the NDI
+/// panel. A session with no NDI SDK installed does log "failed to
+/// initialize the NDI runtime" once at bootstrap now (not "never": see
+/// `ensure_ndi`), and a persistently failing `Finder` is rate-limited to
+/// one log line per failure streak rather than flooding stderr (see
+/// `ThreadState::discovery_error_logged`).
 ///
 /// `compositor_rx`/`deck_rx` are the Step 5 `FrameReadback` channels,
 /// passed in by value: this function does not create them (see the module
@@ -219,6 +230,11 @@ struct ThreadState {
     /// Latest discovery snapshot, refreshed every tick while `finder` is
     /// `Some` and published verbatim into `NdiSnapshot::sources`.
     sources: Vec<NdiSource>,
+    /// Whether `in_::find`'s current failure streak has already been
+    /// logged once (whole-branch review Finding 4): reset to `false` the
+    /// moment discovery succeeds again, so a later failure streak still
+    /// gets its own one log line rather than staying silent forever.
+    discovery_error_logged: bool,
     receive: Option<in_::ActiveReceive>,
     /// Sender half of the frame channel `spawn` created; cloned into each
     /// new `in_::ActiveReceive` on `StartReceive`.
@@ -233,6 +249,7 @@ impl ThreadState {
             decks: std::array::from_fn(|_| None),
             finder: None,
             sources: Vec::new(),
+            discovery_error_logged: false,
             receive: None,
             frame_tx,
         }
@@ -278,7 +295,19 @@ fn run(
         // `timeout_ms = 0`, see `in_::find`) and forward one receive poll:
         // never block this shared thread on either.
         if let Some(finder) = ts.finder.as_ref() {
-            ts.sources = in_::find(finder, None, 0);
+            match in_::find(finder, None, 0) {
+                Ok(sources) => {
+                    ts.sources = sources;
+                    ts.discovery_error_logged = false; // recovered: a later failure streak logs again
+                }
+                Err(e) => {
+                    if !ts.discovery_error_logged {
+                        eprintln!("[ndi] source discovery failed: {e}");
+                        ts.discovery_error_logged = true;
+                    }
+                    ts.sources.clear();
+                }
+            }
         }
         if let Some(active_receive) = ts.receive.as_ref() {
             active_receive.poll();
@@ -421,6 +450,7 @@ mod tests {
         assert!(ts.decks.iter().all(Option::is_none));
         assert!(ts.finder.is_none());
         assert!(ts.sources.is_empty());
+        assert!(!ts.discovery_error_logged);
         assert!(ts.receive.is_none());
 
         let snapshot = NdiSnapshot::default();

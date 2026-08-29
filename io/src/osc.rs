@@ -111,7 +111,15 @@ fn publish(state: &Arc<ArcSwap<OscSnapshot>>, listening: bool, port: u16) {
 /// whatever was previously in `socket`. Never panics: a bind failure is
 /// logged once and leaves `socket` at `None` / state at not-listening,
 /// per the task's error-handling requirement.
+///
+/// The old socket is dropped *before* the new bind is attempted (not
+/// after a successful one): std's `UdpSocket::bind` doesn't set
+/// `SO_REUSEADDR`, so binding a second socket on the same address while
+/// the first is still open would normally fail with `EADDRINUSE`, which
+/// would wrongly report a bind failure on what should be an
+/// unconditional rebind (including the same-port case).
 fn bind(socket: &mut Option<UdpSocket>, port: u16, state: &Arc<ArcSwap<OscSnapshot>>) {
+    *socket = None; // close the old socket first, see doc comment above
     match UdpSocket::bind(("0.0.0.0", port)) {
         Ok(sock) => {
             // Bounds how long `recv_from` blocks below so the run loop can
@@ -299,5 +307,37 @@ mod tests {
         let s = OscSnapshot::idle();
         assert!(!s.listening);
         assert_eq!(s.port, 0);
+    }
+
+    /// Regression test for the review finding: `bind()` must drop the old
+    /// socket *before* attempting the new one, or an unconditional
+    /// same-port restart (`OscControl::Start(port)` while already bound to
+    /// `port`) fails with `EADDRINUSE` (std's `UdpSocket` doesn't set
+    /// `SO_REUSEADDR`) instead of succeeding as the doc comment promises.
+    ///
+    /// Uses a real `UdpSocket`/`bind()` (not mocked) against a concrete,
+    /// currently-free port: an OS-assigned ephemeral socket is opened and
+    /// immediately dropped just to learn a free port number, then `bind()`
+    /// is exercised against that fixed port twice in a row.
+    #[test]
+    fn bind_can_rebind_the_same_port_without_erroring() {
+        let probe = UdpSocket::bind(("0.0.0.0", 0)).expect("OS has a free ephemeral port");
+        let port = probe.local_addr().expect("bound socket has a local addr").port();
+        drop(probe);
+
+        let state = Arc::new(ArcSwap::from_pointee(OscSnapshot::idle()));
+        let mut socket: Option<UdpSocket> = None;
+
+        bind(&mut socket, port, &state);
+        assert!(socket.is_some(), "first bind on {port} should succeed");
+        assert!(state.load().listening);
+        assert_eq!(state.load().port, port);
+
+        // Rebind on the exact same port while `socket` is still `Some(..)`
+        //: this is what would hit `EADDRINUSE` without the fix.
+        bind(&mut socket, port, &state);
+        assert!(socket.is_some(), "rebind on the same port {port} should also succeed");
+        assert!(state.load().listening);
+        assert_eq!(state.load().port, port);
     }
 }

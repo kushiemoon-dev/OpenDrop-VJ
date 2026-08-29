@@ -8,6 +8,7 @@ pub mod overlay;
 pub mod playlist;
 pub mod preset_index;
 pub mod q_vars;
+pub mod rng;
 pub mod share_set;
 pub mod show;
 pub mod snapshot;

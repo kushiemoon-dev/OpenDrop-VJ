@@ -21,6 +21,7 @@
 //! are plain struct fields mutated through `&mut self` methods.
 
 use crate::commands::Deck;
+use crate::rng::Xorshift64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaylistMode {
@@ -35,7 +36,7 @@ pub struct PlaylistEngine {
     index: usize,
     playing: bool,
     elapsed_ms: f64,
-    rng_state: u64,
+    rng: Xorshift64,
     on_preset: Box<dyn FnMut(&str)>,
 }
 
@@ -53,9 +54,16 @@ impl PlaylistEngine {
             index: 0,
             playing: false,
             elapsed_ms: 0.0,
-            rng_state: 0x9E3779B97F4A7C15,
+            rng: Xorshift64::default(),
             on_preset,
         }
+    }
+
+    /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
+    /// the caller (`core` stays zero-I/O and has no clock of its own). See
+    /// `rng.rs`'s module doc comment: whole-branch review Finding I4.
+    pub fn reseed_rng(&mut self, seed: u64) {
+        self.rng.reseed(seed);
     }
 
     pub fn playing(&self) -> bool {
@@ -134,8 +142,25 @@ impl PlaylistEngine {
 
     /// Caller-driven replacement for `setTimeout`: advances the internal
     /// clock by `delta_ms`, firing as many auto-advances as fit.
+    ///
+    /// Whole-branch review Finding C1: a playing playlist emptied out from
+    /// under `tick` (e.g. the last item removed from the panel while it's
+    /// still playing) used to panic on the unguarded `advance_index`/`items[
+    /// self.index]` below: `start`/`next`/`prev` all guard `items.is_empty
+    /// ()` already, this was the one caller that didn't.
     pub fn tick(&mut self, delta_ms: f64) {
-        if !self.playing || !self.interval_ms.is_finite() {
+        if self.items.is_empty() {
+            return;
+        }
+        // Finding M4: `interval_ms <= 0` (not just non-finite) must also
+        // bail out here: otherwise `elapsed_ms -= self.interval_ms` never
+        // shrinks `elapsed_ms` below `interval_ms` and the loop below spins
+        // forever. `!(self.interval_ms > 0.0)` alone would reject 0/negative/
+        // NaN but let `f64::INFINITY` through (used deliberately elsewhere
+        // as "no automatic advance" for a beat-synced deck: see
+        // `set_beat_sync_interval`), so `is_finite()` stays as a separate,
+        // additional guard.
+        if !self.playing || !self.interval_ms.is_finite() || !(self.interval_ms > 0.0) {
             return;
         }
         self.elapsed_ms += delta_ms;
@@ -158,19 +183,12 @@ impl PlaylistEngine {
             return 0;
         }
         loop {
-            let idx = (self.next_random() * self.items.len() as f64) as usize;
+            let idx = (self.rng.next_f64() * self.items.len() as f64) as usize;
             let idx = idx.min(self.items.len() - 1);
             if idx != self.index {
                 return idx;
             }
         }
-    }
-
-    fn next_random(&mut self) -> f64 {
-        self.rng_state ^= self.rng_state << 13;
-        self.rng_state ^= self.rng_state >> 7;
-        self.rng_state ^= self.rng_state << 17;
-        (self.rng_state >> 11) as f64 / (1u64 << 53) as f64
     }
 }
 
@@ -495,6 +513,56 @@ mod tests {
             }
             assert_eq!(pl.current_index(), 0);
             assert_eq!(calls.borrow().len(), 5);
+        }
+
+        #[test]
+        fn reseed_rng_makes_shuffle_draws_actually_differ_across_seeds() {
+            // Finding I4: shuffle used to run off a hardcoded, never-reseeded
+            // constant, so the draw sequence was identical every app launch.
+            let draws = |seed: u64| -> Vec<usize> {
+                let (_, cb) = spy();
+                let mut pl = PlaylistEngine::new(
+                    items(&["A", "B", "C", "D", "E"]),
+                    PlaylistMode::Shuffle,
+                    1000.0,
+                    cb,
+                );
+                pl.reseed_rng(seed);
+                (0..10)
+                    .map(|_| {
+                        pl.next();
+                        pl.current_index()
+                    })
+                    .collect()
+            };
+            assert_ne!(draws(1), draws(2));
+        }
+
+        #[test]
+        fn tick_does_not_panic_when_the_playlist_is_emptied_while_playing() {
+            // Finding C1 regression test: PlaylistEngine::tick used to call
+            // advance_index()/items[index] with no empty-list guard, unlike
+            // start/next/prev: emptying a playing playlist (e.g. removing
+            // its last item from the panel) panicked the whole app on the
+            // next tick.
+            let (_, cb) = spy();
+            let mut pl = PlaylistEngine::new(items(&["Only"]), PlaylistMode::Sequential, 1000.0, cb);
+            pl.start();
+            pl.set_items(Vec::new()); // emptied out from under a still-"playing" engine
+            pl.tick(5000.0); // must not panic
+        }
+
+        #[test]
+        fn tick_with_a_zero_interval_returns_instead_of_spinning_forever() {
+            // Finding M4: tick only guarded `!interval_ms.is_finite()`,
+            // which lets 0 (and negative) through: the `while elapsed_ms >=
+            // interval_ms { elapsed_ms -= interval_ms; ... }` loop below
+            // would then never terminate.
+            let (calls, cb) = spy();
+            let mut pl = PlaylistEngine::new(items(&["A", "B"]), PlaylistMode::Sequential, 0.0, cb);
+            pl.start();
+            pl.tick(100.0); // must return promptly, not hang
+            assert_eq!(*calls.borrow(), vec!["A"]); // no extra advance fired
         }
     }
 

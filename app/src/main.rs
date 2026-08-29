@@ -543,9 +543,45 @@ struct App {
 /// to `preflight::spawn_preflight`. `about_to_wait`'s verdict-handling drain
 /// is the only place that actually calls `Deck::load_preset`.
 fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
-    let Some(path) = state.path_by_name.get(&name).cloned() else { return };
-    state.pending_validations.insert(slot); // for the UI: "validating…" on this card
+    let Some(path) = should_spawn_preflight(&state.path_by_name, &mut state.pending_validations, slot, &name) else {
+        return;
+    };
     preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
+}
+
+/// Whole-branch review Finding 1/2: the dedup/backpressure guard for
+/// `request_preset_load`, split out so it's testable without a real
+/// `AppState` (which needs a live GL context to construct). Resolves
+/// `name` to a path, and: the load-bearing part: only claims `slot` (via
+/// `HashSet::insert`, marking it pending for the UI's "validating…" card)
+/// and returns `Some(path)` if no validation is already in flight for that
+/// slot; a slot already pending returns `None`, leaving `pending_validations`
+/// untouched, so the caller never spawns a second concurrent preflight
+/// child for it.
+///
+/// Without this guard, holding a key bound to `PresetNextActive`/
+/// `PlaylistNextActive`: auto-repeating at OS key-repeat rate, ~25-30/sec:
+/// spawned a brand new out-of-process `projectm_create()` validation on
+/// every repeat: a couple of seconds of a held key could spawn 50-60
+/// concurrent instances alongside the 4 live decks already running. This
+/// also closes Finding 2's stale-verdict race as a side effect: with at
+/// most one in-flight validation per slot, there is never a second one
+/// around to land its verdict out of order against the first: verified by
+/// grepping every `pending_validations` read/write site (`main.rs`,
+/// `ui/decks.rs`): the only insert is here, the only removal is
+/// `about_to_wait`'s verdict drain, once the real verdict comes back: no
+/// separate Clear/Cancel path exists that could remove a slot early.
+fn should_spawn_preflight(
+    path_by_name: &HashMap<String, PathBuf>,
+    pending_validations: &mut HashSet<usize>,
+    slot: usize,
+    name: &str,
+) -> Option<PathBuf> {
+    let path = path_by_name.get(name).cloned()?;
+    if !pending_validations.insert(slot) {
+        return None;
+    }
+    Some(path)
 }
 
 /// Whether MIDI learn mode has finished for the command being learned: the
@@ -780,7 +816,17 @@ impl ApplicationHandler for App {
         // keep working except while an egui text widget (e.g. the preset
         // browser search) actually has focus.
         if let WindowEvent::KeyboardInput { event: key_event, .. } = &event {
-            if key_event.state == ElementState::Pressed && !state.egui_glow.egui_ctx.egui_wants_keyboard_input() {
+            // Whole-branch review Finding 1: `!key_event.repeat` excludes
+            // OS auto-repeat: every command dispatched from this path is a
+            // discrete press/trigger (deck navigation, toggles), and a
+            // held key re-firing one at ~25-30/sec is never the intended
+            // UX for any of them, not just the navigation commands that
+            // exposed the preflight-flood bug. Filtered globally here
+            // rather than per-command.
+            if key_event.state == ElementState::Pressed
+                && !key_event.repeat
+                && !state.egui_glow.egui_ctx.egui_wants_keyboard_input()
+            {
                 if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
                     state.registry.dispatch(cmd_id, 1.0, &mut state.show);
                 }
@@ -1911,6 +1957,59 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whole-branch review Finding 1/2: the preset-load dedup/backpressure
+    /// guard.
+    mod should_spawn_preflight_tests {
+        use super::*;
+
+        fn catalog() -> HashMap<String, PathBuf> {
+            HashMap::from([("Preset A".to_string(), PathBuf::from("/presets/a.milk"))])
+        }
+
+        #[test]
+        fn first_request_for_a_slot_is_allowed_and_marks_it_pending() {
+            let mut pending = HashSet::new();
+            let path = should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A");
+            assert_eq!(path, Some(PathBuf::from("/presets/a.milk")));
+            assert!(pending.contains(&0));
+        }
+
+        #[test]
+        fn a_second_request_for_the_same_in_flight_slot_is_a_no_op() {
+            // Regression: holding a key bound to PresetNextActive/
+            // PlaylistNextActive auto-repeats at OS rate and used to spawn
+            // a fresh preflight child on every repeat.
+            let mut pending = HashSet::new();
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+            assert_eq!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A"), None);
+            assert_eq!(pending, HashSet::from([0]));
+        }
+
+        #[test]
+        fn a_different_slot_is_independent() {
+            let mut pending = HashSet::new();
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 1, "Preset A").is_some());
+            assert_eq!(pending, HashSet::from([0, 1]));
+        }
+
+        #[test]
+        fn an_unknown_preset_name_is_a_no_op_and_never_marks_the_slot_pending() {
+            let mut pending = HashSet::new();
+            assert_eq!(should_spawn_preflight(&catalog(), &mut pending, 0, "Nonexistent"), None);
+            assert!(pending.is_empty());
+        }
+
+        #[test]
+        fn once_the_slot_is_cleared_a_new_request_is_allowed_again() {
+            // Mirrors about_to_wait's verdict-drain: `pending_validations.
+            // remove(&slot)` runs once the real verdict comes back.
+            let mut pending = HashSet::from([0]);
+            pending.remove(&0);
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+        }
+    }
 
     mod midi_learn_completed_tests {
         use super::*;

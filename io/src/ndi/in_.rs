@@ -85,14 +85,17 @@ fn filter_sources(sources: Vec<NdiSource>, source_filter: Option<&str>) -> Vec<N
 /// over between calls), and this is the single shared NDI thread
 /// (composite + 4 decks + discovery + receive): blocking here for seconds
 /// would stall output frame draining for just as long.
-pub(super) fn find(finder: &Finder, source_filter: Option<&str>, timeout_ms: u32) -> Vec<NdiSource> {
-    let sources = finder
-        .find_sources(Duration::from_millis(u64::from(timeout_ms)))
-        .unwrap_or_else(|e| {
-            eprintln!("[ndi] source discovery failed: {e}");
-            Vec::new()
-        });
-    filter_sources(sources.into_iter().map(NdiSource::from).collect(), source_filter)
+///
+/// Returns `Err` (the SDK's error, stringified) rather than logging and
+/// falling back to an empty list itself: whole-branch review Finding 4:
+/// this is polled every ~5ms by [`super::out::run`]'s loop, and a
+/// persistently failing `Finder` (e.g. no NDI SDK installed) used to
+/// `eprintln!` on every single call, roughly 200 lines/second indefinitely.
+/// The caller now logs at most once per failure streak: see
+/// `super::out::ThreadState::discovery_error_logged`.
+pub(super) fn find(finder: &Finder, source_filter: Option<&str>, timeout_ms: u32) -> Result<Vec<NdiSource>, String> {
+    let sources = finder.find_sources(Duration::from_millis(u64::from(timeout_ms))).map_err(|e| e.to_string())?;
+    Ok(filter_sources(sources.into_iter().map(NdiSource::from).collect(), source_filter))
 }
 
 /// Opens a discovery [`Finder`], logging once and returning `None` on

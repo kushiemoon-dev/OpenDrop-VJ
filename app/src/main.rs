@@ -6,7 +6,7 @@ use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
 use opendrop_core::blend::{DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
-use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandRegistry};
+use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
@@ -15,7 +15,7 @@ use opendrop_engine::readback::FrameReadback;
 use opendrop_engine::timing::PassTimer;
 use opendrop_io::midi::MidiTriggerKey;
 use raw_window_handle::HasWindowHandle;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,11 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// per-frame `Instant` deadline check instead of an async timer, since this
 /// thread has no async runtime (Task 8).
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
+
+/// Max messages kept in `AppState::chat_log` (whole-branch review Finding
+/// 2): a bounded ring buffer, oldest dropped first, so the Streaming
+/// panel's chat display can't grow unbounded over a long-running session.
+const CHAT_LOG_CAP: usize = 50;
 
 /// Power mode applied to invisible (opacity ≤ 0.001) decks: selected from
 /// the Quality panel (Step 20). `Eco` reproduces the original always-on
@@ -492,13 +497,25 @@ struct AppState {
     link_tempo_input: f64,
     /// Receiving end of the shared chat-message channel both `twitch` and
     /// `kick` feed (mirrors `broadcastChatMessage`, `main.cjs:425-429`:
-    /// see `opendrop_io::chat`'s module doc comment). Not drained
-    /// anywhere yet: the brief for Task 17 doesn't ask for an app-side
-    /// chat display, only for the plumbing to exist: a later task can
-    /// drain this the same way `about_to_wait` drains `osc`/`remote_ws`'s
-    /// `events`.
-    #[allow(dead_code)] // wired up, not yet consumed: see doc comment above
+    /// see `opendrop_io::chat`'s module doc comment). Drained every
+    /// `about_to_wait` call into `chat_log` below (whole-branch review
+    /// Finding 2: AC-8/AC-9: an undrained unbounded channel with a live
+    /// producer is exactly the leak hazard `io::ndi::out.rs`'s `drain_slot`
+    /// doc comment warns against).
     chat_events: std::sync::mpsc::Receiver<opendrop_io::chat::ChatMessage>,
+    /// Bounded chat history (most recent `CHAT_LOG_CAP` messages, oldest
+    /// dropped first: see `push_chat_message`) rendered at the bottom of
+    /// the Streaming panel, so real Twitch/Kick chat activity is actually
+    /// observable in the running app (whole-branch review Finding 2).
+    chat_log: VecDeque<opendrop_io::chat::ChatMessage>,
+    /// Panel-local error from the Streaming panel's save-on-blur secret
+    /// fields (Twitch OAuth token, Kick bearer/xsrf/cookies): set
+    /// synchronously on the UI thread by `ui::streaming::save_secret_field`
+    /// when `secrets::set_secret` fails, so it can't be an `ArcSwap`
+    /// snapshot field like `ObsSnapshot`/`TwitchSnapshot`/`KickSnapshot`'s
+    /// `last_error` (whole-branch review Finding 1: AC-12). Cleared on the
+    /// next successful save.
+    streaming_secret_save_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -528,6 +545,46 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
 /// touched.
 fn midi_learn_completed(prev_trigger: Option<&MidiTriggerKey>, current_trigger: Option<&MidiTriggerKey>) -> bool {
     current_trigger != prev_trigger
+}
+
+/// Whole-branch review Finding 3: whether a MIDI-dispatched command with no
+/// known persistent state (`about_to_wait`'s `persistent_led == None`)
+/// should still get a confirmation flash. Mirrors the JS reference's
+/// positive test (`midi-connection-actions.ts:92`: `cmd?.kind === 'trigger'
+/// && getCommandLedState(action) === null`): only genuine `Trigger`-kind
+/// commands flash. The previous Rust port flashed for "everything else",
+/// which wrongly included `Range`-kind commands (faders/knobs): every
+/// incoming CC from a mapped fader sent a real 3-byte MIDI LED write,
+/// potentially hundreds per second, fighting a motorized fader or flooding
+/// a DIN-MIDI link. `kind` is `None` for a `CommandId` the registry has no
+/// entry for.
+fn should_flash_led(kind: Option<CommandKind>) -> bool {
+    kind == Some(CommandKind::Trigger)
+}
+
+/// Drains `rx` completely, returning only the most recently received item
+/// (or `None` if nothing was waiting). Used where a consumer only cares
+/// about the latest value from an unbounded channel and polls it once per
+/// tick: mirrors `io::ndi::out::drain_slot`'s "never let this back up"
+/// reasoning (see that function's doc comment), applied to a `Receiver<T>`
+/// a caller reads directly instead of forwarding into a sender.
+fn drain_to_latest<T>(rx: &mpsc::Receiver<T>) -> Option<T> {
+    let mut newest = None;
+    while let Ok(item) = rx.try_recv() {
+        newest = Some(item);
+    }
+    newest
+}
+
+/// Pushes `msg` onto `log`, then trims from the front until `log.len() <=
+/// cap`: keeps only the most recent `cap` messages. Whole-branch review
+/// Finding 2: pure and side-effect-free so the capping behavior is
+/// testable without a real chat channel.
+fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: opendrop_io::chat::ChatMessage, cap: usize) {
+    log.push_back(msg);
+    while log.len() > cap {
+        log.pop_front();
+    }
 }
 
 /// Root of the control window's egui content for this frame. `ui` here is
@@ -591,6 +648,8 @@ fn ui_root(
     kick_bearer_token_input: &mut String,
     kick_xsrf_token_input: &mut String,
     kick_cookies_input: &mut String,
+    chat_log: &VecDeque<opendrop_io::chat::ChatMessage>,
+    streaming_secret_save_error: &mut Option<String>,
     #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
     #[cfg(feature = "link")] link_tempo_input: &mut f64,
     v4l2: &opendrop_io::v4l2loopback::V4l2Handle,
@@ -669,6 +728,8 @@ fn ui_root(
                     kick_bearer_token_input,
                     kick_xsrf_token_input,
                     kick_cookies_input,
+                    chat_log,
+                    streaming_secret_save_error,
                 );
             }
             #[cfg(feature = "link")]
@@ -787,7 +848,15 @@ impl ApplicationHandler for App {
             // immediately, with no confirmation flash (mirrors the
             // `cmd?.kind === 'trigger'` guard in the JS reference: a
             // flash here would wrongly overwrite the state just pushed).
-            // Every other dispatched command gets a 120ms flash instead.
+            // Every other dispatched *Trigger*-kind command gets a 120ms
+            // flash instead; a `Range`-kind command (fader/knob) gets no
+            // LED write at all: whole-branch review Finding 3 (real bug):
+            // the previous `_ => flash` branch swept in every Range-kind
+            // command too, sending a real MIDI LED write for every incoming
+            // CC message from a mapped fader, potentially hundreds per
+            // second, fighting a motorized fader or flooding a DIN-MIDI
+            // link. See `should_flash_led`'s doc comment for the JS
+            // reference this now mirrors.
             let persistent_led = match id {
                 CommandId::PlaylistToggleA => Some(state.show.get_playlist_playing(opendrop_core::commands::Deck::A)),
                 CommandId::PlaylistToggleB => Some(state.show.get_playlist_playing(opendrop_core::commands::Deck::B)),
@@ -800,7 +869,7 @@ impl ApplicationHandler for App {
             if let Some(on) = persistent_led {
                 state.midi.push_led(id, on);
                 state.midi_led_state.insert(id, on);
-            } else {
+            } else if should_flash_led(state.registry.get(id).map(|cmd| cmd.kind)) {
                 state.midi.push_led(id, true);
                 state.midi_led_state.insert(id, true);
                 state.midi_led_flash_off_at.insert(id, Instant::now() + MIDI_LED_FLASH_DURATION);
@@ -901,6 +970,16 @@ impl ApplicationHandler for App {
                     state.show.on_beat();
                 }
             }
+        }
+
+        // Chat (Task 17 follow-up, whole-branch review Finding 2). Same
+        // non-blocking drain shape as the OSC/remote-WS drains above, but
+        // there's no command dispatch here: just a bounded history so
+        // this unbounded `mpsc::Sender` (fed by `twitch`/`kick`) never
+        // backs up, mirroring `io::ndi::out.rs`'s `drain_slot` doc comment
+        // on why an undrained unbounded channel is a real leak.
+        while let Ok(msg) = state.chat_events.try_recv() {
+            push_chat_message(&mut state.chat_log, msg, CHAT_LOG_CAP);
         }
 
         let now = Instant::now();
@@ -1029,16 +1108,21 @@ impl ApplicationHandler for App {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
 
-            // NDI-in (Task 12): one non-blocking poll per tick, before
-            // compositing. `frame_rx` only yields a frame once
-            // `NdiControl::StartReceive` is active and a source is actually
-            // connected (io/src/ndi/in_.rs): most ticks this is empty. The
-            // texture is sized from the frame's own width/height (`NdiFrame`,
-            // see io's Task-12 prerequisite fix) rather than a fixed
-            // constant, since NDI-in sources can be any resolution; a
-            // same-size frame is uploaded in place, a resolution change (or
-            // first connect) recreates the texture.
-            if let Ok(frame) = state.ndi.frame_rx.try_recv() {
+            // NDI-in (Task 12): drains `frame_rx` to its newest frame per
+            // tick, before compositing (whole-branch review Finding 5: a
+            // single `try_recv()` took exactly one frame per app tick,
+            // which falls behind and can never recatch against this
+            // unbounded channel if the NDI source's rate ever briefly
+            // exceeds the app's tick rate: mirrors `io::ndi::out.rs`'s own
+            // `drain_slot`, which loops for exactly this reason). `frame_rx`
+            // only yields a frame once `NdiControl::StartReceive` is active
+            // and a source is actually connected (io/src/ndi/in_.rs): most
+            // ticks this is empty. The texture is sized from the frame's
+            // own width/height (`NdiFrame`, see io's Task-12 prerequisite
+            // fix) rather than a fixed constant, since NDI-in sources can be
+            // any resolution; a same-size frame is uploaded in place, a
+            // resolution change (or first connect) recreates the texture.
+            if let Some(frame) = drain_to_latest(&state.ndi.frame_rx) {
                 let expected_len = frame.width as usize * frame.height as usize * 4;
                 if frame.data.len() != expected_len {
                     eprintln!(
@@ -1181,6 +1265,8 @@ impl ApplicationHandler for App {
                 kick_bearer_token_input,
                 kick_xsrf_token_input,
                 kick_cookies_input,
+                chat_log,
+                streaming_secret_save_error,
                 #[cfg(feature = "link")]
                 link,
                 #[cfg(feature = "link")]
@@ -1244,6 +1330,8 @@ impl ApplicationHandler for App {
                     kick_bearer_token_input,
                     kick_xsrf_token_input,
                     kick_cookies_input,
+                    chat_log,
+                    streaming_secret_save_error,
                     #[cfg(feature = "link")]
                     link,
                     #[cfg(feature = "link")]
@@ -1769,6 +1857,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         #[cfg(feature = "link")]
         link_tempo_input: 120.0,
         chat_events,
+        chat_log: VecDeque::new(),
+        streaming_secret_save_error: None,
     })
 }
 
@@ -1880,6 +1970,86 @@ mod tests {
             // rather than a bare, world-predictable path.
             let dir = thumbnail_cache_dir_from(None, None);
             assert!(dir.ends_with("opendrop/thumbnails"));
+        }
+    }
+
+    /// Whole-branch review Finding 3: the LED-flash Trigger-kind gating.
+    mod should_flash_led_tests {
+        use super::*;
+
+        #[test]
+        fn trigger_kind_flashes() {
+            assert!(should_flash_led(Some(CommandKind::Trigger)));
+        }
+
+        #[test]
+        fn range_kind_does_not_flash() {
+            // Regression: the previous "not a persistent-state command ->
+            // flash" logic wrongly included Range-kind commands (faders/
+            // knobs), sending a real MIDI LED write for every incoming CC
+            // message: potentially hundreds per second.
+            assert!(!should_flash_led(Some(CommandKind::Range)));
+        }
+
+        #[test]
+        fn unknown_command_does_not_flash() {
+            assert!(!should_flash_led(None));
+        }
+    }
+
+    /// Whole-branch review Finding 5: the NDI-in drain-to-latest behavior.
+    mod drain_to_latest_tests {
+        use super::*;
+
+        #[test]
+        fn empty_channel_returns_none() {
+            let (_tx, rx) = mpsc::channel::<i32>();
+            assert_eq!(drain_to_latest(&rx), None);
+        }
+
+        #[test]
+        fn keeps_only_the_most_recently_sent_item() {
+            let (tx, rx) = mpsc::channel::<i32>();
+            tx.send(1).unwrap();
+            tx.send(2).unwrap();
+            tx.send(3).unwrap();
+            assert_eq!(drain_to_latest(&rx), Some(3));
+            // Fully drained by the call above: nothing left for a second call.
+            assert_eq!(drain_to_latest(&rx), None);
+        }
+    }
+
+    /// Whole-branch review Finding 2: the chat-log ring-buffer capping.
+    mod push_chat_message_tests {
+        use super::*;
+        use opendrop_io::chat::{ChatMessage, ChatPlatform};
+
+        fn msg(content: &str) -> ChatMessage {
+            ChatMessage {
+                platform: ChatPlatform::Twitch,
+                user_id: "1".to_string(),
+                username: "someviewer".to_string(),
+                content: content.to_string(),
+            }
+        }
+
+        #[test]
+        fn under_cap_keeps_everything_in_order() {
+            let mut log = VecDeque::new();
+            push_chat_message(&mut log, msg("a"), 5);
+            push_chat_message(&mut log, msg("b"), 5);
+            let contents: Vec<&str> = log.iter().map(|m| m.content.as_str()).collect();
+            assert_eq!(contents, vec!["a", "b"]);
+        }
+
+        #[test]
+        fn over_cap_drops_the_oldest_first() {
+            let mut log = VecDeque::new();
+            for i in 0..5 {
+                push_chat_message(&mut log, msg(&i.to_string()), 3);
+            }
+            let contents: Vec<&str> = log.iter().map(|m| m.content.as_str()).collect();
+            assert_eq!(contents, vec!["2", "3", "4"]);
         }
     }
 }

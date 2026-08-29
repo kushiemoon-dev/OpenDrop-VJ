@@ -31,10 +31,14 @@
 //! no-op (guarded by `is_empty()`) so tabbing through the form can't
 //! accidentally overwrite an already-stored secret with a blank one.
 
+use std::collections::VecDeque;
+
+use opendrop_io::chat::{ChatMessage, ChatPlatform};
 use opendrop_io::kick::{KickControl, KickHandle};
 use opendrop_io::obs::{ObsControl, ObsHandle};
 use opendrop_io::twitch::{TwitchControl, TwitchHandle};
 
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
     obs: &ObsHandle,
@@ -48,6 +52,8 @@ pub fn show(
     kick_bearer_token_input: &mut String,
     kick_xsrf_token_input: &mut String,
     kick_cookies_input: &mut String,
+    chat_log: &VecDeque<ChatMessage>,
+    secret_save_error: &mut Option<String>,
 ) {
     let snapshot = obs.latest();
 
@@ -70,6 +76,9 @@ pub fn show(
             let _ = obs.control_tx.send(ObsControl::Connect(obs_host.clone(), *obs_port));
         }
     });
+    if let Some(err) = &snapshot.last_error {
+        ui.colored_label(egui::Color32::RED, err);
+    }
 
     if snapshot.connected {
         ui.separator();
@@ -103,7 +112,10 @@ pub fn show(
             let _ = twitch.control_tx.send(TwitchControl::Connect(twitch_channel.clone()));
         }
     });
-    save_secret_field(ui, "OAuth token", twitch_oauth_token_input, opendrop_io::secrets::TWITCH_OAUTH_TOKEN);
+    if let Some(err) = &twitch_snapshot.last_error {
+        ui.colored_label(egui::Color32::RED, err);
+    }
+    save_secret_field(ui, "OAuth token", twitch_oauth_token_input, opendrop_io::secrets::TWITCH_OAUTH_TOKEN, secret_save_error);
 
     ui.separator();
     ui.label("Kick");
@@ -127,9 +139,31 @@ pub fn show(
             let _ = kick.control_tx.send(KickControl::Connect(kick_channel.clone()));
         }
     });
-    save_secret_field(ui, "Bearer token", kick_bearer_token_input, opendrop_io::secrets::KICK_BEARER_TOKEN);
-    save_secret_field(ui, "XSRF token", kick_xsrf_token_input, opendrop_io::secrets::KICK_XSRF_TOKEN);
-    save_secret_field(ui, "Cookies", kick_cookies_input, opendrop_io::secrets::KICK_COOKIES);
+    if let Some(err) = &kick_snapshot.last_error {
+        ui.colored_label(egui::Color32::RED, err);
+    }
+    save_secret_field(ui, "Bearer token", kick_bearer_token_input, opendrop_io::secrets::KICK_BEARER_TOKEN, secret_save_error);
+    save_secret_field(ui, "XSRF token", kick_xsrf_token_input, opendrop_io::secrets::KICK_XSRF_TOKEN, secret_save_error);
+    save_secret_field(ui, "Cookies", kick_cookies_input, opendrop_io::secrets::KICK_COOKIES, secret_save_error);
+
+    if let Some(err) = secret_save_error {
+        ui.colored_label(egui::Color32::RED, format!("Secret save failed: {err}"));
+    }
+
+    ui.separator();
+    ui.label("Chat");
+    egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+        // Newest first: a VJ glancing at this panel live wants the latest
+        // message visible without having to scroll (whole-branch review
+        // Finding 2).
+        for msg in chat_log.iter().rev() {
+            let platform = match msg.platform {
+                ChatPlatform::Twitch => "Twitch",
+                ChatPlatform::Kick => "Kick",
+            };
+            ui.label(format!("[{platform}] {}: {}", msg.username, msg.content));
+        }
+    });
 }
 
 /// One masked (`password(true)`) text field that writes `input`'s value to
@@ -137,13 +171,21 @@ pub fn show(
 /// after: see this module's doc comment for the full UX rationale. Shared
 /// by the Twitch OAuth-token field and the 3 Kick credential fields, the
 /// only difference between them being the label and the keyring key.
-fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &str) {
+/// `error` is `show`'s shared panel-local save-error field (whole-branch
+/// review Finding 1: AC-12): a `set_secret` failure used to be an
+/// `eprintln!` only; it's now also written there (and rendered by `show`),
+/// and cleared on the next successful save.
+fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &str, error: &mut Option<String>) {
     ui.horizontal(|ui| {
         ui.label(label);
         let response = ui.add(egui::TextEdit::singleline(input).password(true).desired_width(220.0));
         if response.lost_focus() && !input.is_empty() {
-            if let Err(e) = opendrop_io::secrets::set_secret(key, input) {
-                eprintln!("opendrop-app: failed to save secret '{key}': {e}");
+            match opendrop_io::secrets::set_secret(key, input) {
+                Ok(()) => *error = None,
+                Err(e) => {
+                    eprintln!("opendrop-app: failed to save secret '{key}': {e}");
+                    *error = Some(format!("Failed to save secret '{label}': {e}"));
+                }
             }
             input.clear();
         }

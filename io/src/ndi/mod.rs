@@ -5,4 +5,5 @@
 mod in_;
 mod out;
 
+pub use in_::NdiSource;
 pub use out::{spawn, NdiControl, NdiHandle, NdiSnapshot};

@@ -5,7 +5,7 @@ use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
-use opendrop_core::blend::{DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use opendrop_core::blend::{should_force_normal_for_lowest_slot, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
@@ -20,7 +20,7 @@ use std::ffi::OsString;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -1173,7 +1173,12 @@ impl ApplicationHandler for App {
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for i in 0..deck::DECK_COUNT {
-                let force_normal = lowest_active == Some(i);
+                // Whole-branch review Finding I5: this used to be
+                // open-coded (`lowest_active == Some(i)`), untested here:
+                // now the tested `opendrop_core::blend::
+                // should_force_normal_for_lowest_slot` port of `compositor.
+                // ts:140`'s `shouldForceNormalForLowestSlot`.
+                let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
                 state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
             }
             // NDI-in layer, composited last, over every deck, as part of
@@ -1781,6 +1786,16 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let (chat_tx, chat_events) = mpsc::channel();
 
     let mut show = Show::default();
+    // Whole-branch review Finding I4: `core` is zero-I/O and has no clock of
+    // its own, so its playlist engines start from a fixed, hardcoded RNG
+    // seed: shuffle mode would otherwise replay the exact same sequence
+    // every single app launch. Real per-launch entropy is supplied here,
+    // the one place in the codebase allowed to touch a wall clock for this.
+    let bootstrap_rng_seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    show.reseed_rng(bootstrap_rng_seed);
     show.preset_catalog = catalog;
 
     Ok(AppState {

@@ -264,7 +264,7 @@ pub struct Command {
     pub id: CommandId,
     pub label: &'static str,
     pub kind: CommandKind,
-    /// See `CommandRegistry`'s doc comment: 205 of the 223 commands
+    /// See `CommandRegistry`'s doc comment: 202 of the 223 commands
     /// registered by `create_default_registry` share the `noop` stub here,
     /// intentionally: this is not a signature to widen casually.
     pub run: fn(f64, &mut dyn CommandContext),
@@ -273,7 +273,7 @@ pub struct Command {
 /// Dispatches by `CommandId` to a `Command`'s `run` fn.
 ///
 /// **Known, intentional debt** (whole-branch review): of the 223
-/// `CommandId` variants `create_default_registry` registers, 205: most
+/// `CommandId` variants `create_default_registry` registers, 202: most
 /// `Range` commands (color/blend/lumakey/colorkey per slot, all 32 time-param
 /// families, all 128 q-var slots) and several `Trigger` commands (strobe,
 /// LFO rate, recall-snapshot, timeline-toggle): are permanent `noop` stubs,

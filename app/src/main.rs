@@ -136,6 +136,7 @@ enum Panel {
     Ndi,
     Osc,
     RemoteWs,
+    Streaming,
 }
 
 struct WindowSlot {
@@ -419,6 +420,18 @@ struct AppState {
     /// carries `(CommandId, value01)` dispatches drained in
     /// `about_to_wait`, same no-soft-takeover contract as OSC.
     remote_ws: opendrop_io::remote_ws::RemoteWsHandle,
+    /// Handle to the dedicated OBS WebSocket thread (Task 16): app->OBS
+    /// direction only, no `events`/`about_to_wait` drain (see
+    /// `opendrop_io::obs`'s module doc comment): `latest()` gives the
+    /// current connected/scenes snapshot, `control_tx` sends Connect/
+    /// Disconnect/SetScene.
+    obs: opendrop_io::obs::ObsHandle,
+    /// The Streaming panel's own OBS host/port fields, read by `Connect` at
+    /// click time: not part of `ObsSnapshot`, same reasoning as `osc_port`
+    /// (see `ui::osc`'s doc comment). Defaults match OpenDrop-VJ's
+    /// `obs-link-store.svelte.ts` (`localhost`/`4455`).
+    obs_host: String,
+    obs_port: u16,
 }
 
 #[derive(Default)]
@@ -500,6 +513,9 @@ fn ui_root(
     osc: &opendrop_io::osc::OscHandle,
     osc_port: &mut u16,
     remote_ws: &opendrop_io::remote_ws::RemoteWsHandle,
+    obs: &opendrop_io::obs::ObsHandle,
+    obs_host: &mut String,
+    obs_port: &mut u16,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -513,6 +529,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Ndi, "NDI");
             ui.selectable_value(active_panel, Panel::Osc, "OSC");
             ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
+            ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
         });
         ui.separator();
         match active_panel {
@@ -554,6 +571,9 @@ fn ui_root(
             }
             Panel::RemoteWs => {
                 ui::remote::show(ui, remote_ws);
+            }
+            Panel::Streaming => {
+                ui::streaming::show(ui, obs, obs_host, obs_port);
             }
         }
     });
@@ -1027,6 +1047,9 @@ impl ApplicationHandler for App {
                 osc,
                 osc_port,
                 remote_ws,
+                obs,
+                obs_host,
+                obs_port,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1072,6 +1095,9 @@ impl ApplicationHandler for App {
                     osc,
                     osc_port,
                     remote_ws,
+                    obs,
+                    obs_host,
+                    obs_port,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1563,6 +1589,9 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         osc: opendrop_io::osc::spawn(),
         osc_port: 7000,
         remote_ws: opendrop_io::remote_ws::spawn(),
+        obs: opendrop_io::obs::spawn(),
+        obs_host: "localhost".to_string(),
+        obs_port: 4455,
     })
 }
 

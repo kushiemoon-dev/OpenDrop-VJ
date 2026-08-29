@@ -36,7 +36,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use grafton_ndi::{PixelFormat, Sender as GraftonSender, SenderOptions, VideoFrame, NDI};
+use grafton_ndi::{Finder, PixelFormat, Sender as GraftonSender, SenderOptions, VideoFrame, NDI};
+
+use super::in_::{self, NdiSource};
 
 /// Mirrors `engine::compositor::COMP_W`/`COMP_H`: hardcoded here rather
 /// than depending on `opendrop-engine` (a GL/projectM crate) from this
@@ -76,6 +78,15 @@ const POLL_TICK: Duration = Duration::from_millis(5);
 pub struct NdiHandle {
     state: Arc<ArcSwap<NdiSnapshot>>,
     pub control_tx: Sender<NdiControl>,
+    /// Receive end of the channel [`in_::ActiveReceive`] pushes captured
+    /// frames' RGBA bytes on. The channel is created in this module
+    /// (`spawn`, alongside `control_tx`'s channel); the `Sender` half stays
+    /// internal to the NDI thread (owned by `ThreadState`, cloned into each
+    /// `ActiveReceive`), and this `Receiver` half is handed out here for
+    /// `app` (Task 12) to read frames from directly: same shape as
+    /// `control_tx`: a public field, no wrapper method, since there is
+    /// nothing to validate on either send or receive.
+    pub frame_rx: Receiver<Vec<u8>>,
 }
 
 impl NdiHandle {
@@ -95,6 +106,16 @@ impl NdiHandle {
 pub struct NdiSnapshot {
     pub composite_active: bool,
     pub deck_active: [bool; DECK_COUNT],
+    /// Sources currently known to the discovery `Finder`, refreshed every
+    /// run-loop tick while discovery is active (see `in_::find`): empty
+    /// when discovery was never started or has been stopped. Polled, not
+    /// event-driven: there is no separate "source list changed" signal,
+    /// `app` (Task 12) just re-reads this on its own cadence via `latest()`.
+    pub sources: Vec<NdiSource>,
+    /// Whether a receive session is currently connected (mirrors
+    /// `composite_active`/`deck_active`'s convention), also going back to
+    /// `false` on its own if the receiver ever failed to start.
+    pub receive_active: bool,
 }
 
 /// Outward control requests, sent non-blocking via `NdiHandle::control_tx`.
@@ -105,6 +126,16 @@ pub enum NdiControl {
     StopComposite,
     StartDeck(usize, String),
     StopDeck(usize),
+    /// Starts (or restarts) source discovery. No filter argument: mirrors
+    /// the reference (`grandiose.find({}, ...)`, no filter either): see
+    /// `in_::find`'s doc comment.
+    StartDiscovery,
+    StopDiscovery,
+    /// Connects to the given source and starts pushing its frames on
+    /// `NdiHandle::frame_rx`. Replaces any receive session already in
+    /// progress.
+    StartReceive(NdiSource),
+    StopReceive,
 }
 
 /// Spawns the dedicated NDI thread and returns immediately. The thread
@@ -120,11 +151,12 @@ pub enum NdiControl {
 pub fn spawn(compositor_rx: Receiver<Vec<u8>>, deck_rx: [Receiver<Vec<u8>>; DECK_COUNT]) -> NdiHandle {
     let state = Arc::new(ArcSwap::from_pointee(NdiSnapshot::default()));
     let (control_tx, control_rx) = mpsc::channel();
+    let (frame_tx, frame_rx) = mpsc::channel();
     std::thread::spawn({
         let state = state.clone();
-        move || run(state, compositor_rx, deck_rx, control_rx)
+        move || run(state, compositor_rx, deck_rx, control_rx, frame_tx)
     });
-    NdiHandle { state, control_tx }
+    NdiHandle { state, control_tx, frame_rx }
 }
 
 /// One active NDI stream: the SDK sender plus a reusable [`VideoFrame`]
@@ -178,11 +210,30 @@ struct ThreadState {
     ndi: Option<NDI>,
     composite: Option<SlotSender>,
     decks: [Option<SlotSender>; DECK_COUNT],
+    /// Discovery `Finder`, kept alive across ticks (rather than recreated
+    /// per-poll) so the SDK's own accumulated source list carries over
+    /// between `in_::find` calls: see that function's doc comment.
+    finder: Option<Finder>,
+    /// Latest discovery snapshot, refreshed every tick while `finder` is
+    /// `Some` and published verbatim into `NdiSnapshot::sources`.
+    sources: Vec<NdiSource>,
+    receive: Option<in_::ActiveReceive>,
+    /// Sender half of the frame channel `spawn` created; cloned into each
+    /// new `in_::ActiveReceive` on `StartReceive`.
+    frame_tx: Sender<Vec<u8>>,
 }
 
 impl ThreadState {
-    fn new() -> Self {
-        ThreadState { ndi: None, composite: None, decks: std::array::from_fn(|_| None) }
+    fn new(frame_tx: Sender<Vec<u8>>) -> Self {
+        ThreadState {
+            ndi: None,
+            composite: None,
+            decks: std::array::from_fn(|_| None),
+            finder: None,
+            sources: Vec::new(),
+            receive: None,
+            frame_tx,
+        }
     }
 }
 
@@ -191,8 +242,9 @@ fn run(
     compositor_rx: Receiver<Vec<u8>>,
     deck_rx: [Receiver<Vec<u8>>; DECK_COUNT],
     control_rx: Receiver<NdiControl>,
+    frame_tx: Sender<Vec<u8>>,
 ) {
-    let mut ts = ThreadState::new();
+    let mut ts = ThreadState::new(frame_tx);
     publish(&state, &ts);
 
     loop {
@@ -218,6 +270,16 @@ fn run(
         drain_slot(&compositor_rx, ts.composite.as_mut());
         for (rx, slot) in deck_rx.iter().zip(ts.decks.iter_mut()) {
             drain_slot(rx, slot.as_mut());
+        }
+
+        // Input side, same every-tick cadence: poll discovery (non-blocking,
+        // `timeout_ms = 0`, see `in_::find`) and forward one receive poll:
+        // never block this shared thread on either.
+        if let Some(finder) = ts.finder.as_ref() {
+            ts.sources = in_::find(finder, None, 0);
+        }
+        if let Some(active_receive) = ts.receive.as_ref() {
+            active_receive.poll();
         }
 
         publish(&state, &ts);
@@ -247,6 +309,8 @@ fn publish(state: &Arc<ArcSwap<NdiSnapshot>>, ts: &ThreadState) {
     state.store(Arc::new(NdiSnapshot {
         composite_active: ts.composite.is_some(),
         deck_active: std::array::from_fn(|i| ts.decks[i].is_some()),
+        sources: ts.sources.clone(),
+        receive_active: ts.receive.is_some(),
     }));
 }
 
@@ -260,6 +324,13 @@ fn handle_control(ts: &mut ThreadState, ctrl: NdiControl) {
                 ts.decks[slot] = None;
             }
         }
+        NdiControl::StartDiscovery => start_discovery(ts),
+        NdiControl::StopDiscovery => {
+            ts.finder = None;
+            ts.sources.clear();
+        }
+        NdiControl::StartReceive(source) => start_receive(ts, source),
+        NdiControl::StopReceive => ts.receive = None,
     }
 }
 
@@ -275,7 +346,7 @@ fn ensure_ndi(ts: &mut ThreadState) -> bool {
             true
         }
         Err(e) => {
-            eprintln!("[ndi] failed to initialize the NDI runtime: {e}: NDI output unavailable");
+            eprintln!("[ndi] failed to initialize the NDI runtime: {e}: NDI unavailable");
             false
         }
     }
@@ -315,6 +386,24 @@ fn start_deck(ts: &mut ThreadState, slot: usize, name: &str) {
     }
 }
 
+fn start_discovery(ts: &mut ThreadState) {
+    if !ensure_ndi(ts) {
+        ts.finder = None;
+        return;
+    }
+    let ndi = ts.ndi.as_ref().expect("ensure_ndi just guaranteed Some");
+    ts.finder = in_::open_finder(ndi);
+}
+
+fn start_receive(ts: &mut ThreadState, source: NdiSource) {
+    if !ensure_ndi(ts) {
+        ts.receive = None;
+        return;
+    }
+    let ndi = ts.ndi.as_ref().expect("ensure_ndi just guaranteed Some");
+    ts.receive = in_::ActiveReceive::start(ndi, source, ts.frame_tx.clone());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,14 +412,20 @@ mod tests {
     /// inactive: no panics, no sender assumed.
     #[test]
     fn fresh_thread_state_is_inactive() {
-        let ts = ThreadState::new();
+        let (frame_tx, _frame_rx) = mpsc::channel();
+        let ts = ThreadState::new(frame_tx);
         assert!(ts.ndi.is_none());
         assert!(ts.composite.is_none());
         assert!(ts.decks.iter().all(Option::is_none));
+        assert!(ts.finder.is_none());
+        assert!(ts.sources.is_empty());
+        assert!(ts.receive.is_none());
 
         let snapshot = NdiSnapshot::default();
         assert!(!snapshot.composite_active);
         assert!(snapshot.deck_active.iter().all(|&a| !a));
+        assert!(snapshot.sources.is_empty());
+        assert!(!snapshot.receive_active);
     }
 
     #[test]

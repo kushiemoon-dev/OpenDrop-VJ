@@ -2,9 +2,21 @@
 # installer layout: headers under `<SDK>/include`, libs under
 # `<SDK>/lib/<arch-triple>`. This machine's `ndi-sdk` pacman package instead
 # drops headers straight into /usr/include and libndi.so straight into
-# /usr/lib (standard distro packaging, not the installer layout): see
+# /usr/lib (standard distro packaging, not the installer layout). See
 # engine/build.rs for the same kind of Arch-packaging workaround applied to
 # projectM-4. `ndi-sdk-shim/` symlinks into those system paths so
 # grafton-ndi's build.rs finds what it expects without forking the crate.
+#
+# No `force = true` here, so an NDI_SDK_DIR already exported in your shell
+# still wins over this. But grafton-ndi's build.rs only falls back to its
+# own guessed NewTek install paths when NDI_SDK_DIR is unset entirely, and
+# this [env] entry always sets it to the shim path below whenever the shell
+# hasn't. On a future machine with a real NewTek SDK install and no
+# NDI_SDK_DIR exported, that pre-empts grafton-ndi's own fallback guess,
+# even if the real SDK is sitting right where it would have found it. Fails
+# loud (a build.rs panic pointing at the shim path), not silently, but
+# still worth knowing. If you're not on this machine's Arch `ndi-sdk`
+# pacman layout: delete this file, or export your own NDI_SDK_DIR before
+# building.
 [env]
 NDI_SDK_DIR = { value = "ndi-sdk-shim", relative = true }

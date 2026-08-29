@@ -40,12 +40,19 @@ use grafton_ndi::{PixelFormat, Sender as GraftonSender, SenderOptions, VideoFram
 
 /// Mirrors `engine::compositor::COMP_W`/`COMP_H`: hardcoded here rather
 /// than depending on `opendrop-engine` (a GL/projectM crate) from this
-/// I/O-only crate just for 4 integers; `audio` and `midi` don't depend on
+/// I/O-only crate just for 4 integers. `audio` and `midi` don't depend on
 /// `engine` either, and a mismatch would fail loudly at Task 10's call site
 /// (an `[mpsc::Receiver<Vec<u8>>; N]` size mismatch), not silently.
+///
+/// Not auto-synced: if `engine::compositor::COMP_W`/`COMP_H` ever change,
+/// these need updating here by hand too. A drift is still safe, just not
+/// silent: `SlotSender::send`'s `VideoFrame::replace_data` call rejects a
+/// wrong-sized buffer, logs it, and drops that one frame, rather than
+/// panicking or sending corrupt data.
 const COMP_W: i32 = 1920;
 const COMP_H: i32 = 1080;
-/// Mirrors `engine::deck::DECK_W`/`DECK_H`/`DECK_COUNT`: see [`COMP_W`].
+/// Mirrors `engine::deck::DECK_W`/`DECK_H`/`DECK_COUNT`, same manual-sync
+/// caveat as [`COMP_W`].
 const DECK_W: i32 = 1280;
 const DECK_H: i32 = 720;
 const DECK_COUNT: usize = 4;

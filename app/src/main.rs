@@ -9,8 +9,9 @@ use opendrop_core::blend::DEFAULT_COLOR_PARAMS;
 use opendrop_core::commands::{create_default_registry, CommandId, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
-use opendrop_engine::compositor::{Compositor, LayerInput};
+use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::readback::FrameReadback;
 use opendrop_engine::timing::PassTimer;
 use raw_window_handle::HasWindowHandle;
 use std::collections::{HashMap, HashSet};
@@ -160,6 +161,29 @@ struct AppState {
     output: WindowSlot,
     decks: Vec<Deck>,
     compositor: Compositor,
+    /// GPU->CPU async pixel readback (Step 4's `FrameReadback`) for the
+    /// composite output and each deck's live texture: driven once per
+    /// frame in `about_to_wait`, gated behind `ndi_active || v4l2_active` so
+    /// idle sessions never pay the readback cost.
+    compositor_readback: FrameReadback,
+    deck_readback: [FrameReadback; deck::DECK_COUNT],
+    /// Outlet for `compositor_readback`'s polled RGBA bytes. The `Receiver`
+    /// end is held here too, for now: no consumer exists on this branch
+    /// yet; the not-yet-built NDI output and v4l2loopback output threads
+    /// take it over once they exist.
+    compositor_frame_tx: mpsc::Sender<Vec<u8>>,
+    #[allow(dead_code)] // held for the not-yet-built NDI/v4l2loopback output threads to take over; unread on this branch
+    compositor_frame_rx: mpsc::Receiver<Vec<u8>>,
+    /// Same as `compositor_frame_tx`/`_rx`, one channel pair per deck.
+    deck_frame_tx: [mpsc::Sender<Vec<u8>>; deck::DECK_COUNT],
+    #[allow(dead_code)] // held for the not-yet-built NDI/v4l2loopback output threads to take over; unread on this branch
+    deck_frame_rx: [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT],
+    /// Whether an NDI output consumer is active: set by the NDI panel
+    /// (Step 10), not yet wired on this branch. Gates the readback loop.
+    ndi_active: bool,
+    /// Whether a v4l2loopback output consumer is active: set by its panel
+    /// (Step 19), not yet wired on this branch. Gates the readback loop.
+    v4l2_active: bool,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -595,6 +619,26 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
+            // Step 5: GPU->CPU readback feeding the future NDI / v4l2loopback
+            // output paths: gated behind whichever of those consumers is
+            // actually active so an idle session never pays the ~8MB/frame
+            // RGBA copy. No consumer is wired up on this branch yet: a
+            // polled `Some(bytes)` is just pushed onto its channel and
+            // silently dropped if nothing is receiving, same non-blocking,
+            // ignore-on-fail convention as `AudioHandle::set_device`.
+            if state.ndi_active || state.v4l2_active {
+                state.compositor_readback.begin_read(&state.gl);
+                if let Some(bytes) = state.compositor_readback.poll(&state.gl) {
+                    let _ = state.compositor_frame_tx.send(bytes);
+                }
+                for i in 0..deck::DECK_COUNT {
+                    state.deck_readback[i].begin_read(&state.gl);
+                    if let Some(bytes) = state.deck_readback[i].poll(&state.gl) {
+                        let _ = state.deck_frame_tx[i].send(bytes);
+                    }
+                }
+            }
+
             // Copied out (Instant/f64 are Copy) before the destructure below
             // so the Playlists panel's Tap Tempo button can compute its own
             // `t0.elapsed()` at click time, and the Audio panel's VU meter
@@ -1001,6 +1045,39 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let blit_control_timer = PassTimer::new(&gl).map_err(|e| format!("blit_control_timer: {e}"))?;
     let blit_output_timer = PassTimer::new(&gl).map_err(|e| format!("blit_output_timer: {e}"))?;
 
+    // Step 5: one FrameReadback per shared texture (compositor + 4 decks).
+    // Built here, main_ctx still current on control's surface: FrameReadback::
+    // new must run on the main context, the only one that sees every texture
+    // in the share group (decks included, already created above). Sized off
+    // the same COMP_W/COMP_H and DECK_W/DECK_H the textures themselves were
+    // allocated at, never hardcoded.
+    let compositor_readback = FrameReadback::new(&gl, compositor.color_tex, COMP_W, COMP_H)?;
+    let deck_readback: [FrameReadback; deck::DECK_COUNT] = {
+        let mut v = Vec::with_capacity(deck::DECK_COUNT);
+        for dk in &decks {
+            v.push(FrameReadback::new(&gl, dk.texture, deck::DECK_W, deck::DECK_H)?);
+        }
+        v.try_into().unwrap_or_else(|_| unreachable!("DECK_COUNT readbacks pushed"))
+    };
+
+    // Output channels for the readback bytes above. No consumer exists on
+    // this branch: the `Receiver` ends are just held on `AppState` until
+    // the future NDI / v4l2loopback output threads take them over.
+    let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
+    let (deck_frame_tx, deck_frame_rx): ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]) = {
+        let mut tx_v = Vec::with_capacity(deck::DECK_COUNT);
+        let mut rx_v = Vec::with_capacity(deck::DECK_COUNT);
+        for _ in 0..deck::DECK_COUNT {
+            let (tx, rx) = mpsc::channel::<Vec<u8>>();
+            tx_v.push(tx);
+            rx_v.push(rx);
+        }
+        (
+            tx_v.try_into().unwrap_or_else(|_| unreachable!("DECK_COUNT senders pushed")),
+            rx_v.try_into().unwrap_or_else(|_| unreachable!("DECK_COUNT receivers pushed")),
+        )
+    };
+
     main_ctx.make_current(&output.surface).map_err(|e| format!("make_current(output) failed: {e}"))?;
     output
         .surface
@@ -1045,6 +1122,14 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         output,
         decks,
         compositor,
+        compositor_readback,
+        deck_readback,
+        compositor_frame_tx,
+        compositor_frame_rx,
+        deck_frame_tx,
+        deck_frame_rx,
+        ndi_active: false,
+        v4l2_active: false,
         gl,
         egui_glow,
         refresh_interval,

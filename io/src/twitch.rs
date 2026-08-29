@@ -50,11 +50,17 @@ use crate::secrets;
 /// always the latest known value (mirrors `ObsSnapshot`).
 pub struct TwitchSnapshot {
     pub connected: bool,
+    /// Set when `Connect` is refused (no OAuth token registered, or a
+    /// keyring lookup failure): whole-branch review Finding 1 (AC-12):
+    /// this used to be an `eprintln!` only, invisible to a GUI user.
+    /// Rendered in the Streaming panel. Cleared by a subsequent successful
+    /// `Connect` or by `Disconnect`.
+    pub last_error: Option<String>,
 }
 
 impl TwitchSnapshot {
     pub fn idle() -> Self {
-        TwitchSnapshot { connected: false }
+        TwitchSnapshot { connected: false, last_error: None }
     }
 }
 
@@ -104,12 +110,12 @@ pub fn spawn(chat_tx: Sender<ChatMessage>) -> TwitchHandle {
     TwitchHandle { state, control_tx }
 }
 
-fn publish_idle(state: &Arc<ArcSwap<TwitchSnapshot>>) {
-    state.store(Arc::new(TwitchSnapshot::idle()));
+fn publish_idle(state: &Arc<ArcSwap<TwitchSnapshot>>, last_error: Option<String>) {
+    state.store(Arc::new(TwitchSnapshot { last_error, ..TwitchSnapshot::idle() }));
 }
 
 fn publish_connected(state: &Arc<ArcSwap<TwitchSnapshot>>) {
-    state.store(Arc::new(TwitchSnapshot { connected: true }));
+    state.store(Arc::new(TwitchSnapshot { connected: true, last_error: None }));
 }
 
 /// Builds and runs this thread's own tokio runtime for its entire
@@ -191,14 +197,18 @@ async fn async_run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<Twi
                             }
                             Err(e) => {
                                 eprintln!("opendrop-io: twitch join failed: {e}");
-                                publish_idle(&state);
+                                publish_idle(&state, None);
                                 // new_client (and incoming) drop here.
                             }
                         }
                     }
                     Err(e) => {
+                        // Whole-branch review Finding 1 (AC-12): this
+                        // refusal used to be an `eprintln!` only, invisible
+                        // to a GUI user: now also surfaced via
+                        // `TwitchSnapshot::last_error`.
                         eprintln!("opendrop-io: twitch connect refused: {e}");
-                        publish_idle(&state);
+                        publish_idle(&state, Some(e));
                     }
                 }
             }
@@ -206,7 +216,7 @@ async fn async_run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<Twi
                 if let Some(task) = forward_task.take() {
                     task.abort(); // drops the client held inside: see the comment on `forward_task` above
                 }
-                publish_idle(&state);
+                publish_idle(&state, None);
             }
         }
     }
@@ -234,6 +244,7 @@ mod tests {
     fn fresh_snapshot_is_idle() {
         let s = TwitchSnapshot::idle();
         assert!(!s.connected);
+        assert!(s.last_error.is_none());
     }
 
     #[test]

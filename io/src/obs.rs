@@ -46,11 +46,19 @@ pub struct ObsSnapshot {
     /// re-fetch it later: see `ObsControl::Connect`'s doc comment).
     /// Empty while not connected.
     pub scenes: Vec<String>,
+    /// Set when the OBS password keyring lookup fails during `Connect`
+    /// (whole-branch review Finding 1: AC-12: this used to be an
+    /// `eprintln!` only, invisible to a GUI user). Rendered in the
+    /// Streaming panel. Cleared by a subsequent successful `Connect` or by
+    /// `Disconnect`; carried through this same `Connect` attempt's outcome
+    /// (success or failure) rather than dropped, so it isn't lost before
+    /// the user ever sees it.
+    pub last_error: Option<String>,
 }
 
 impl ObsSnapshot {
     pub fn idle() -> Self {
-        ObsSnapshot { connected: false, scenes: Vec::new() }
+        ObsSnapshot { connected: false, scenes: Vec::new(), last_error: None }
     }
 }
 
@@ -105,12 +113,12 @@ pub fn spawn() -> ObsHandle {
     ObsHandle { state, control_tx }
 }
 
-fn publish_idle(state: &Arc<ArcSwap<ObsSnapshot>>) {
-    state.store(Arc::new(ObsSnapshot::idle()));
+fn publish_idle(state: &Arc<ArcSwap<ObsSnapshot>>, last_error: Option<String>) {
+    state.store(Arc::new(ObsSnapshot { last_error, ..ObsSnapshot::idle() }));
 }
 
-fn publish_connected(state: &Arc<ArcSwap<ObsSnapshot>>, scenes: Vec<String>) {
-    state.store(Arc::new(ObsSnapshot { connected: true, scenes }));
+fn publish_connected(state: &Arc<ArcSwap<ObsSnapshot>>, scenes: Vec<String>, last_error: Option<String>) {
+    state.store(Arc::new(ObsSnapshot { connected: true, scenes, last_error }));
 }
 
 /// Builds and runs this thread's own tokio runtime for its entire
@@ -159,27 +167,35 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                     old.disconnect().await;
                 }
                 let secret_result = secrets::get_secret(secrets::OBS_PASSWORD);
-                if let Err(e) = &secret_result {
+                // Captured (not just logged) per whole-branch review Finding
+                // 1 (AC-12): a keyring lookup failure used to be an
+                // `eprintln!` only, invisible to a GUI user launched from a
+                // desktop environment. Still lenient (the connect attempt
+                // below proceeds without a password either way), but now
+                // surfaced via `ObsSnapshot::last_error` regardless of
+                // whether that attempt goes on to succeed or fail.
+                let keyring_error = secret_result.as_ref().err().map(|e| {
                     eprintln!("opendrop-io: obs password lookup failed, connecting without a password: {e}");
-                }
+                    format!("OBS password lookup failed, connecting without a password: {e}")
+                });
                 let password = password_for_connect(secret_result);
                 match obws::Client::connect(host, port, password).await {
                     Ok(new_client) => match new_client.scenes().list().await {
                         Ok(scene_list) => {
                             let names = scene_list.scenes.into_iter().map(|s| s.id.name).collect();
                             client = Some(new_client);
-                            publish_connected(&state, names);
+                            publish_connected(&state, names, keyring_error);
                         }
                         Err(e) => {
                             eprintln!("opendrop-io: obs GetSceneList failed: {e}");
-                            publish_idle(&state);
+                            publish_idle(&state, keyring_error);
                             // new_client drops here: its own Drop impl
                             // aborts the background read task.
                         }
                     },
                     Err(e) => {
                         eprintln!("opendrop-io: obs connect failed: {e}");
-                        publish_idle(&state);
+                        publish_idle(&state, keyring_error);
                     }
                 }
             }
@@ -187,7 +203,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                 if let Some(mut c) = client.take() {
                     c.disconnect().await;
                 }
-                publish_idle(&state);
+                publish_idle(&state, None);
             }
             ObsControl::SetScene(name) => {
                 // `None`: not connected: no-op, mirrors OscControl::Stop while idle.
@@ -195,7 +211,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                     if let Err(e) = c.scenes().set_current_program_scene(name.as_str()).await {
                         eprintln!("opendrop-io: obs SetCurrentProgramScene failed: {e}");
                         client = None; // drop() aborts the background task, see above
-                        publish_idle(&state);
+                        publish_idle(&state, None);
                     }
                 }
             }
@@ -229,6 +245,7 @@ mod tests {
         let s = ObsSnapshot::idle();
         assert!(!s.connected);
         assert!(s.scenes.is_empty());
+        assert!(s.last_error.is_none());
     }
 
     #[test]

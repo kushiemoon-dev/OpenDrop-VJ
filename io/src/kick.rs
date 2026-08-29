@@ -111,11 +111,17 @@ const DISCOVERY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ap
 /// always the latest known value (mirrors `ObsSnapshot`/`TwitchSnapshot`).
 pub struct KickSnapshot {
     pub connected: bool,
+    /// Set when `Connect` is refused (missing bearer/xsrf/cookies, or a
+    /// keyring lookup failure): whole-branch review Finding 1 (AC-12):
+    /// this used to be an `eprintln!` only, invisible to a GUI user.
+    /// Rendered in the Streaming panel. Cleared by a subsequent successful
+    /// `Connect` or by `Disconnect`.
+    pub last_error: Option<String>,
 }
 
 impl KickSnapshot {
     pub fn idle() -> Self {
-        KickSnapshot { connected: false }
+        KickSnapshot { connected: false, last_error: None }
     }
 }
 
@@ -162,12 +168,12 @@ pub fn spawn(chat_tx: Sender<ChatMessage>) -> KickHandle {
     KickHandle { state, control_tx }
 }
 
-fn publish_idle(state: &Arc<ArcSwap<KickSnapshot>>) {
-    state.store(Arc::new(KickSnapshot::idle()));
+fn publish_idle(state: &Arc<ArcSwap<KickSnapshot>>, last_error: Option<String>) {
+    state.store(Arc::new(KickSnapshot { last_error, ..KickSnapshot::idle() }));
 }
 
 fn publish_connected(state: &Arc<ArcSwap<KickSnapshot>>) {
-    state.store(Arc::new(KickSnapshot { connected: true }));
+    state.store(Arc::new(KickSnapshot { connected: true, last_error: None }));
 }
 
 /// Builds and runs this thread's own tokio runtime for its entire
@@ -232,17 +238,21 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                             }
                             Err(e) => {
                                 eprintln!("opendrop-io: kick websocket connect failed: {e}");
-                                publish_idle(&state);
+                                publish_idle(&state, None);
                             }
                         },
                         Err(e) => {
                             eprintln!("opendrop-io: kick channel discovery failed: {e}");
-                            publish_idle(&state);
+                            publish_idle(&state, None);
                         }
                     },
                     Err(e) => {
+                        // Whole-branch review Finding 1 (AC-12): this
+                        // refusal used to be an `eprintln!` only, invisible
+                        // to a GUI user: now also surfaced via
+                        // `KickSnapshot::last_error`.
                         eprintln!("opendrop-io: kick connect refused: {e}");
-                        publish_idle(&state);
+                        publish_idle(&state, Some(e));
                     }
                 }
             }
@@ -250,7 +260,7 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                 if let Some(task) = ws_task.take() {
                     task.abort();
                 }
-                publish_idle(&state);
+                publish_idle(&state, None);
             }
         }
     }
@@ -367,7 +377,7 @@ async fn run_ws(mut ws: KickWs, chatroom_id: u64, chat_tx: Sender<ChatMessage>, 
     .to_string();
     if let Err(e) = ws.send(Message::text(subscribe)).await {
         eprintln!("opendrop-io: kick pusher subscribe failed: {e}");
-        publish_idle(&state);
+        publish_idle(&state, None);
         return;
     }
 
@@ -385,7 +395,7 @@ async fn run_ws(mut ws: KickWs, chatroom_id: u64, chat_tx: Sender<ChatMessage>, 
             }
         }
     }
-    publish_idle(&state);
+    publish_idle(&state, None);
 }
 
 #[cfg(test)]
@@ -396,6 +406,7 @@ mod tests {
     fn fresh_snapshot_is_idle() {
         let s = KickSnapshot::idle();
         assert!(!s.connected);
+        assert!(s.last_error.is_none());
     }
 
     #[test]

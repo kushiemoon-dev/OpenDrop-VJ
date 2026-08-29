@@ -135,6 +135,7 @@ enum Panel {
     Midi,
     Ndi,
     Osc,
+    RemoteWs,
 }
 
 struct WindowSlot {
@@ -410,6 +411,14 @@ struct AppState {
     /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
     /// matching OpenDrop-VJ's `electron-features-store.svelte.ts` default.
     osc_port: u16,
+    /// Handle to the dedicated remote-WS thread (Task 14): first async
+    /// integration in this codebase (its own tokio runtime lives entirely
+    /// inside that thread, see `opendrop_io::remote_ws`'s module doc
+    /// comment; no tokio type reaches `AppState` itself, only the same
+    /// kind of `std::sync::mpsc` handle `osc`/`midi` expose). `events`
+    /// carries `(CommandId, value01)` dispatches drained in
+    /// `about_to_wait`, same no-soft-takeover contract as OSC.
+    remote_ws: opendrop_io::remote_ws::RemoteWsHandle,
 }
 
 #[derive(Default)]
@@ -490,6 +499,7 @@ fn ui_root(
     ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
     osc: &opendrop_io::osc::OscHandle,
     osc_port: &mut u16,
+    remote_ws: &opendrop_io::remote_ws::RemoteWsHandle,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -502,6 +512,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Midi, "MIDI");
             ui.selectable_value(active_panel, Panel::Ndi, "NDI");
             ui.selectable_value(active_panel, Panel::Osc, "OSC");
+            ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
         });
         ui.separator();
         match active_panel {
@@ -540,6 +551,9 @@ fn ui_root(
             }
             Panel::Osc => {
                 ui::osc::show(ui, osc, osc_port);
+            }
+            Panel::RemoteWs => {
+                ui::remote::show(ui, remote_ws);
             }
         }
     });
@@ -737,6 +751,15 @@ impl ApplicationHandler for App {
         // `opendrop_io::osc`, not here). No soft-takeover: unlike MIDI's
         // crossfader, OSC has no such gate in the existing app.
         while let Ok((id, value01)) = state.osc.events.try_recv() {
+            state.registry.dispatch(id, value01, &mut state.show);
+        }
+
+        // Remote WS (Task 14). Same shape as the OSC drain just above:
+        // `remote_ws.events` carries `(CommandId, value01)` dispatches
+        // already filtered (token check + command-name lookup) and
+        // clamped by the remote-WS thread itself (`opendrop_io::
+        // remote_ws`, not here). No soft-takeover, same as OSC.
+        while let Ok((id, value01)) = state.remote_ws.events.try_recv() {
             state.registry.dispatch(id, value01, &mut state.show);
         }
 
@@ -1003,6 +1026,7 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                remote_ws,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1047,6 +1071,7 @@ impl ApplicationHandler for App {
                     ndi_in_selected_source,
                     osc,
                     osc_port,
+                    remote_ws,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1537,6 +1562,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_led_flash_off_at: HashMap::new(),
         osc: opendrop_io::osc::spawn(),
         osc_port: 7000,
+        remote_ws: opendrop_io::remote_ws::spawn(),
     })
 }
 

@@ -217,8 +217,14 @@ struct AppState {
     compositor: Compositor,
     /// GPU->CPU async pixel readback (Step 4's `FrameReadback`) for the
     /// composite output and each deck's live texture: driven once per
-    /// frame in `about_to_wait`, gated behind `ndi_active || v4l2_active` so
-    /// idle sessions never pay the readback cost.
+    /// frame in `about_to_wait`. Composite is gated on `ndi_composite_active
+    /// || v4l2_active` (either consumer needs the composite), each deck on
+    /// that deck's own `ndi_deck_active[i]` only (v4l2 never needs per-deck
+    /// readbacks): whole-branch review Finding I5: a single combined
+    /// `ndi_active || v4l2_active` gate over all 5 readbacks used to make a
+    /// v4l2-only session pay for 4 wasted deck `glReadPixels`+`to_vec()`
+    /// calls every frame, and symmetrically made an NDI-composite-only
+    /// session pay for v4l2's extra `bytes.clone()`.
     compositor_readback: FrameReadback,
     deck_readback: [FrameReadback; deck::DECK_COUNT],
     /// Outlet for `compositor_readback`'s polled RGBA bytes, feeding the NDI
@@ -241,15 +247,19 @@ struct AppState {
     /// `opendrop_io::ndi::spawn` once, at construction time), and takes
     /// start/stop control messages from the NDI panel (Task 10).
     ndi: opendrop_io::ndi::NdiHandle,
-    /// The NDI panel's own composite toggle state, driving `ndi_active`
-    /// each frame (see `ndi_active`'s doc comment).
+    /// The NDI panel's own composite toggle state (resynced from
+    /// `NdiSnapshot::composite_active` each frame the panel is drawn: see
+    /// `ui::ndi`'s doc comment, whole-branch review Finding M5). Directly
+    /// gates the composite readback in `about_to_wait` (Finding I5):
+    /// there's no separate recomputed aggregate any more: the previous
+    /// `ndi_active` field, recomputed *after* the readback gate already
+    /// consumed it, was one frame stale by construction (whole-branch
+    /// review Finding M1); reading this field directly removes that extra
+    /// staleness.
     ndi_composite_active: bool,
-    /// Same as `ndi_composite_active`, one per deck.
+    /// Same as `ndi_composite_active`, one per deck: each element directly
+    /// gates that deck's own readback (Finding I5).
     ndi_deck_active: [bool; deck::DECK_COUNT],
-    /// Whether an NDI output consumer is active: true whenever
-    /// `ndi_composite_active` or any of `ndi_deck_active` is set, recomputed
-    /// every frame right after the NDI panel runs. Gates the readback loop.
-    ndi_active: bool,
     /// GL texture holding the most recently received NDI-in frame (Task
     /// 12), composited as the topmost layer over the 4 decks: `None`
     /// until the first frame of an active receive arrives. Carries its own
@@ -264,9 +274,12 @@ struct AppState {
     /// whether the receiver actually started).
     ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
     /// Whether a v4l2loopback output consumer is active: this panel's own
-    /// Start/Stop toggle (Task 19), driven directly by `ui::v4l2loopback::
-    /// show` (no per-slot array to OR together, unlike `ndi_active`, so no
-    /// separate aggregate field is needed). Gates the readback loop.
+    /// Start/Stop toggle (Task 19), resynced from `V4l2Snapshot::running`
+    /// each frame the panel is drawn (`ui::v4l2loopback::show`, whole-branch
+    /// review Finding M5): no per-slot array to OR together, just the one
+    /// stream, so no separate aggregate field is needed. Gates the
+    /// composite readback in `about_to_wait` alongside `ndi_composite_active`
+    /// (Finding I5).
     v4l2_active: bool,
     /// Handle to the dedicated v4l2loopback output thread (Task 19): owns
     /// the `Receiver` end of `v4l2_frame_tx` (handed to `opendrop_io::
@@ -1184,22 +1197,41 @@ impl ApplicationHandler for App {
             }
             state.compositor.end_frame(&state.gl);
 
-            // Step 5: GPU->CPU readback feeding the future NDI / v4l2loopback
-            // output paths: gated behind whichever of those consumers is
-            // actually active so an idle session never pays the ~8MB/frame
-            // RGBA copy. No consumer is wired up on this branch yet: a
-            // polled `Some(bytes)` is just pushed onto its channel and
+            // Step 5: GPU->CPU readback feeding the NDI / v4l2loopback
+            // output paths: gated per consumer so an idle (or
+            // partially-idle) session never pays for a copy nobody wants
+            // (whole-branch review Finding I5). The composite readback is
+            // needed by either `ndi_composite_active` or `v4l2_active`
+            // (v4l2 only ever pipes the composite stream); each deck
+            // readback is needed only by that specific deck's
+            // `ndi_deck_active[i]`: v4l2 never needs a per-deck readback.
+            // A polled `Some(bytes)` is just pushed onto its channel and
             // silently dropped if nothing is receiving, same non-blocking,
             // ignore-on-fail convention as `AudioHandle::set_device`.
-            if state.ndi_active || state.v4l2_active {
+            if state.ndi_composite_active || state.v4l2_active {
                 state.compositor_readback.begin_read(&state.gl);
                 if let Some(bytes) = state.compositor_readback.poll(&state.gl) {
                     // Two consumers, two channels (see `v4l2_frame_tx`'s doc
-                    // comment): one clone so each gets its own owned copy.
-                    let _ = state.v4l2_frame_tx.send(bytes.clone());
-                    let _ = state.compositor_frame_tx.send(bytes);
+                    // comment): only clone when both actually want a copy,
+                    // otherwise hand the one copy straight to whichever
+                    // consumer needs it.
+                    match (state.v4l2_active, state.ndi_composite_active) {
+                        (true, true) => {
+                            let _ = state.v4l2_frame_tx.send(bytes.clone());
+                            let _ = state.compositor_frame_tx.send(bytes);
+                        }
+                        (true, false) => {
+                            let _ = state.v4l2_frame_tx.send(bytes);
+                        }
+                        (false, true) => {
+                            let _ = state.compositor_frame_tx.send(bytes);
+                        }
+                        (false, false) => {} // unreachable: the outer `if` guarantees one of the two
+                    }
                 }
-                for i in 0..deck::DECK_COUNT {
+            }
+            for i in 0..deck::DECK_COUNT {
+                if state.ndi_deck_active[i] {
                     state.deck_readback[i].begin_read(&state.gl);
                     if let Some(bytes) = state.deck_readback[i].poll(&state.gl) {
                         let _ = state.deck_frame_tx[i].send(bytes);
@@ -1341,10 +1373,6 @@ impl ApplicationHandler for App {
                     v4l2_device,
                 );
             });
-            // Recomputed every frame from the panel's own toggle state
-            // (not `NdiSnapshot`, which reflects whether the sender actually
-            // started): gates the readback loop above (Step 5).
-            state.ndi_active = state.ndi_composite_active || state.ndi_deck_active.iter().any(|&x| x);
             if let Some(name) = preset_load_request {
                 // Same pipeline as keyboard navigation and playlist/beat-sync
                 // advances (`take_fired_presets`, above): never a direct
@@ -1781,7 +1809,6 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         },
         ndi_composite_active: false,
         ndi_deck_active: [false; deck::DECK_COUNT],
-        ndi_active: false,
         ndi_in_texture: None,
         ndi_in_selected_source: None,
         v4l2_active: false,

@@ -6,7 +6,7 @@ use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
 use glutin_winit::DisplayBuilder;
 use opendrop_core::blend::DEFAULT_COLOR_PARAMS;
-use opendrop_core::commands::{create_default_registry, CommandId, CommandRegistry};
+use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
@@ -45,6 +45,13 @@ const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;
 /// throttle (Step 20): `Pause` skips rendering the deck entirely instead,
 /// and `Off` ignores this constant altogether.
 const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
+
+/// How long a MIDI-triggered command's LED confirmation flash stays on
+/// before `about_to_wait` pushes it back off: mirrors the JS reference's
+/// `setTimeout(..., 120)` (`midi-connection-actions.ts:90`), but as a
+/// per-frame `Instant` deadline check instead of an async timer, since this
+/// thread has no async runtime (Task 8).
+const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
 /// Power mode applied to invisible (opacity ≤ 0.001) decks: selected from
 /// the Quality panel (Step 20). `Eco` reproduces the original always-on
@@ -91,6 +98,7 @@ enum Panel {
     Audio,
     Quality,
     Output,
+    Midi,
 }
 
 struct WindowSlot {
@@ -297,6 +305,39 @@ struct AppState {
     /// frame it's visible (see `ui::output`'s doc comment for why this is
     /// deliberately unlike Step 19's `input_devices` cache).
     selected_output_monitor: Option<String>,
+    /// Handle to the dedicated MIDI I/O thread (Task 8): `latest()` gives
+    /// the current connection/mapping/clock snapshot, `events` carries raw,
+    /// unfiltered `(CommandId, value01)` dispatches drained in
+    /// `about_to_wait`, `control_tx` sends port/learn/LED control messages.
+    midi: opendrop_io::midi::MidiHandle,
+    /// Last-pushed LED on/off state per command, so a hotplug reconnect
+    /// (detected via `hotplug_epoch`) can replay every known LED state to
+    /// the freshly reopened output port instead of leaving it dark.
+    midi_led_state: HashMap<CommandId, bool>,
+    /// Command currently in MIDI learn mode, if any: set when the panel's
+    /// Learn button is clicked, cleared once that command's mapping shows
+    /// up in the MIDI snapshot (learn completed). Drives the panel's
+    /// "waiting..." button state; nothing in `MidiSnapshot` signals
+    /// learn-mode directly.
+    midi_learning: Option<CommandId>,
+    /// Whether the crossfader's soft-takeover gate has already let a MIDI
+    /// value through this session: until then, incoming crossfader values
+    /// are compared against `show.get_crossfader()` and only dispatched
+    /// once they land within 0.08 of the live value (Ruling A: this
+    /// comparison lives in `app`, not the `io` MIDI thread).
+    midi_crossfader_taken_over: bool,
+    /// Last-seen `MidiSnapshot::hotplug_epoch`, diffed each frame to detect
+    /// an output port (re)connecting since the last check.
+    midi_last_hotplug_epoch: u64,
+    /// Last-seen `MidiSnapshot::clock_beat_count`, diffed each frame to
+    /// detect how many MIDI clock beats fired since the last check.
+    midi_last_beat_count: u64,
+    /// Pending LED-off deadlines for the 120ms confirmation flash: a
+    /// command's LED is pushed on immediately on dispatch and its deadline
+    /// recorded here; `about_to_wait` checks this every call and pushes it
+    /// back off once the deadline passes (no `std::thread::sleep`, no
+    /// async timer).
+    midi_led_flash_off_at: HashMap<CommandId, Instant>,
 }
 
 #[derive(Default)]
@@ -356,6 +397,9 @@ fn ui_root(
     event_loop: &ActiveEventLoop,
     output_window: &Window,
     selected_output_monitor: &mut Option<String>,
+    registry: &CommandRegistry,
+    midi: &opendrop_io::midi::MidiHandle,
+    midi_learning: &mut Option<CommandId>,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -365,6 +409,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Audio, "Audio");
             ui.selectable_value(active_panel, Panel::Quality, "Quality");
             ui.selectable_value(active_panel, Panel::Output, "Output");
+            ui.selectable_value(active_panel, Panel::Midi, "MIDI");
         });
         ui.separator();
         match active_panel {
@@ -394,6 +439,9 @@ fn ui_root(
             }
             Panel::Output => {
                 ui::output::show(ui, event_loop, output_window, selected_output_monitor);
+            }
+            Panel::Midi => {
+                ui::midi::show(ui, midi, registry, midi_learning);
             }
         }
     });
@@ -484,6 +532,84 @@ impl ApplicationHandler for App {
         }
         for load in state.show.take_fired_presets() {
             request_preset_load(state, load.slot, load.name);
+        }
+
+        // MIDI (Task 8). `midi.events` carries raw, unfiltered
+        // `(CommandId, value01)` dispatches (Task 7's `MidiDispatch`):
+        // soft-takeover (crossfader only, Ruling A), LED flash vs.
+        // persistent-state confirmation, and mapping/clock/hotplug sync all
+        // happen here, mirroring `midi-connection-actions.ts:70-134`.
+        while let Ok((id, value01)) = state.midi.events.try_recv() {
+            if id == CommandId::Crossfader && !state.midi_crossfader_taken_over {
+                if (value01 - state.show.get_crossfader()).abs() > 0.08 {
+                    continue; // soft-takeover gate: knob not yet in phase with the live value
+                }
+                state.midi_crossfader_taken_over = true;
+            }
+            state.registry.dispatch(id, value01, &mut state.show);
+
+            // Persistent-state commands push their real on/off state
+            // immediately, with no confirmation flash (mirrors the
+            // `cmd?.kind === 'trigger'` guard in the JS reference: a
+            // flash here would wrongly overwrite the state just pushed).
+            // Every other dispatched command gets a 120ms flash instead.
+            let persistent_led = match id {
+                CommandId::PlaylistToggleA => Some(state.show.get_playlist_playing(opendrop_core::commands::Deck::A)),
+                CommandId::PlaylistToggleB => Some(state.show.get_playlist_playing(opendrop_core::commands::Deck::B)),
+                CommandId::PlaylistToggleActive => {
+                    let deck = state.show.get_active_deck();
+                    Some(state.show.get_playlist_playing(deck))
+                }
+                _ => None,
+            };
+            if let Some(on) = persistent_led {
+                state.midi.push_led(id, on);
+                state.midi_led_state.insert(id, on);
+            } else {
+                state.midi.push_led(id, true);
+                state.midi_led_state.insert(id, true);
+                state.midi_led_flash_off_at.insert(id, Instant::now() + MIDI_LED_FLASH_DURATION);
+            }
+        }
+
+        // LED flash expiry: a per-frame `Instant` deadline check, not a
+        // blocking timer (this thread has no async runtime).
+        let midi_flash_now = Instant::now();
+        let expired_led_flashes: Vec<CommandId> = state
+            .midi_led_flash_off_at
+            .iter()
+            .filter(|&(_, &deadline)| midi_flash_now >= deadline)
+            .map(|(&id, _)| id)
+            .collect();
+        for id in expired_led_flashes {
+            state.midi.push_led(id, false);
+            state.midi_led_state.insert(id, false);
+            state.midi_led_flash_off_at.remove(&id);
+        }
+
+        // Clock sync, hotplug LED replay, and learn-mode completion: all
+        // diffed against the same snapshot fetch. A learning command never
+        // appears on `midi.events` (the io thread consumes that message to
+        // complete the learn instead of dispatching it), so learn
+        // completion can only be observed via the mapping snapshot here.
+        let midi_snapshot = state.midi.latest();
+        let midi_new_beats = midi_snapshot.clock_beat_count.wrapping_sub(state.midi_last_beat_count);
+        for _ in 0..midi_new_beats {
+            state.show.clock.pulse(Some(midi_snapshot.clock_bpm));
+        }
+        state.midi_last_beat_count = midi_snapshot.clock_beat_count;
+
+        if midi_snapshot.hotplug_epoch != state.midi_last_hotplug_epoch {
+            for (&id, &on) in &state.midi_led_state {
+                state.midi.push_led(id, on);
+            }
+            state.midi_last_hotplug_epoch = midi_snapshot.hotplug_epoch;
+        }
+
+        if let Some(learning_id) = state.midi_learning {
+            if midi_snapshot.mapping.contains_key(&learning_id) {
+                state.midi_learning = None;
+            }
         }
 
         let now = Instant::now();
@@ -676,6 +802,9 @@ impl ApplicationHandler for App {
                 invisible_mode,
                 pending_mesh_size,
                 selected_output_monitor,
+                registry,
+                midi,
+                midi_learning,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -711,6 +840,9 @@ impl ApplicationHandler for App {
                     event_loop,
                     &output.window,
                     selected_output_monitor,
+                    registry,
+                    midi,
+                    midi_learning,
                 );
             });
             if let Some(name) = preset_load_request {
@@ -1174,6 +1306,13 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
         selected_output_monitor: None,
+        midi: opendrop_io::midi::spawn(),
+        midi_led_state: HashMap::new(),
+        midi_learning: None,
+        midi_crossfader_taken_over: false,
+        midi_last_hotplug_epoch: 0,
+        midi_last_beat_count: 0,
+        midi_led_flash_off_at: HashMap::new(),
     })
 }
 

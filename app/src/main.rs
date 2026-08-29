@@ -149,6 +149,7 @@ enum Panel {
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    About,
 }
 
 struct WindowSlot {
@@ -763,6 +764,7 @@ fn ui_root(
             #[cfg(feature = "link")]
             ui.selectable_value(active_panel, Panel::Link, "Link");
             ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
+            ui.selectable_value(active_panel, Panel::About, "About");
         });
         ui.separator();
         match active_panel {
@@ -829,6 +831,9 @@ fn ui_root(
             }
             Panel::V4l2 => {
                 ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
+            }
+            Panel::About => {
+                ui::about::show(ui);
             }
         }
     });

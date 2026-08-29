@@ -1,6 +1,7 @@
 //! egui panel content, one file per panel (Step 16 begins with the decks
 //! panel; later steps add more under this module).
 
+pub mod about;
 pub mod audio;
 pub mod decks;
 // Feature-gated on the `mod` declaration itself, mirroring `opendrop_io

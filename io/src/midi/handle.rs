@@ -30,7 +30,9 @@ use opendrop_core::commands::CommandId;
 use super::clock_sync::MidiClockSync;
 use super::control::{self, handle_control};
 use super::message::{MidiEvent, MidiParser};
-use super::types::{is_note_off, resolve_mapping, trigger_key_and_value, MidiControl, MidiDispatch, MidiMapping, MidiSnapshot};
+use super::types::{
+    bind_trigger, is_note_off, resolve_mapping, trigger_key_and_value, MidiControl, MidiDispatch, MidiMapping, MidiSnapshot,
+};
 
 /// How often the run loop wakes up to service control messages and the
 /// periodic timeout/hotplug checks even when no MIDI byte has arrived.
@@ -214,7 +216,11 @@ fn handle_raw_midi(ts: &mut ThreadState, events_tx: &Sender<MidiDispatch>, raw: 
         if note_off {
             return; // wait for the next non-note-off message, mirrors midi-connection-actions.ts:61
         }
-        ts.mapping.insert(learning_id, key);
+        // Whole-branch review Finding M6: `bind_trigger` evicts any OTHER
+        // command already bound to this same `key` first, so a trigger has
+        // at most one owner and `resolve_mapping`'s reverse lookup stays
+        // unambiguous.
+        bind_trigger(&mut ts.mapping, learning_id, key);
         ts.learning = None;
         super::mapping::save_mapping(ts.mapping_path.as_deref(), &ts.mapping);
         return;

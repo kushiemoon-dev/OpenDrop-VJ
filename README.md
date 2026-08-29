@@ -2,6 +2,28 @@
 
 Native Rust rewrite of OpenDrop-VJ (see `REQUIREMENTS.md`/`PLAN.md`).
 
+## Prérequis de build : NDI SDK
+
+Compiler ce workspace (`cargo build --workspace`, y compris juste `io` ou
+`app`, qui dépend de `io`) nécessite le NDI SDK (headers + libs) présent au
+moment du build, pas seulement à l'exécution : `grafton-ndi` (Task 9)
+utilise `bindgen` dans son `build.rs`, ce qui en fait une dépendance de
+build à part entière, pas un simple `dlopen` runtime comme envisagé au
+départ.
+
+Deux fichiers versionnés font le pont avec le packaging Arch de cette
+machine : `ndi-sdk-shim/` (symlinks `include`/`lib/x86_64-linux-gnu` vers
+les emplacements système du paquet pacman `ndi-sdk`) et `.cargo/config.toml`
+(positionne `NDI_SDK_DIR` vers `ndi-sdk-shim` quand le shell ne l'exporte
+pas déjà lui-même). Voir le commentaire en tête de `.cargo/config.toml`
+pour le détail du contournement.
+
+Sur une autre machine ou avec un autre layout SDK (installeur NewTek
+standard, autre distro) : soit exporter son propre `NDI_SDK_DIR` avant de
+builder, soit remplacer/supprimer `ndi-sdk-shim/` et l'entrée `[env]` de
+`.cargo/config.toml` en conséquence. Le SDK lui-même se télécharge sur
+ndi.video.
+
 ## Ableton Link (optionnel, GPL)
 
 Le support Ableton Link (`io::link` / panneau Link) est désactivé par

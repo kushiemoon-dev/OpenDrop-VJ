@@ -54,6 +54,11 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// thread has no async runtime (Task 8).
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
+/// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
+/// real elapsed-time measurement, matching the TS reference's
+/// `Math.min(dt, 0.1)` (`clock.ts:53`).
+const MAX_TICK_DT: Duration = Duration::from_millis(100);
+
 /// Max messages kept in `AppState::chat_log` (whole-branch review Finding
 /// 2): a bounded ring buffer, oldest dropped first, so the Streaming
 /// panel's chat display can't grow unbounded over a long-running session.
@@ -125,9 +130,8 @@ fn create_ndi_in_texture(
 
 /// Which top-level panel the control window is currently showing: gates
 /// per-tick work that only matters while its panel is visible (Step 17: the
-/// thumbnail pump only runs while `PresetBrowser` is on screen). Deliberately
-/// minimal: just enough to gate that one thing, not a general tabbed-panel
-/// system.
+/// thumbnail pump only runs while `PresetBrowser` is on screen), besides
+/// driving `ui_root`'s own tab row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Panel {
     #[default]
@@ -337,6 +341,12 @@ struct AppState {
     keymap: HashMap<Key, CommandId>,
     blit_control_timer: PassTimer,
     blit_output_timer: PassTimer,
+    /// Wall-clock instant the output window's surface was last swapped, or
+    /// `None` before the first tick. Doubles as `compute_tick_dt`'s
+    /// `last_tick_at`, read near the top of the same gated tick that
+    /// overwrites it near the bottom (Finding 3): the two ends of one
+    /// tick are close enough together that this is a faithful "previous
+    /// tick's real elapsed-time reference", without a second field.
     last_output_swap_at: Option<Instant>,
     perf_tick: u64,
     /// Sender handed to `preflight::spawn_preflight`: cloned once per
@@ -383,8 +393,12 @@ struct AppState {
     /// still missing a texture.
     thumb_queue: Vec<ThumbJob>,
     /// Cached preset thumbnails, keyed by preset name: populated by
-    /// `pump_thumbnail_queue`, read by the preset-browser panel.
+    /// `pump_thumbnail_queue`, read by the preset-browser panel. Bounded to
+    /// `thumbnails::MAX_RESIDENT_THUMBNAILS` entries (whole-branch review
+    /// Finding 4): `thumbnail_order` is its insertion-order companion,
+    /// see `thumbnails::insert_bounded`.
     thumbnail_textures: HashMap<String, egui::TextureHandle>,
+    thumbnail_order: VecDeque<String>,
     /// The one outstanding `--render-thumbnail` child process, if any.
     /// Thumbnails are rendered out of process (see `thumbnails`' module doc:
     /// a preset that crashes projectM must not take the app down just
@@ -543,9 +557,45 @@ struct App {
 /// to `preflight::spawn_preflight`. `about_to_wait`'s verdict-handling drain
 /// is the only place that actually calls `Deck::load_preset`.
 fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
-    let Some(path) = state.path_by_name.get(&name).cloned() else { return };
-    state.pending_validations.insert(slot); // for the UI: "validating…" on this card
+    let Some(path) = should_spawn_preflight(&state.path_by_name, &mut state.pending_validations, slot, &name) else {
+        return;
+    };
     preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
+}
+
+/// Whole-branch review Finding 1/2: the dedup/backpressure guard for
+/// `request_preset_load`, split out so it's testable without a real
+/// `AppState` (which needs a live GL context to construct). Resolves
+/// `name` to a path, and: the load-bearing part: only claims `slot` (via
+/// `HashSet::insert`, marking it pending for the UI's "validating…" card)
+/// and returns `Some(path)` if no validation is already in flight for that
+/// slot; a slot already pending returns `None`, leaving `pending_validations`
+/// untouched, so the caller never spawns a second concurrent preflight
+/// child for it.
+///
+/// Without this guard, holding a key bound to `PresetNextActive`/
+/// `PlaylistNextActive`: auto-repeating at OS key-repeat rate, ~25-30/sec:
+/// spawned a brand new out-of-process `projectm_create()` validation on
+/// every repeat: a couple of seconds of a held key could spawn 50-60
+/// concurrent instances alongside the 4 live decks already running. This
+/// also closes Finding 2's stale-verdict race as a side effect: with at
+/// most one in-flight validation per slot, there is never a second one
+/// around to land its verdict out of order against the first: verified by
+/// grepping every `pending_validations` read/write site (`main.rs`,
+/// `ui/decks.rs`): the only insert is here, the only removal is
+/// `about_to_wait`'s verdict drain, once the real verdict comes back: no
+/// separate Clear/Cancel path exists that could remove a slot early.
+fn should_spawn_preflight(
+    path_by_name: &HashMap<String, PathBuf>,
+    pending_validations: &mut HashSet<usize>,
+    slot: usize,
+    name: &str,
+) -> Option<PathBuf> {
+    let path = path_by_name.get(name).cloned()?;
+    if !pending_validations.insert(slot) {
+        return None;
+    }
+    Some(path)
 }
 
 /// Whether MIDI learn mode has finished for the command being learned: the
@@ -573,6 +623,35 @@ fn midi_learn_completed(prev_trigger: Option<&MidiTriggerKey>, current_trigger: 
 /// entry for.
 fn should_flash_led(kind: Option<CommandKind>) -> bool {
     kind == Some(CommandKind::Trigger)
+}
+
+/// Whole-branch review Finding 3: real (measured) dt for
+/// `Show::clock.step`/`Show::tick_playlists`, instead of the nominal
+/// `refresh_interval` the render-pacing loop targets. `about_to_wait`'s
+/// pacing resyncs `next_frame_at = now + refresh_interval` whenever the
+/// loop falls behind, discarding the overrun (see that resync branch's own
+/// comment): feeding nominal dt into the beat-sync clock silently
+/// under-counted exactly the time a tick that fell behind actually took.
+/// At 4 decks + egui + dual-window blit genuinely running at 40fps against
+/// a 60fps target, a 128 BPM beat-sync played back around 85 BPM.
+///
+/// `last_tick_at` is `None` only on the very first tick, before there is
+/// anything to measure against yet, where nominal dt is the only sane
+/// fallback. `max_dt` matches the TS reference's `Math.min(dt, 0.1)`
+/// (`clock.ts:53`, "avoid large jumps on tab-visibility change"): the same
+/// rationale covers a debugger pause or any other long stall here, so a
+/// real one doesn't feed a huge jump into beat-sync.
+///
+/// Frame-pacing itself (the `WaitUntil(next_frame_at)` scheduling) is
+/// unaffected: it keeps targeting `refresh_interval` as before. Only the
+/// clock/playlist tick inputs change to real elapsed time. Pure, so it's
+/// testable without a real event loop.
+fn compute_tick_dt(now: Instant, last_tick_at: Option<Instant>, nominal: Duration, max_dt: Duration) -> f64 {
+    let elapsed = match last_tick_at {
+        Some(prev) => now.saturating_duration_since(prev),
+        None => nominal,
+    };
+    elapsed.min(max_dt).as_secs_f64()
 }
 
 /// Drains `rx` completely, returning only the most recently received item
@@ -604,9 +683,8 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
 /// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). Decks (Step 16) and preset-browser
-/// (Step 17) panels so far, switched via the tab row; later steps add more
-/// panels here.
+/// Task 2's notes on this same drift). One panel per `Panel` variant,
+/// switched via the tab row.
 ///
 /// Takes individual `AppState` fields, not `&mut AppState`: see
 /// `ui::decks::show`'s doc comment for why. `load_request` is an out-param:
@@ -780,7 +858,17 @@ impl ApplicationHandler for App {
         // keep working except while an egui text widget (e.g. the preset
         // browser search) actually has focus.
         if let WindowEvent::KeyboardInput { event: key_event, .. } = &event {
-            if key_event.state == ElementState::Pressed && !state.egui_glow.egui_ctx.egui_wants_keyboard_input() {
+            // Whole-branch review Finding 1: `!key_event.repeat` excludes
+            // OS auto-repeat: every command dispatched from this path is a
+            // discrete press/trigger (deck navigation, toggles), and a
+            // held key re-firing one at ~25-30/sec is never the intended
+            // UX for any of them, not just the navigation commands that
+            // exposed the preflight-flood bug. Filtered globally here
+            // rather than per-command.
+            if key_event.state == ElementState::Pressed
+                && !key_event.repeat
+                && !state.egui_glow.egui_ctx.egui_wants_keyboard_input()
+            {
                 if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
                     state.registry.dispatch(cmd_id, 1.0, &mut state.show);
                 }
@@ -1030,7 +1118,9 @@ impl ApplicationHandler for App {
             // which drifts by design, see the resync branch below). Never
             // derive it from `next_frame_at`.
             let now_ms = state.t0.elapsed().as_secs_f64() * 1000.0;
-            let dt = state.refresh_interval.as_secs_f64();
+            // Real elapsed time, not the nominal refresh_interval (Finding
+            // 3): see `compute_tick_dt`'s doc comment.
+            let dt = compute_tick_dt(now, state.last_output_swap_at, state.refresh_interval, MAX_TICK_DT);
             if state.show.manual_bpm == 0.0 {
                 let r = state.show.beat_detector.process_sample(audio.energy_byte, now_ms);
                 if r.beat_triggered {
@@ -1108,6 +1198,7 @@ impl ApplicationHandler for App {
                     &state.path_by_name,
                     &state.egui_glow.egui_ctx,
                     &mut state.thumbnail_textures,
+                    &mut state.thumbnail_order,
                     &mut state.failed_thumbnails,
                 ) {
                     eprintln!("[app] thumbnail pump failed: {e}");
@@ -1414,7 +1505,9 @@ impl ApplicationHandler for App {
 
             state.perf_tick += 1;
             if state.perf_tick % 60 == 0 {
-                let active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001).unwrap_or(0);
+                // Minor #21: same expression as `lowest_active` above,
+                // computed once and reused instead of twice.
+                let active = lowest_active.unwrap_or(0);
                 let fmt = |v: Option<f64>| v.map(|ms| format!("{ms:.3}ms")).unwrap_or_else(|| "n/a".to_string());
                 println!(
                     "[timing] deck{active} render={} copy={} | composite={} | blit control={} output={} | wall(swap-to-swap)={}",
@@ -1869,6 +1962,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
+        thumbnail_order: VecDeque::new(),
         thumbnail_in_flight: None,
         thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
@@ -1926,6 +2020,98 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whole-branch review Finding 3: real elapsed-time dt for beat-sync/
+    /// playlist ticking.
+    mod compute_tick_dt_tests {
+        use super::*;
+
+        #[test]
+        fn first_tick_uses_nominal_dt() {
+            let now = Instant::now();
+            let dt = compute_tick_dt(now, None, Duration::from_millis(16), Duration::from_millis(100));
+            assert!((dt - 0.016).abs() < 1e-6);
+        }
+
+        #[test]
+        fn measures_real_elapsed_time_not_nominal() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_millis(25);
+            // Nominal would be 16ms (60fps), but the tick actually took
+            // 25ms (fell behind): the real, measured value has to win.
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert!((dt - 0.025).abs() < 1e-6);
+        }
+
+        #[test]
+        fn clamps_a_long_stall_to_max_dt() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_secs(2);
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert_eq!(dt, 0.1);
+        }
+
+        #[test]
+        fn exactly_at_the_clamp_boundary_is_not_reduced() {
+            let prev = Instant::now();
+            let now = prev + Duration::from_millis(100);
+            let dt = compute_tick_dt(now, Some(prev), Duration::from_millis(16), Duration::from_millis(100));
+            assert_eq!(dt, 0.1);
+        }
+    }
+
+    /// Whole-branch review Finding 1/2: the preset-load dedup/backpressure
+    /// guard.
+    mod should_spawn_preflight_tests {
+        use super::*;
+
+        fn catalog() -> HashMap<String, PathBuf> {
+            HashMap::from([("Preset A".to_string(), PathBuf::from("/presets/a.milk"))])
+        }
+
+        #[test]
+        fn first_request_for_a_slot_is_allowed_and_marks_it_pending() {
+            let mut pending = HashSet::new();
+            let path = should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A");
+            assert_eq!(path, Some(PathBuf::from("/presets/a.milk")));
+            assert!(pending.contains(&0));
+        }
+
+        #[test]
+        fn a_second_request_for_the_same_in_flight_slot_is_a_no_op() {
+            // Regression: holding a key bound to PresetNextActive/
+            // PlaylistNextActive auto-repeats at OS rate and used to spawn
+            // a fresh preflight child on every repeat.
+            let mut pending = HashSet::new();
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+            assert_eq!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A"), None);
+            assert_eq!(pending, HashSet::from([0]));
+        }
+
+        #[test]
+        fn a_different_slot_is_independent() {
+            let mut pending = HashSet::new();
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 1, "Preset A").is_some());
+            assert_eq!(pending, HashSet::from([0, 1]));
+        }
+
+        #[test]
+        fn an_unknown_preset_name_is_a_no_op_and_never_marks_the_slot_pending() {
+            let mut pending = HashSet::new();
+            assert_eq!(should_spawn_preflight(&catalog(), &mut pending, 0, "Nonexistent"), None);
+            assert!(pending.is_empty());
+        }
+
+        #[test]
+        fn once_the_slot_is_cleared_a_new_request_is_allowed_again() {
+            // Mirrors about_to_wait's verdict-drain: `pending_validations.
+            // remove(&slot)` runs once the real verdict comes back.
+            let mut pending = HashSet::from([0]);
+            pending.remove(&0);
+            assert!(should_spawn_preflight(&catalog(), &mut pending, 0, "Preset A").is_some());
+        }
+    }
 
     mod midi_learn_completed_tests {
         use super::*;

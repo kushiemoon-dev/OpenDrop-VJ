@@ -222,6 +222,17 @@ impl Show {
         self.maybe_advance_on_beat(Deck::B);
     }
 
+    /// Restarts the auto-crossfade cadence from the top. Port of the
+    /// unconditional `resetAutoXfadeCount()` call the TS reference makes on
+    /// every auto-xfade toggle, either direction (`+page.svelte:1754`).
+    /// Whole-branch review Finding 7: `app` never called an equivalent of
+    /// this: toggling auto-xfade off then back on resumed the crossfade
+    /// cycle mid-count instead of restarting it, so the first crossfade
+    /// after re-enabling could land 1-7 beats early/late.
+    pub fn reset_auto_xfade_count(&mut self) {
+        self.auto_xfade_count = 0;
+    }
+
     fn maybe_advance_on_beat(&mut self, deck: Deck) {
         let (synced, locked, trigger) = match deck {
             Deck::A => (self.beat_sync_a, self.lock_a, self.beat_trigger_a),
@@ -369,6 +380,19 @@ impl CommandContext for Show {
             Deck::A => Deck::B,
             Deck::B => Deck::A,
         };
+        // Whole-branch review Finding 19: keep `selected_slot` (what the
+        // Decks panel highlights) in sync on a keyboard-driven switch too.
+        // `select_slot` already derives `active_deck` from a clicked
+        // slot's bus; without this, the reverse direction let the
+        // highlighted card and the deck `PresetNextActive`/
+        // `PlaylistNextActive` actually act on disagree. A deck whose bus
+        // isn't assigned to any slot (both `Off`, or both slots on the
+        // other letter) leaves `selected_slot` where it was, same
+        // "no visible effect" contract `take_fired_presets` already has
+        // for that case.
+        if let Some(slot) = self.deck_bus_slot_for(self.active_deck) {
+            self.selected_slot = slot;
+        }
     }
 
     /// Cycles the deck's index through the full preset catalog (not the
@@ -615,6 +639,29 @@ mod tests {
             assert_eq!(show.get_active_deck(), Deck::B);
             show.switch_active_deck();
             assert_eq!(show.get_active_deck(), Deck::A);
+        }
+
+        #[test]
+        fn switch_active_deck_keeps_selected_slot_in_sync() {
+            // Whole-branch review Finding 19: a keyboard-driven active-deck
+            // switch used to leave `selected_slot` (what the Decks panel
+            // highlights) pointing at the previous deck's slot.
+            let mut show = Show::default(); // deck_bus: [A, B, Off, Off]
+            assert_eq!(show.selected_slot, 0);
+            show.switch_active_deck(); // now active_deck == B, which is slot 1
+            assert_eq!(show.selected_slot, 1);
+            show.switch_active_deck(); // back to A, slot 0
+            assert_eq!(show.selected_slot, 0);
+        }
+
+        #[test]
+        fn switch_active_deck_leaves_selected_slot_alone_when_the_new_active_deck_has_no_slot() {
+            let mut show = Show::default();
+            show.deck_bus = [DeckBus::A, DeckBus::A, DeckBus::Off, DeckBus::Off]; // no slot is on B
+            show.selected_slot = 0;
+            show.switch_active_deck(); // active_deck becomes B, but no slot maps to it
+            assert_eq!(show.get_active_deck(), Deck::B);
+            assert_eq!(show.selected_slot, 0); // unchanged, not reset to something wrong
         }
     }
 
@@ -1009,6 +1056,26 @@ mod tests {
             show.on_beat();
             show.on_beat();
             assert_eq!(show.crossfader, 0.0);
+        }
+
+        #[test]
+        fn reset_auto_xfade_count_restarts_the_cadence_from_the_top() {
+            // Whole-branch review Finding 7: without a reset, re-enabling
+            // auto-xfade mid-count would fire the next crossfade early.
+            let mut show = Show::default();
+            show.auto_xfade = true;
+            show.beats_per_change = 4;
+            show.on_beat();
+            show.on_beat();
+            show.on_beat(); // 3 beats in, one short of the 4-beat cadence
+            assert_eq!(show.crossfader, 0.0);
+            show.reset_auto_xfade_count();
+            show.on_beat(); // would have flipped here without the reset
+            assert_eq!(show.crossfader, 0.0);
+            show.on_beat();
+            show.on_beat();
+            show.on_beat();
+            assert_eq!(show.crossfader, 1.0); // flips a full 4 beats after the reset
         }
 
         #[test]

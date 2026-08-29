@@ -80,6 +80,13 @@ pub fn show(
                     // "still the old entry": StartLearn doesn't clear it.
                     *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
                 }
+                // Whole-branch review Finding M10: before this, the only
+                // way out of learn mode was a real MIDI message arriving:
+                // no way to back out of a Learn clicked by mistake.
+                if is_learning && ui.button("Cancel").clicked() {
+                    let _ = midi.control_tx.send(MidiControl::StopLearn);
+                    *midi_learning = None;
+                }
                 if ui.button("Clear").clicked() {
                     let _ = midi.control_tx.send(MidiControl::ClearMapping(cmd.id));
                 }

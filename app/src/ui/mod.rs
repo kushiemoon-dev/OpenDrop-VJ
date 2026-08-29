@@ -11,3 +11,4 @@ pub mod playlists;
 pub mod preset_browser;
 pub mod quality;
 pub mod remote;
+pub mod streaming;

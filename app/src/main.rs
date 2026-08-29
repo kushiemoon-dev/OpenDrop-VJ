@@ -134,6 +134,7 @@ enum Panel {
     Output,
     Midi,
     Ndi,
+    Osc,
 }
 
 struct WindowSlot {
@@ -398,6 +399,17 @@ struct AppState {
     /// back off once the deadline passes (no `std::thread::sleep`, no
     /// async timer).
     midi_led_flash_off_at: HashMap<CommandId, Instant>,
+    /// Handle to the dedicated OSC UDP server thread (Task 13): `latest()`
+    /// gives the current listening/port snapshot, `events` carries
+    /// `(CommandId, value01)` dispatches drained in `about_to_wait` (no
+    /// soft-takeover, unlike MIDI's crossfader: the brief is explicit OSC
+    /// has none in the existing app), `control_tx` sends Start/Stop.
+    osc: opendrop_io::osc::OscHandle,
+    /// The OSC panel's own port field, read by `Start` at click time: not
+    /// `OscSnapshot::port`, which only reflects the port actually bound
+    /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
+    /// matching OpenDrop-VJ's `electron-features-store.svelte.ts` default.
+    osc_port: u16,
 }
 
 #[derive(Default)]
@@ -476,6 +488,8 @@ fn ui_root(
     ndi_composite_active: &mut bool,
     ndi_deck_active: &mut [bool; deck::DECK_COUNT],
     ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
+    osc: &opendrop_io::osc::OscHandle,
+    osc_port: &mut u16,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -487,6 +501,7 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Output, "Output");
             ui.selectable_value(active_panel, Panel::Midi, "MIDI");
             ui.selectable_value(active_panel, Panel::Ndi, "NDI");
+            ui.selectable_value(active_panel, Panel::Osc, "OSC");
         });
         ui.separator();
         match active_panel {
@@ -522,6 +537,9 @@ fn ui_root(
             }
             Panel::Ndi => {
                 ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active, ndi_in_selected_source);
+            }
+            Panel::Osc => {
+                ui::osc::show(ui, osc, osc_port);
             }
         }
     });
@@ -711,6 +729,15 @@ impl ApplicationHandler for App {
         };
         if midi_learn_done {
             state.midi_learning = None;
+        }
+
+        // OSC (Task 13). `osc.events` carries `(CommandId, value01)`
+        // dispatches already filtered/clamped by the OSC thread (address
+        // prefix + command-name lookup + 0..1 clamp all happen in
+        // `opendrop_io::osc`, not here). No soft-takeover: unlike MIDI's
+        // crossfader, OSC has no such gate in the existing app.
+        while let Ok((id, value01)) = state.osc.events.try_recv() {
+            state.registry.dispatch(id, value01, &mut state.show);
         }
 
         let now = Instant::now();
@@ -974,6 +1001,8 @@ impl ApplicationHandler for App {
                 ndi_composite_active,
                 ndi_deck_active,
                 ndi_in_selected_source,
+                osc,
+                osc_port,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1016,6 +1045,8 @@ impl ApplicationHandler for App {
                     ndi_composite_active,
                     ndi_deck_active,
                     ndi_in_selected_source,
+                    osc,
+                    osc_port,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1504,6 +1535,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_last_hotplug_epoch: 0,
         midi_last_beat_count: 0,
         midi_led_flash_off_at: HashMap::new(),
+        osc: opendrop_io::osc::spawn(),
+        osc_port: 7000,
     })
 }
 

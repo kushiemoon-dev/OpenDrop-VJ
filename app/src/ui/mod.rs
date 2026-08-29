@@ -3,6 +3,11 @@
 
 pub mod audio;
 pub mod decks;
+// Feature-gated on the `mod` declaration itself, mirroring `opendrop_io
+// ::link`'s own gating: with the `link` feature off (the default), this
+// file is never parsed. See Task 18's brief and PLAN.md's Risque 5.
+#[cfg(feature = "link")]
+pub mod link;
 pub mod midi;
 pub mod ndi;
 pub mod osc;

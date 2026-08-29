@@ -137,6 +137,8 @@ enum Panel {
     Osc,
     RemoteWs,
     Streaming,
+    #[cfg(feature = "link")]
+    Link,
 }
 
 struct WindowSlot {
@@ -453,6 +455,19 @@ struct AppState {
     kick_bearer_token_input: String,
     kick_xsrf_token_input: String,
     kick_cookies_input: String,
+    /// Handle to the dedicated Ableton Link thread (Task 18): `latest()`
+    /// gives the current enabled/tempo/beat/phase/peers snapshot,
+    /// `control_tx` sends Start/Stop/SetTempo. Present only when the
+    /// `link` feature is enabled (OFF by default: GPL licensing
+    /// boundary, see `opendrop_io::link`'s module doc comment and the
+    /// root README).
+    #[cfg(feature = "link")]
+    link: opendrop_io::link::LinkHandle,
+    /// The Link panel's own tempo field, read by `SetTempo` at click
+    /// time: not `LinkSnapshot::tempo`, same reasoning as `osc_port`
+    /// (see `ui::osc`'s doc comment).
+    #[cfg(feature = "link")]
+    link_tempo_input: f64,
     /// Receiving end of the shared chat-message channel both `twitch` and
     /// `kick` feed (mirrors `broadcastChatMessage`, `main.cjs:425-429`:
     /// see `opendrop_io::chat`'s module doc comment). Not drained
@@ -554,6 +569,8 @@ fn ui_root(
     kick_bearer_token_input: &mut String,
     kick_xsrf_token_input: &mut String,
     kick_cookies_input: &mut String,
+    #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
+    #[cfg(feature = "link")] link_tempo_input: &mut f64,
 ) {
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -568,6 +585,8 @@ fn ui_root(
             ui.selectable_value(active_panel, Panel::Osc, "OSC");
             ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
             ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
+            #[cfg(feature = "link")]
+            ui.selectable_value(active_panel, Panel::Link, "Link");
         });
         ui.separator();
         match active_panel {
@@ -625,6 +644,10 @@ fn ui_root(
                     kick_xsrf_token_input,
                     kick_cookies_input,
                 );
+            }
+            #[cfg(feature = "link")]
+            Panel::Link => {
+                ui::link::show(ui, link, link_tempo_input);
             }
         }
     });
@@ -832,6 +855,23 @@ impl ApplicationHandler for App {
         // remote_ws`, not here). No soft-takeover, same as OSC.
         while let Ok((id, value01)) = state.remote_ws.events.try_recv() {
             state.registry.dispatch(id, value01, &mut state.show);
+        }
+
+        // Ableton Link (Task 18). The Link thread never touches `Show`
+        // itself (see `opendrop_io::link`'s module doc comment): it only
+        // publishes the latest polled `(tempo, phase01)`; applying that
+        // to the clock happens here, once per `about_to_wait` call, same
+        // as the MIDI clock-pulse handling above. `sync_external` forces
+        // both bpm and phase from Link's authoritative timeline and
+        // fires a beat when phase wraps.
+        #[cfg(feature = "link")]
+        {
+            let link_snapshot = state.link.latest();
+            if link_snapshot.enabled {
+                for _ in 0..state.show.clock.sync_external(link_snapshot.tempo, link_snapshot.phase01) {
+                    state.show.on_beat();
+                }
+            }
         }
 
         let now = Instant::now();
@@ -1109,6 +1149,10 @@ impl ApplicationHandler for App {
                 kick_bearer_token_input,
                 kick_xsrf_token_input,
                 kick_cookies_input,
+                #[cfg(feature = "link")]
+                link,
+                #[cfg(feature = "link")]
+                link_tempo_input,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1165,6 +1209,10 @@ impl ApplicationHandler for App {
                     kick_bearer_token_input,
                     kick_xsrf_token_input,
                     kick_cookies_input,
+                    #[cfg(feature = "link")]
+                    link,
+                    #[cfg(feature = "link")]
+                    link_tempo_input,
                 );
             });
             // Recomputed every frame from the panel's own toggle state
@@ -1673,6 +1721,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         kick_bearer_token_input: String::new(),
         kick_xsrf_token_input: String::new(),
         kick_cookies_input: String::new(),
+        #[cfg(feature = "link")]
+        link: opendrop_io::link::spawn(),
+        #[cfg(feature = "link")]
+        link_tempo_input: 120.0,
         chat_events,
     })
 }

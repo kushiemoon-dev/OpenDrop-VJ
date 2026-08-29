@@ -23,6 +23,12 @@ rand = "0.10.2"
 # response's `.json::<T>()` deserialization.
 reqwest = { version = "0.12", features = ["json"] }
 rosc = "0.11.4"
+# Ableton Link (`io::link`, feature `link`, OFF by default): wraps
+# Ableton's official C++ Link library, GPL-2.0-or-later. `optional`: this
+# dependency (and the GPL code it pulls in) must be completely absent
+# from a default build: see the `link` feature below and Task 18's
+# brief / PLAN.md's Risque 5.
+rusty_link = { version = "0.4.9", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1", features = ["rt", "net", "sync", "time"] }
@@ -34,6 +40,13 @@ tower-http = { version = "0.7", features = ["fs"] }
 # auth/rate-limit behavior, chosen over the generic `irc` crate (brief in
 # PHASE5-IO.PLAN's Task 17 découpage note).
 twitch-irc = "6.1"
+
+[features]
+# Ableton Link support (`io::link`). OFF by default: enabling it pulls
+# in `rusty_link`, which wraps a GPL-2.0-or-later C++ library; the
+# resulting binary must be treated as GPL-2.0-or-later as a whole (see
+# the root README's "Ableton Link (optionnel, GPL)" section).
+link = ["dep:rusty_link"]
 
 [dev-dependencies]
 # Sync WS client used only by remote_ws's real-server smoke test: same

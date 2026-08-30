@@ -19,3 +19,4 @@ pub mod quality;
 pub mod remote;
 pub mod streaming;
 pub mod v4l2loopback;
+pub mod widgets;

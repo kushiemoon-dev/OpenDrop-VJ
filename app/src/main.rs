@@ -2223,23 +2223,37 @@ mod tests {
     mod thumbnail_cache_dir_tests {
         use super::*;
 
+        // Only used by the POSIX-only fixtures below; gated the same way
+        // so it doesn't trip an unused-function warning on Windows.
+        #[cfg(not(target_os = "windows"))]
         fn os(s: &str) -> Option<OsString> {
             Some(OsString::from(s))
         }
 
+        // These three fixtures use POSIX-absolute literals (`/xdg`,
+        // `/home/u`) to exercise the `.is_absolute()` branch in
+        // `thumbnail_cache_dir_from`. `Path::is_absolute()` requires a
+        // drive/UNC prefix on Windows, so a bare `/xdg` is NOT absolute
+        // there and the fallback-to-temp_dir branch fires instead,
+        // failing these assertions: a test-fixture limitation, not a
+        // bug in the function (XDG_CACHE_HOME/HOME are POSIX-only
+        // conventions to begin with; see the doc comment above).
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn prefers_xdg_cache_home() {
             let dir = thumbnail_cache_dir_from(os("/xdg"), os("/home/u"));
             assert_eq!(dir, PathBuf::from("/xdg/opendrop/thumbnails"));
         }
 
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn falls_back_to_home_dot_cache() {
             let dir = thumbnail_cache_dir_from(None, os("/home/u"));
             assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));
         }
 
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn ignores_a_relative_xdg_cache_home() {
             let dir = thumbnail_cache_dir_from(os("relative/cache"), os("/home/u"));
             assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));

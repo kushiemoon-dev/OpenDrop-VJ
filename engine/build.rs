@@ -55,7 +55,11 @@ fn probe_projectm() -> Vec<PathBuf> {
     let projectm = vcpkg::Config::new()
         .target_triplet("x64-windows")
         .find_package("projectm")
-        .expect("projectm not found via vcpkg (vcpkg install projectm:x64-windows)");
+        .expect(
+            "projectm not found via vcpkg; install it via the pinned overlay port \
+             (vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports), \
+             not plain 'vcpkg install projectm:x64-windows'; see packaging/windows/README.md",
+        );
 
     projectm.include_paths
 }

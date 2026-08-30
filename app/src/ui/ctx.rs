@@ -44,18 +44,32 @@ use winit::window::Window;
 use crate::ui::preset_browser::SearchCache;
 use crate::{InvisibleMode, Panel};
 
-/// Nav chrome: which panel is active. `stage_mode`/a theme picker/a
-/// mini-transport (crossfader, BPM, tap) are named in this step's brief as
-/// this struct's eventual shape, but none of those exist as `AppState`
-/// fields yet (`stage_mode` is currently only a `config::UiConfig` field,
-/// not wired into `AppState`: see that module's doc comment): a later
-/// step adds them here once they do. `theme_request` is deliberately NOT a
-/// field of this struct: it's `ui_root`'s own 8th, standalone parameter
-/// (same idiom as `LibraryCtx::load_request`), so it stays out-of-band the
-/// same way across every struct instead of only for whichever one happens
-/// to hold the nav row.
+/// Nav chrome: which panel is active, the Stage toggle, and the status
+/// bar's frame-timing readout (Step 10). The mini-transport (crossfader,
+/// BPM, tap) named alongside these in Step 9's own reviewer note stays out
+/// of this struct on purpose: it lives on `Show` (`PerformCtx::show`, the
+/// single owner of that business object: see this module's doc comment),
+/// so `ui::shell::header` takes `(&mut ShellCtx, &mut PerformCtx)` as two
+/// distinct parameters instead, same two-struct idiom as
+/// `ui::preset_browser::show`. `theme_request` is deliberately NOT a field
+/// of this struct: it's `ui_root`'s own 8th, standalone parameter (same
+/// idiom as `LibraryCtx::load_request`), so it stays out-of-band the same
+/// way across every struct instead of only for whichever one happens to
+/// hold the nav row.
 pub(crate) struct ShellCtx<'a> {
     pub(crate) active_panel: &'a mut Panel,
+    /// Header's Stage toggle (`⛶`, `ghost_button`): not yet wired to any
+    /// rendering/layout behavior beyond flipping this bool; a later step
+    /// gives it real meaning.
+    pub(crate) stage_mode: &'a mut bool,
+    /// Status bar's fps/frame-ms readout: wall-clock swap-to-swap time
+    /// from `main.rs`'s `about_to_wait`, one frame stale by construction
+    /// (mirrors `AppState::last_output_swap_at`'s own staleness note).
+    /// `None` before the first tick. Copied by value out of `AppState`
+    /// before the destructure that produces the other 7 structs' fields
+    /// (same convention as `SourcesCtx::last_vu_level`), since nothing
+    /// needs to mutate it from inside `ui_root`.
+    pub(crate) last_wall_ms: Option<f64>,
 }
 
 /// Live performance state: the `Show` business object plus per-deck UI

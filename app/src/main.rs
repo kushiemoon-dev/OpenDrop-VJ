@@ -360,6 +360,13 @@ struct AppState {
     /// tick are close enough together that this is a faithful "previous
     /// tick's real elapsed-time reference", without a second field.
     last_output_swap_at: Option<Instant>,
+    /// Wall-clock swap-to-swap frame time in ms, mirrored from the
+    /// `wall_ms` local computed right after each render (see that call
+    /// site, just below `last_output_swap_at`'s own write): one frame
+    /// stale by construction, same as `last_output_swap_at` itself.
+    /// `None` before the first tick. Feeds the status bar's fps/frame-ms
+    /// readout (Step 10 of the Phase 7 UI redesign plan).
+    last_wall_ms: Option<f64>,
     perf_tick: u64,
     /// Sender handed to `preflight::spawn_preflight`: cloned once per
     /// `request_preset_load` call so each validation request gets its own
@@ -390,6 +397,10 @@ struct AppState {
     deck_tex_ids: [egui::TextureId; 4],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
+    /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan):
+    /// not yet wired to any rendering/layout behavior beyond the toggle
+    /// itself; a later step gives it real meaning.
+    stage_mode: bool,
     /// Live text in the preset-browser search box.
     preset_search_query: String,
     /// Memoized `search` results for `preset_search_query`: see
@@ -695,8 +706,14 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
 /// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). One panel per `Panel` variant,
-/// switched via the tab row.
+/// Task 2's notes on this same drift). A 4-zone shell (Step 10 of the Phase
+/// 7 UI redesign plan): header, sectioned nav, status bar, then content:
+/// `egui::Panel::top`/`left`/`bottom` (not `SidePanel`/`TopBottomPanel`,
+/// which don't exist in this vendored egui 0.36.1), `CentralPanel` last, in
+/// that mandated order. `ui::shell::{header,nav,status_bar}` hold the zone
+/// bodies; this function only wires them up plus the unchanged content
+/// match (Step 9's version, just relocated into the new `CentralPanel`
+/// zone).
 ///
 /// Takes individual `AppState` fields, not `&mut AppState`: see
 /// `ui::decks::show`'s doc comment for why. `load_request` is an out-param:
@@ -724,37 +741,18 @@ fn ui_root(
     // Plumbing only for now (Step 9): no UI element writes to this yet.
     // Actually consuming it to switch themes at runtime is Step 12's job.
     let _ = theme_request;
-    // `control` (Ableton Link) is only read from the `#[cfg(feature =
-    // "link")]` match arm below: under the default build `ControlCtx` is
-    // its empty marker variant (see that struct's own doc comment) and
-    // this line is the only "use" of the parameter, avoiding a spurious
-    // unused-variable warning without renaming the param.
-    let _ = &control;
+
+    egui::Panel::top("od_header").resizable(false).exact_size(48.0).show_separator_line(false).show(ui, |ui| {
+        ui::shell::header(ui, shell, perform);
+    });
+    egui::Panel::left("od_nav").resizable(false).exact_size(184.0).show(ui, |ui| {
+        ui::shell::nav(ui, shell);
+    });
+    egui::Panel::bottom("od_status").resizable(false).exact_size(26.0).show(ui, |ui| {
+        ui::shell::status_bar(ui, shell, perform, library, sources, output, stream, control);
+    });
+
     egui::CentralPanel::default().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.selectable_value(shell.active_panel, Panel::Decks, "Decks");
-            ui.selectable_value(shell.active_panel, Panel::PresetBrowser, "Presets");
-            ui.selectable_value(shell.active_panel, Panel::Playlists, "Playlists");
-            ui.selectable_value(shell.active_panel, Panel::Audio, "Audio");
-            ui.selectable_value(shell.active_panel, Panel::Quality, "Quality");
-            ui.selectable_value(shell.active_panel, Panel::Output, "Output");
-            ui.selectable_value(shell.active_panel, Panel::Midi, "MIDI");
-            // Step 9: the nav row still has exactly one NDI button (zero
-            // visual change): it targets `NdiOut`; `NdiIn` isn't reachable
-            // from a button yet. Both variants already drive the same
-            // `ui::ndi::show` call below either way, so this is not
-            // user-visible: a future step is what actually gives the two
-            // directions their own buttons/content.
-            ui.selectable_value(shell.active_panel, Panel::NdiOut, "NDI");
-            ui.selectable_value(shell.active_panel, Panel::Osc, "OSC");
-            ui.selectable_value(shell.active_panel, Panel::RemoteWs, "Remote");
-            ui.selectable_value(shell.active_panel, Panel::Streaming, "Streaming");
-            #[cfg(feature = "link")]
-            ui.selectable_value(shell.active_panel, Panel::Link, "Link");
-            ui.selectable_value(shell.active_panel, Panel::V4l2, "V4L2");
-            ui.selectable_value(shell.active_panel, Panel::About, "About");
-        });
-        ui.separator();
         match shell.active_panel {
             Panel::Decks => {
                 ui::decks::show(
@@ -771,7 +769,7 @@ fn ui_root(
                 ui::preset_browser::show(ui, perform, library);
             }
             Panel::Playlists => {
-                ui::playlists::show(ui, perform.show, perform.t0);
+                ui::playlists::show(ui, perform.show);
             }
             Panel::Audio => {
                 ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);
@@ -1338,6 +1336,11 @@ impl ApplicationHandler for App {
             // either way.
             let t0 = state.t0;
             let last_vu_level = state.last_vu_level;
+            // Status bar's fps/frame-ms readout (Step 10): same by-value
+            // copy-before-destructure convention as `last_vu_level` above,
+            // since `ShellCtx::last_wall_ms` is a plain `Option<f64>`, not
+            // a `&mut` field.
+            let last_wall_ms = state.last_wall_ms;
 
             // Decks (Step 16), preset-browser (Step 17), playlists (Step
             // 18), and audio (Step 19) panels: real content, replacing the
@@ -1355,6 +1358,7 @@ impl ApplicationHandler for App {
                 preset_errors,
                 transition_seconds,
                 active_panel,
+                stage_mode,
                 preset_search_query,
                 preset_search_cache,
                 thumb_queue,
@@ -1416,7 +1420,7 @@ impl ApplicationHandler for App {
             // `_ctx` suffix only where the destructure already bound a
             // same-named `WindowSlot` (`control`, `output`) that's still
             // needed below for `egui_glow.run`/`&output.window`.
-            let mut shell_ctx = ui::ctx::ShellCtx { active_panel };
+            let mut shell_ctx = ui::ctx::ShellCtx { active_panel, stage_mode, last_wall_ms };
             let mut perform_ctx = ui::ctx::PerformCtx {
                 show,
                 deck_tex_ids,
@@ -1530,6 +1534,9 @@ impl ApplicationHandler for App {
             let swap_now = Instant::now();
             let wall_ms = state.last_output_swap_at.map(|prev| (swap_now - prev).as_secs_f64() * 1000.0);
             state.last_output_swap_at = Some(swap_now);
+            // Status bar's fps/frame-ms readout (Step 10): same one-frame
+            // staleness as `last_output_swap_at` above, by construction.
+            state.last_wall_ms = wall_ms;
 
             state.perf_tick += 1;
             if state.perf_tick % 60 == 0 {
@@ -2039,6 +2046,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         blit_control_timer,
         blit_output_timer,
         last_output_swap_at: None,
+        last_wall_ms: None,
         perf_tick: 0,
         preflight_tx,
         preflight_rx,
@@ -2053,6 +2061,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         transition_seconds: 0.0,
         deck_tex_ids,
         active_panel: Panel::default(),
+        stage_mode: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),
         failed_thumbnails: HashSet::new(),

@@ -13,7 +13,6 @@
 //! panel in this app.
 
 pub fn show(ui: &mut egui::Ui) {
-    ui.heading("About");
     ui.separator();
 
     ui.label("Visuals rendered by projectM, dynamically linked.");

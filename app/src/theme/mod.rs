@@ -7,3 +7,4 @@
 pub mod easing;
 pub mod registry;
 pub mod tokens;
+pub mod visuals;

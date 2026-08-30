@@ -14,7 +14,7 @@ pub enum ThemeId {
     Cyan,
 }
 
-const METRICS: Metrics = Metrics {
+static METRICS: Metrics = Metrics {
     radius_sm: 2.0,
     radius_md: 4.0,
     radius_lg: 6.0,
@@ -27,9 +27,9 @@ const METRICS: Metrics = Metrics {
     tile_content_w: 110.0,
 };
 
-const DURATIONS: Durations = Durations { fast: 0.15, base: 0.25, slow: 0.40 };
+static DURATIONS: Durations = Durations { fast: 0.15, base: 0.25, slow: 0.40 };
 
-const TYPE_SCALE: TypeScale =
+static TYPE_SCALE: TypeScale =
     TypeScale { display: 24.0, heading: 18.0, section: 15.0, body: 13.0, strong: 13.0, button: 13.0, small: 9.0, micro: 8.0, numeric: 14.0, monospace: 13.0 };
 
 // Shared semantic status colors: same hex across every theme (not part of
@@ -41,7 +41,7 @@ const OK: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
 const WARN: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
 const ERROR: Color32 = Color32::from_rgb(0xff, 0x6b, 0x6b);
 
-const KUSHIE: Theme = Theme {
+static KUSHIE: Theme = Theme {
     id: ThemeId::Kushie,
     palette: Palette {
         ink: Color32::from_rgb(0x0d, 0x11, 0x17),
@@ -60,7 +60,7 @@ const KUSHIE: Theme = Theme {
     type_scale: &TYPE_SCALE,
 };
 
-const OPENDROP_CLASSIC: Theme = Theme {
+static OPENDROP_CLASSIC: Theme = Theme {
     id: ThemeId::OpenDropClassic,
     palette: Palette {
         ink: Color32::from_rgb(0x0d, 0x0d, 0x0d),
@@ -81,7 +81,7 @@ const OPENDROP_CLASSIC: Theme = Theme {
 
 // `ink`/`surface` below: see `cyan_palette_hex_values`'s doc comment for
 // why `ink` is `#080f12` rather than the plan text's literal `#0e1a1e`.
-const CYAN: Theme = Theme {
+static CYAN: Theme = Theme {
     id: ThemeId::Cyan,
     palette: Palette {
         ink: Color32::from_rgb(0x08, 0x0f, 0x12),

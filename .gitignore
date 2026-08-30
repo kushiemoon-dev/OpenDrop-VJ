@@ -23,3 +23,11 @@ PLAN.md
 /packaging/appimage/AppDir/
 /packaging/appimage/.cache/
 /*.AppImage
+
+# Windows NDI runtime DLL (Processing.NDI.Lib.x64.dll, ~28.5 MB): not
+# committed, same policy as libndi.so.6 in the AppImage build and the
+# vcpkg-sourced projectM DLLs (Step 12): copied at package time from the
+# NDI SDK installed on the Windows build machine
+# (C:\Program Files\NDI\NDI 6 SDK\Bin\x64\Processing.NDI.Lib.x64.dll).
+# See .superpowers/sdd/PHASE6-PACKAGING.PLAN/task-13-report.md.
+/packaging/windows/Processing.NDI.Lib.x64.dll

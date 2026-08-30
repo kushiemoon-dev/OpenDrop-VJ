@@ -1839,6 +1839,26 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (examples/pure_glow.rs:188).
     let mut egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
 
+    // Step 6 (Phase 7 UI redesign plan): wire the default Kushie theme +
+    // fonts onto the bootstrap Context, once. `set_fonts` is only ever
+    // called here: a runtime theme change (Step 12) re-applies
+    // `set_style_of` but never re-registers fonts. `set_style_of` is applied
+    // to both `Theme::Dark` and `Theme::Light` with the same `Arc<Style>` so
+    // no internal egui route (tooltips, `Area`, anything reading
+    // `ctx.global_style()`) is left on an unthemed style even if
+    // `theme_preference` changes later.
+    egui_glow.egui_ctx.set_fonts(theme::fonts::font_definitions());
+    egui_glow.egui_ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
+    let default_theme_id = theme::registry::ThemeId::default();
+    let default_theme = theme::registry::get(default_theme_id);
+    let default_style = Arc::new(theme::visuals::style(default_theme));
+    egui_glow.egui_ctx.set_style_of(egui::Theme::Dark, default_style.clone());
+    egui_glow.egui_ctx.set_style_of(egui::Theme::Light, default_style);
+    // Also record the active ThemeId in ctx.data (see `theme::THEME_ID_KEY`)
+    // for Step 8's widgets.rs and Step 12, which resolve theme tokens for
+    // custom-painted widgets not driven by egui's `Style` directly.
+    egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), default_theme_id));
+
     // Register each deck's live GPU texture with egui's painter once, here
     // at bootstrap: never per-frame, which would leak a new texture handle
     // into the painter every tick. `register_native_texture` touches no GL

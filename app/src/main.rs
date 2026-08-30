@@ -74,7 +74,7 @@ const CHAT_LOG_CAP: usize = 50;
 /// `Off` disables the throttle, rendering invisible decks at full rate same
 /// as visible ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InvisibleMode {
+pub(crate) enum InvisibleMode {
     Eco,
     Pause,
     Off,
@@ -134,8 +134,10 @@ fn create_ndi_in_texture(
 /// per-tick work that only matters while its panel is visible (Step 17: the
 /// thumbnail pump only runs while `PresetBrowser` is on screen), besides
 /// driving `ui_root`'s own tab row.
+// `pub(crate)`: read by `ui::ctx::ShellCtx` (Step 9 of the Phase 7 UI
+// redesign plan), a different module from this one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Panel {
+pub(crate) enum Panel {
     #[default]
     Decks,
     PresetBrowser,
@@ -144,7 +146,14 @@ enum Panel {
     Quality,
     Output,
     Midi,
-    Ndi,
+    // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
+    // is unchanged (it already renders both the output toggles and the
+    // input selector in one call): both variants currently drive that
+    // same call from `ui_root`'s match; a future step gives each its own
+    // nav button and its own half of `ndi.rs`.
+    #[allow(dead_code)] // not reachable from a nav button yet: see above
+    NdiIn,
+    NdiOut,
     Osc,
     RemoteWs,
     Streaming,
@@ -694,145 +703,124 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// the preset-browser panel can't call `request_preset_load` itself (that
 /// needs the whole `AppState`), so a click just records the name here for
 /// the caller to act on once this frame's egui pass is done.
+// Step 9 (Phase 7 UI redesign plan): the 51 (53 with `--features link`)
+// individual `AppState`-derived params this function used to take are
+// grouped into 7 disjoint `&mut` context structs (`ui::ctx`) plus
+// `theme_request` as an 8th, standalone out-param: pure re-packaging, see
+// `ui::ctx`'s module doc comment for the field-to-struct assignment and the
+// borrow-check reasoning behind it.
 #[allow(clippy::too_many_arguments)]
 fn ui_root(
     ui: &mut egui::Ui,
-    show: &mut Show,
-    deck_tex_ids: &[egui::TextureId; 4],
-    deck_preset_names: &[String; 4],
-    pending_validations: &HashSet<usize>,
-    preset_errors: &HashMap<usize, String>,
-    transition_seconds: &mut f64,
-    active_panel: &mut Panel,
-    preset_search_query: &mut String,
-    preset_search_cache: &mut ui::preset_browser::SearchCache,
-    thumb_queue: &mut Vec<ThumbJob>,
-    thumbnail_textures: &HashMap<String, egui::TextureHandle>,
-    failed_thumbnails: &HashSet<String>,
-    audio: &opendrop_audio::AudioHandle,
-    input_devices: &Vec<String>,
-    selected_input_device: &mut Option<String>,
-    last_vu_level: f64,
-    load_request: &mut Option<String>,
-    t0: Instant,
-    refresh_interval: &mut Duration,
-    invisible_mode: &mut InvisibleMode,
-    pending_mesh_size: &mut [Option<(usize, usize)>; deck::DECK_COUNT],
-    event_loop: &ActiveEventLoop,
-    output_window: &Window,
-    selected_output_monitor: &mut Option<String>,
-    registry: &CommandRegistry,
-    midi: &opendrop_io::midi::MidiHandle,
-    midi_learning: &mut Option<(CommandId, Option<MidiTriggerKey>)>,
-    ndi: &opendrop_io::ndi::NdiHandle,
-    ndi_composite_active: &mut bool,
-    ndi_deck_active: &mut [bool; deck::DECK_COUNT],
-    ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
-    osc: &opendrop_io::osc::OscHandle,
-    osc_port: &mut u16,
-    remote_ws: &opendrop_io::remote_ws::RemoteWsHandle,
-    obs: &opendrop_io::obs::ObsHandle,
-    obs_host: &mut String,
-    obs_port: &mut u16,
-    twitch: &opendrop_io::twitch::TwitchHandle,
-    twitch_channel: &mut String,
-    twitch_oauth_token_input: &mut String,
-    kick: &opendrop_io::kick::KickHandle,
-    kick_channel: &mut String,
-    kick_bearer_token_input: &mut String,
-    kick_xsrf_token_input: &mut String,
-    kick_cookies_input: &mut String,
-    chat_log: &VecDeque<opendrop_io::chat::ChatMessage>,
-    streaming_secret_save_error: &mut Option<String>,
-    #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
-    #[cfg(feature = "link")] link_tempo_input: &mut f64,
-    v4l2: &opendrop_io::v4l2loopback::V4l2Handle,
-    v4l2_active: &mut bool,
-    v4l2_device: &mut Option<Option<PathBuf>>,
+    shell: &mut ui::ctx::ShellCtx,
+    perform: &mut ui::ctx::PerformCtx,
+    library: &mut ui::ctx::LibraryCtx,
+    sources: &mut ui::ctx::SourcesCtx,
+    output: &mut ui::ctx::OutputCtx,
+    stream: &mut ui::ctx::StreamCtx,
+    control: &mut ui::ctx::ControlCtx,
+    theme_request: &mut Option<theme::registry::ThemeId>,
 ) {
+    // Plumbing only for now (Step 9): no UI element writes to this yet.
+    // Actually consuming it to switch themes at runtime is Step 12's job.
+    let _ = theme_request;
+    // `control` (Ableton Link) is only read from the `#[cfg(feature =
+    // "link")]` match arm below: under the default build `ControlCtx` is
+    // its empty marker variant (see that struct's own doc comment) and
+    // this line is the only "use" of the parameter, avoiding a spurious
+    // unused-variable warning without renaming the param.
+    let _ = &control;
     egui::CentralPanel::default().show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.selectable_value(active_panel, Panel::Decks, "Decks");
-            ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
-            ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
-            ui.selectable_value(active_panel, Panel::Audio, "Audio");
-            ui.selectable_value(active_panel, Panel::Quality, "Quality");
-            ui.selectable_value(active_panel, Panel::Output, "Output");
-            ui.selectable_value(active_panel, Panel::Midi, "MIDI");
-            ui.selectable_value(active_panel, Panel::Ndi, "NDI");
-            ui.selectable_value(active_panel, Panel::Osc, "OSC");
-            ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
-            ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
+            ui.selectable_value(shell.active_panel, Panel::Decks, "Decks");
+            ui.selectable_value(shell.active_panel, Panel::PresetBrowser, "Presets");
+            ui.selectable_value(shell.active_panel, Panel::Playlists, "Playlists");
+            ui.selectable_value(shell.active_panel, Panel::Audio, "Audio");
+            ui.selectable_value(shell.active_panel, Panel::Quality, "Quality");
+            ui.selectable_value(shell.active_panel, Panel::Output, "Output");
+            ui.selectable_value(shell.active_panel, Panel::Midi, "MIDI");
+            // Step 9: the nav row still has exactly one NDI button (zero
+            // visual change): it targets `NdiOut`; `NdiIn` isn't reachable
+            // from a button yet. Both variants already drive the same
+            // `ui::ndi::show` call below either way, so this is not
+            // user-visible: a future step is what actually gives the two
+            // directions their own buttons/content.
+            ui.selectable_value(shell.active_panel, Panel::NdiOut, "NDI");
+            ui.selectable_value(shell.active_panel, Panel::Osc, "OSC");
+            ui.selectable_value(shell.active_panel, Panel::RemoteWs, "Remote");
+            ui.selectable_value(shell.active_panel, Panel::Streaming, "Streaming");
             #[cfg(feature = "link")]
-            ui.selectable_value(active_panel, Panel::Link, "Link");
-            ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
-            ui.selectable_value(active_panel, Panel::About, "About");
+            ui.selectable_value(shell.active_panel, Panel::Link, "Link");
+            ui.selectable_value(shell.active_panel, Panel::V4l2, "V4L2");
+            ui.selectable_value(shell.active_panel, Panel::About, "About");
         });
         ui.separator();
-        match active_panel {
+        match shell.active_panel {
             Panel::Decks => {
-                ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
-            }
-            Panel::PresetBrowser => {
-                ui::preset_browser::show(
+                ui::decks::show(
                     ui,
-                    show,
-                    preset_search_query,
-                    preset_search_cache,
-                    thumb_queue,
-                    thumbnail_textures,
-                    failed_thumbnails,
-                    load_request,
+                    perform.show,
+                    perform.deck_tex_ids,
+                    perform.deck_preset_names,
+                    perform.pending_validations,
+                    perform.preset_errors,
+                    perform.transition_seconds,
                 );
             }
+            Panel::PresetBrowser => {
+                ui::preset_browser::show(ui, perform, library);
+            }
             Panel::Playlists => {
-                ui::playlists::show(ui, show, t0);
+                ui::playlists::show(ui, perform.show, perform.t0);
             }
             Panel::Audio => {
-                ui::audio::show(ui, audio, input_devices, selected_input_device, last_vu_level);
+                ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);
             }
             Panel::Quality => {
-                ui::quality::show(ui, refresh_interval, invisible_mode, pending_mesh_size);
+                ui::quality::show(ui, output.refresh_interval, output.invisible_mode, output.pending_mesh_size);
             }
             Panel::Output => {
-                ui::output::show(ui, event_loop, output_window, selected_output_monitor);
+                ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
             Panel::Midi => {
-                ui::midi::show(ui, midi, registry, midi_learning);
+                ui::midi::show(ui, sources.midi, sources.registry, sources.midi_learning);
             }
-            Panel::Ndi => {
-                ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active, ndi_in_selected_source);
+            Panel::NdiIn => {
+                ui::ndi::show(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active, sources.ndi_in_selected_source);
+            }
+            Panel::NdiOut => {
+                ui::ndi::show(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active, sources.ndi_in_selected_source);
             }
             Panel::Osc => {
-                ui::osc::show(ui, osc, osc_port);
+                ui::osc::show(ui, sources.osc, sources.osc_port);
             }
             Panel::RemoteWs => {
-                ui::remote::show(ui, remote_ws);
+                ui::remote::show(ui, sources.remote_ws);
             }
             Panel::Streaming => {
                 ui::streaming::show(
                     ui,
-                    obs,
-                    obs_host,
-                    obs_port,
-                    twitch,
-                    twitch_channel,
-                    twitch_oauth_token_input,
-                    kick,
-                    kick_channel,
-                    kick_bearer_token_input,
-                    kick_xsrf_token_input,
-                    kick_cookies_input,
-                    chat_log,
-                    streaming_secret_save_error,
+                    stream.obs,
+                    stream.obs_host,
+                    stream.obs_port,
+                    stream.twitch,
+                    stream.twitch_channel,
+                    stream.twitch_oauth_token_input,
+                    stream.kick,
+                    stream.kick_channel,
+                    stream.kick_bearer_token_input,
+                    stream.kick_xsrf_token_input,
+                    stream.kick_cookies_input,
+                    stream.chat_log,
+                    stream.streaming_secret_save_error,
                 );
             }
             #[cfg(feature = "link")]
             Panel::Link => {
-                ui::link::show(ui, link, link_tempo_input);
+                ui::link::show(ui, control.link, control.link_tempo_input);
             }
             Panel::V4l2 => {
-                ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
+                ui::v4l2loopback::show(ui, sources.v4l2, sources.v4l2_active, sources.v4l2_device);
             }
             Panel::About => {
                 ui::about::show(ui);
@@ -1417,63 +1405,96 @@ impl ApplicationHandler for App {
             // `request_preset_load` call has to wait until after `run()`
             // returns, below.
             let mut preset_load_request: Option<String> = None;
+            // Step 9: plumbing only, not consumed yet: see `ui_root`'s own
+            // comment on this parameter.
+            let mut theme_request: Option<theme::registry::ThemeId> = None;
+
+            // Step 9: group the bindings the destructure above just
+            // produced into the 7 context structs `ui_root` now takes,
+            // instead of 51/53 individual arguments. Every field here is
+            // exactly one of those bindings: no new state. Named with a
+            // `_ctx` suffix only where the destructure already bound a
+            // same-named `WindowSlot` (`control`, `output`) that's still
+            // needed below for `egui_glow.run`/`&output.window`.
+            let mut shell_ctx = ui::ctx::ShellCtx { active_panel };
+            let mut perform_ctx = ui::ctx::PerformCtx {
+                show,
+                deck_tex_ids,
+                deck_preset_names,
+                pending_validations,
+                preset_errors,
+                transition_seconds,
+                t0,
+            };
+            let mut library_ctx = ui::ctx::LibraryCtx {
+                preset_search_query,
+                search_cache: preset_search_cache,
+                thumb_queue,
+                thumbnail_textures,
+                failed_thumbnails,
+                load_request: &mut preset_load_request,
+            };
+            let mut sources_ctx = ui::ctx::SourcesCtx {
+                audio,
+                input_devices,
+                selected_input_device,
+                last_vu_level,
+                registry,
+                midi,
+                midi_learning,
+                ndi_in_selected_source,
+                osc,
+                osc_port,
+                remote_ws,
+                v4l2,
+                v4l2_active,
+                v4l2_device,
+            };
+            let mut output_ctx = ui::ctx::OutputCtx {
+                refresh_interval,
+                invisible_mode,
+                pending_mesh_size,
+                event_loop,
+                output_window: &output.window,
+                selected_output_monitor,
+                ndi,
+                ndi_composite_active,
+                ndi_deck_active,
+            };
+            let mut stream_ctx = ui::ctx::StreamCtx {
+                obs,
+                obs_host,
+                obs_port,
+                twitch,
+                twitch_channel,
+                twitch_oauth_token_input,
+                kick,
+                kick_channel,
+                kick_bearer_token_input,
+                kick_xsrf_token_input,
+                kick_cookies_input,
+                chat_log,
+                streaming_secret_save_error,
+            };
+            let mut control_ctx = ui::ctx::ControlCtx {
+                #[cfg(feature = "link")]
+                link,
+                #[cfg(feature = "link")]
+                link_tempo_input,
+                #[cfg(not(feature = "link"))]
+                _marker: std::marker::PhantomData,
+            };
             egui_glow.run(&control.window, |ui| {
                 ui_root(
                     ui,
-                    show,
-                    deck_tex_ids,
-                    deck_preset_names,
-                    pending_validations,
-                    preset_errors,
-                    transition_seconds,
-                    active_panel,
-                    preset_search_query,
-                    preset_search_cache,
-                    thumb_queue,
-                    thumbnail_textures,
-                    failed_thumbnails,
-                    audio,
-                    input_devices,
-                    selected_input_device,
-                    last_vu_level,
-                    &mut preset_load_request,
-                    t0,
-                    refresh_interval,
-                    invisible_mode,
-                    pending_mesh_size,
-                    event_loop,
-                    &output.window,
-                    selected_output_monitor,
-                    registry,
-                    midi,
-                    midi_learning,
-                    ndi,
-                    ndi_composite_active,
-                    ndi_deck_active,
-                    ndi_in_selected_source,
-                    osc,
-                    osc_port,
-                    remote_ws,
-                    obs,
-                    obs_host,
-                    obs_port,
-                    twitch,
-                    twitch_channel,
-                    twitch_oauth_token_input,
-                    kick,
-                    kick_channel,
-                    kick_bearer_token_input,
-                    kick_xsrf_token_input,
-                    kick_cookies_input,
-                    chat_log,
-                    streaming_secret_save_error,
-                    #[cfg(feature = "link")]
-                    link,
-                    #[cfg(feature = "link")]
-                    link_tempo_input,
-                    v4l2,
-                    v4l2_active,
-                    v4l2_device,
+                    &mut shell_ctx,
+                    &mut perform_ctx,
+                    &mut library_ctx,
+                    &mut sources_ctx,
+                    &mut output_ctx,
+                    &mut stream_ctx,
+                    &mut control_ctx,
+                    &mut theme_request,
                 );
             });
             if let Some(name) = preset_load_request {

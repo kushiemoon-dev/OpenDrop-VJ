@@ -1,0 +1,158 @@
+//! Step 9 of the Phase 7 UI redesign plan: `ui_root`'s 51 (53 with
+//! `--features link`) positional parameters, grouped into 7 disjoint `&mut`
+//! context structs. Pure re-packaging: every field below is exactly the
+//! binding `main.rs`'s `let AppState { ... } = state;` destructure already
+//! produces, only regrouped; no new state, no behavior/visual change.
+//!
+//! Each struct mirrors one region of the control window's panel set, so a
+//! panel's `show` call only needs to borrow the structs it actually reads:
+//! `ShellCtx` (nav chrome), `PerformCtx` (decks/playlists/browser's shared
+//! `Show`), `LibraryCtx` (preset browser), `SourcesCtx` (external control
+//! surfaces: audio input, MIDI, OSC, remote WS, V4L2, the NDI-in selection),
+//! `OutputCtx` (NDI-out, the Output panel's monitor picker, the Quality
+//! panel), `StreamCtx` (OBS/Twitch/Kick), `ControlCtx` (Ableton Link, `#[cfg(
+//! feature = "link")]`-gated per field, never on the struct itself: see
+//! that struct's own doc comment).
+//!
+//! Two borrow-check points worth calling out explicitly (both already
+//! resolved by construction, not something a caller needs to work around):
+//! - `show` (the `Show` business object) lives in `PerformCtx` only, never
+//!   duplicated into another struct. `ui::preset_browser::show`: the one
+//!   panel that needs both a `Show` borrow and the browser's own local
+//!   state: takes `(&mut PerformCtx, &mut LibraryCtx)` as two distinct
+//!   `&mut` parameters rather than one combined borrow, and reborrows
+//!   `perform.show` to `&Show` only for the instruction that calls
+//!   `SearchCache::resolve` (see that call site's own comment).
+//! - `ndi_in_selected_source` lives in `SourcesCtx` while the NDI-out
+//!   handle/toggles live in `OutputCtx`: required both to avoid a double
+//!   borrow of one NDI-shaped bundle and because `Panel::NdiIn`/`NdiOut`
+//!   (this same step) will eventually want the in/out panels reading from
+//!   different structs.
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use opendrop_core::commands::{CommandId, CommandRegistry};
+use opendrop_core::show::Show;
+use opendrop_core::thumb_queue::ThumbJob;
+use opendrop_engine::deck;
+use opendrop_io::midi::MidiTriggerKey;
+use winit::event_loop::ActiveEventLoop;
+use winit::window::Window;
+
+use crate::ui::preset_browser::SearchCache;
+use crate::{InvisibleMode, Panel};
+
+/// Nav chrome: which panel is active. `stage_mode`/a theme picker/a
+/// mini-transport (crossfader, BPM, tap) are named in this step's brief as
+/// this struct's eventual shape, but none of those exist as `AppState`
+/// fields yet (`stage_mode` is currently only a `config::UiConfig` field,
+/// not wired into `AppState`: see that module's doc comment): a later
+/// step adds them here once they do. `theme_request` is deliberately NOT a
+/// field of this struct: it's `ui_root`'s own 8th, standalone parameter
+/// (same idiom as `LibraryCtx::load_request`), so it stays out-of-band the
+/// same way across every struct instead of only for whichever one happens
+/// to hold the nav row.
+pub(crate) struct ShellCtx<'a> {
+    pub(crate) active_panel: &'a mut Panel,
+}
+
+/// Live performance state: the `Show` business object plus per-deck UI
+/// state, shared by the Decks, Playlists, and Preset Browser panels (the
+/// browser also needs `LibraryCtx`: see this module's doc comment on the
+/// two-struct split).
+pub(crate) struct PerformCtx<'a> {
+    pub(crate) show: &'a mut Show,
+    pub(crate) deck_tex_ids: &'a [egui::TextureId; 4],
+    pub(crate) deck_preset_names: &'a [String; 4],
+    pub(crate) pending_validations: &'a HashSet<usize>,
+    pub(crate) preset_errors: &'a HashMap<usize, String>,
+    pub(crate) transition_seconds: &'a mut f64,
+    pub(crate) t0: Instant,
+}
+
+/// Preset Browser panel state: search box, cached results, thumbnail
+/// pipeline. `search_cache` is named to match `SearchCache::resolve`'s call
+/// site exactly (`library.search_cache.resolve(&*perform.show, query)`,
+/// inside `ui::preset_browser::show`: a shared reborrow of a `PerformCtx`
+/// field, scoped to that one call, never stored). `load_request` is the
+/// browser's click-to-load out-param, same idiom as the pre-existing
+/// `preset_load_request` local in `main.rs`'s `run()` closure.
+pub(crate) struct LibraryCtx<'a> {
+    pub(crate) preset_search_query: &'a mut String,
+    pub(crate) search_cache: &'a mut SearchCache,
+    pub(crate) thumb_queue: &'a mut Vec<ThumbJob>,
+    pub(crate) thumbnail_textures: &'a HashMap<String, egui::TextureHandle>,
+    pub(crate) failed_thumbnails: &'a HashSet<String>,
+    pub(crate) load_request: &'a mut Option<String>,
+}
+
+/// External control/device surfaces: Audio input, MIDI, OSC, remote WS,
+/// V4L2loopback, and the NDI-in panel's own selected-source state (the NDI
+/// handle and its composite/deck toggles are output-side: see `OutputCtx`).
+pub(crate) struct SourcesCtx<'a> {
+    pub(crate) audio: &'a opendrop_audio::AudioHandle,
+    pub(crate) input_devices: &'a Vec<String>,
+    pub(crate) selected_input_device: &'a mut Option<String>,
+    pub(crate) last_vu_level: f64,
+    pub(crate) registry: &'a CommandRegistry,
+    pub(crate) midi: &'a opendrop_io::midi::MidiHandle,
+    pub(crate) midi_learning: &'a mut Option<(CommandId, Option<MidiTriggerKey>)>,
+    pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,
+    pub(crate) osc: &'a opendrop_io::osc::OscHandle,
+    pub(crate) osc_port: &'a mut u16,
+    pub(crate) remote_ws: &'a opendrop_io::remote_ws::RemoteWsHandle,
+    pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
+    pub(crate) v4l2_active: &'a mut bool,
+    pub(crate) v4l2_device: &'a mut Option<Option<PathBuf>>,
+}
+
+/// Output-side state: the NDI-out handle and its composite/per-deck
+/// toggles, the Output panel's monitor picker, and the Quality panel.
+pub(crate) struct OutputCtx<'a> {
+    pub(crate) refresh_interval: &'a mut Duration,
+    pub(crate) invisible_mode: &'a mut InvisibleMode,
+    pub(crate) pending_mesh_size: &'a mut [Option<(usize, usize)>; deck::DECK_COUNT],
+    pub(crate) event_loop: &'a ActiveEventLoop,
+    pub(crate) output_window: &'a Window,
+    pub(crate) selected_output_monitor: &'a mut Option<String>,
+    pub(crate) ndi: &'a opendrop_io::ndi::NdiHandle,
+    pub(crate) ndi_composite_active: &'a mut bool,
+    pub(crate) ndi_deck_active: &'a mut [bool; deck::DECK_COUNT],
+}
+
+/// Streaming panel state: OBS, Twitch, Kick, and the shared chat log.
+pub(crate) struct StreamCtx<'a> {
+    pub(crate) obs: &'a opendrop_io::obs::ObsHandle,
+    pub(crate) obs_host: &'a mut String,
+    pub(crate) obs_port: &'a mut u16,
+    pub(crate) twitch: &'a opendrop_io::twitch::TwitchHandle,
+    pub(crate) twitch_channel: &'a mut String,
+    pub(crate) twitch_oauth_token_input: &'a mut String,
+    pub(crate) kick: &'a opendrop_io::kick::KickHandle,
+    pub(crate) kick_channel: &'a mut String,
+    pub(crate) kick_bearer_token_input: &'a mut String,
+    pub(crate) kick_xsrf_token_input: &'a mut String,
+    pub(crate) kick_cookies_input: &'a mut String,
+    pub(crate) chat_log: &'a VecDeque<opendrop_io::chat::ChatMessage>,
+    pub(crate) streaming_secret_save_error: &'a mut Option<String>,
+}
+
+/// Ableton Link panel state. `#[cfg(feature = "link")]` is on the two
+/// fields individually, never on the struct itself, so `ControlCtx` exists
+/// (and `ui_root`'s arity stays 8 params) in both build configurations:
+/// see the plan's explicit vigilance note on this struct. With the `link`
+/// feature off (the default), both real fields disappear and `_marker` is
+/// the struct's only field: a zero-sized `PhantomData` purely so the `'a`
+/// lifetime parameter stays used (an empty struct with a declared-but-
+/// unused lifetime is a hard compile error, `E0392`): not business state,
+/// never read.
+pub(crate) struct ControlCtx<'a> {
+    #[cfg(feature = "link")]
+    pub(crate) link: &'a opendrop_io::link::LinkHandle,
+    #[cfg(feature = "link")]
+    pub(crate) link_tempo_input: &'a mut f64,
+    #[cfg(not(feature = "link"))]
+    pub(crate) _marker: std::marker::PhantomData<&'a ()>,
+}

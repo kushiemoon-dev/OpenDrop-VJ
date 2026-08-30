@@ -31,6 +31,8 @@ use opendrop_core::show::Show;
 use opendrop_core::thumb_queue::{enqueue_front, prune_to_visible, ThumbJob};
 use std::collections::{HashMap, HashSet};
 
+use crate::ui::ctx::{LibraryCtx, PerformCtx};
+
 /// Matches `opendrop_engine::thumbnail::{THUMB_W, THUMB_H}`'s 192:108
 /// aspect ratio, scaled down for a browser tile.
 const TILE_SIZE: egui::Vec2 = egui::vec2(96.0, 54.0);
@@ -87,20 +89,15 @@ fn tile_stride(ui: &egui::Ui) -> f32 {
     TILE_CONTENT_W + frame.total_margin().sum().x + ui.spacing().item_spacing.x
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn show(
-    ui: &mut egui::Ui,
-    show: &mut Show,
-    search_query: &mut String,
-    search_cache: &mut SearchCache,
-    thumb_queue: &mut Vec<ThumbJob>,
-    thumbnail_textures: &HashMap<String, egui::TextureHandle>,
-    failed_thumbnails: &HashSet<String>,
-    load_request: &mut Option<String>,
-) {
+// Step 9 (Phase 7 UI redesign plan): takes the two context structs that
+// carry this panel's params instead of 7 individual ones: `perform.show`
+// (needed for the tiles' +A/+B buttons) and `library`'s 6 browser-local
+// fields. Pure re-packaging: every access below is exactly the field the
+// old individual parameter of the same name used to be.
+pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCtx) {
     ui.horizontal(|ui| {
         ui.label("Search");
-        ui.text_edit_singleline(search_query);
+        ui.text_edit_singleline(library.preset_search_query);
     });
 
     ui.separator();
@@ -112,9 +109,12 @@ pub fn show(
     // `ui.horizontal` does not wrap.
     let usable_w = ui.available_width() - ui.spacing().scroll.allocated_width();
     let per_row = ((usable_w / tile_stride(ui)).floor() as usize).max(1);
-    // Borrows `search_cache`, not `show`, so the tiles below can still take
-    // `show` mutably.
-    let results = search_cache.resolve(show, search_query.as_str());
+    // Borrows `library.search_cache`, not `perform.show`, so the tiles
+    // below can still take `perform.show` mutably: `&*perform.show` here
+    // is a shared reborrow of a `PerformCtx` field, scoped to this one
+    // call, never stored (see `ui::ctx`'s module doc comment on this exact
+    // call site).
+    let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str());
     let total_rows = results.len().div_ceil(per_row);
 
     // Whole-branch review Finding 4: names of the tiles actually on screen
@@ -137,7 +137,7 @@ pub fn show(
             ui.horizontal(|ui| {
                 ui.set_min_height(ROW_HEIGHT); // keeps the real pitch equal to ROW_HEIGHT
                 for name in &results[start..end] {
-                    tile(ui, show, name, thumb_queue, thumbnail_textures, failed_thumbnails, load_request);
+                    tile(ui, perform.show, name, library.thumb_queue, library.thumbnail_textures, library.failed_thumbnails, library.load_request);
                 }
             });
         }
@@ -152,7 +152,7 @@ pub fn show(
     // panel is shown again, at which point this prunes it fresh against
     // whatever is visible then, before the next pump tick can grind
     // through anything stale.
-    *thumb_queue = prune_to_visible(std::mem::take(thumb_queue), &visible_names);
+    *library.thumb_queue = prune_to_visible(std::mem::take(library.thumb_queue), &visible_names);
 }
 
 /// One preset tile: thumbnail (or placeholder while it's still queued),

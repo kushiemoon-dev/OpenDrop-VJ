@@ -72,13 +72,20 @@ pub fn visuals(t: &Theme) -> Visuals {
 /// scale; `dense` is an explicit scope wired later (Step 8
 /// `widgets::dense`).
 pub fn style(t: &Theme) -> Style {
-    Style { visuals: visuals(t), spacing: egui::style::Spacing { item_spacing: t.metrics.spacing_airy, ..Default::default() }, ..Default::default() }
+    Style {
+        visuals: visuals(t),
+        text_styles: super::fonts::text_styles(t),
+        spacing: egui::style::Spacing { item_spacing: t.metrics.spacing_airy, ..Default::default() },
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::fonts;
     use crate::theme::registry::{self, ThemeId};
+    use egui::TextStyle;
 
     const ALL_THEME_IDS: [ThemeId; 3] = [ThemeId::Kushie, ThemeId::OpenDropClassic, ThemeId::Cyan];
 
@@ -253,6 +260,41 @@ mod tests {
         for id in ALL_THEME_IDS {
             let t = registry::get(id);
             assert_eq!(style(t).spacing.item_spacing, t.metrics.spacing_airy, "{id:?}");
+        }
+    }
+
+    // --- text_styles: merged from `fonts::text_styles`, not left at
+    // egui's built-in default (which lacks the 5 custom `TextStyle::Name`s
+    // and would panic on `.resolve()` of any of them) -------------------
+
+    #[test]
+    fn style_text_styles_field_matches_fonts_text_styles_output() {
+        for id in ALL_THEME_IDS {
+            let t = registry::get(id);
+            assert_eq!(style(t).text_styles, fonts::text_styles(t), "{id:?}");
+        }
+    }
+
+    #[test]
+    fn style_text_styles_contains_all_ten_known_text_styles() {
+        for id in ALL_THEME_IDS {
+            let t = registry::get(id);
+            let styles = style(t).text_styles;
+            let expected = [
+                TextStyle::Heading,
+                TextStyle::Body,
+                TextStyle::Button,
+                TextStyle::Small,
+                TextStyle::Monospace,
+                TextStyle::Name("Display".into()),
+                TextStyle::Name("Section".into()),
+                TextStyle::Name("Strong".into()),
+                TextStyle::Name("Micro".into()),
+                TextStyle::Name("Numeric".into()),
+            ];
+            for ts in expected {
+                assert!(styles.contains_key(&ts), "{id:?} missing {ts:?}");
+            }
         }
     }
 }

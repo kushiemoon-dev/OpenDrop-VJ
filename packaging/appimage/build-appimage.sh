@@ -155,7 +155,7 @@ EOF
 chmod +x "$APPDIR/AppRun"
 
 echo "Copying presets from $PRESETS_SRC ..."
-cp -r "$PRESETS_SRC/." "$APPDIR/usr/share/opendrop/presets/"
+rsync -a --exclude='.git' "$PRESETS_SRC/" "$APPDIR/usr/share/opendrop/presets/"
 
 # --- 3. Build the AppImage ---
 

@@ -193,8 +193,17 @@ Copy-Item $License (Join-Path $OutDir "LICENSE")
 
 # Sibling-of-exe "presets" folder, flat layout: matches preset_dir_from's
 # Windows branch (app/src/main.rs), verified against real MSVC in Step 14.
+# robocopy (not Copy-Item) so the presets source's .git directory can be
+# excluded; robocopy exit codes are NOT standard Windows conventions, 0-7
+# all mean success (various "files copied" states), only 8+ is a real
+# failure.
 Write-Output "Copying presets from $PresetsSrc ..."
-Copy-Item $PresetsSrc (Join-Path $OutDir "presets") -Recurse
+$PresetsDest = Join-Path $OutDir "presets"
+robocopy $PresetsSrc $PresetsDest /E /XD .git
+if ($LASTEXITCODE -ge 8) {
+    Write-Error "robocopy failed copying presets (exit code $LASTEXITCODE)"
+    exit 1
+}
 
 # --- 5. Zip it ---
 

@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod audio;
+pub mod ctx;
 pub mod decks;
 // Feature-gated on the `mod` declaration itself, mirroring `opendrop_io
 // ::link`'s own gating: with the `link` feature off (the default), this

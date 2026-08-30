@@ -1,7 +1,10 @@
-//! Playlists + beat-sync panel: per-deck (A/B) playlist transport/lock/item
-//! list, plus the beat-sync engine controls (toggle, trigger config, tap
-//! tempo, auto-crossfade, BPM display). Port of `SidebarPlaylist.svelte`
-//! (Step 18 of the plan).
+//! Playlists panel: per-deck (A/B) playlist transport/lock/item list, mode/
+//! interval controls, and per-deck beat-sync toggle + trigger config. Port
+//! of `SidebarPlaylist.svelte` (Step 18 of the plan). The shared BPM
+//! display, Tap Tempo/Clear, beats-per-change selector, and auto-crossfade
+//! toggle that used to sit here moved into the header's hand-painted
+//! mini-transport (Step 10 of the Phase 7 UI redesign plan, `ui::shell::
+//! header`): this panel no longer renders them.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as
 //! `ui::decks`/`ui::preset_browser`: the call site (`main.rs`'s
@@ -21,9 +24,8 @@ use opendrop_core::beat_trigger::{apply_beat_trigger_patch, BeatTriggerConfigPat
 use opendrop_core::commands::Deck;
 use opendrop_core::playlist::PlaylistMode;
 use opendrop_core::show::Show;
-use std::time::Instant;
 
-pub fn show(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
+pub fn show(ui: &mut egui::Ui, show: &mut Show) {
     ui.horizontal(|ui| {
         ui.label("Mode");
         if ui.selectable_label(show.playlists.mode == PlaylistMode::Sequential, "Sequential").clicked() {
@@ -37,41 +39,6 @@ pub fn show(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
     ui.horizontal(|ui| {
         ui.label("Interval (s)");
         ui.add(egui::Slider::new(&mut show.playlists.interval_sec, 2.0..=120.0));
-    });
-
-    ui.separator();
-
-    ui.horizontal(|ui| {
-        ui.label("BPM");
-        let bpm = show.current_bpm();
-        ui.label(if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") });
-        if ui.button("Tap Tempo").clicked() {
-            show.tap_tempo(t0.elapsed().as_secs_f64() * 1000.0);
-        }
-        if ui.button("Clear").clicked() {
-            show.clear_manual_bpm();
-        }
-        // Whole-branch review Finding 6: `Show::beats_per_change` (auto-
-        // crossfade cadence, distinct from the per-deck trigger configs
-        // below) had no UI control. Same fixed option set as the TS
-        // reference's `<select>` (`SidebarPlaylist.svelte:118`).
-        egui::ComboBox::from_id_salt("beats_per_change")
-            .selected_text(show.beats_per_change.to_string())
-            .show_ui(ui, |ui| {
-                for n in [4u32, 8, 16, 32] {
-                    if ui.selectable_label(show.beats_per_change == n, n.to_string()).clicked() {
-                        show.beats_per_change = n;
-                    }
-                }
-            });
-        // Whole-branch review Finding 7: resets the cadence on every
-        // toggle (either direction), matching the TS reference's
-        // unconditional `resetAutoXfadeCount()` call (`+page.svelte:1754`)
-        //: without it, re-enabling auto-xfade resumed mid-cycle instead
-        // of restarting it.
-        if ui.toggle_value(&mut show.auto_xfade, "⇄").changed() {
-            show.reset_auto_xfade_count();
-        }
     });
 
     ui.separator();

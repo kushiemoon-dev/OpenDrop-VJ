@@ -1,7 +1,9 @@
 //! Decks panel: 4 deck cards (live GPU thumbnail, preset name/status,
-//! active-slot highlight, bus-cycle button), plus the crossfader and
-//! transition-seconds controls. Port of `MixerLayout.svelte` (Step 16 of
-//! the plan).
+//! active-slot highlight, bus-cycle button), plus the transition-seconds
+//! control. Port of `MixerLayout.svelte` (Step 16 of the plan). The
+//! crossfader that used to sit here moved into the header's hand-painted
+//! mini-transport (Step 10 of the Phase 7 UI redesign plan, `ui::shell::
+//! header`): always visible now, not just while this panel is active.
 //!
 //! Takes individual `AppState` fields rather than `&mut AppState` as a
 //! whole: the call site (`main.rs`'s `about_to_wait`) already holds
@@ -43,12 +45,6 @@ pub fn show(
     });
 
     ui.separator();
-
-    ui.horizontal(|ui| {
-        ui.label("Crossfader");
-        ui.add(egui::Slider::new(&mut show.crossfader, 0.0..=1.0));
-        ui.label(format!("A {:.0}% / B {:.0}%", (1.0 - show.crossfader) * 100.0, show.crossfader * 100.0));
-    });
 
     ui.horizontal(|ui| {
         ui.label("Transition (s)");

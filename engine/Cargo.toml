@@ -11,3 +11,6 @@ opendrop-core = { path = "../core" }
 [build-dependencies]
 bindgen = "0.70"
 pkg-config = "0.3"
+
+[target.'cfg(windows)'.build-dependencies]
+vcpkg = "0.2"

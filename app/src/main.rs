@@ -149,6 +149,7 @@ enum Panel {
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    About,
 }
 
 struct WindowSlot {
@@ -763,6 +764,7 @@ fn ui_root(
             #[cfg(feature = "link")]
             ui.selectable_value(active_panel, Panel::Link, "Link");
             ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
+            ui.selectable_value(active_panel, Panel::About, "About");
         });
         ui.separator();
         match active_panel {
@@ -829,6 +831,9 @@ fn ui_root(
             }
             Panel::V4l2 => {
                 ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
+            }
+            Panel::About => {
+                ui::about::show(ui);
             }
         }
     });
@@ -1580,14 +1585,62 @@ fn create_window_slot(display: &Display, gl_config: &Config, window: Window) -> 
     })
 }
 
-fn preset_dir() -> PathBuf {
-    let raw = std::env::var("OPENDROP_PRESET_DIR").unwrap_or_else(|_| {
-        panic!(
-            "OPENDROP_PRESET_DIR is not set. Point it at a directory of .milk presets, e.g.:\n  \
-             OPENDROP_PRESET_DIR=/srv/http/opendrop-presets cargo run -p opendrop-app"
-        )
-    });
-    PathBuf::from(raw)
+fn preset_dir() -> Result<PathBuf, String> {
+    preset_dir_from(
+        std::env::var_os("OPENDROP_PRESET_DIR"),
+        std::env::var_os("APPDIR"),
+        std::env::current_exe().ok(),
+    )
+}
+
+/// The env-reading half of `preset_dir`, split out so the fallback order is
+/// testable without mutating process-global environment state.
+///
+/// Resolution order: `OPENDROP_PRESET_DIR` wins unconditionally if set; then
+/// a platform-specific packaged location, only if it actually exists on
+/// disk; else the same error `cargo run` has always raised for a missing
+/// dev override.
+fn preset_dir_from(
+    env_override: Option<OsString>,
+    appdir: Option<OsString>,
+    exe_path: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    if let Some(raw) = env_override {
+        return Ok(PathBuf::from(raw));
+    }
+
+    // Linux: AppImage's own runtime sets APPDIR at launch (not something
+    // this repo sets). Must match the layout Step 6 creates in the AppDir.
+    if let Some(appdir) = appdir {
+        let candidate = PathBuf::from(appdir).join("usr/share/opendrop/presets");
+        if candidate.is_dir() {
+            return Ok(candidate);
+        }
+    }
+
+    // Windows: sibling-of-exe, flat layout (no `usr/bin`/`usr/share`
+    // AppImage-style structure). Must match the layout Step 15 creates in
+    // the portable zip.
+    #[cfg(target_os = "windows")]
+    if let Some(exe_path) = exe_path {
+        if let Some(exe_dir) = exe_path.parent() {
+            let candidate = exe_dir.join("presets");
+            if candidate.is_dir() {
+                return Ok(candidate);
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = exe_path;
+
+    // macOS packaged fallback: not implemented, no build/test machine
+    // available (see PHASE6-PACKAGING.REQUIREMENTS.md)
+
+    Err(
+        "OPENDROP_PRESET_DIR is not set. Point it at a directory of .milk presets, e.g.:\n  \
+         OPENDROP_PRESET_DIR=/srv/http/opendrop-presets cargo run -p opendrop-app"
+            .to_string(),
+    )
 }
 
 /// Display name for a preset file: its path relative to `preset_dir`, with
@@ -1721,7 +1774,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // `--render-thumbnail` child process (see `thumbnails`' module doc), so
     // this process holds exactly the 4 deck contexts plus the main one.
 
-    let preset_root = preset_dir();
+    let preset_root = preset_dir()?;
     let presets = pick_distinct_presets(&preset_root, deck::DECK_COUNT);
     if presets.len() < deck::DECK_COUNT {
         return Err(format!(
@@ -2170,23 +2223,37 @@ mod tests {
     mod thumbnail_cache_dir_tests {
         use super::*;
 
+        // Only used by the POSIX-only fixtures below; gated the same way
+        // so it doesn't trip an unused-function warning on Windows.
+        #[cfg(not(target_os = "windows"))]
         fn os(s: &str) -> Option<OsString> {
             Some(OsString::from(s))
         }
 
+        // These three fixtures use POSIX-absolute literals (`/xdg`,
+        // `/home/u`) to exercise the `.is_absolute()` branch in
+        // `thumbnail_cache_dir_from`. `Path::is_absolute()` requires a
+        // drive/UNC prefix on Windows, so a bare `/xdg` is NOT absolute
+        // there and the fallback-to-temp_dir branch fires instead,
+        // failing these assertions: a test-fixture limitation, not a
+        // bug in the function (XDG_CACHE_HOME/HOME are POSIX-only
+        // conventions to begin with; see the doc comment above).
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn prefers_xdg_cache_home() {
             let dir = thumbnail_cache_dir_from(os("/xdg"), os("/home/u"));
             assert_eq!(dir, PathBuf::from("/xdg/opendrop/thumbnails"));
         }
 
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn falls_back_to_home_dot_cache() {
             let dir = thumbnail_cache_dir_from(None, os("/home/u"));
             assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));
         }
 
         #[test]
+        #[cfg(not(target_os = "windows"))]
         fn ignores_a_relative_xdg_cache_home() {
             let dir = thumbnail_cache_dir_from(os("relative/cache"), os("/home/u"));
             assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/thumbnails"));
@@ -2198,6 +2265,108 @@ mod tests {
             // rather than a bare, world-predictable path.
             let dir = thumbnail_cache_dir_from(None, None);
             assert!(dir.ends_with("opendrop/thumbnails"));
+        }
+    }
+
+    mod preset_dir_from_tests {
+        use super::*;
+
+        fn os(s: &str) -> Option<OsString> {
+            Some(OsString::from(s))
+        }
+
+        /// A fresh temp directory under `std::env::temp_dir()`, removed
+        /// when dropped. No `tempdir`-style crate is in use elsewhere in
+        /// this suite, so this is the plain-`std` equivalent.
+        struct ScratchDir {
+            path: PathBuf,
+        }
+
+        impl ScratchDir {
+            fn new(unique: &str) -> Self {
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock before UNIX epoch")
+                    .as_nanos();
+                let path = std::env::temp_dir().join(format!(
+                    "opendrop-preset_dir_from_tests-{unique}-{}-{nanos}",
+                    std::process::id()
+                ));
+                std::fs::create_dir_all(&path).expect("create scratch dir");
+                ScratchDir { path }
+            }
+        }
+
+        impl Drop for ScratchDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.path);
+            }
+        }
+
+        const MISSING_ENV_MESSAGE: &str = "OPENDROP_PRESET_DIR is not set. Point it at a directory of .milk presets, e.g.:\n  \
+             OPENDROP_PRESET_DIR=/srv/http/opendrop-presets cargo run -p opendrop-app";
+
+        #[test]
+        fn env_override_wins_even_when_appdir_and_exe_path_also_exist() {
+            let appdir = ScratchDir::new("env-wins-appdir");
+            std::fs::create_dir_all(appdir.path.join("usr/share/opendrop/presets")).unwrap();
+            let exe_dir = ScratchDir::new("env-wins-exe");
+            std::fs::create_dir_all(exe_dir.path.join("presets")).unwrap();
+
+            let dir = preset_dir_from(
+                os("/explicit/override"),
+                Some(appdir.path.clone().into_os_string()),
+                Some(exe_dir.path.join("opendrop-app")),
+            );
+            assert_eq!(dir, Ok(PathBuf::from("/explicit/override")));
+        }
+
+        #[test]
+        fn appdir_set_and_the_presets_subdir_exists_is_returned() {
+            let appdir = ScratchDir::new("appdir-exists");
+            let presets = appdir.path.join("usr/share/opendrop/presets");
+            std::fs::create_dir_all(&presets).unwrap();
+
+            let dir = preset_dir_from(None, Some(appdir.path.clone().into_os_string()), None);
+            assert_eq!(dir, Ok(presets));
+        }
+
+        #[test]
+        fn appdir_set_but_the_presets_subdir_is_missing_is_an_error() {
+            let appdir = ScratchDir::new("appdir-missing-subdir");
+            // appdir.path itself exists, but usr/share/opendrop/presets under
+            // it does not: must never fall back to a silent bogus path.
+
+            let dir = preset_dir_from(None, Some(appdir.path.clone().into_os_string()), None);
+            assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn windows_exe_with_a_sibling_presets_dir_is_returned() {
+            let exe_dir = ScratchDir::new("windows-exe-sibling");
+            let presets = exe_dir.path.join("presets");
+            std::fs::create_dir_all(&presets).unwrap();
+
+            let dir = preset_dir_from(None, None, Some(exe_dir.path.join("opendrop-app.exe")));
+            assert_eq!(dir, Ok(presets));
+        }
+
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn windows_exe_without_a_sibling_presets_dir_is_an_error() {
+            let exe_dir = ScratchDir::new("windows-exe-no-sibling");
+
+            let dir = preset_dir_from(None, None, Some(exe_dir.path.join("opendrop-app.exe")));
+            assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
+        }
+
+        #[test]
+        fn nothing_set_is_an_error_with_the_unchanged_dev_message() {
+            // Regression coverage for the current `cargo run` dev behavior:
+            // same message, now returned instead of panicking.
+            let dir = preset_dir_from(None, None, None);
+            assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
         }
     }
 

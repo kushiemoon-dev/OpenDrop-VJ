@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=OpenDrop Native
+Exec=opendrop-app
+Icon=opendrop-native
+Type=Application
+Categories=AudioVideo;

@@ -24,6 +24,20 @@ builder, soit remplacer/supprimer `ndi-sdk-shim/` et l'entrée `[env]` de
 `.cargo/config.toml` en conséquence. Le SDK lui-même se télécharge sur
 ndi.video.
 
+## Limitation connue : découverte NDI
+
+La découverte réseau NDI (énumération des sources NDI publiées sur le réseau
+local dans l'interface utilisateur) dépend d'un daemon Avahi actif sur la
+machine hôte. L'AppImage distribué ne peut pas embarquer un daemon système ;
+cette limitation est donc acceptée et documentée en Phase 6 plutôt que
+corrigée. L'application fonctionnera normalement en son absence, mais
+l'énumération automatique des sources NDI ne sera pas disponible; l'accès
+direct par URL ou adresse IP restera opérationnel.
+
+*Note :* le prérequis NDI SDK + `libprojectm` dev (décrit ci-dessus) s'applique
+à **toute machine de build**, y compris Windows (voir Step 12-13 du plan pour
+les instructions spécifiques à chaque plateforme).
+
 ## Ableton Link (optionnel, GPL)
 
 Le support Ableton Link (`io::link` / panneau Link) est désactivé par

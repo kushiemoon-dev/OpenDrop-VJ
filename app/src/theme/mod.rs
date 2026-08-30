@@ -5,6 +5,7 @@
 //! calls it yet from `main.rs` or `ui::`: that wiring starts at Step 4.
 
 pub mod easing;
+pub mod fonts;
 pub mod registry;
 pub mod tokens;
 pub mod visuals;

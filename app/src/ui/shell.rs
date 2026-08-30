@@ -31,23 +31,32 @@ use crate::Panel;
 /// the header zone, drawn once per frame before the content match, not
 /// gated on which panel is active.
 pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx) {
-    ui.horizontal(|ui| {
-        let t = theme(ui);
-        wordmark(ui);
+    // `dense` (Step 8's density-scope helper): the header packs a lot into
+    // 48px: wordmark, crossfader, the whole BPM/tap row, and the
+    // right-aligned Stage/theme group: so this tightens `item_spacing`
+    // between all of them (Step 10 fix-round-1: the airy default measured
+    // ~830px of wanted content against a real ~622-800px window at the
+    // app's default/untouched size, overflowing the right-aligned group to
+    // 0 available width and making it disappear rather than overlap).
+    widgets::dense(ui, |ui| {
+        ui.horizontal(|ui| {
+            let t = theme(ui);
+            wordmark(ui);
 
-        ui.add_space(t.metrics.spacing_airy.x * 2.0);
-        crossfader(ui, perform.show);
+            ui.add_space(t.metrics.spacing_dense.x);
+            crossfader(ui, perform.show);
 
-        ui.add_space(t.metrics.spacing_airy.x * 2.0);
-        bpm_tap(ui, perform.show, perform.t0);
+            ui.add_space(t.metrics.spacing_dense.x);
+            bpm_tap(ui, perform.show, perform.t0);
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Rightmost: read-only theme picker (Step 10 brief: wiring it
-            // to actually switch themes is Step 12's job).
-            theme_combo(ui);
-            if widgets::ghost_button(ui, "⛶").clicked() {
-                *shell.stage_mode = !*shell.stage_mode;
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Rightmost: read-only theme picker (Step 10 brief: wiring
+                // it to actually switch themes is Step 12's job).
+                theme_combo(ui);
+                if widgets::ghost_button(ui, "⛶").clicked() {
+                    *shell.stage_mode = !*shell.stage_mode;
+                }
+            });
         });
     });
 }
@@ -82,7 +91,11 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 
     mono_label(ui, format!("A · {:.0}%", (1.0 - show.crossfader) * 100.0));
 
-    let rail_width = 200.0;
+    // Step 10 fix-round-1: narrowed from 200 to fit the default/untouched
+    // window width (see `header`'s own doc comment) without dropping any
+    // control: still a full-width drag-anywhere-on-rail target, just more
+    // compact.
+    let rail_width = 64.0;
     let rail_height = 6.0;
     let (rect, response) = ui.allocate_exact_size(egui::vec2(rail_width, 24.0), egui::Sense::click_and_drag());
 
@@ -148,7 +161,11 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
     let t = theme(ui);
     ui.horizontal(|ui| {
         let bpm = show.current_bpm();
-        let bpm_text = if bpm == 0.0 { "— BPM".to_string() } else { format!("{bpm:.0} BPM") };
+        // Bare number, no "BPM" unit suffix (Step 10 fix-round-1): sitting
+        // directly next to "Tap"/"Clear" already makes it unambiguous, and
+        // dropping the 3-letter suffix was part of closing the header
+        // overflow found in review: see `header`'s own doc comment.
+        let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
         let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
         let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
         let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
@@ -165,7 +182,10 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
             ui.painter().galley(rect.min, galley, t.palette.text);
         }
 
-        if ui.button("Tap Tempo").clicked() {
+        // "Tap" (Step 10 fix-round-1: shortened from "Tap Tempo" to help
+        // the header row fit the app's default/untouched window width:
+        // see `header`'s own doc comment).
+        if ui.button("Tap").clicked() {
             show.tap_tempo(t0.elapsed().as_secs_f64() * 1000.0);
         }
         if ui.button("Clear").clicked() {
@@ -174,7 +194,12 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
         // Whole-branch review Finding 6 (moved verbatim): `Show::
         // beats_per_change` (auto-crossfade cadence). Same fixed option
         // set as the TS reference's `<select>` (`SidebarPlaylist.svelte:118`).
+        // `.width(40.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults
+        // to a 100px minimum width (`Spacing::combo_width`) regardless of
+        // content: way oversized for a 1-2 digit value, and a real
+        // contributor to the header overflow.
         egui::ComboBox::from_id_salt("od_beats_per_change")
+            .width(40.0)
             .selected_text(show.beats_per_change.to_string())
             .show_ui(ui, |ui| {
                 for n in [4u32, 8, 16, 32] {
@@ -201,7 +226,12 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
 /// avoid a "combo visible but does nothing on click" intermediate state.
 fn theme_combo(ui: &mut egui::Ui) {
     let t = theme(ui);
-    egui::ComboBox::from_id_salt("od_theme_combo").selected_text(format!("{:?}", t.id)).show_ui(ui, |ui| {
+    // `.width(48.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults to
+    // a 100px minimum width regardless of content, a real contributor to
+    // the header overflow found in review: this is only a floor, so
+    // `OpenDropClassic` (the longest name) still renders in full, just
+    // without padding every other, shorter name out to 100px too.
+    egui::ComboBox::from_id_salt("od_theme_combo").width(48.0).selected_text(format!("{:?}", t.id)).show_ui(ui, |ui| {
         for id in [ThemeId::Kushie, ThemeId::OpenDropClassic, ThemeId::Cyan] {
             ui.label(format!("{id:?}"));
         }

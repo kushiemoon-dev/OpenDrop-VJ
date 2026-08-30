@@ -149,9 +149,9 @@ pub(crate) enum Panel {
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
     // is unchanged (it already renders both the output toggles and the
     // input selector in one call): both variants currently drive that
-    // same call from `ui_root`'s match; a future step gives each its own
-    // nav button and its own half of `ndi.rs`.
-    #[allow(dead_code)] // not reachable from a nav button yet: see above
+    // same call from `ui_root`'s match. Step 10 gave this variant its own
+    // nav button (SOURCES section, `ui::shell::nav`): a future step still
+    // owes it its own half of `ndi.rs`.
     NdiIn,
     NdiOut,
     Osc,

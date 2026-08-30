@@ -32,6 +32,7 @@ mod keymap;
 mod preflight;
 mod thumbnail_child;
 mod thumbnails;
+mod theme;
 mod ui;
 
 /// ponytail: paced off the control window's monitor only, read once at

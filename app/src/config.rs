@@ -5,10 +5,13 @@
 //! never-panic philosophy: a missing/malformed/stale file degrades to
 //! `UiConfig::default()` rather than failing bootstrap.
 //!
-//! Nothing in this module is wired into `main.rs`'s bootstrap or exit
-//! paths yet (per this step's controller ruling): that wiring lands once
-//! `AppState` grows the fields to receive it (`stage_mode`, `ui_scale`,
-//! `target_fps`, ... don't exist there yet).
+//! Most of `UiConfig` is wired into `main.rs`'s bootstrap and exit paths:
+//! `theme`, `active_panel`, `stage_mode`, `output_monitor`,
+//! `audio_input_device`, `osc_port`, `obs_host`, `obs_port`,
+//! `twitch_channel`, `kick_channel`, and `invisible_mode` are all restored
+//! at bootstrap and saved in `App::exiting`. `ui_scale`/`target_fps` are
+//! the two fields still unwired: no `AppState` counterpart exists yet to
+//! receive them.
 //!
 //! Secrets (OBS/Twitch/Kick tokens) are never part of `UiConfig`, they
 //! stay in the OS keyring via `opendrop_io::secrets`

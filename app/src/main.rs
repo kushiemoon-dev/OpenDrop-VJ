@@ -1686,10 +1686,12 @@ impl ApplicationHandler for App {
                 // rendering the old theme's palette after this switch.
                 state.egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), new_id));
 
-                // Persist immediately (Step 7's `config.rs`, not yet wired
-                // anywhere else): read-modify-write just the `theme` field
-                // so a future step wiring the rest of `UiConfig` (active
-                // panel, stage mode, ...) isn't clobbered by this one.
+                // Persist immediately (Step 7's `config.rs`): read-modify-
+                // write just the `theme` field so this doesn't clobber
+                // `active_panel`/`stage_mode`/the other already-persisted
+                // fields, which are wired at other call sites (bootstrap
+                // and `App::exiting`, "Whole-branch review fix wave,
+                // finding 1 (AC-10)").
                 let config_path = config::config_file_path();
                 let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
                 ui_config.theme = new_id;

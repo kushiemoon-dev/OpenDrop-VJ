@@ -39,15 +39,28 @@
 //! the rest, so it can't preserve the per-option click + selected-highlight
 //! behavior these controls need. `chip`/`chip_row` stay reserved for
 //! genuinely static tag rows, which this panel doesn't have.
+//!
+//! Item-row mini-thumbnails (found live post-Phase-7: the plain text list
+//! read as less "finished" than Decks/Presets' thumbnail-driven look) reuse
+//! `LibraryCtx`'s thumbnail pipeline exactly as `ui::preset_browser::tile`
+//! does: same cache lookup, same `thumb_queue` enqueue-on-miss: so a
+//! preset already thumbnailed anywhere in the app (browsed, or already on a
+//! deck) shows up here too, and one not yet rendered gets queued rather
+//! than staying a permanent placeholder. `Metrics::mini_thumb_size` (48x27)
+//! is already the engine's own 16:9 cache aspect, so unlike the preset
+//! browser's 4:3 tiles this needs no crop, just the plain default UV.
 
 use opendrop_core::beat_trigger::{apply_beat_trigger_patch, BeatTriggerConfigPatch, BeatTriggerMode};
 use opendrop_core::commands::Deck;
 use opendrop_core::playlist::PlaylistMode;
 use opendrop_core::show::Show;
+use opendrop_core::thumb_queue::{enqueue_front, ThumbJob};
+use std::collections::{HashMap, HashSet};
 
+use crate::ui::ctx::LibraryCtx;
 use crate::ui::widgets::{self, theme};
 
-pub fn show(ui: &mut egui::Ui, show: &mut Show) {
+pub fn show(ui: &mut egui::Ui, show: &mut Show, library: &mut LibraryCtx) {
     widgets::dense(ui, |ui| {
         ui.horizontal(|ui| {
             widgets::micro_label(ui, "Mode");
@@ -70,15 +83,23 @@ pub fn show(ui: &mut egui::Ui, show: &mut Show) {
         ui.separator();
 
         ui.columns(2, |columns| {
-            deck_panel(&mut columns[0], show, Deck::A);
-            deck_panel(&mut columns[1], show, Deck::B);
+            deck_panel(&mut columns[0], show, Deck::A, library.thumbnail_textures, library.failed_thumbnails, library.thumb_queue);
+            deck_panel(&mut columns[1], show, Deck::B, library.thumbnail_textures, library.failed_thumbnails, library.thumb_queue);
         });
     });
 }
 
 /// One deck's (A/B) playlist transport/lock/items + beat-sync/trigger
 /// controls.
-fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
+#[allow(clippy::too_many_arguments)]
+fn deck_panel(
+    ui: &mut egui::Ui,
+    show: &mut Show,
+    deck: Deck,
+    thumbnail_textures: &HashMap<String, egui::TextureHandle>,
+    failed_thumbnails: &HashSet<String>,
+    thumb_queue: &mut Vec<ThumbJob>,
+) {
     ui.push_id(deck_label(deck), |ui| {
         ui.heading(deck_label(deck));
 
@@ -110,16 +131,41 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
             Deck::A => show.playlists.a_items.clone(),
             Deck::B => show.playlists.b_items.clone(),
         };
+        let t = theme(ui);
+        let mini_size = t.metrics.mini_thumb_size;
         egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
             for name in &items {
                 ui.horizontal(|ui| {
+                    let (rect, _response) = ui.allocate_exact_size(mini_size, egui::Sense::hover());
+                    if ui.is_rect_visible(rect) {
+                        let corner_radius = egui::CornerRadius::from(t.metrics.radius_sm);
+                        if let Some(tex) = thumbnail_textures.get(name) {
+                            // `mini_thumb_size` is already 16:9, the same
+                            // aspect ratio the engine caches at, so unlike
+                            // `preset_browser::tile`'s 4:3 boxes this needs
+                            // no crop, just the plain default UV. Rounded
+                            // + bordered to match the card/tile look used
+                            // everywhere else (found live: a plain
+                            // sharp-cornered, borderless image read as
+                            // unfinished next to Decks/Presets).
+                            ui.put(rect, egui::Image::new((tex.id(), rect.size())).corner_radius(corner_radius));
+                        } else if failed_thumbnails.contains(name) {
+                            ui.painter().rect_filled(rect, corner_radius, t.palette.error.gamma_multiply(0.3));
+                        } else {
+                            ui.painter().rect_filled(rect, corner_radius, t.palette.dim);
+                            *thumb_queue = enqueue_front(std::mem::take(thumb_queue), ThumbJob { slot_key: name.clone(), name: name.clone() });
+                        }
+                        ui.painter().rect_stroke(rect, corner_radius, egui::Stroke::new(t.metrics.border_width, t.palette.border), egui::StrokeKind::Outside);
+                    }
+
                     // A bare `ui.label` here has no wrap width to truncate
                     // against inside a horizontal row (egui's `Extend` wrap
                     // mode for non-wrapping horizontal layouts), so a long
                     // preset name renders at its full natural width and
                     // overflows past this column, into Deck B's (found
-                    // live). Reserve width for the `×` button first, then
-                    // bound and truncate the label to what's left.
+                    // live). Reserve width for the mini-thumb and the `×`
+                    // button first, then bound and truncate the label to
+                    // what's left.
                     let button_w = ui.spacing().interact_size.x;
                     ui.set_width((ui.available_width() - button_w).max(0.0));
                     ui.add(egui::Label::new(name).truncate());
@@ -136,7 +182,6 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
             Deck::A => show.beat_sync_a,
             Deck::B => show.beat_sync_b,
         };
-        let t = theme(ui);
         let sync_color = if synced { t.palette.accent } else { t.palette.dim };
         // `widgets::pill` paints its label through a raw `ui.label` inside
         // `Frame::show`, which inherits ambient wrap mode (unlike egui's
@@ -239,12 +284,18 @@ mod tests {
     use crate::ui::widgets::themed_test_ui;
     use opendrop_core::beat_trigger::default_beat_trigger_config;
 
-    // `show` takes only `&mut egui::Ui` and `&mut Show` (no `PerformCtx`/
-    // `LibraryCtx`, unlike `ui::preset_browser`), so `Show::default()` is
-    // enough to exercise every branch below, same testability tier as
-    // `ui::decks`/`ui::about`/`ui::quality`'s own `show`.
     fn sample_show() -> Show {
         Show::default()
+    }
+
+    // `show`/`deck_panel` now also need `LibraryCtx`'s thumbnail fields
+    // (mini-thumb previews, found live post-Phase-7). Empty collections are
+    // enough to exercise every branch below, same testability tier as
+    // `ui::preset_browser`'s own tests: no real texture, so the code takes
+    // the "not yet thumbnailed" branch and enqueues, never the happy path,
+    // but that's still every line of the rendering logic running once.
+    fn sample_library() -> (HashMap<String, egui::TextureHandle>, HashSet<String>, Vec<ThumbJob>) {
+        (HashMap::new(), HashSet::new(), Vec::new())
     }
 
     // --- show(): the whole panel. Always internally dense (this file's
@@ -258,7 +309,19 @@ mod tests {
     fn show_does_not_panic() {
         themed_test_ui(|ui| {
             let mut state = sample_show();
-            show(ui, &mut state);
+            let (thumbnail_textures, failed_thumbnails, mut thumb_queue) = sample_library();
+            let mut search_query = String::new();
+            let mut search_cache = crate::ui::preset_browser::SearchCache::default();
+            let mut load_request = None;
+            let mut library = LibraryCtx {
+                preset_search_query: &mut search_query,
+                search_cache: &mut search_cache,
+                thumb_queue: &mut thumb_queue,
+                thumbnail_textures: &thumbnail_textures,
+                failed_thumbnails: &failed_thumbnails,
+                load_request: &mut load_request,
+            };
+            show(ui, &mut state, &mut library);
         });
     }
 
@@ -267,7 +330,19 @@ mod tests {
         themed_test_ui(|ui| {
             widgets::dense(ui, |ui| {
                 let mut state = sample_show();
-                show(ui, &mut state);
+                let (thumbnail_textures, failed_thumbnails, mut thumb_queue) = sample_library();
+                let mut search_query = String::new();
+                let mut search_cache = crate::ui::preset_browser::SearchCache::default();
+                let mut load_request = None;
+                let mut library = LibraryCtx {
+                    preset_search_query: &mut search_query,
+                    search_cache: &mut search_cache,
+                    thumb_queue: &mut thumb_queue,
+                    thumbnail_textures: &thumbnail_textures,
+                    failed_thumbnails: &failed_thumbnails,
+                    load_request: &mut load_request,
+                };
+                show(ui, &mut state, &mut library);
             });
         });
     }
@@ -285,7 +360,19 @@ mod tests {
             state.lock_a = true;
             state.beat_sync_a = true;
             state.beat_sync_b = true;
-            show(ui, &mut state);
+            let (thumbnail_textures, failed_thumbnails, mut thumb_queue) = sample_library();
+            let mut search_query = String::new();
+            let mut search_cache = crate::ui::preset_browser::SearchCache::default();
+            let mut load_request = None;
+            let mut library = LibraryCtx {
+                preset_search_query: &mut search_query,
+                search_cache: &mut search_cache,
+                thumb_queue: &mut thumb_queue,
+                thumbnail_textures: &thumbnail_textures,
+                failed_thumbnails: &failed_thumbnails,
+                load_request: &mut load_request,
+            };
+            show(ui, &mut state, &mut library);
         });
     }
 
@@ -295,8 +382,9 @@ mod tests {
     fn deck_panel_does_not_panic_for_both_decks() {
         themed_test_ui(|ui| {
             let mut state = sample_show();
-            deck_panel(ui, &mut state, Deck::A);
-            deck_panel(ui, &mut state, Deck::B);
+            let (thumbnail_textures, failed_thumbnails, mut thumb_queue) = sample_library();
+            deck_panel(ui, &mut state, Deck::A, &thumbnail_textures, &failed_thumbnails, &mut thumb_queue);
+            deck_panel(ui, &mut state, Deck::B, &thumbnail_textures, &failed_thumbnails, &mut thumb_queue);
         });
     }
 

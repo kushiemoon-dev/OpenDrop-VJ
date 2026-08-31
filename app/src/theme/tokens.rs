@@ -51,6 +51,13 @@ pub struct Metrics {
     pub thumb_size: Vec2,
     pub tile_size: Vec2,
     pub tile_content_w: f32,
+    /// Small 16:9 preview used where a row needs a thumbnail but not a full
+    /// deck/tile-sized one: the Stage bottom bar's deck thumbnails
+    /// (`ui::shell`, Step 11) and playlist item rows (`ui::playlists`,
+    /// found live post-Phase-7: added visual preview parity with
+    /// Decks/Presets). Repatriated from `ui::shell`'s own former
+    /// `STAGE_THUMB_SIZE` local const.
+    pub mini_thumb_size: Vec2,
 }
 
 /// Animation durations, in seconds.

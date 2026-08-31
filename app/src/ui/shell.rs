@@ -76,18 +76,26 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx)
 }
 
 /// Stage-mode header (Step 11): a 28px band replacing `header`'s 48px:
-/// just the wordmark plus a `STAGE` mode indicator, no crossfader/BPM/
-/// theme controls (those move to `status_bar_stage`, and the toggle back
-/// to Normal is `F11`, not a button here). Exists mainly so the user
-/// retains a stable, unambiguous cue that Stage mode is active once the
-/// rest of the header/nav chrome retracts.
-pub fn header_stage(ui: &mut egui::Ui) {
+/// wordmark, a `STAGE` mode indicator, no crossfader/BPM/theme controls
+/// (those stay in `status_bar_stage`/`header`), but the same `⛶`
+/// `ghost_button` `header` uses to toggle `stage_mode`, right-aligned.
+/// `F11` is still the primary toggle, but a pointer-driven way out is
+/// required too (fix-round-1 review finding): `F11` is a near-universal
+/// OS/window-manager fullscreen binding a user's WM could intercept,
+/// which would otherwise trap them in Stage mode with no mouse escape.
+pub fn header_stage(ui: &mut egui::Ui, stage_mode: &mut bool) {
     let t = theme(ui);
     widgets::dense(ui, |ui| {
         ui.horizontal(|ui| {
             wordmark(ui);
             ui.add_space(t.metrics.spacing_dense.x);
             widgets::pill(ui, "Stage", t.palette.accent);
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if widgets::ghost_button(ui, "⛶").clicked() {
+                    *stage_mode = !*stage_mode;
+                }
+            });
         });
     });
 }
@@ -464,13 +472,17 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
             // 1 (measured live at the app's default ~622px content width,
             // same instrumented-probe technique Step 10 used for the
             // header's own overflow): `vu_meter` floors its width at
-            // `Metrics::tile_content_w` (110px, sized for the Audio
-            // panel's own full-width usage) regardless of the space handed
-            // to it, which alone left no room for BPM/FPS/the drawer
-            // toggle after 4 vignettes + bus pills + the crossfader on one
-            // row.
+            // `Metrics::tile_content_w` (sized for the Audio panel's own
+            // full-width usage) regardless of the space handed to it,
+            // which alone left no room for BPM/FPS/the drawer toggle
+            // after 4 vignettes + bus pills + the crossfader on one row.
+            // Allocated width below reads `t.metrics.tile_content_w`
+            // directly (fix-round-1 review finding: a hardcoded `110.0`
+            // literal here only avoided clipping because it happened to
+            // equal `tile_content_w`'s current value, and would silently
+            // re-clip if that token ever changed).
             ui.horizontal(|ui| {
-                ui.allocate_ui(egui::vec2(110.0, 12.0), |ui| {
+                ui.allocate_ui(egui::vec2(t.metrics.tile_content_w, 12.0), |ui| {
                     widgets::vu_meter(ui, sources.last_vu_level as f32);
                 });
                 sep(ui);

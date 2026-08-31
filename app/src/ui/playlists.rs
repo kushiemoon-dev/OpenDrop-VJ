@@ -19,33 +19,60 @@
 //! deck (`playlist.rs:170-171`, re-read by `toggle_playlist` on every call),
 //! so this panel shows one shared mode/interval control above the two
 //! per-deck sections, not two independent ones.
+//!
+//! Reskinned (Step 15 of the Phase 7 UI redesign plan): the whole panel is
+//! one of the plan's 3 permanently-dense zones (with the presets grid, Step
+//! 14, and the MIDI learn rows, Step 17): `widgets::dense` wraps the
+//! entire body below, no user-facing toggle. `🔒` is replaced by a plain
+//! "LOCK" text label: no emoji in displayed text, even though Step 5's
+//! widened fallback chain would still render it. `⇄` (auto-crossfade) is
+//! NOT touched here: it already moved out of this file into the header's
+//! mini-transport at Step 10 (alongside the BPM/tap block) and still
+//! renders as the raw glyph in `ui::shell::header` today, out of this
+//! step's scope. Every `ui.selectable_label` pair (mode, beat-sync, trigger
+//! mode) is replaced with `widgets::pill`, colored `accent` when selected
+//! and `dim` otherwise, clicked via `Response::interact(Sense::click())`:
+//! the exact pattern `ui::decks::deck_card` already established for its own
+//! 3-state bus badge: rather than `widgets::chip_row`: `chip_row` takes
+//! `&[&str]` and returns one aggregate `Response` for the whole row, with
+//! no way to learn which chip was clicked or to color one differently from
+//! the rest, so it can't preserve the per-option click + selected-highlight
+//! behavior these controls need. `chip`/`chip_row` stay reserved for
+//! genuinely static tag rows, which this panel doesn't have.
 
 use opendrop_core::beat_trigger::{apply_beat_trigger_patch, BeatTriggerConfigPatch, BeatTriggerMode};
 use opendrop_core::commands::Deck;
 use opendrop_core::playlist::PlaylistMode;
 use opendrop_core::show::Show;
 
+use crate::ui::widgets::{self, theme};
+
 pub fn show(ui: &mut egui::Ui, show: &mut Show) {
-    ui.horizontal(|ui| {
-        ui.label("Mode");
-        if ui.selectable_label(show.playlists.mode == PlaylistMode::Sequential, "Sequential").clicked() {
-            show.playlists.mode = PlaylistMode::Sequential;
-        }
-        if ui.selectable_label(show.playlists.mode == PlaylistMode::Shuffle, "Shuffle").clicked() {
-            show.playlists.mode = PlaylistMode::Shuffle;
-        }
-    });
+    widgets::dense(ui, |ui| {
+        ui.horizontal(|ui| {
+            widgets::micro_label(ui, "Mode");
+            let t = theme(ui);
+            let sequential_color = if show.playlists.mode == PlaylistMode::Sequential { t.palette.accent } else { t.palette.dim };
+            if widgets::pill(ui, "Sequential", sequential_color).interact(egui::Sense::click()).clicked() {
+                show.playlists.mode = PlaylistMode::Sequential;
+            }
+            let shuffle_color = if show.playlists.mode == PlaylistMode::Shuffle { t.palette.accent } else { t.palette.dim };
+            if widgets::pill(ui, "Shuffle", shuffle_color).interact(egui::Sense::click()).clicked() {
+                show.playlists.mode = PlaylistMode::Shuffle;
+            }
+        });
 
-    ui.horizontal(|ui| {
-        ui.label("Interval (s)");
-        ui.add(egui::Slider::new(&mut show.playlists.interval_sec, 2.0..=120.0));
-    });
+        ui.horizontal(|ui| {
+            widgets::micro_label(ui, "Interval (s)");
+            ui.add(egui::Slider::new(&mut show.playlists.interval_sec, 2.0..=120.0));
+        });
 
-    ui.separator();
+        ui.separator();
 
-    ui.columns(2, |columns| {
-        deck_panel(&mut columns[0], show, Deck::A);
-        deck_panel(&mut columns[1], show, Deck::B);
+        ui.columns(2, |columns| {
+            deck_panel(&mut columns[0], show, Deck::A);
+            deck_panel(&mut columns[1], show, Deck::B);
+        });
     });
 }
 
@@ -70,8 +97,8 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
                 show.playlists.playlist_next(deck);
             }
             match deck {
-                Deck::A => ui.toggle_value(&mut show.lock_a, "🔒"),
-                Deck::B => ui.toggle_value(&mut show.lock_b, "🔒"),
+                Deck::A => ui.toggle_value(&mut show.lock_a, "LOCK"),
+                Deck::B => ui.toggle_value(&mut show.lock_b, "LOCK"),
             };
         });
 
@@ -100,7 +127,9 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
             Deck::A => show.beat_sync_a,
             Deck::B => show.beat_sync_b,
         };
-        if ui.selectable_label(synced, "Beat Sync").clicked() {
+        let t = theme(ui);
+        let sync_color = if synced { t.palette.accent } else { t.palette.dim };
+        if widgets::pill(ui, "Beat Sync", sync_color).interact(egui::Sense::click()).clicked() {
             show.toggle_beat_sync(deck);
         }
 
@@ -119,17 +148,20 @@ fn trigger_config(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
     };
 
     ui.horizontal(|ui| {
-        if ui.selectable_label(trigger.mode == BeatTriggerMode::Beat, "Beat").clicked() {
+        let t = theme(ui);
+        let beat_color = if trigger.mode == BeatTriggerMode::Beat { t.palette.accent } else { t.palette.dim };
+        if widgets::pill(ui, "Beat", beat_color).interact(egui::Sense::click()).clicked() {
             trigger = apply_beat_trigger_patch(trigger, BeatTriggerConfigPatch { mode: Some(BeatTriggerMode::Beat), ..Default::default() });
         }
-        if ui.selectable_label(trigger.mode == BeatTriggerMode::VolumePeak, "Volume Peak").clicked() {
+        let volume_color = if trigger.mode == BeatTriggerMode::VolumePeak { t.palette.accent } else { t.palette.dim };
+        if widgets::pill(ui, "Volume Peak", volume_color).interact(egui::Sense::click()).clicked() {
             trigger =
                 apply_beat_trigger_patch(trigger, BeatTriggerConfigPatch { mode: Some(BeatTriggerMode::VolumePeak), ..Default::default() });
         }
     });
 
     ui.horizontal(|ui| {
-        ui.label("Beats/change");
+        widgets::micro_label(ui, "Beats/change");
         let mut beats = trigger.beats_per_change as i64;
         if ui.add(egui::Slider::new(&mut beats, 1..=64)).changed() {
             trigger = apply_beat_trigger_patch(trigger, BeatTriggerConfigPatch { beats_per_change: Some(beats), ..Default::default() });
@@ -149,7 +181,7 @@ fn trigger_config(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
     });
 
     ui.horizontal(|ui| {
-        ui.label("Offset");
+        widgets::micro_label(ui, "Offset");
         let mut offset = trigger.offset as i64;
         let max_offset = (trigger.beats_per_change as i64 - 1).max(0);
         if ui.add(egui::Slider::new(&mut offset, 0..=max_offset)).changed() {
@@ -159,7 +191,7 @@ fn trigger_config(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
 
     if trigger.mode == BeatTriggerMode::VolumePeak {
         ui.horizontal(|ui| {
-            ui.label("Sensitivity");
+            widgets::micro_label(ui, "Sensitivity");
             let mut sensitivity = trigger.sensitivity;
             if ui.add(egui::Slider::new(&mut sensitivity, 0.0..=1.0)).changed() {
                 trigger = apply_beat_trigger_patch(trigger, BeatTriggerConfigPatch { sensitivity: Some(sensitivity), ..Default::default() });
@@ -177,5 +209,105 @@ fn deck_label(deck: Deck) -> &'static str {
     match deck {
         Deck::A => "Deck A",
         Deck::B => "Deck B",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::themed_test_ui;
+    use opendrop_core::beat_trigger::default_beat_trigger_config;
+
+    // `show` takes only `&mut egui::Ui` and `&mut Show` (no `PerformCtx`/
+    // `LibraryCtx`, unlike `ui::preset_browser`), so `Show::default()` is
+    // enough to exercise every branch below, same testability tier as
+    // `ui::decks`/`ui::about`/`ui::quality`'s own `show`.
+    fn sample_show() -> Show {
+        Show::default()
+    }
+
+    // --- show(): the whole panel. Always internally dense (this file's
+    // module doc comment), so the bare and `widgets::dense`-wrapped calls
+    // below aren't exercising two different spacing modes, only mirroring
+    // every other panel's test shape (`ui::decks`, `ui::preset_browser`)
+    // for consistency and to guard against a future `dense` call being
+    // accidentally removed from `show()` itself. ---------------------------
+
+    #[test]
+    fn show_does_not_panic() {
+        themed_test_ui(|ui| {
+            let mut state = sample_show();
+            show(ui, &mut state);
+        });
+    }
+
+    #[test]
+    fn show_does_not_panic_dense() {
+        themed_test_ui(|ui| {
+            widgets::dense(ui, |ui| {
+                let mut state = sample_show();
+                show(ui, &mut state);
+            });
+        });
+    }
+
+    // --- show(): non-default state (locked, synced, non-empty playlists,
+    // shuffle mode) renders every branch without panicking -----------------
+
+    #[test]
+    fn show_renders_locked_synced_and_populated_decks() {
+        themed_test_ui(|ui| {
+            let mut state = sample_show();
+            state.playlists.mode = PlaylistMode::Shuffle;
+            state.playlists.a_items = vec!["Alpha".to_string(), "Beta".to_string()];
+            state.playlists.b_items = vec!["Gamma".to_string()];
+            state.lock_a = true;
+            state.beat_sync_a = true;
+            state.beat_sync_b = true;
+            show(ui, &mut state);
+        });
+    }
+
+    // --- deck_panel(): both decks, A and B, don't panic --------------------
+
+    #[test]
+    fn deck_panel_does_not_panic_for_both_decks() {
+        themed_test_ui(|ui| {
+            let mut state = sample_show();
+            deck_panel(ui, &mut state, Deck::A);
+            deck_panel(ui, &mut state, Deck::B);
+        });
+    }
+
+    // --- trigger_config(): both trigger modes, since the Sensitivity row
+    // only renders under VolumePeak ------------------------------------
+
+    #[test]
+    fn trigger_config_does_not_panic_in_beat_mode() {
+        themed_test_ui(|ui| {
+            let mut state = sample_show();
+            state.beat_trigger_a = default_beat_trigger_config();
+            trigger_config(ui, &mut state, Deck::A);
+        });
+    }
+
+    #[test]
+    fn trigger_config_does_not_panic_in_volume_peak_mode() {
+        themed_test_ui(|ui| {
+            let mut state = sample_show();
+            let mut trigger = default_beat_trigger_config();
+            trigger = apply_beat_trigger_patch(trigger, BeatTriggerConfigPatch { mode: Some(BeatTriggerMode::VolumePeak), ..Default::default() });
+            state.beat_trigger_b = trigger;
+            trigger_config(ui, &mut state, Deck::B);
+        });
+    }
+
+    // --- deck_label(): stable, human-readable, keyed on the enum not an
+    // index --------------------------------------------------------------
+
+    #[test]
+    fn deck_label_matches_deck() {
+        assert_eq!(deck_label(Deck::A), "Deck A");
+        assert_eq!(deck_label(Deck::B), "Deck B");
     }
 }

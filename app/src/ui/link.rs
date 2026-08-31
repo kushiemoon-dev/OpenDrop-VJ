@@ -14,14 +14,24 @@
 //! snapshot's `tempo` reflects the Link session's live tempo, while this
 //! field is what the user is currently typing, sent via `SetTempo` only
 //! when they click the button.
+//!
+//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the
+//! `label(if snapshot.enabled {...})` enabled/disabled row swaps for
+//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`
+//! (Steps 17-18). Not compile-verified in this sandbox (missing cmake for
+//! the `link` feature's native dependency): reviewed by careful reading
+//! only, same determination as Steps 9/10/17. The Tempo/Peers row and the
+//! Set-tempo row are untouched.
 
 use opendrop_io::link::{LinkControl, LinkHandle};
+
+use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, link: &LinkHandle, link_tempo_input: &mut f64) {
     let snapshot = link.latest();
 
     ui.horizontal(|ui| {
-        ui.label(if snapshot.enabled { "Ableton Link: enabled" } else { "Ableton Link: disabled" });
+        widgets::connection_row(ui, "Ableton Link", snapshot.enabled);
         if snapshot.enabled {
             if ui.button("Stop").clicked() {
                 let _ = link.control_tx.send(LinkControl::Stop);

@@ -22,9 +22,19 @@
 //! `running` flips to `false` on its own (`io::v4l2loopback::run`'s
 //! liveness check), and without this resync the Start/Stop button would
 //! stay stuck showing "Stop" for a pipe that no longer exists.
+//!
+//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the
+//! `label(if snapshot.running {...})` running/stopped row swaps for
+//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`
+//! (Steps 17-18). The device-found/not-found `match` above it is left
+//! untouched: it reports a resolved path, not a binary connected status,
+//! so folding it into `connection_row` would drop the path detail for no
+//! gain.
 
 use opendrop_io::v4l2loopback::{find_device, V4l2Control, V4l2Handle};
 use std::path::PathBuf;
+
+use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, v4l2: &V4l2Handle, active: &mut bool, device: &mut Option<Option<PathBuf>>) {
     let resolved = device.get_or_insert_with(find_device).clone();
@@ -41,7 +51,7 @@ pub fn show(ui: &mut egui::Ui, v4l2: &V4l2Handle, active: &mut bool, device: &mu
     // click made this same frame still takes effect and is still sent.
     *active = snapshot.running;
     ui.horizontal(|ui| {
-        ui.label(if snapshot.running { "v4l2loopback: running" } else { "v4l2loopback: stopped" });
+        widgets::connection_row(ui, "v4l2loopback", snapshot.running);
         if *active {
             if ui.button("Stop").clicked() {
                 *active = false;

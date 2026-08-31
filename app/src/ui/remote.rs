@@ -11,15 +11,32 @@
 //! No QR code: a bonus, not requested, deliberately not added (brief is
 //! explicit). No soft-takeover, no mapping/learn UI, same reasoning as
 //! `ui::osc`.
+//!
+//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the two-branch
+//! `label("Remote: listening on ...")` / `label("Remote: not listening")`
+//! pair (an `if`/`else` across separate `ui.label` calls, not a single
+//! `label(if ... else ...)` like `ui::midi`/`ui::ndi`, but the same
+//! connected-status intent) becomes `widgets::connection_row` in both
+//! branches. The host:port detail moves to a plain label alongside the
+//! pill instead of being dropped. The Token row and URL line are
+//! untouched.
 
 use opendrop_io::remote_ws::{RemoteWsControl, RemoteWsHandle};
+
+use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, remote_ws: &RemoteWsHandle) {
     let snapshot = remote_ws.latest();
 
     if snapshot.listening {
         let host = snapshot.ip.as_deref().unwrap_or("(no LAN IP detected)");
-        ui.label(format!("Remote: listening on {host}:{}", snapshot.port));
+        ui.horizontal(|ui| {
+            widgets::connection_row(ui, "Remote", snapshot.listening);
+            ui.label(format!("on {host}:{}", snapshot.port));
+            if ui.button("Stop").clicked() {
+                let _ = remote_ws.control_tx.send(RemoteWsControl::Stop);
+            }
+        });
         ui.horizontal(|ui| {
             ui.label("Token");
             ui.monospace(&snapshot.token);
@@ -30,13 +47,12 @@ pub fn show(ui: &mut egui::Ui, remote_ws: &RemoteWsHandle) {
                 snapshot.port, snapshot.port, snapshot.token
             ));
         }
-        if ui.button("Stop").clicked() {
-            let _ = remote_ws.control_tx.send(RemoteWsControl::Stop);
-        }
     } else {
-        ui.label("Remote: not listening");
-        if ui.button("Start").clicked() {
-            let _ = remote_ws.control_tx.send(RemoteWsControl::Start);
-        }
+        ui.horizontal(|ui| {
+            widgets::connection_row(ui, "Remote", snapshot.listening);
+            if ui.button("Start").clicked() {
+                let _ = remote_ws.control_tx.send(RemoteWsControl::Start);
+            }
+        });
     }
 }

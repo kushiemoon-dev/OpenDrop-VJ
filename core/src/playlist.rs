@@ -160,7 +160,7 @@ impl PlaylistEngine {
         // as "no automatic advance" for a beat-synced deck: see
         // `set_beat_sync_interval`), so `is_finite()` stays as a separate,
         // additional guard.
-        if !self.playing || !self.interval_ms.is_finite() || !(self.interval_ms > 0.0) {
+        if !self.playing || !self.interval_ms.is_finite() || self.interval_ms.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return;
         }
         self.elapsed_ms += delta_ms;
@@ -563,6 +563,35 @@ mod tests {
             pl.start();
             pl.tick(100.0); // must return promptly, not hang
             assert_eq!(*calls.borrow(), vec!["A"]); // no extra advance fired
+        }
+
+        #[test]
+        fn tick_with_a_negative_interval_returns_instead_of_spinning_forever() {
+            let (calls, cb) = spy();
+            let mut pl = PlaylistEngine::new(items(&["A", "B"]), PlaylistMode::Sequential, -50.0, cb);
+            pl.start();
+            pl.tick(100.0);
+            assert_eq!(*calls.borrow(), vec!["A"]); // no extra advance fired
+        }
+
+        #[test]
+        fn tick_with_a_nan_interval_returns_without_advancing() {
+            let (calls, cb) = spy();
+            let mut pl = PlaylistEngine::new(items(&["A", "B"]), PlaylistMode::Sequential, f64::NAN, cb);
+            pl.start();
+            pl.tick(100.0);
+            assert_eq!(*calls.borrow(), vec!["A"]);
+        }
+
+        #[test]
+        fn tick_with_an_infinite_interval_returns_without_advancing() {
+            // Deliberate valid state (see `tick`'s own doc comment): infinity means
+            // "no automatic advance", used for a beat-synced deck.
+            let (calls, cb) = spy();
+            let mut pl = PlaylistEngine::new(items(&["A", "B"]), PlaylistMode::Sequential, f64::INFINITY, cb);
+            pl.start();
+            pl.tick(100.0);
+            assert_eq!(*calls.borrow(), vec!["A"]);
         }
     }
 

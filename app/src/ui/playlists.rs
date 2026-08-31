@@ -313,6 +313,8 @@ mod tests {
             let mut search_query = String::new();
             let mut search_cache = crate::ui::preset_browser::SearchCache::default();
             let mut load_request = None;
+            let mut favorite_presets = HashSet::new();
+            let mut favorites_only = false;
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -320,6 +322,8 @@ mod tests {
                 thumbnail_textures: &thumbnail_textures,
                 failed_thumbnails: &failed_thumbnails,
                 load_request: &mut load_request,
+                favorite_presets: &mut favorite_presets,
+                favorites_only: &mut favorites_only,
             };
             show(ui, &mut state, &mut library);
         });
@@ -334,6 +338,8 @@ mod tests {
                 let mut search_query = String::new();
                 let mut search_cache = crate::ui::preset_browser::SearchCache::default();
                 let mut load_request = None;
+                let mut favorite_presets = HashSet::new();
+                let mut favorites_only = false;
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -341,6 +347,8 @@ mod tests {
                     thumbnail_textures: &thumbnail_textures,
                     failed_thumbnails: &failed_thumbnails,
                     load_request: &mut load_request,
+                    favorite_presets: &mut favorite_presets,
+                    favorites_only: &mut favorites_only,
                 };
                 show(ui, &mut state, &mut library);
             });
@@ -364,6 +372,8 @@ mod tests {
             let mut search_query = String::new();
             let mut search_cache = crate::ui::preset_browser::SearchCache::default();
             let mut load_request = None;
+            let mut favorite_presets = HashSet::new();
+            let mut favorites_only = false;
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -371,6 +381,8 @@ mod tests {
                 thumbnail_textures: &thumbnail_textures,
                 failed_thumbnails: &failed_thumbnails,
                 load_request: &mut load_request,
+                favorite_presets: &mut favorite_presets,
+                favorites_only: &mut favorites_only,
             };
             show(ui, &mut state, &mut library);
         });

@@ -7,8 +7,8 @@
 //!    FBO-0 → texture copy (`deck::copy_fbo0_to_shared_texture`) is already
 //!    in GL's bottom-left convention: nothing in this pipeline flips rows.
 //!  - 14 uniforms, not 13 (PLAN.md's count; corrected in step 10).
-//! The video layer (compositor.ts's 5th layer) is out of scope for Phase 2
-//!: no video decode crate exists yet (see PLAN.md § Hors).
+//!    The video layer (compositor.ts's 5th layer) is out of scope for Phase 2
+//!   : no video decode crate exists yet (see PLAN.md § Hors).
 
 use glow::HasContext;
 use opendrop_core::blend::{blend_state_for, BlendMode, ColorParams, GlBlend, SlotComposite};

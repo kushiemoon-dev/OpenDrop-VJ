@@ -35,7 +35,7 @@
 //! dense, no user toggle), unlike Decks (Step 13, aéré by default).
 
 use opendrop_core::commands::Deck;
-use opendrop_core::preset_index::search;
+use opendrop_core::preset_index::{filter_favorites, search};
 use opendrop_core::show::Show;
 use opendrop_core::thumb_queue::{enqueue_front, prune_to_visible, ThumbJob};
 use std::collections::{HashMap, HashSet};
@@ -64,13 +64,24 @@ pub struct SearchCache {
     /// the empty query is a real, cacheable "show everything" result.
     query: Option<String>,
     results: Vec<String>,
+    favorites_only: bool,
+    favorites_snapshot: HashSet<String>,
 }
 
 impl SearchCache {
-    fn resolve(&mut self, show: &Show, query: &str) -> &[String] {
-        if self.query.as_deref() != Some(query) {
-            self.results = search(&show.preset_catalog, query).into_iter().map(|p| p.name.clone()).collect();
+    fn resolve(&mut self, show: &Show, query: &str, favorites_only: bool, favorite_presets: &HashSet<String>) -> &[String] {
+        let query_changed = self.query.as_deref() != Some(query);
+        let filter_toggled = self.favorites_only != favorites_only;
+        let favorites_changed = favorites_only && self.favorites_snapshot != *favorite_presets;
+        if query_changed || filter_toggled || favorites_changed {
+            let matched = search(&show.preset_catalog, query);
+            let matched = if favorites_only { filter_favorites(matched, favorite_presets) } else { matched };
+            self.results = matched.into_iter().map(|p| p.name.clone()).collect();
             self.query = Some(query.to_string());
+            self.favorites_only = favorites_only;
+            if favorites_only {
+                self.favorites_snapshot = favorite_presets.clone();
+            }
         }
         &self.results
     }
@@ -177,6 +188,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
                 egui::TextEdit::singleline(library.preset_search_query)
                     .font(egui::FontId::new(t.type_scale.monospace, egui::FontFamily::Name(FAMILY_MONO.into()))),
             );
+            ui.checkbox(library.favorites_only, "★ only");
         });
 
         ui.separator();
@@ -193,7 +205,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
         // here is a shared reborrow of a `PerformCtx` field, scoped to
         // this one call, never stored (see `ui::ctx`'s module doc comment
         // on this exact call site).
-        let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str());
+        let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str(), *library.favorites_only, library.favorite_presets);
         let total_rows = results.len().div_ceil(per_row);
 
         // Whole-branch review Finding 4: names of the tiles actually on
@@ -225,7 +237,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
                 ui.horizontal(|ui| {
                     ui.set_min_height(row_h); // keeps the real pitch equal to row_h
                     for name in &results[start..end] {
-                        tile(ui, perform.show, name, metrics, library.thumb_queue, library.thumbnail_textures, library.failed_thumbnails, library.load_request);
+                        tile(ui, perform.show, name, metrics, library.thumb_queue, library.thumbnail_textures, library.failed_thumbnails, library.load_request, library.favorite_presets);
                     }
                 });
             }
@@ -265,6 +277,7 @@ fn tile(
     thumbnail_textures: &HashMap<String, egui::TextureHandle>,
     failed_thumbnails: &HashSet<String>,
     load_request: &mut Option<String>,
+    favorite_presets: &mut HashSet<String>,
 ) {
     let t = theme(ui);
     // `name`, the preset's stable key: never a `row * per_row + i`-style
@@ -383,6 +396,16 @@ fn tile(
                     if ui.button("+B").clicked() {
                         show.playlists.add_to_playlist(Deck::B, name.to_string());
                     }
+                    let mut is_favorited = favorite_presets.contains(name);
+                    let star = if is_favorited { "★" } else { "☆" };
+                    if ui.toggle_value(&mut is_favorited, star).clicked() {
+                        if is_favorited {
+                            favorite_presets.insert(name.to_string());
+                        } else {
+                            favorite_presets.remove(name);
+                        }
+                        persist_favorites(favorite_presets);
+                    }
                 });
             });
         });
@@ -401,6 +424,17 @@ fn tile(
             tile_hover_glow(ui, frame.response.rect, hover_t);
         }
     });
+}
+
+/// Read-modify-write of just `favorite_presets` (same idiom as `main.rs`'s
+/// runtime theme-switch handler): loads the current on-disk config,
+/// overwrites only this field, saves back: never clobbers `theme`/
+/// `active_panel`/`stage_mode`/... written by other call sites.
+fn persist_favorites(favorite_presets: &HashSet<String>) {
+    let config_path = crate::config::config_file_path();
+    let mut ui_config = config_path.as_deref().map(crate::config::load_config).unwrap_or_default();
+    ui_config.favorite_presets = favorite_presets.clone();
+    crate::config::save_config(config_path.as_deref(), &ui_config);
 }
 
 /// Hover lift + glow overlay (Step 22), the tile counterpart of `ui::
@@ -439,7 +473,7 @@ mod tests {
     fn search_cache_filters_by_case_insensitive_substring() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "alpha");
+        let results = cache.resolve(&show, "alpha", false, &HashSet::new());
         assert_eq!(results, ["Alpha Swirl Refract".to_string()]);
     }
 
@@ -447,7 +481,7 @@ mod tests {
     fn search_cache_empty_query_returns_every_preset() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "");
+        let results = cache.resolve(&show, "", false, &HashSet::new());
         assert_eq!(results.len(), 2);
     }
 
@@ -455,8 +489,49 @@ mod tests {
     fn search_cache_no_match_returns_empty() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "nonexistent");
+        let results = cache.resolve(&show, "nonexistent", false, &HashSet::new());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_cache_favorites_only_restricts_to_favorite_names() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
+        let results = cache.resolve(&show, "", true, &favorites);
+        assert_eq!(results, ["Alpha Swirl Refract".to_string()]);
+    }
+
+    #[test]
+    fn search_cache_favorites_only_composes_with_text_query() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let favorites = HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]);
+        let results = cache.resolve(&show, "beta", true, &favorites);
+        assert_eq!(results, ["Beta Pulse Drift".to_string()]);
+    }
+
+    #[test]
+    fn search_cache_toggling_favorites_only_changes_result_for_same_query() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
+        let all = cache.resolve(&show, "", false, &favorites).to_vec();
+        assert_eq!(all.len(), 2);
+        let favorites_only = cache.resolve(&show, "", true, &favorites);
+        assert_eq!(favorites_only, ["Alpha Swirl Refract".to_string()]);
+    }
+
+    #[test]
+    fn search_cache_favorites_set_change_invalidates_while_filter_active() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let mut favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
+        let first = cache.resolve(&show, "", true, &favorites).to_vec();
+        assert_eq!(first, ["Alpha Swirl Refract".to_string()]);
+        favorites.insert("Beta Pulse Drift".to_string());
+        let second = cache.resolve(&show, "", true, &favorites);
+        assert_eq!(second.len(), 2);
     }
 
     // --- row_height(): the load-bearing regression guard -------------------
@@ -481,7 +556,7 @@ mod tests {
 
                 let response = ui
                     .horizontal(|ui| {
-                        tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
+                        tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request, &mut HashSet::new());
                     })
                     .response;
 
@@ -533,6 +608,8 @@ mod tests {
             let thumbnail_textures = HashMap::new();
             let failed_thumbnails = HashSet::new();
             let mut load_request = None;
+            let mut favorite_presets = HashSet::new();
+            let mut favorites_only = false;
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -540,6 +617,8 @@ mod tests {
                 thumbnail_textures: &thumbnail_textures,
                 failed_thumbnails: &failed_thumbnails,
                 load_request: &mut load_request,
+                favorite_presets: &mut favorite_presets,
+                favorites_only: &mut favorites_only,
             };
 
             show(ui, &mut perform, &mut library);
@@ -572,6 +651,8 @@ mod tests {
                 let thumbnail_textures = HashMap::new();
                 let failed_thumbnails = HashSet::new();
                 let mut load_request = None;
+                let mut favorite_presets = HashSet::new();
+                let mut favorites_only = false;
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -579,6 +660,8 @@ mod tests {
                     thumbnail_textures: &thumbnail_textures,
                     failed_thumbnails: &failed_thumbnails,
                     load_request: &mut load_request,
+                    favorite_presets: &mut favorite_presets,
+                    favorites_only: &mut favorites_only,
                 };
 
                 show(ui, &mut perform, &mut library);
@@ -606,8 +689,8 @@ mod tests {
                 // to prove the id key is `name`-stable) must not panic on
                 // an id clash within a single frame's widget tree either.
                 ui.horizontal(|ui| {
-                    tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
-                    tile(ui, &mut show, "Beta Pulse Drift", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
+                    tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request, &mut HashSet::new());
+                    tile(ui, &mut show, "Beta Pulse Drift", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request, &mut HashSet::new());
                 });
             });
         });

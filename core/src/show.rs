@@ -530,22 +530,19 @@ mod tests {
 
         #[test]
         fn crossfader_at_one_is_full_b_zero_elsewhere() {
-            let mut show = Show::default();
-            show.crossfader = 1.0;
+            let show = Show { crossfader: 1.0, ..Default::default() };
             assert_eq!(show.slot_opacities(), [0.0, 1.0, 0.0, 0.0]);
         }
 
         #[test]
         fn crossfader_at_midpoint_splits_a_and_b_evenly() {
-            let mut show = Show::default();
-            show.crossfader = 0.5;
+            let show = Show { crossfader: 0.5, ..Default::default() };
             assert_eq!(show.slot_opacities(), [0.5, 0.5, 0.0, 0.0]);
         }
 
         #[test]
         fn off_slots_never_move() {
-            let mut show = Show::default();
-            show.crossfader = 1.0;
+            let show = Show { crossfader: 1.0, ..Default::default() };
             assert_eq!(show.slot_opacities()[2], 0.0);
             assert_eq!(show.slot_opacities()[3], 0.0);
         }
@@ -607,8 +604,7 @@ mod tests {
 
         #[test]
         fn returns_none_when_no_slot_assigned_to_deck() {
-            let mut show = Show::default();
-            show.deck_bus = [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off];
+            let show = Show { deck_bus: [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off], ..Default::default() };
             assert_eq!(show.deck_bus_slot_for(Deck::A), None);
             assert_eq!(show.deck_bus_slot_for(Deck::B), None);
         }
@@ -656,9 +652,7 @@ mod tests {
 
         #[test]
         fn switch_active_deck_leaves_selected_slot_alone_when_the_new_active_deck_has_no_slot() {
-            let mut show = Show::default();
-            show.deck_bus = [DeckBus::A, DeckBus::A, DeckBus::Off, DeckBus::Off]; // no slot is on B
-            show.selected_slot = 0;
+            let mut show = Show { deck_bus: [DeckBus::A, DeckBus::A, DeckBus::Off, DeckBus::Off], selected_slot: 0, ..Default::default() }; // no slot is on B
             show.switch_active_deck(); // active_deck becomes B, but no slot maps to it
             assert_eq!(show.get_active_deck(), Deck::B);
             assert_eq!(show.selected_slot, 0); // unchanged, not reset to something wrong
@@ -707,43 +701,35 @@ mod tests {
 
         #[test]
         fn forward_advances_the_index_by_one() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             assert_eq!(show.preset_index_a, 1);
         }
 
         #[test]
         fn backward_decrements_the_index_by_one() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
-            show.preset_index_a = 2;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), preset_index_a: 2, ..Default::default() };
             show.navigate_preset(Deck::A, -1);
             assert_eq!(show.preset_index_a, 1);
         }
 
         #[test]
         fn forward_wraps_from_the_last_index_to_zero() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
-            show.preset_index_a = 2;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), preset_index_a: 2, ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             assert_eq!(show.preset_index_a, 0);
         }
 
         #[test]
         fn backward_wraps_from_zero_to_the_last_index() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
-            show.preset_index_a = 0;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), preset_index_a: 0, ..Default::default() };
             show.navigate_preset(Deck::A, -1);
             assert_eq!(show.preset_index_a, 2);
         }
 
         #[test]
         fn deck_a_and_deck_b_have_independent_indices() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             assert_eq!(show.preset_index_a, 1);
             assert_eq!(show.preset_index_b, 0);
@@ -751,8 +737,7 @@ mod tests {
 
         #[test]
         fn reports_the_chosen_preset_name_via_the_fired_cell() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1", "P2"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1", "P2"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
         }
@@ -924,8 +909,7 @@ mod tests {
 
         #[test]
         fn targets_the_slot_assigned_to_deck_a() {
-            let mut show = Show::default(); // deck_bus[0] == A
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), ..Default::default() }; // deck_bus[0] == A
             show.navigate_preset(Deck::A, 1);
             let out = show.take_fired_presets();
             assert_eq!(out.len(), 1);
@@ -935,8 +919,7 @@ mod tests {
 
         #[test]
         fn targets_the_slot_assigned_to_deck_b() {
-            let mut show = Show::default(); // deck_bus[1] == B
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), ..Default::default() }; // deck_bus[1] == B
             show.navigate_preset(Deck::B, 1);
             let out = show.take_fired_presets();
             assert_eq!(out.len(), 1);
@@ -946,9 +929,7 @@ mod tests {
 
         #[test]
         fn follows_deck_bus_reassignment() {
-            let mut show = Show::default();
-            show.deck_bus = [DeckBus::B, DeckBus::A, DeckBus::Off, DeckBus::Off];
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { deck_bus: [DeckBus::B, DeckBus::A, DeckBus::Off, DeckBus::Off], preset_catalog: catalog(&["P0", "P1"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             let out = show.take_fired_presets();
             assert_eq!(out[0].slot, 1);
@@ -956,9 +937,7 @@ mod tests {
 
         #[test]
         fn no_report_when_no_slot_is_assigned_to_the_deck() {
-            let mut show = Show::default();
-            show.deck_bus = [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off];
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { deck_bus: [DeckBus::Off, DeckBus::Off, DeckBus::Off, DeckBus::Off], preset_catalog: catalog(&["P0", "P1"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             let out = show.take_fired_presets();
             assert!(out.is_empty());
@@ -966,8 +945,7 @@ mod tests {
 
         #[test]
         fn drains_are_empty_after_the_first_call() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             let first = show.take_fired_presets();
             assert_eq!(first.len(), 1);
@@ -977,8 +955,7 @@ mod tests {
 
         #[test]
         fn reports_both_decks_when_both_have_fired() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), ..Default::default() };
             show.navigate_preset(Deck::A, 1);
             show.navigate_preset(Deck::B, 1);
             let out = show.take_fired_presets();
@@ -1025,9 +1002,7 @@ mod tests {
 
         #[test]
         fn auto_xfade_does_not_toggle_before_the_configured_beat_count() {
-            let mut show = Show::default();
-            show.auto_xfade = true;
-            show.beats_per_change = 4;
+            let mut show = Show { auto_xfade: true, beats_per_change: 4, ..Default::default() };
             for _ in 0..3 {
                 show.on_beat();
                 assert_eq!(show.crossfader, 0.0);
@@ -1036,9 +1011,7 @@ mod tests {
 
         #[test]
         fn auto_xfade_toggles_on_the_nth_beat() {
-            let mut show = Show::default();
-            show.auto_xfade = true;
-            show.beats_per_change = 4;
+            let mut show = Show { auto_xfade: true, beats_per_change: 4, ..Default::default() };
             for _ in 0..4 {
                 show.on_beat();
             }
@@ -1047,9 +1020,7 @@ mod tests {
 
         #[test]
         fn auto_xfade_toggles_back_after_another_n_beats() {
-            let mut show = Show::default();
-            show.auto_xfade = true;
-            show.beats_per_change = 2;
+            let mut show = Show { auto_xfade: true, beats_per_change: 2, ..Default::default() };
             show.on_beat();
             show.on_beat();
             assert_eq!(show.crossfader, 1.0);
@@ -1062,9 +1033,7 @@ mod tests {
         fn reset_auto_xfade_count_restarts_the_cadence_from_the_top() {
             // Whole-branch review Finding 7: without a reset, re-enabling
             // auto-xfade mid-count would fire the next crossfade early.
-            let mut show = Show::default();
-            show.auto_xfade = true;
-            show.beats_per_change = 4;
+            let mut show = Show { auto_xfade: true, beats_per_change: 4, ..Default::default() };
             show.on_beat();
             show.on_beat();
             show.on_beat(); // 3 beats in, one short of the 4-beat cadence
@@ -1080,16 +1049,14 @@ mod tests {
 
         #[test]
         fn does_not_touch_crossfader_when_auto_xfade_is_off() {
-            let mut show = Show::default();
-            show.beats_per_change = 1;
+            let mut show = Show { beats_per_change: 1, ..Default::default() };
             show.on_beat();
             assert_eq!(show.crossfader, 0.0);
         }
 
         #[test]
         fn does_not_advance_when_beat_sync_is_false() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), ..Default::default() };
             // beat_sync_a/b default to false.
             show.on_beat();
             assert!(show.fired_preset_a.borrow().is_none());
@@ -1098,10 +1065,7 @@ mod tests {
 
         #[test]
         fn does_not_advance_when_locked_even_if_beat_sync_is_true() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_sync_a = true;
-            show.lock_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_sync_a: true, lock_a: true, ..Default::default() };
             show.on_beat();
             assert!(show.fired_preset_a.borrow().is_none());
         }
@@ -1118,9 +1082,7 @@ mod tests {
 
         #[test]
         fn navigates_the_preset_catalog_when_the_playlist_is_empty() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_sync_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_sync_a: true, ..Default::default() };
             show.on_beat();
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
         }
@@ -1138,9 +1100,7 @@ mod tests {
 
         #[test]
         fn respects_the_configured_trigger_cadence_via_the_clock_beat_count() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_sync_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_sync_a: true, ..Default::default() };
             show.beat_trigger_a.beats_per_change = 4;
             show.clock.pulse(None); // beat_count = 1
             show.on_beat();
@@ -1296,18 +1256,14 @@ mod tests {
 
         #[test]
         fn does_nothing_in_beat_mode() {
-            let mut show = Show::default(); // default trigger mode is Beat
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_sync_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_sync_a: true, ..Default::default() }; // default trigger mode is Beat
             show.check_volume_peak_triggers(0.9, 1000.0);
             assert!(show.fired_preset_a.borrow().is_none());
         }
 
         #[test]
         fn does_nothing_when_not_synced() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_trigger_a = volume_peak_trigger();
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_trigger_a: volume_peak_trigger(), ..Default::default() };
             // beat_sync_a defaults to false.
             show.check_volume_peak_triggers(0.9, 1000.0);
             assert!(show.fired_preset_a.borrow().is_none());
@@ -1315,21 +1271,14 @@ mod tests {
 
         #[test]
         fn does_nothing_when_locked() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_trigger_a = volume_peak_trigger();
-            show.beat_sync_a = true;
-            show.lock_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_trigger_a: volume_peak_trigger(), beat_sync_a: true, lock_a: true, ..Default::default() };
             show.check_volume_peak_triggers(0.9, 1000.0);
             assert!(show.fired_preset_a.borrow().is_none());
         }
 
         #[test]
         fn advances_on_a_clear_peak_in_volume_peak_mode() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_trigger_a = volume_peak_trigger();
-            show.beat_sync_a = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_trigger_a: volume_peak_trigger(), beat_sync_a: true, ..Default::default() };
             show.check_volume_peak_triggers(0.2, 1000.0); // establishes the rolling average
             show.check_volume_peak_triggers(0.9, 1600.0); // clear peak above it
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
@@ -1337,12 +1286,7 @@ mod tests {
 
         #[test]
         fn processes_both_decks_independently() {
-            let mut show = Show::default();
-            show.preset_catalog = catalog(&["P0", "P1"]);
-            show.beat_trigger_a = volume_peak_trigger();
-            show.beat_trigger_b = volume_peak_trigger();
-            show.beat_sync_a = true;
-            show.beat_sync_b = true;
+            let mut show = Show { preset_catalog: catalog(&["P0", "P1"]), beat_trigger_a: volume_peak_trigger(), beat_trigger_b: volume_peak_trigger(), beat_sync_a: true, beat_sync_b: true, ..Default::default() };
             show.check_volume_peak_triggers(0.2, 1000.0);
             show.check_volume_peak_triggers(0.9, 1600.0);
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));

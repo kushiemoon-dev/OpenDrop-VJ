@@ -134,7 +134,9 @@ $vcpkgBin = Join-Path $vcpkgRoot "installed\x64-windows\bin"
 $vcpkgDlls = @(
     "projectM-4.dll",
     "projectM-4-playlist.dll",
-    "glew32.dll"
+    "glew32.dll",
+    "libEGL.dll",
+    "libGLESv2.dll"
 )
 
 $resolvedVcpkgDlls = @()

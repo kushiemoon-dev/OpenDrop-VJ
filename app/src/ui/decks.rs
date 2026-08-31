@@ -85,36 +85,51 @@ fn deck_card(
 
     ui.push_id(i, |ui| {
         let card = widgets::card(ui, |ui| {
-            let block = ui.vertical(|ui| {
-                let image = ui.add(egui::Image::new((deck_tex_ids[i], t.metrics.thumb_size)).uv(FLIPPED_V_UV));
-                thumbnail_overlay(ui, image.rect, is_active);
+            // `card`'s content_ui inherits its layout from the caller:
+            // here, the enclosing `ui.horizontal` deck row: so without an
+            // explicit `ui.vertical` wrapper, `block` and `bus` below would
+            // lay out side by side instead of stacked (also found live: the
+            // bus badge rendered as an oversized vertical bar next to the
+            // thumbnail, inheriting the row's full cross-axis height).
+            ui.vertical(|ui| {
+                let block = ui.vertical(|ui| {
+                    // `ui.vertical` defaults to wrapping text to the FULL available
+                    // width of the enclosing `ui.horizontal` row (egui's
+                    // `TextWrapMode::Wrap` for vertical layouts), not to the
+                    // thumbnail's intrinsic width. Without this, the preset-name
+                    // label below stretches this card to consume the entire row,
+                    // hiding decks 1-3 (found live, post-Phase-7-redesign).
+                    ui.set_width(t.metrics.thumb_size.x);
+                    let image = ui.add(egui::Image::new((deck_tex_ids[i], t.metrics.thumb_size)).uv(FLIPPED_V_UV));
+                    thumbnail_overlay(ui, image.rect, is_active);
 
-                if pending_validations.contains(&i) {
-                    ui.label("Validating…");
-                } else if let Some(err) = preset_errors.get(&i) {
-                    widgets::error_banner(ui, err);
-                } else {
-                    ui.label(&deck_preset_names[i]);
+                    if pending_validations.contains(&i) {
+                        ui.label("Validating…");
+                    } else if let Some(err) = preset_errors.get(&i) {
+                        widgets::error_banner(ui, err);
+                    } else {
+                        ui.label(&deck_preset_names[i]);
+                    }
+                    meta_line(ui);
+                });
+                if block.response.interact(egui::Sense::click()).clicked() {
+                    show.select_slot(i);
                 }
-                meta_line(ui);
-            });
-            if block.response.interact(egui::Sense::click()).clicked() {
-                show.select_slot(i);
-            }
 
-            // Bus A = `accent`, bus B = `ok`, off = `dim` (the mapping
-            // `Metrics`' own doc comment establishes for this step, already
-            // reused as-is by the header's own bus A/B pills: `ui::shell::
-            // status_bar_stage`).
-            let (bus_text, bus_color) = match show.deck_bus[i] {
-                DeckBus::A => ("● Bus A", t.palette.accent),
-                DeckBus::B => ("● Bus B", t.palette.ok),
-                DeckBus::Off => ("○ Off", t.palette.dim),
-            };
-            let bus = widgets::pill(ui, bus_text, bus_color);
-            if bus.interact(egui::Sense::click()).clicked() {
-                show.deck_bus[i] = show.deck_bus[i].next();
-            }
+                // Bus A = `accent`, bus B = `ok`, off = `dim` (the mapping
+                // `Metrics`' own doc comment establishes for this step, already
+                // reused as-is by the header's own bus A/B pills: `ui::shell::
+                // status_bar_stage`).
+                let (bus_text, bus_color) = match show.deck_bus[i] {
+                    DeckBus::A => ("● Bus A", t.palette.accent),
+                    DeckBus::B => ("● Bus B", t.palette.ok),
+                    DeckBus::Off => ("○ Off", t.palette.dim),
+                };
+                let bus = widgets::pill(ui, bus_text, bus_color);
+                if bus.interact(egui::Sense::click()).clicked() {
+                    show.deck_bus[i] = show.deck_bus[i].next();
+                }
+            });
         });
 
         // Hover lift + glow (Step 22 of the Phase 7 UI redesign plan): `i`

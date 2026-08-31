@@ -3,6 +3,8 @@
 //! Handles preset categorization (parsing " - " delimiters) and case-insensitive
 //! substring search over the preset name field. No I/O; disk scanning stays in the `app` crate.
 
+use std::collections::HashSet;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresetMeta {
     pub name: String,
@@ -31,6 +33,13 @@ pub fn search<'a>(list: &'a [PresetMeta], query: &str) -> Vec<&'a PresetMeta> {
         .iter()
         .filter(|p| p.name.to_lowercase().contains(&q))
         .collect()
+}
+
+/// Filters an already-searched preset list down to only the names present
+/// in `favorites`. Composed after `search()` rather than added as a
+/// parameter to it, so `search()`'s existing contract/tests stay untouched.
+pub fn filter_favorites<'a>(list: Vec<&'a PresetMeta>, favorites: &HashSet<String>) -> Vec<&'a PresetMeta> {
+    list.into_iter().filter(|p| favorites.contains(&p.name)).collect()
 }
 
 #[cfg(test)]
@@ -197,6 +206,50 @@ mod tests {
             let presets: Vec<PresetMeta> = vec![];
 
             let results = search(&presets, "anything");
+            assert_eq!(results.len(), 0);
+        }
+    }
+
+    mod filter_favorites {
+        use super::*;
+
+        #[test]
+        fn empty_favorites_returns_empty_list() {
+            let a = PresetMeta { name: "Psychedelic - Swirly Loops".to_string(), category: "Psychedelic".to_string() };
+            let b = PresetMeta { name: "Wave - Shimmer".to_string(), category: "Wave".to_string() };
+            let list = vec![&a, &b];
+
+            let results = filter_favorites(list, &HashSet::new());
+            assert_eq!(results.len(), 0);
+        }
+
+        #[test]
+        fn matching_subset_is_returned_intact() {
+            let a = PresetMeta { name: "Psychedelic - Swirly Loops".to_string(), category: "Psychedelic".to_string() };
+            let b = PresetMeta { name: "Wave - Shimmer".to_string(), category: "Wave".to_string() };
+            let list = vec![&a, &b];
+            let favorites = HashSet::from(["Psychedelic - Swirly Loops".to_string()]);
+
+            let results = filter_favorites(list, &favorites);
+            assert_eq!(results, vec![&a]);
+        }
+
+        #[test]
+        fn name_absent_from_favorites_is_excluded() {
+            let a = PresetMeta { name: "Psychedelic - Swirly Loops".to_string(), category: "Psychedelic".to_string() };
+            let list = vec![&a];
+            let favorites = HashSet::from(["Wave - Shimmer".to_string()]);
+
+            let results = filter_favorites(list, &favorites);
+            assert_eq!(results.len(), 0);
+        }
+
+        #[test]
+        fn empty_input_list_returns_empty_list() {
+            let list: Vec<&PresetMeta> = vec![];
+            let favorites = HashSet::from(["Wave - Shimmer".to_string()]);
+
+            let results = filter_favorites(list, &favorites);
             assert_eq!(results.len(), 0);
         }
     }

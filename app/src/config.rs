@@ -15,6 +15,7 @@
 //! (see `app/src/ui/streaming.rs`'s `save_secret_field`/
 //! `clear_secret_button`).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -105,6 +106,7 @@ pub(crate) struct UiConfig {
     #[serde(with = "InvisibleModeWire")]
     pub(crate) invisible_mode: InvisibleMode,
     pub(crate) target_fps: u32,
+    pub(crate) favorite_presets: HashSet<String>,
 }
 
 impl Default for UiConfig {
@@ -123,6 +125,7 @@ impl Default for UiConfig {
             kick_channel: String::new(),
             invisible_mode: InvisibleMode::Eco,
             target_fps: 60,
+            favorite_presets: HashSet::new(),
         }
     }
 }
@@ -198,6 +201,7 @@ mod tests {
             kick_channel: "kushiemoon".to_string(),
             invisible_mode: InvisibleMode::Pause,
             target_fps: 144,
+            favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
         };
 
         let json = config_to_json(&config);

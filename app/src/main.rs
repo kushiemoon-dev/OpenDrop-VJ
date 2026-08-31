@@ -462,6 +462,16 @@ struct AppState {
     /// Memoized `search` results for `preset_search_query`: see
     /// `ui::preset_browser::SearchCache`.
     preset_search_cache: ui::preset_browser::SearchCache,
+    /// Preset names the user has starred, keyed by name (same stable
+    /// identity `tile()` already uses for its thumbnail cache/id). Restored
+    /// from `ui_config.favorite_presets` at bootstrap; persisted immediately
+    /// on each toggle (`ui::preset_browser`'s star-click handler calls
+    /// `config::save_config` directly), never deferred to `App::exiting`.
+    favorite_presets: HashSet<String>,
+    /// Preset Browser's "favorites only" filter toggle. Deliberately NOT
+    /// persisted: matches `preset_search_query`'s own bootstrap-only reset
+    /// (`:2265`, always `String::new()`): always starts `false` on launch.
+    favorites_only: bool,
     /// Presets whose thumbnail render failed once already. Both
     /// `thumbnails::pump_thumbnail_queue` (writer) and the preset-browser
     /// panel (reader) consult it, so a failure can't turn into a per-tick
@@ -1500,6 +1510,8 @@ impl ApplicationHandler for App {
                 presets_drawer_open,
                 preset_search_query,
                 preset_search_cache,
+                favorite_presets,
+                favorites_only,
                 thumb_queue,
                 thumbnail_textures,
                 failed_thumbnails,
@@ -1576,6 +1588,8 @@ impl ApplicationHandler for App {
                 thumbnail_textures,
                 failed_thumbnails,
                 load_request: &mut preset_load_request,
+                favorite_presets,
+                favorites_only,
             };
             let mut sources_ctx = ui::ctx::SourcesCtx {
                 audio,
@@ -2277,6 +2291,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         presets_drawer_open: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),
+        favorite_presets: ui_config.favorite_presets.clone(),
+        favorites_only: false,
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),

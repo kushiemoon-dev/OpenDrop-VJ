@@ -4,8 +4,8 @@
 //! `Context` at bootstrap (Step 6). No panel calls any of these yet: that
 //! substitution happens panel by panel at Steps 13-21, at which point each
 //! panel is retouched for the theme anyway. No animation lives here either
-//! (Step 22 owns easing/transitions); `card`'s and the 3 button variants'
-//! hover response is a plain binary state switch, not a tween.
+//! (Step 22 owns easing/transitions); `card`'s and `ghost_button`'s hover
+//! response is a plain binary state switch, not a tween.
 //!
 //! Every color routed through a helper here comes from `theme(ui).palette`
 //! (or a blend derived from two palette colors via `Color32::lerp_to_gamma`/
@@ -67,29 +67,9 @@ pub fn micro_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
-/// Same micro typography as `micro_label`, prefixed with `// ` in the
-/// theme's `dim` color. Built as a single `LayoutJob` with 2 sections (not
-/// 2 separate `ui.label` calls, which would lay out on 2 different
-/// baselines) so the `// ` prefix and the text share one text row.
-pub fn micro_label_prefixed(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let t = theme(ui);
-    let font_id = egui::FontId::new(t.type_scale.micro, egui::FontFamily::Name(FAMILY_MONO.into()));
-
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        "// ",
-        0.0,
-        egui::text::TextFormat { font_id: font_id.clone(), color: t.palette.dim, ..Default::default() },
-    );
-    job.append(&text.to_uppercase(), 0.0, egui::text::TextFormat { font_id, color: t.palette.muted, ..Default::default() });
-
-    ui.label(job)
-}
-
 /// Uppercase section header (mono, `muted`), used above a group of
-/// controls. See `section_card` for the same header wrapped in a `card`.
-/// Font via a direct `FontId` (`type_scale.section` + `FAMILY_MONO`), same
-/// reasoning as `micro_label`.
+/// controls. Font via a direct `FontId` (`type_scale.section` +
+/// `FAMILY_MONO`), same reasoning as `micro_label`.
 pub fn section(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let t = theme(ui);
     ui.label(
@@ -99,21 +79,12 @@ pub fn section(ui: &mut egui::Ui, text: &str) -> egui::Response {
     )
 }
 
-/// A `card` (see below) with a `section` header laid out above
-/// `add_contents`.
-pub fn section_card<R>(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-    card(ui, |ui| {
-        section(ui, title);
-        add_contents(ui)
-    })
-}
-
 /// Override `ui`'s interactive widget colors for the duration of `f`, then
-/// run `f` (typically `|ui| ui.button(text)`) inside that scope. Shared by
-/// the 3 button variants below: each only picks different `fill`/`fg`/
-/// `border` colors, all sourced from `theme(ui).palette`, and reuses
-/// whatever `bg_stroke` width/`corner_radius` Step 4's `visuals()` already
-/// set on the ambient style (only the colors are touched here).
+/// run `f` (typically `|ui| ui.button(text)`) inside that scope. Used by
+/// `ghost_button` below, which picks its own `fill`/`fg`/`border` colors,
+/// all sourced from `theme(ui).palette`, and reuses whatever `bg_stroke`
+/// width/`corner_radius` Step 4's `visuals()` already set on the ambient
+/// style (only the colors are touched here).
 fn styled_button<R>(ui: &mut egui::Ui, fill: egui::Color32, fg: egui::Color32, border: egui::Color32, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let t = theme(ui);
     // Hover/press feedback is a plain static color per state (not a tween,
@@ -136,12 +107,6 @@ fn styled_button<R>(ui: &mut egui::Ui, fill: egui::Color32, fg: egui::Color32, b
     .inner
 }
 
-/// Filled, accent-colored call-to-action button.
-pub fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let t = theme(ui);
-    styled_button(ui, t.palette.accent, t.palette.ink, t.palette.accent, |ui| ui.button(text))
-}
-
 /// Transparent (no fill), bordered, low-emphasis button.
 pub fn ghost_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let t = theme(ui);
@@ -150,12 +115,6 @@ pub fn ghost_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     // literal, keeping every color in this file traceable to a token.
     let transparent = t.palette.surface.gamma_multiply(0.0);
     styled_button(ui, transparent, t.palette.text, t.palette.border, |ui| ui.button(text))
-}
-
-/// Filled, error-colored destructive-action button.
-pub fn danger_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let t = theme(ui);
-    styled_button(ui, t.palette.error, t.palette.ink, t.palette.error, |ui| ui.button(text))
 }
 
 /// A bordered, `surface`-filled container that lifts (lightens) and grows
@@ -183,49 +142,6 @@ pub fn card<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R)
     prepared.paint(ui);
 
     egui::InnerResponse::new(inner, response)
-}
-
-/// A label + `egui::Slider` + mono numeric readout, in one row. The
-/// readout is a separate `label`, sized from `type_scale.numeric` and set
-/// to `FAMILY_MONO` via a direct `FontId` (not the slider's own built-in
-/// value text, and not `TextStyle::Name("Numeric")`, same reasoning as
-/// `micro_label`), so its font is always the theme's mono family
-/// regardless of the slider's own styling.
-pub fn slider_row(ui: &mut egui::Ui, label: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>) -> egui::Response {
-    let t = theme(ui);
-    ui.horizontal(|ui| {
-        micro_label(ui, label);
-        let response = ui.add(egui::Slider::new(value, range).show_value(false));
-        ui.label(
-            egui::RichText::new(format!("{:.2}", *value))
-                .font(egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into())))
-                .color(t.palette.text),
-        );
-        response
-    })
-    .inner
-}
-
-/// A small bordered, `ink`-filled, uppercase-mono-text badge.
-pub fn chip(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let t = theme(ui);
-    egui::Frame::NONE
-        .fill(t.palette.ink)
-        .stroke(egui::Stroke::new(t.metrics.border_width, t.palette.border))
-        .corner_radius(egui::CornerRadius::from(t.metrics.radius_sm))
-        .inner_margin(egui::Margin::symmetric(6, 2))
-        .show(ui, |ui| micro_label(ui, text))
-        .response
-}
-
-/// A horizontal row of `chip`s.
-pub fn chip_row(ui: &mut egui::Ui, labels: &[&str]) -> egui::Response {
-    ui.horizontal(|ui| {
-        for label in labels {
-            chip(ui, label);
-        }
-    })
-    .response
 }
 
 /// A rounded, `color`-tinted badge: `color` at low opacity as the fill, full
@@ -311,11 +227,16 @@ pub fn warn_banner(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// Paint an accent-colored focus ring just outside `rect`, without
 /// allocating layout space or interaction (a caller draws this over a
 /// widget it already placed, using that widget's `Response::rect`).
+///
+/// `radius_lg` (whole-branch review fix wave, finding 6): the only caller
+/// (`ui::decks`'s `active_glow`) rings a `card`, which is itself built with
+/// `radius_lg`, not `radius_md`: a mismatch here left the ring's corners
+/// visibly not following the card's.
 pub fn focus_ring(ui: &egui::Ui, rect: egui::Rect) {
     let t = theme(ui);
     ui.painter().rect_stroke(
         rect,
-        egui::CornerRadius::from(t.metrics.radius_md),
+        egui::CornerRadius::from(t.metrics.radius_lg),
         egui::Stroke::new(t.metrics.border_width * 2.0, t.palette.accent),
         egui::StrokeKind::Outside,
     );
@@ -404,41 +325,11 @@ mod tests {
     }
 
     #[test]
-    fn micro_label_prefixed_does_not_panic() {
-        themed_test_ui(|ui| {
-            micro_label_prefixed(ui, "comment");
-            dense(ui, |ui| {
-                micro_label_prefixed(ui, "comment");
-            });
-        });
-    }
-
-    #[test]
     fn section_does_not_panic() {
         themed_test_ui(|ui| {
             section(ui, "output");
             dense(ui, |ui| {
                 section(ui, "output");
-            });
-        });
-    }
-
-    #[test]
-    fn section_card_does_not_panic() {
-        themed_test_ui(|ui| {
-            section_card(ui, "output", |ui| ui.label("body"));
-            dense(ui, |ui| {
-                section_card(ui, "output", |ui| ui.label("body"));
-            });
-        });
-    }
-
-    #[test]
-    fn primary_button_does_not_panic() {
-        themed_test_ui(|ui| {
-            primary_button(ui, "Go");
-            dense(ui, |ui| {
-                primary_button(ui, "Go");
             });
         });
     }
@@ -454,52 +345,11 @@ mod tests {
     }
 
     #[test]
-    fn danger_button_does_not_panic() {
-        themed_test_ui(|ui| {
-            danger_button(ui, "Delete");
-            dense(ui, |ui| {
-                danger_button(ui, "Delete");
-            });
-        });
-    }
-
-    #[test]
     fn card_does_not_panic() {
         themed_test_ui(|ui| {
             card(ui, |ui| ui.label("inside card"));
             dense(ui, |ui| {
                 card(ui, |ui| ui.label("inside card"));
-            });
-        });
-    }
-
-    #[test]
-    fn slider_row_does_not_panic() {
-        themed_test_ui(|ui| {
-            let mut value = 0.5;
-            slider_row(ui, "level", &mut value, 0.0..=1.0);
-            dense(ui, |ui| {
-                slider_row(ui, "level", &mut value, 0.0..=1.0);
-            });
-        });
-    }
-
-    #[test]
-    fn chip_does_not_panic() {
-        themed_test_ui(|ui| {
-            chip(ui, "beta");
-            dense(ui, |ui| {
-                chip(ui, "beta");
-            });
-        });
-    }
-
-    #[test]
-    fn chip_row_does_not_panic() {
-        themed_test_ui(|ui| {
-            chip_row(ui, &["alpha", "beta"]);
-            dense(ui, |ui| {
-                chip_row(ui, &["alpha", "beta"]);
             });
         });
     }

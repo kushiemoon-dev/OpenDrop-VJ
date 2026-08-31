@@ -163,6 +163,59 @@ pub(crate) enum Panel {
     About,
 }
 
+/// Whole-branch review fix wave, finding 1 (AC-10): `config::PanelId` ->
+/// `Panel`, for restoring `AppState::active_panel` from a loaded `ui.json`
+/// at bootstrap. Kept as an explicit conversion rather than merging the
+/// two enums, per `config.rs`'s own module doc comment (`Panel` must not
+/// derive `Serialize`/`Deserialize`).
+impl From<config::PanelId> for Panel {
+    fn from(id: config::PanelId) -> Self {
+        match id {
+            config::PanelId::Decks => Panel::Decks,
+            config::PanelId::PresetBrowser => Panel::PresetBrowser,
+            config::PanelId::Playlists => Panel::Playlists,
+            config::PanelId::Audio => Panel::Audio,
+            config::PanelId::Quality => Panel::Quality,
+            config::PanelId::Output => Panel::Output,
+            config::PanelId::Midi => Panel::Midi,
+            config::PanelId::NdiIn => Panel::NdiIn,
+            config::PanelId::NdiOut => Panel::NdiOut,
+            config::PanelId::Osc => Panel::Osc,
+            config::PanelId::RemoteWs => Panel::RemoteWs,
+            config::PanelId::Streaming => Panel::Streaming,
+            #[cfg(feature = "link")]
+            config::PanelId::Link => Panel::Link,
+            config::PanelId::V4l2 => Panel::V4l2,
+            config::PanelId::About => Panel::About,
+        }
+    }
+}
+
+/// The reverse of the above, for saving `AppState::active_panel` into
+/// `UiConfig` on exit.
+impl From<Panel> for config::PanelId {
+    fn from(panel: Panel) -> Self {
+        match panel {
+            Panel::Decks => config::PanelId::Decks,
+            Panel::PresetBrowser => config::PanelId::PresetBrowser,
+            Panel::Playlists => config::PanelId::Playlists,
+            Panel::Audio => config::PanelId::Audio,
+            Panel::Quality => config::PanelId::Quality,
+            Panel::Output => config::PanelId::Output,
+            Panel::Midi => config::PanelId::Midi,
+            Panel::NdiIn => config::PanelId::NdiIn,
+            Panel::NdiOut => config::PanelId::NdiOut,
+            Panel::Osc => config::PanelId::Osc,
+            Panel::RemoteWs => config::PanelId::RemoteWs,
+            Panel::Streaming => config::PanelId::Streaming,
+            #[cfg(feature = "link")]
+            Panel::Link => config::PanelId::Link,
+            Panel::V4l2 => config::PanelId::V4l2,
+            Panel::About => config::PanelId::About,
+        }
+    }
+}
+
 struct WindowSlot {
     window: Window,
     surface: Surface<WindowSurface>,
@@ -860,10 +913,10 @@ fn ui_root(
                 ui::midi::show(ui, sources.midi, sources.registry, sources.midi_learning);
             }
             Panel::NdiIn => {
-                ui::ndi::show(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active, sources.ndi_in_selected_source);
+                ui::ndi::show_in(ui, output.ndi, sources.ndi_in_selected_source);
             }
             Panel::NdiOut => {
-                ui::ndi::show(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active, sources.ndi_in_selected_source);
+                ui::ndi::show_out(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active);
             }
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
@@ -1685,6 +1738,19 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(state) = &mut self.state {
+            // Whole-branch review fix wave, finding 1 (AC-10): persist
+            // `active_panel`/`stage_mode` on exit, matching Step 7's
+            // original "How" text ("écriture sur exiting ... et
+            // immédiatement à chaque changement de thème runtime"). Same
+            // read-modify-write idiom as the runtime theme-switch handler,
+            // so this never clobbers `theme` (or any other already-
+            // persisted field) saved elsewhere.
+            let config_path = config::config_file_path();
+            let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
+            ui_config.active_panel = state.active_panel.into();
+            ui_config.stage_mode = state.stage_mode;
+            config::save_config(config_path.as_deref(), &ui_config);
+
             state.egui_glow.destroy();
         }
     }
@@ -1988,9 +2054,19 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (examples/pure_glow.rs:188).
     let mut egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
 
-    // Step 6 (Phase 7 UI redesign plan): wire the default Kushie theme +
-    // fonts onto the bootstrap Context, once. `set_fonts` is only ever
-    // called here: a runtime theme change (Step 12) re-applies
+    // Whole-branch review fix wave, finding 1 (AC-10): load the persisted
+    // `ui.json` once, here, before the theme/active_panel/stage_mode it
+    // carries are wired onto the Context/AppState below: Step 7's `config.
+    // rs` landed with this load call deferred (Ruling D: `AppState` didn't
+    // have `active_panel`/`stage_mode` yet), and that wiring was never
+    // revisited once Steps 10/11 added them. Without this, the runtime
+    // theme-switch handler's `config::save_config` call was writing a
+    // preference file the app then ignored on every restart.
+    let ui_config = config::config_file_path().map(|p| config::load_config(&p)).unwrap_or_default();
+
+    // Step 6 (Phase 7 UI redesign plan): wire the persisted (or default)
+    // theme + fonts onto the bootstrap Context, once. `set_fonts` is only
+    // ever called here: a runtime theme change (Step 12) re-applies
     // `set_style_of` but never re-registers fonts. `set_style_of` is applied
     // to both `Theme::Dark` and `Theme::Light` with the same `Arc<Style>` so
     // no internal egui route (tooltips, `Area`, anything reading
@@ -1998,7 +2074,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // `theme_preference` changes later.
     egui_glow.egui_ctx.set_fonts(theme::fonts::font_definitions());
     egui_glow.egui_ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
-    let default_theme_id = theme::registry::ThemeId::default();
+    let default_theme_id = ui_config.theme;
     let default_theme = theme::registry::get(default_theme_id);
     let default_style = Arc::new(theme::visuals::style(default_theme));
     egui_glow.egui_ctx.set_style_of(egui::Theme::Dark, default_style.clone());
@@ -2180,8 +2256,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_preset_names: std::array::from_fn(|i| preset_display_name(&preset_root, &presets[i])),
         transition_seconds: 0.0,
         deck_tex_ids,
-        active_panel: Panel::default(),
-        stage_mode: false,
+        // Whole-branch review fix wave, finding 1 (AC-10): restored from
+        // the same `ui_config` loaded above, instead of always starting on
+        // the hardcoded defaults.
+        active_panel: ui_config.active_panel.into(),
+        stage_mode: ui_config.stage_mode,
         presets_drawer_open: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),

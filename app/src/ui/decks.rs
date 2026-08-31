@@ -9,10 +9,11 @@
 //! instead of `Frame::group`, `widgets::pill` bus badges, and a hand-painted
 //! thumbnail texture/active-glow using the same layered-`rect_filled`
 //! technique `ui::shell::crossfader`'s handle halo already established.
-//! Everything painted here is the mockup's *resting* state only: the
-//! active card's breathing glow and the live dot's pulse are both animated
-//! in the mockup, but that oscillation is explicitly Step 22's job, not
-//! this one's.
+//! Step 22 wires up the card's hover lift+glow (`hover_glow`) and the
+//! active card's breathing glow (`active_glow`'s continuous oscillation);
+//! the live dot's pulse isn't one of that step's 3 mandated animated
+//! locations (deck-card hover, preset-tile hover, nav-rail slide) and
+//! stays resting/static, same as the diagonal hairline stripes.
 //!
 //! Takes individual `AppState` fields rather than `&mut AppState` as a
 //! whole: the call site (`main.rs`'s `about_to_wait`) already holds
@@ -22,6 +23,7 @@
 use opendrop_core::show::{DeckBus, Show};
 use std::collections::{HashMap, HashSet};
 
+use crate::theme::easing::ease_out_kushie;
 use crate::theme::fonts::FAMILY_MONO;
 use crate::ui::widgets::{self, theme};
 
@@ -115,6 +117,22 @@ fn deck_card(
             }
         });
 
+        // Hover lift + glow (Step 22 of the Phase 7 UI redesign plan): `i`
+        // (the `push_id` above) is already a stable animation key: 4
+        // fixed decks, never filtered or reordered, so no id change is
+        // needed for this step's id-hygiene rule. Hit-test
+        // (`card.response.hovered()`) always reads the card's real,
+        // un-lifted `Response::rect` from the layout above: only
+        // `hover_glow`'s decorative overlay rect is ever translated, so
+        // the animated lift can never desync from the cursor mid-
+        // transition: the "card dodges the cursor" bug this step's brief
+        // explicitly warns about.
+        let d = t.durations.fast.max(4.0 * ui.ctx().input(|input| input.stable_dt));
+        let hover_t = ui.ctx().animate_bool_with_time_and_easing(ui.id().with("hover"), card.response.hovered(), d, ease_out_kushie);
+        if hover_t > 0.0 {
+            hover_glow(ui, card.response.rect, hover_t);
+        }
+
         if is_active {
             active_glow(ui, card.response.rect);
         }
@@ -129,8 +147,10 @@ fn deck_card(
 /// mockup's own markup only puts `.od-livedot` on its `.on` card (the other
 /// 3, including one also assigned to a bus, have none), so this reads it as
 /// bundled with the active/selected state rather than with bus routing.
-/// Both elements are resting-state only: the mockup's pulse/breathe
-/// keyframes on them are Step 22's job.
+/// Both elements stay resting-state only: the live dot's pulse isn't one
+/// of Step 22's 3 mandated animated locations (see this file's module doc
+/// comment), and the diagonal stripes have no animated counterpart in the
+/// mockup either.
 fn thumbnail_overlay(ui: &egui::Ui, rect: egui::Rect, is_active: bool) {
     let t = theme(ui);
     let painter = ui.painter().with_clip_rect(rect);
@@ -171,20 +191,54 @@ fn meta_line(ui: &mut egui::Ui) {
     });
 }
 
-/// Accent border + soft glow on the active deck's card, at *resting*
-/// intensity (mockup: the `breathe` keyframe's 0%/100% state: `0 0 0 1px
-/// accent, 0 4px 16px accent@18%`: not its 50% peak). A layered
-/// `rect_filled` halo, the same simulated-glow technique as the header's
-/// crossfader handle (`ui::shell::crossfader`), plus `widgets::focus_ring`
-/// for the crisp 1px accent ring on top. Static: the oscillation between
-/// this resting state and the mockup's brighter peak is Step 22's job.
+/// Accent border + soft glow on the active deck's card, breathing (Step 22
+/// of the Phase 7 UI redesign plan) between the mockup's `breathe`
+/// keyframe's 0%/100% state (this function's original alphas below,
+/// unchanged, are exactly that resting state: `0 0 0 1px accent, 0 4px
+/// 16px accent@18%`) and its 50% peak: a continuous ~2.4s sine oscillation
+/// of the halo layers' alpha, driven directly by `ui.ctx().input(|i|
+/// i.time)`: deliberately NOT an `animate_*` call, since there is no
+/// bool/value state transition here, just the elapsed clock. Never the
+/// rect itself, only intensity oscillates. `focus_ring`'s crisp 1px ring
+/// (the mockup's separate `0 0 0 1px accent` shadow layer) stays constant,
+/// matching the mockup's own layering.
 fn active_glow(ui: &egui::Ui, rect: egui::Rect) {
     let t = theme(ui);
     let corner_radius = egui::CornerRadius::from(t.metrics.radius_lg);
+
+    // `sin(pi * phase)` is 0 at `phase` 0.0 and 1.0 (the keyframe's 0%/100%
+    // resting endpoints) and 1.0 at `phase` 0.5 (the keyframe's 50% peak),
+    // never negative across `phase`'s [0, 1) range: the "breathe out,
+    // breathe in" shape of a CSS `breathe` keyframe.
+    const PERIOD_SECS: f64 = 2.4;
+    let phase = (ui.ctx().input(|i| i.time) / PERIOD_SECS).rem_euclid(1.0);
+    let breathe = (std::f64::consts::PI * phase).sin() as f32;
+    let intensity = 1.0 + 0.6 * breathe;
+
     for (expand, alpha) in [(14.0, 10u8), (8.0, 22u8), (3.0, 40u8)] {
+        let alpha = ((alpha as f32) * intensity).min(255.0) as u8;
         ui.painter().rect_filled(rect.expand(expand), corner_radius, t.palette.accent.gamma_multiply_u8(alpha));
     }
     widgets::focus_ring(ui, rect);
+}
+
+/// Hover lift + glow overlay (Step 22): a stronger, upward-shifted version
+/// of `active_glow`'s resting halo, faded in by `hover_t` (the id-keyed
+/// `animate_bool_with_time_and_easing` progress computed by `deck_card`,
+/// 0 = resting, 1 = fully hovered). Painted from the card's own
+/// `Response::rect`, already fully laid out and hit-tested before this
+/// runs (see `deck_card`'s own comment on this call site): only this
+/// decorative overlay's rect is ever translated upward, which is what
+/// visually "lifts" the card without moving anything the pointer is
+/// actually tested against.
+fn hover_glow(ui: &egui::Ui, rect: egui::Rect, hover_t: f32) {
+    let t = theme(ui);
+    let corner_radius = egui::CornerRadius::from(t.metrics.radius_lg);
+    let lifted = rect.translate(egui::vec2(0.0, -4.0 * hover_t));
+    for (expand, alpha) in [(16.0, 14u8), (9.0, 28u8)] {
+        let alpha = (alpha as f32 * hover_t) as u8;
+        ui.painter().rect_filled(lifted.expand(expand), corner_radius, t.palette.accent.gamma_multiply_u8(alpha));
+    }
 }
 
 /// Fade/transition summary row: same ticks + rail visual grammar as the

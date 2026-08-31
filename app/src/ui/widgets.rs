@@ -177,6 +177,27 @@ pub fn connection_row(ui: &mut egui::Ui, label: &str, connected: bool) -> egui::
     .response
 }
 
+/// Which of `vu_meter`'s 3 color tiers a given (already 0.0..=1.0
+/// clamped) level falls into. Extracted as a pure function so the exact
+/// threshold boundaries (0.7, 0.9) are unit-testable. `Response`
+/// doesn't expose the painted fill color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VuTier {
+    Ok,
+    Warn,
+    Error,
+}
+
+fn vu_level_tier(level: f32) -> VuTier {
+    if level > 0.9 {
+        VuTier::Error
+    } else if level > 0.7 {
+        VuTier::Warn
+    } else {
+        VuTier::Ok
+    }
+}
+
 /// A horizontal level meter: an `ink`-filled track with a fill proportional
 /// to `level` (clamped to `0.0..=1.0`), colored `ok`/`warn`/`error` past
 /// fixed thresholds, bordered with `border`.
@@ -192,7 +213,11 @@ pub fn vu_meter(ui: &mut egui::Ui, level: f32) -> egui::Response {
 
         let mut fill_rect = rect;
         fill_rect.set_width(rect.width() * level);
-        let fill_color = if level > 0.9 { t.palette.error } else if level > 0.7 { t.palette.warn } else { t.palette.ok };
+        let fill_color = match vu_level_tier(level) {
+            VuTier::Error => t.palette.error,
+            VuTier::Warn => t.palette.warn,
+            VuTier::Ok => t.palette.ok,
+        };
         ui.painter().rect_filled(fill_rect, corner_radius, fill_color);
 
         ui.painter().rect_stroke(rect, corner_radius, egui::Stroke::new(t.metrics.border_width, t.palette.border), egui::StrokeKind::Outside);
@@ -306,86 +331,141 @@ mod tests {
     // scopes ----------------------------------------------------------
 
     #[test]
-    fn dense_does_not_panic() {
+    fn dense_scopes_item_spacing_to_the_dense_token_and_restores_it_after() {
         themed_test_ui(|ui| {
+            let t = theme(ui);
+            assert_eq!(ui.spacing().item_spacing, t.metrics.spacing_airy);
             dense(ui, |ui| {
-                ui.label("inside dense");
+                assert_eq!(ui.spacing().item_spacing, t.metrics.spacing_dense);
             });
+            assert_eq!(ui.spacing().item_spacing, t.metrics.spacing_airy);
         });
     }
 
     #[test]
-    fn micro_label_does_not_panic() {
+    fn section_renders_taller_than_micro_label_for_the_same_text() {
         themed_test_ui(|ui| {
-            micro_label(ui, "gain");
-            dense(ui, |ui| {
-                micro_label(ui, "gain");
-            });
+            let micro = micro_label(ui, "gain");
+            let section_resp = section(ui, "gain");
+            assert!(section_resp.rect.height() > micro.rect.height());
         });
     }
 
     #[test]
-    fn section_does_not_panic() {
+    fn ghost_button_registers_a_simulated_click() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::theme::fonts::font_definitions());
+        ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
+        let default_theme_id = ThemeId::default();
+        let default_style = std::sync::Arc::new(crate::theme::visuals::style(registry::get(default_theme_id)));
+        ctx.set_style_of(egui::Theme::Dark, default_style.clone());
+        ctx.set_style_of(egui::Theme::Light, default_style);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(THEME_ID_KEY), default_theme_id));
+
+        let mut rect = egui::Rect::NOTHING;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = ghost_button(ui, "Cancel").rect;
+        })
+        .drop_without_applying_deltas();
+        let pos = rect.center();
+
+        let press_and_release = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+            ],
+            ..Default::default()
+        };
+        let mut clicked = false;
+        ctx.run_ui(press_and_release, |ui| {
+            clicked = ghost_button(ui, "Cancel").clicked();
+        })
+        .drop_without_applying_deltas();
+
+        assert!(clicked, "a press+release over ghost_button's own rect should register as a click");
+    }
+
+    #[test]
+    fn card_passes_inner_value_through_and_reflects_hover_state() {
         themed_test_ui(|ui| {
-            section(ui, "output");
-            dense(ui, |ui| {
-                section(ui, "output");
-            });
+            let response = card(ui, |_| 42);
+            assert_eq!(response.inner, 42);
+            assert!(!response.response.hovered(), "no pointer position set yet, should not be hovered");
+        });
+
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::theme::fonts::font_definitions());
+        ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
+        let default_theme_id = ThemeId::default();
+        let default_style = std::sync::Arc::new(crate::theme::visuals::style(registry::get(default_theme_id)));
+        ctx.set_style_of(egui::Theme::Dark, default_style.clone());
+        ctx.set_style_of(egui::Theme::Light, default_style);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(THEME_ID_KEY), default_theme_id));
+
+        let mut rect = egui::Rect::NOTHING;
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = card(ui, |ui| ui.label("inside card")).response.rect;
+        })
+        .drop_without_applying_deltas();
+
+        let mut hovered = false;
+        ctx.run_ui(
+            egui::RawInput { events: vec![egui::Event::PointerMoved(rect.center())], ..Default::default() },
+            |ui| {
+                hovered = card(ui, |ui| ui.label("inside card")).response.hovered();
+            },
+        )
+        .drop_without_applying_deltas();
+
+        assert!(hovered, "pointer moved over the card's own rect should register as hovered");
+    }
+
+    #[test]
+    fn pill_size_scales_with_text_length_and_fixed_padding() {
+        themed_test_ui(|ui| {
+            let t = theme(ui);
+            let label = micro_label(ui, "a");
+            let pill_a = pill(ui, "a", t.palette.ok);
+            assert!((pill_a.rect.height() - (label.rect.height() + 6.0 + 2.0 * t.metrics.border_width)).abs() < 0.5);
+
+            let short = pill(ui, "on", t.palette.ok);
+            let long = pill(ui, "disconnected", t.palette.error);
+            assert!(long.rect.width() > short.rect.width(), "a longer label should produce a wider pill");
+            assert_eq!(short.rect.height(), long.rect.height(), "height is independent of text length/color at a fixed font size");
         });
     }
 
     #[test]
-    fn ghost_button_does_not_panic() {
+    fn connection_row_differs_between_connected_and_offline() {
         themed_test_ui(|ui| {
-            ghost_button(ui, "Cancel");
-            dense(ui, |ui| {
-                ghost_button(ui, "Cancel");
-            });
+            let connected = connection_row(ui, "midi", true);
+            let offline = connection_row(ui, "osc", false);
+            assert_ne!(connected.rect.width(), offline.rect.width());
         });
     }
 
     #[test]
-    fn card_does_not_panic() {
-        themed_test_ui(|ui| {
-            card(ui, |ui| ui.label("inside card"));
-            dense(ui, |ui| {
-                card(ui, |ui| ui.label("inside card"));
-            });
-        });
+    fn vu_level_tier_thresholds() {
+        assert_eq!(vu_level_tier(0.0), VuTier::Ok);
+        assert_eq!(vu_level_tier(0.7), VuTier::Ok); // boundary: not > 0.7
+        assert_eq!(vu_level_tier(0.71), VuTier::Warn);
+        assert_eq!(vu_level_tier(0.9), VuTier::Warn); // boundary: not > 0.9
+        assert_eq!(vu_level_tier(0.91), VuTier::Error);
+        assert_eq!(vu_level_tier(1.0), VuTier::Error);
     }
 
     #[test]
-    fn pill_does_not_panic() {
+    fn vu_meter_allocates_the_same_geometry_regardless_of_out_of_range_level() {
         themed_test_ui(|ui| {
-            let color = theme(ui).palette.ok;
-            pill(ui, "live", color);
-            dense(ui, |ui| {
-                pill(ui, "live", color);
-            });
-        });
-    }
-
-    #[test]
-    fn connection_row_does_not_panic() {
-        themed_test_ui(|ui| {
-            connection_row(ui, "midi", true);
-            connection_row(ui, "osc", false);
-            dense(ui, |ui| {
-                connection_row(ui, "midi", true);
-                connection_row(ui, "osc", false);
-            });
-        });
-    }
-
-    #[test]
-    fn vu_meter_does_not_panic() {
-        themed_test_ui(|ui| {
-            vu_meter(ui, 0.5);
-            vu_meter(ui, -1.0); // out-of-range: must clamp, not panic
-            vu_meter(ui, 2.0);
-            dense(ui, |ui| {
-                vu_meter(ui, 0.5);
-            });
+            let in_range = vu_meter(ui, 0.5);
+            let below = vu_meter(ui, -1.0);
+            let above = vu_meter(ui, 2.0);
+            assert_eq!(in_range.rect.height(), 8.0);
+            assert_eq!(below.rect.height(), 8.0);
+            assert_eq!(above.rect.height(), 8.0);
+            assert_eq!(in_range.rect.width(), below.rect.width());
+            assert_eq!(in_range.rect.width(), above.rect.width());
         });
     }
 

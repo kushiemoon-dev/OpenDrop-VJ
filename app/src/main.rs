@@ -898,7 +898,7 @@ fn ui_root(
                 ui::preset_browser::show(ui, perform, library);
             }
             Panel::Playlists => {
-                ui::playlists::show(ui, perform.show);
+                ui::playlists::show(ui, perform.show, library);
             }
             Panel::Audio => {
                 ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);

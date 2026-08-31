@@ -34,10 +34,6 @@ use crate::ui::decks::FLIPPED_V_UV;
 use crate::ui::widgets::{self, theme};
 use crate::Panel;
 
-/// Deck vignette size for the Stage bottom bar (Step 11 of the Phase 7 UI
-/// redesign plan): same 16:9 aspect as `ui::decks::THUMB_SIZE`, just
-/// scaled down to fit a single dense row instead of a full deck card.
-const STAGE_THUMB_SIZE: egui::Vec2 = egui::vec2(48.0, 27.0);
 
 // --- Header --------------------------------------------------------------
 
@@ -474,7 +470,7 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
             // deck-count readout, then the crossfader.
             ui.horizontal(|ui| {
                 for tex_id in perform.deck_tex_ids {
-                    ui.add(egui::Image::new((*tex_id, STAGE_THUMB_SIZE)).uv(FLIPPED_V_UV));
+                    ui.add(egui::Image::new((*tex_id, t.metrics.mini_thumb_size)).uv(FLIPPED_V_UV));
                 }
                 sep(ui);
 

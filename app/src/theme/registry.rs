@@ -27,6 +27,7 @@ static METRICS: Metrics = Metrics {
     // render aspect ratio: see `ui::preset_browser::tile`'s doc comment.
     tile_size: vec2(96.0, 72.0),
     tile_content_w: 110.0,
+    mini_thumb_size: vec2(48.0, 27.0),
 };
 
 static DURATIONS: Durations = Durations { fast: 0.15, base: 0.25, slow: 0.40 };

@@ -487,20 +487,30 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
                 crossfader(ui, perform.show);
             });
 
-            // Row 2: live readouts: VU, BPM, FPS, and the preset drawer
-            // toggle. Split onto its own row rather than packed into row
-            // 1 (measured live at the app's default ~622px content width,
-            // same instrumented-probe technique Step 10 used for the
-            // header's own overflow): `vu_meter` floors its width at
-            // `Metrics::tile_content_w` (sized for the Audio panel's own
-            // full-width usage) regardless of the space handed to it,
-            // which alone left no room for BPM/FPS/the drawer toggle
-            // after 4 vignettes + bus pills + the crossfader on one row.
-            // Allocated width below reads `t.metrics.tile_content_w`
-            // directly (fix-round-1 review finding: a hardcoded `110.0`
-            // literal here only avoided clipping because it happened to
-            // equal `tile_content_w`'s current value, and would silently
-            // re-clip if that token ever changed).
+            // Row 2 (live readouts): VU meter, a separator, the BPM
+            // readout, Tap/Clear buttons (whole-branch review fix wave,
+            // finding 4, added after this row's last real measurement),
+            // then a right-aligned group of the FPS label, a separator,
+            // and the preset drawer toggle. Split onto its own row rather
+            // than packed into row 1 (measured live at the app's default
+            // ~624px content width, same instrumented-probe technique
+            // Step 10 used for the header's own overflow): `vu_meter`
+            // floors its width at `Metrics::tile_content_w` (sized for
+            // the Audio panel's own full-width usage) regardless of the
+            // space handed to it, which alone left no room for BPM/FPS/
+            // the drawer toggle after 4 vignettes + bus pills + the
+            // crossfader on one row. Allocated width below reads
+            // `t.metrics.tile_content_w` directly (fix-round-1 review
+            // finding: a hardcoded `110.0` literal here only avoided
+            // clipping because it happened to equal `tile_content_w`'s
+            // current value, and would silently re-clip if that token
+            // ever changed). Re-measured after Tap/Clear landed
+            // (instrumented-probe, same technique): content through the
+            // Clear button reaches ~217px, and the right-aligned FPS/
+            // separator/toggle group only needs ~60px more, both well
+            // under the ~624px available: the row still fits with room
+            // to spare, no escalation (tighter spacing, smaller buttons,
+            // or a second row) was needed.
             ui.horizontal(|ui| {
                 ui.allocate_ui(egui::vec2(t.metrics.tile_content_w, 12.0), |ui| {
                     widgets::vu_meter(ui, sources.last_vu_level as f32);

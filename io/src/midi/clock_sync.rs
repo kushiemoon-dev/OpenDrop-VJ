@@ -42,7 +42,7 @@ impl MidiClockSync {
         }
         self.pulses += 1;
 
-        let bpm = if self.pulses % BPM_UPDATE_INTERVAL == 0 && self.ts_ring.len() >= BPM_SAMPLE_COUNT
+        let bpm = if self.pulses.is_multiple_of(BPM_UPDATE_INTERVAL) && self.ts_ring.len() >= BPM_SAMPLE_COUNT
         {
             let recent = &self.ts_ring[self.ts_ring.len() - BPM_SAMPLE_COUNT..];
             let interval_sum: f64 = recent.windows(2).map(|w| w[1] - w[0]).sum();
@@ -53,7 +53,7 @@ impl MidiClockSync {
             None
         };
 
-        let beat_fired = self.pulses % PULSES_PER_QUARTER == 0;
+        let beat_fired = self.pulses.is_multiple_of(PULSES_PER_QUARTER);
 
         (bpm, beat_fired)
     }
@@ -102,7 +102,7 @@ mod tests {
         // should report a bpm converged on 120.0 within +/- 0.1.
         for (i, (bpm, _)) in results.iter().enumerate() {
             let pulse = i as u32 + 1;
-            if pulse % 6 == 0 && pulse >= 7 {
+            if pulse.is_multiple_of(6) && pulse >= 7 {
                 let bpm = bpm.expect("expected a bpm value at this pulse");
                 assert!(
                     (bpm - 120.0).abs() <= 0.1,
@@ -122,7 +122,7 @@ mod tests {
             let pulse = i as u32 + 1;
             assert_eq!(
                 *beat_fired,
-                pulse % 24 == 0,
+                pulse.is_multiple_of(24),
                 "pulse {pulse}: beat_fired was {beat_fired}"
             );
         }
@@ -137,7 +137,7 @@ mod tests {
 
         for (i, (bpm, _)) in results.iter().enumerate() {
             let pulse = i as u32 + 1;
-            if pulse % 6 == 0 && pulse >= 7 {
+            if pulse.is_multiple_of(6) && pulse >= 7 {
                 assert_eq!(*bpm, None, "pulse {pulse}: expected no bpm, got {bpm:?}");
             }
         }

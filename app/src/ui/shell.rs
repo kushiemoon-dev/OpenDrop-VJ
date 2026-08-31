@@ -512,6 +512,19 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
                 sep(ui);
 
                 bpm_readout(ui, perform.show);
+                // Whole-branch review fix wave, finding 4: Stage mode (the
+                // live-performance mode) had no way to tap or clear the
+                // manual BPM at all: `bpm_tap` (the only caller of
+                // `Show::tap_tempo`/`clear_manual_bpm`) lives in `header`
+                // only, never reached while Stage mode replaces it with
+                // `header_stage`. Same controls, same labels as `bpm_tap`,
+                // just reachable from here too.
+                if ui.button("Tap").clicked() {
+                    perform.show.tap_tempo(perform.t0.elapsed().as_secs_f64() * 1000.0);
+                }
+                if ui.button("Clear").clicked() {
+                    perform.show.clear_manual_bpm();
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let fps_text = match shell.last_wall_ms {
@@ -530,10 +543,14 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
 }
 
 /// A `micro_label`ed 5px dot: `ok` (green) + a soft glow when `active`,
-/// `warn` (amber) with no glow otherwise (Step 10 brief).
+/// `dim` with no glow otherwise (whole-branch review fix wave, finding 5:
+/// was `warn`, which made a freshly-launched app's status bar read as a
+/// row of warnings for a merely-offline state: `dim` matches `widgets::
+/// connection_row`'s established convention for the same conceptual
+/// state).
 fn status_dot(ui: &mut egui::Ui, label: &str, active: bool) {
     let t = theme(ui);
-    let color = if active { t.palette.ok } else { t.palette.warn };
+    let color = if active { t.palette.ok } else { t.palette.dim };
     let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 9.0), egui::Sense::hover());
     if ui.is_rect_visible(rect) {
         let center = rect.center();

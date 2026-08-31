@@ -94,6 +94,11 @@ pub struct Theme {
 
 /// WCAG 2.x relative luminance
 /// (<https://www.w3.org/TR/WCAG21/#dfn-relative-luminance>).
+///
+/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// caller is a palette invariant test in this file, `visuals.rs`, or
+/// `registry.rs`, never production code.
+#[cfg(test)]
 pub(crate) fn relative_luminance(color: Color32) -> f32 {
     fn channel(c: u8) -> f32 {
         let c = c as f32 / 255.0;
@@ -109,6 +114,10 @@ pub(crate) fn relative_luminance(color: Color32) -> f32 {
 /// WCAG 2.x contrast ratio between two colors
 /// (<https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio>): `(L1 + 0.05) /
 /// (L2 + 0.05)` where `L1` is the lighter of the two relative luminances.
+///
+/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// caller is a palette invariant test, never production code.
+#[cfg(test)]
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f32 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
     let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };

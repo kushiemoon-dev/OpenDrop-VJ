@@ -33,6 +33,13 @@
 #       Redist\MSVC\<ver>\x64\Microsoft.VC143.CRT\ folder, the
 #       Microsoft-sanctioned copy meant for bundling with an app, not
 #       from System32.)
+#     - libEGL.dll, libGLESv2.dll, z.dll (vcpkg x64-windows, dynamic
+#       triplet, same as glew32.dll/projectM-4.dll above: (a) the app
+#       needs an EGL/GLES implementation and Windows has none natively
+#      : ANGLE provides it, the Chromium/Electron-precedented approach;
+#       (b) z.dll (zlib) is a real transitive dependency of
+#       libGLESv2.dll confirmed by `dumpbin /dependents`, not itself an
+#       OS component, so it must ship alongside it)
 #   Never bundled: everything else `dumpbin /dependents` reports
 #   (KERNEL32.dll, USER32.dll, ADVAPI32.dll, ntdll.dll, WS2_32.dll,
 #   OPENGL32.dll, GDI32.dll, and the api-ms-win-crt-*.dll Universal CRT
@@ -40,6 +47,15 @@
 #   been part of the OS since Windows 10), unlike the VC++ Redistributable
 #   above (same "don't bundle the base system" principle as the AppImage
 #   script's driver-library exclusions).
+#     - d3dcompiler_47.dll: ANGLE's D3D11 HLSL compiler backend
+#       `LoadLibrary`s it dynamically at runtime (confirmed via string
+#       inspection of libGLESv2.dll: it does not show up as a static
+#       dumpbin dependency, unlike everything else in this list), but it
+#       ships as part of the OS on Windows Server 2022/Windows 10+
+#       (confirmed present at C:\Windows\System32\D3DCompiler_47.dll on
+#       the build machine, dated to the OS image itself, not separately
+#       installed): so it is not bundled, matching the "don't bundle
+#       the base system" policy above.
 
 $ErrorActionPreference = "Stop"
 
@@ -136,7 +152,8 @@ $vcpkgDlls = @(
     "projectM-4-playlist.dll",
     "glew32.dll",
     "libEGL.dll",
-    "libGLESv2.dll"
+    "libGLESv2.dll",
+    "z.dll"
 )
 
 $resolvedVcpkgDlls = @()

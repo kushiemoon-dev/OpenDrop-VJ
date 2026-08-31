@@ -321,47 +321,54 @@ pub fn focus_ring(ui: &egui::Ui, rect: egui::Rect) {
     );
 }
 
+/// `egui::__run_test_ui` (`egui/src/lib.rs:683`) hardcodes
+/// `ctx.set_fonts(FontDefinitions::empty())` and a bare
+/// `Context::default()` style, with no way to inject different ones.
+/// That's fine for widgets built only from egui's own built-in
+/// `TextStyle`s (which stay present, just with empty font lists, under
+/// `FontDefinitions::empty()`), but every helper here that goes
+/// through a family alias (`FAMILY_MONO`, mandated by this step's
+/// "font weight only via family aliases" constraint) needs that
+/// family actually registered, or egui panics trying to shape text in
+/// a family it's never heard of (`FontFamily::Name("mono") is not
+/// bound to any fonts`). `Context::set_fonts` only takes effect "at
+/// the start of the next pass" (`context.rs:2124`), too late to
+/// matter if called mid-`__run_test_ui`. So: prime a fresh `Context`
+/// with the real `font_definitions()` (Step 5) *before* its first
+/// pass, mirroring `main.rs`'s bootstrap (Step 6), then run one pass
+/// with the same `run_ui`/`drop_without_applying_deltas` mechanics
+/// `__run_test_ui` itself uses. Also installs the real `style()`
+/// (Step 4), so the ambient `Visuals::widgets` grid (corner radii,
+/// border colors) the button/`card` helpers scope over matches
+/// production, not `Visuals::dark()`'s own defaults. Step 5's own
+/// `fonts.rs` tests hit the fonts half of this identical constraint
+/// and likewise never use `__run_test_ui` for anything
+/// font-shaping-sensitive.
+///
+/// `pub(crate)` (Step 13 of the Phase 7 UI redesign plan): panel test
+/// modules that call through a family alias too (`ui::decks`'s `card`/
+/// `pill`/`micro_label` usage, and every panel Steps 14-21 theme after
+/// it) hit this exact constraint, so this lives outside `mod tests`
+/// rather than duplicated per panel file.
+#[cfg(test)]
+pub(crate) fn themed_test_ui(mut add_contents: impl FnMut(&mut egui::Ui)) {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::theme::fonts::font_definitions());
+    ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
+
+    let default_theme_id = ThemeId::default();
+    let default_style = std::sync::Arc::new(crate::theme::visuals::style(registry::get(default_theme_id)));
+    ctx.set_style_of(egui::Theme::Dark, default_style.clone());
+    ctx.set_style_of(egui::Theme::Light, default_style);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(THEME_ID_KEY), default_theme_id));
+
+    let output = ctx.run_ui(Default::default(), |ui| add_contents(ui));
+    output.drop_without_applying_deltas();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `egui::__run_test_ui` (`egui/src/lib.rs:683`) hardcodes
-    /// `ctx.set_fonts(FontDefinitions::empty())` and a bare
-    /// `Context::default()` style, with no way to inject different ones.
-    /// That's fine for widgets built only from egui's own built-in
-    /// `TextStyle`s (which stay present, just with empty font lists, under
-    /// `FontDefinitions::empty()`), but every helper here that goes
-    /// through a family alias (`FAMILY_MONO`, mandated by this step's
-    /// "font weight only via family aliases" constraint) needs that
-    /// family actually registered, or egui panics trying to shape text in
-    /// a family it's never heard of (`FontFamily::Name("mono") is not
-    /// bound to any fonts`). `Context::set_fonts` only takes effect "at
-    /// the start of the next pass" (`context.rs:2124`), too late to
-    /// matter if called mid-`__run_test_ui`. So: prime a fresh `Context`
-    /// with the real `font_definitions()` (Step 5) *before* its first
-    /// pass, mirroring `main.rs`'s bootstrap (Step 6), then run one pass
-    /// with the same `run_ui`/`drop_without_applying_deltas` mechanics
-    /// `__run_test_ui` itself uses. Also installs the real `style()`
-    /// (Step 4), so the ambient `Visuals::widgets` grid (corner radii,
-    /// border colors) the button/`card` helpers scope over matches
-    /// production, not `Visuals::dark()`'s own defaults. Step 5's own
-    /// `fonts.rs` tests hit the fonts half of this identical constraint
-    /// and likewise never use `__run_test_ui` for anything
-    /// font-shaping-sensitive.
-    fn themed_test_ui(mut add_contents: impl FnMut(&mut egui::Ui)) {
-        let ctx = egui::Context::default();
-        ctx.set_fonts(crate::theme::fonts::font_definitions());
-        ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
-
-        let default_theme_id = ThemeId::default();
-        let default_style = std::sync::Arc::new(crate::theme::visuals::style(registry::get(default_theme_id)));
-        ctx.set_style_of(egui::Theme::Dark, default_style.clone());
-        ctx.set_style_of(egui::Theme::Light, default_style);
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(THEME_ID_KEY), default_theme_id));
-
-        let output = ctx.run_ui(Default::default(), |ui| add_contents(ui));
-        output.drop_without_applying_deltas();
-    }
 
     // --- theme(): default fallback, no bootstrap wiring required ---------
 

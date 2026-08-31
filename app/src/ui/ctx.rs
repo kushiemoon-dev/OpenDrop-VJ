@@ -106,6 +106,8 @@ pub(crate) struct LibraryCtx<'a> {
     pub(crate) thumbnail_textures: &'a HashMap<String, egui::TextureHandle>,
     pub(crate) failed_thumbnails: &'a HashSet<String>,
     pub(crate) load_request: &'a mut Option<String>,
+    pub(crate) favorite_presets: &'a mut HashSet<String>,
+    pub(crate) favorites_only: &'a mut bool,
 }
 
 /// External control/device surfaces: Audio input, MIDI, OSC, remote WS,

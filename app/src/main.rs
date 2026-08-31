@@ -462,6 +462,16 @@ struct AppState {
     /// Memoized `search` results for `preset_search_query`: see
     /// `ui::preset_browser::SearchCache`.
     preset_search_cache: ui::preset_browser::SearchCache,
+    /// Preset names the user has starred, keyed by name (same stable
+    /// identity `tile()` already uses for its thumbnail cache/id). Restored
+    /// from `ui_config.favorite_presets` at bootstrap; persisted immediately
+    /// on each toggle (`ui::preset_browser`'s star-click handler calls
+    /// `config::save_config` directly), never deferred to `App::exiting`.
+    favorite_presets: HashSet<String>,
+    /// Preset Browser's "favorites only" filter toggle. Deliberately NOT
+    /// persisted: matches `preset_search_query`'s own bootstrap-only reset
+    /// (`:2265`, always `String::new()`): always starts `false` on launch.
+    favorites_only: bool,
     /// Presets whose thumbnail render failed once already. Both
     /// `thumbnails::pump_thumbnail_queue` (writer) and the preset-browser
     /// panel (reader) consult it, so a failure can't turn into a per-tick
@@ -1273,8 +1283,8 @@ impl ApplicationHandler for App {
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
 
-            for i in 0..deck::DECK_COUNT {
-                let visible = layer_inputs[i].opacity > 0.001;
+            for (i, layer_input) in layer_inputs.iter().enumerate() {
+                let visible = layer_input.opacity > 0.001;
                 // See `InvisibleMode`: `Eco` is the original always-on
                 // throttle, `Pause` skips rendering this deck entirely while
                 // invisible (its texture keeps showing the last frame it
@@ -1394,14 +1404,14 @@ impl ApplicationHandler for App {
 
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
-            for i in 0..deck::DECK_COUNT {
+            for (i, layer_input) in layer_inputs.iter().enumerate() {
                 // Whole-branch review Finding I5: this used to be
                 // open-coded (`lowest_active == Some(i)`), untested here:
                 // now the tested `opendrop_core::blend::
                 // should_force_normal_for_lowest_slot` port of `compositor.
                 // ts:140`'s `shouldForceNormalForLowestSlot`.
                 let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
-                state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
+                state.compositor.composite_layer(&state.gl, state.decks[i].texture, layer_input, force_normal);
             }
             // NDI-in layer, composited last, over every deck, as part of
             // this same shared pass: `render_and_swap*` later just blits
@@ -1500,6 +1510,8 @@ impl ApplicationHandler for App {
                 presets_drawer_open,
                 preset_search_query,
                 preset_search_cache,
+                favorite_presets,
+                favorites_only,
                 thumb_queue,
                 thumbnail_textures,
                 failed_thumbnails,
@@ -1576,6 +1588,8 @@ impl ApplicationHandler for App {
                 thumbnail_textures,
                 failed_thumbnails,
                 load_request: &mut preset_load_request,
+                favorite_presets,
+                favorites_only,
             };
             let mut sources_ctx = ui::ctx::SourcesCtx {
                 audio,
@@ -1672,10 +1686,12 @@ impl ApplicationHandler for App {
                 // rendering the old theme's palette after this switch.
                 state.egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), new_id));
 
-                // Persist immediately (Step 7's `config.rs`, not yet wired
-                // anywhere else): read-modify-write just the `theme` field
-                // so a future step wiring the rest of `UiConfig` (active
-                // panel, stage mode, ...) isn't clobbered by this one.
+                // Persist immediately (Step 7's `config.rs`): read-modify-
+                // write just the `theme` field so this doesn't clobber
+                // `active_panel`/`stage_mode`/the other already-persisted
+                // fields, which are wired at other call sites (bootstrap
+                // and `App::exiting`, "Whole-branch review fix wave,
+                // finding 1 (AC-10)").
                 let config_path = config::config_file_path();
                 let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
                 ui_config.theme = new_id;
@@ -1744,11 +1760,21 @@ impl ApplicationHandler for App {
             // immédiatement à chaque changement de thème runtime"). Same
             // read-modify-write idiom as the runtime theme-switch handler,
             // so this never clobbers `theme` (or any other already-
-            // persisted field) saved elsewhere.
+            // persisted field) saved elsewhere. Also owns the 8 already-
+            // UI-controlled fields below, not just `active_panel`/
+            // `stage_mode`.
             let config_path = config::config_file_path();
             let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
             ui_config.active_panel = state.active_panel.into();
             ui_config.stage_mode = state.stage_mode;
+            ui_config.output_monitor = state.selected_output_monitor.clone();
+            ui_config.audio_input_device = state.selected_input_device.clone();
+            ui_config.osc_port = state.osc_port;
+            ui_config.obs_host = state.obs_host.clone();
+            ui_config.obs_port = state.obs_port;
+            ui_config.twitch_channel = state.twitch_channel.clone();
+            ui_config.kick_channel = state.kick_channel.clone();
+            ui_config.invisible_mode = state.invisible_mode;
             config::save_config(config_path.as_deref(), &ui_config);
 
             state.egui_glow.destroy();
@@ -2123,7 +2149,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (Task 19: see `v4l2_frame_tx`'s doc comment on `AppState`).
     let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
     let (v4l2_frame_tx, v4l2_frame_rx) = mpsc::channel::<Vec<u8>>();
-    let (deck_frame_tx, deck_frame_rx): ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]) = {
+    type DeckFrameChannels = ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]);
+    let (deck_frame_tx, deck_frame_rx): DeckFrameChannels = {
         let mut tx_v = Vec::with_capacity(deck::DECK_COUNT);
         let mut rx_v = Vec::with_capacity(deck::DECK_COUNT);
         for _ in 0..deck::DECK_COUNT {
@@ -2231,10 +2258,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         // panel never calls `list_input_devices()` itself, per the brief
         // ("the list doesn't change mid-session").
         input_devices: opendrop_audio::list_input_devices(),
-        selected_input_device: None,
+        // Panel settings restored from the same `ui_config` loaded above,
+        // not just navigation state.
+        selected_input_device: ui_config.audio_input_device.clone(),
         last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
-        invisible_mode: InvisibleMode::Eco,
+        invisible_mode: ui_config.invisible_mode,
         pending_mesh_size: [None; deck::DECK_COUNT],
         show,
         registry: create_default_registry(),
@@ -2264,6 +2293,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         presets_drawer_open: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),
+        favorite_presets: ui_config.favorite_presets.clone(),
+        favorites_only: false,
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),
@@ -2271,7 +2302,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         thumbnail_in_flight: None,
         thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
-        selected_output_monitor: None,
+        selected_output_monitor: ui_config.output_monitor.clone(),
         midi: opendrop_io::midi::spawn(),
         midi_led_state: HashMap::new(),
         midi_learning: None,
@@ -2280,16 +2311,16 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_last_beat_count: 0,
         midi_led_flash_off_at: HashMap::new(),
         osc: opendrop_io::osc::spawn(),
-        osc_port: 7000,
+        osc_port: ui_config.osc_port,
         remote_ws: opendrop_io::remote_ws::spawn(),
         obs: opendrop_io::obs::spawn(),
-        obs_host: "localhost".to_string(),
-        obs_port: 4455,
+        obs_host: ui_config.obs_host.clone(),
+        obs_port: ui_config.obs_port,
         twitch: opendrop_io::twitch::spawn(chat_tx.clone()),
-        twitch_channel: String::new(),
+        twitch_channel: ui_config.twitch_channel.clone(),
         twitch_oauth_token_input: String::new(),
         kick: opendrop_io::kick::spawn(chat_tx),
-        kick_channel: String::new(),
+        kick_channel: ui_config.kick_channel.clone(),
         kick_bearer_token_input: String::new(),
         kick_xsrf_token_input: String::new(),
         kick_cookies_input: String::new(),

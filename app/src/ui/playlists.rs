@@ -113,7 +113,16 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
         egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
             for name in &items {
                 ui.horizontal(|ui| {
-                    ui.label(name);
+                    // A bare `ui.label` here has no wrap width to truncate
+                    // against inside a horizontal row (egui's `Extend` wrap
+                    // mode for non-wrapping horizontal layouts), so a long
+                    // preset name renders at its full natural width and
+                    // overflows past this column, into Deck B's (found
+                    // live). Reserve width for the `×` button first, then
+                    // bound and truncate the label to what's left.
+                    let button_w = ui.spacing().interact_size.x;
+                    ui.set_width((ui.available_width() - button_w).max(0.0));
+                    ui.add(egui::Label::new(name).truncate());
                     if ui.button("×").clicked() {
                         show.playlists.remove_from_playlist(deck, name);
                     }
@@ -129,9 +138,21 @@ fn deck_panel(ui: &mut egui::Ui, show: &mut Show, deck: Deck) {
         };
         let t = theme(ui);
         let sync_color = if synced { t.palette.accent } else { t.palette.dim };
-        if widgets::pill(ui, "Beat Sync", sync_color).interact(egui::Sense::click()).clicked() {
-            show.toggle_beat_sync(deck);
-        }
+        // `widgets::pill` paints its label through a raw `ui.label` inside
+        // `Frame::show`, which inherits ambient wrap mode (unlike egui's
+        // built-in `selectable_label`, the widget this replaced, which
+        // sizes to its content regardless of layout). Called bare here,
+        // this pill sat directly in the column's vertical layout, so the
+        // label's default `Wrap` mode stretched it to the full column
+        // width once selected: the "BEAT SYNC" bar filling the whole
+        // column found live. The other pills in this file already avoid
+        // this because they're called inside an explicit `ui.horizontal`,
+        // which resolves to `Extend` (natural width) instead.
+        ui.horizontal(|ui| {
+            if widgets::pill(ui, "Beat Sync", sync_color).interact(egui::Sense::click()).clicked() {
+                show.toggle_beat_sync(deck);
+            }
+        });
 
         trigger_config(ui, show, deck);
     });

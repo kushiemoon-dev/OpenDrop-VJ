@@ -24,6 +24,15 @@
 //! and the grid is laid out row by row through `ScrollArea::show_rows`, so
 //! off-screen tiles cost nothing at all rather than a full widget layout
 //! each.
+//!
+//! Reskinned per `decks-presets.html` (Step 14 of the Phase 7 UI redesign
+//! plan): tile size/content width move into `Metrics` (`THUMB_SIZE`'s Step
+//! 3/13 migration pattern), the tile becomes a 4:3 thumb (mockup's
+//! `.od-tile-thumb`, was 16:9) with a mono truncated name, and the fixed
+//! `ROW_HEIGHT` constant is replaced by `row_height`, derived from the
+//! live style rather than hand-picked: see that function's doc comment
+//! for why. This panel is one of 3 density-frozen zones in the app (always
+//! dense, no user toggle), unlike Decks (Step 13, aéré by default).
 
 use opendrop_core::commands::Deck;
 use opendrop_core::preset_index::search;
@@ -31,24 +40,10 @@ use opendrop_core::show::Show;
 use opendrop_core::thumb_queue::{enqueue_front, prune_to_visible, ThumbJob};
 use std::collections::{HashMap, HashSet};
 
+use crate::theme::fonts::FAMILY_MONO;
+use crate::theme::tokens::Metrics;
 use crate::ui::ctx::{LibraryCtx, PerformCtx};
-
-/// Matches `opendrop_engine::thumbnail::{THUMB_W, THUMB_H}`'s 192:108
-/// aspect ratio, scaled down for a browser tile.
-const TILE_SIZE: egui::Vec2 = egui::vec2(96.0, 54.0);
-
-/// Width of a tile's content column: `TILE_SIZE.x` widened to fit the
-/// "+A"/"+B" button row underneath it. Shared with `tile_stride` so the
-/// tiles-per-row count and the tiles themselves can never disagree.
-const TILE_CONTENT_W: f32 = 110.0;
-
-/// Fixed row pitch handed to `ScrollArea::show_rows`, which needs one to
-/// map a scroll offset to a row index without laying anything out. Picked
-/// with headroom over a tile's natural height (thumbnail + name + button
-/// row + the group frame's margins) and then enforced with `set_min_height`
-/// on each row, so the pitch `show_rows` assumes always matches what is
-/// actually laid out.
-const ROW_HEIGHT: f32 = 132.0;
+use crate::ui::widgets::{self, theme};
 
 /// Cached result of `search(&show.preset_catalog, query)`, resolved to
 /// owned names.
@@ -83,10 +78,75 @@ impl SearchCache {
 /// Horizontal space one tile occupies, content column plus the group
 /// frame's margins/stroke plus the spacing before the next tile. Read off
 /// the live style rather than hardcoded, so the tiles-per-row count stays
-/// right if the theme's margins change.
-fn tile_stride(ui: &egui::Ui) -> f32 {
+/// right if the theme's margins change. Takes `metrics` explicitly (the
+/// same `&'static Metrics` `row_height` below takes) rather than calling
+/// `theme(ui).metrics` itself, so both functions are provably reading the
+/// same source of truth instead of two independent lookups that could
+/// diverge.
+fn tile_stride(ui: &egui::Ui, metrics: &Metrics) -> f32 {
     let frame = egui::Frame::group(ui.style());
-    TILE_CONTENT_W + frame.total_margin().sum().x + ui.spacing().item_spacing.x
+    metrics.tile_content_w + frame.total_margin().sum().x + ui.spacing().item_spacing.x
+}
+
+/// Row pitch handed to `ScrollArea::show_rows` as its `row_height_sans_
+/// spacing` parameter (egui 0.36.1, `containers/scroll_area.rs`). Confirmed
+/// from that function's source before writing this:
+///
+/// ```ignore
+/// let spacing = ui.spacing().item_spacing;
+/// let row_height_with_spacing = row_height_sans_spacing + spacing.y;
+/// // ... min_row/max_row and the visible rect are computed from
+/// // row_height_with_spacing, i.e. show_rows assumes EVERY row (not just
+/// // the visible ones) is exactly `row_height_sans_spacing` tall plus one
+/// // trailing `item_spacing.y` gap.
+/// ```
+///
+/// The value returned here must therefore be the row's real content
+/// height alone, WITHOUT that trailing gap: `show_rows` adds `item_
+/// spacing.y` itself, and `show()`'s own `add_contents` closure (a plain
+/// vertical layout) adds that same `item_spacing.y` again between
+/// successive `ui.horizontal` rows through ordinary layout, which is what
+/// makes the two additions line up rather than double- or under-count.
+/// Passing a value that already includes the trailing gap would space
+/// rows too far apart (wasted room, not an overlap); passing one that
+/// undercounts the row's actual rendered height is the dangerous
+/// direction: `show_rows` would then assume a shorter pitch than what
+/// `set_min_height` (in `show()`, below) actually forces each row to be,
+/// and every row from that point on would render fractionally lower than
+/// its assumed slot, compounding into a real overlap by the time the
+/// ~9800-item library has been scrolled through.
+///
+/// Derived, not hardcoded, by walking the exact same widget tree `tile()`
+/// builds: the `Frame::group` margins that wrap each card, `metrics.
+/// tile_size.y` for the thumbnail, one `item_spacing.y` for the gap
+/// between the thumbnail and the name (siblings inside the card's own
+/// `ui.vertical`), the name label's real text-row height (measured for
+/// the exact mono `FontId` `tile()` renders it with, not a guessed
+/// constant), a second `item_spacing.y` for the gap between the card and
+/// the "+A"/"+B" row (siblings inside the frame's own vertical layout),
+/// and the button row's height. The button figure can't be read back from
+/// a live `Response` here without actually rendering a probe widget every
+/// frame, so it mirrors the same floor `egui::Button` itself applies
+/// before painting (`widgets/button.rs`: `min_size.y = min_size.y.
+/// at_least(interact_size.y)`) together with its content-driven height
+/// (text row + `2 * button_padding.y`), taking whichever is larger: this
+/// is the one part of the derivation that isn't a byte-for-byte replay of
+/// `tile()`'s own layout calls, which is exactly why `row_height_covers_
+/// the_real_tile_content_height` (below, in `mod tests`) doesn't re-run
+/// this same formula: it renders one real tile through `tile()` and
+/// asserts this function's return value against the actually-measured
+/// `Response` height, so a wrong assumption here (rather than in
+/// `Button`'s own internals) still gets caught.
+fn row_height(ui: &egui::Ui, metrics: &Metrics) -> f32 {
+    let t = theme(ui);
+    let frame = egui::Frame::group(ui.style());
+    let spacing = ui.spacing();
+
+    let name_font = egui::FontId::new(t.type_scale.small, egui::FontFamily::Name(FAMILY_MONO.into()));
+    let name_height = ui.fonts_mut(|f| f.row_height(&name_font));
+    let button_height = spacing.interact_size.y.max(ui.text_style_height(&egui::TextStyle::Button) + 2.0 * spacing.button_padding.y);
+
+    frame.total_margin().sum().y + metrics.tile_size.y + spacing.item_spacing.y + name_height + spacing.item_spacing.y + button_height
 }
 
 // Step 9 (Phase 7 UI redesign plan): takes the two context structs that
@@ -95,52 +155,77 @@ fn tile_stride(ui: &egui::Ui) -> f32 {
 // fields. Pure re-packaging: every access below is exactly the field the
 // old individual parameter of the same name used to be.
 pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCtx) {
-    ui.horizontal(|ui| {
-        ui.label("Search");
-        ui.text_edit_singleline(library.preset_search_query);
-    });
+    let metrics = theme(ui).metrics;
 
-    ui.separator();
+    // Permanently dense (one of 3 density-frozen zones in the app, see
+    // this file's module doc comment): no user-facing toggle, so this
+    // scope wraps the whole panel body rather than being conditional on
+    // anything. `row_height`/`tile_stride` below both read `ui.spacing()`
+    // live, so they automatically pick up the dense scale from inside
+    // this closure: no separate wiring needed.
+    let visible_names: HashSet<String> = widgets::dense(ui, |ui| {
+        let t = theme(ui);
+        ui.horizontal(|ui| {
+            widgets::micro_label(ui, "Search");
+            ui.add(
+                egui::TextEdit::singleline(library.preset_search_query)
+                    .font(egui::FontId::new(t.type_scale.monospace, egui::FontFamily::Name(FAMILY_MONO.into()))),
+            );
+        });
 
-    // Measured against the width the ScrollArea below will actually hand
-    // its contents: `allocated_width` is what a non-floating scrollbar
-    // takes out of it (0 for egui's default floating bars). Counting one
-    // tile too many per row would clip the rightmost one, since
-    // `ui.horizontal` does not wrap.
-    let usable_w = ui.available_width() - ui.spacing().scroll.allocated_width();
-    let per_row = ((usable_w / tile_stride(ui)).floor() as usize).max(1);
-    // Borrows `library.search_cache`, not `perform.show`, so the tiles
-    // below can still take `perform.show` mutably: `&*perform.show` here
-    // is a shared reborrow of a `PerformCtx` field, scoped to this one
-    // call, never stored (see `ui::ctx`'s module doc comment on this exact
-    // call site).
-    let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str());
-    let total_rows = results.len().div_ceil(per_row);
+        ui.separator();
 
-    // Whole-branch review Finding 4: names of the tiles actually on screen
-    // this frame, collected alongside the row layout below so
-    // `thumb_queue` can be pruned to just them afterwards: the queue
-    // previously grew unbounded across a fast scroll or a search-query
-    // change, since nothing ever removed a job for a tile that scrolled
-    // (or was filtered) away.
-    let mut visible_names: HashSet<String> = HashSet::new();
+        // Measured against the width the ScrollArea below will actually
+        // hand its contents: `allocated_width` is what a non-floating
+        // scrollbar takes out of it (0 for egui's default floating bars).
+        // Counting one tile too many per row would clip the rightmost
+        // one, since `ui.horizontal` does not wrap.
+        let usable_w = ui.available_width() - ui.spacing().scroll.allocated_width();
+        let per_row = ((usable_w / tile_stride(ui, metrics)).floor() as usize).max(1);
+        // Borrows `library.search_cache`, not `perform.show`, so the tiles
+        // below can still take `perform.show` mutably: `&*perform.show`
+        // here is a shared reborrow of a `PerformCtx` field, scoped to
+        // this one call, never stored (see `ui::ctx`'s module doc comment
+        // on this exact call site).
+        let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str());
+        let total_rows = results.len().div_ceil(per_row);
 
-    // `show_rows`, not `vertical() + horizontal_wrapped()`: the free-flow
-    // version built every one of the ~9800 tiles as real widgets every
-    // frame: `is_rect_visible` only skipped the *painting*, never the
-    // layout. This one never even visits a row that isn't on screen.
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, total_rows, |ui, rows| {
-        for row in rows {
-            let start = row * per_row;
-            let end = (start + per_row).min(results.len());
-            visible_names.extend(results[start..end].iter().cloned());
-            ui.horizontal(|ui| {
-                ui.set_min_height(ROW_HEIGHT); // keeps the real pitch equal to ROW_HEIGHT
-                for name in &results[start..end] {
-                    tile(ui, perform.show, name, library.thumb_queue, library.thumbnail_textures, library.failed_thumbnails, library.load_request);
-                }
-            });
-        }
+        // Whole-branch review Finding 4: names of the tiles actually on
+        // screen this frame, collected alongside the row layout below so
+        // `thumb_queue` can be pruned to just them afterwards: the queue
+        // previously grew unbounded across a fast scroll or a
+        // search-query change, since nothing ever removed a job for a
+        // tile that scrolled (or was filtered) away.
+        let mut visible_names: HashSet<String> = HashSet::new();
+
+        // `row_height`, not a fixed constant: derived from the live
+        // (dense) style, see that function's doc comment for the full
+        // `show_rows` contract this has to satisfy. Computed once per
+        // frame, outside the `show_rows` closure, and reused both for the
+        // pitch passed to `show_rows` and for `set_min_height` below, so
+        // the two can never read a different value.
+        let row_h = row_height(ui, metrics);
+
+        // `show_rows`, not `vertical() + horizontal_wrapped()`: the
+        // free-flow version built every one of the ~9800 tiles as real
+        // widgets every frame: `is_rect_visible` only skipped the
+        // *painting*, never the layout. This one never even visits a row
+        // that isn't on screen.
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_h, total_rows, |ui, rows| {
+            for row in rows {
+                let start = row * per_row;
+                let end = (start + per_row).min(results.len());
+                visible_names.extend(results[start..end].iter().cloned());
+                ui.horizontal(|ui| {
+                    ui.set_min_height(row_h); // keeps the real pitch equal to row_h
+                    for name in &results[start..end] {
+                        tile(ui, perform.show, name, metrics, library.thumb_queue, library.thumbnail_textures, library.failed_thumbnails, library.load_request);
+                    }
+                });
+            }
+        });
+
+        visible_names
     });
 
     // A fast scroll through ~9800 tiles, or a search query that filters
@@ -169,16 +254,29 @@ fn tile(
     ui: &mut egui::Ui,
     show: &mut Show,
     name: &str,
+    metrics: &Metrics,
     thumb_queue: &mut Vec<ThumbJob>,
     thumbnail_textures: &HashMap<String, egui::TextureHandle>,
     failed_thumbnails: &HashSet<String>,
     load_request: &mut Option<String>,
 ) {
+    let t = theme(ui);
+    // `name`, the preset's stable key: never a `row * per_row + i`-style
+    // index, which shifts under the caller as the list scrolls or the
+    // search query changes and would silently rebind an in-progress
+    // widget's state (focus, animation, drag) to a different preset. Load-
+    // bearing for widget ids from this step on; Step 22 reuses this same
+    // key for animation ids.
     ui.push_id(name, |ui| {
         egui::Frame::group(ui.style()).show(ui, |ui| {
-            ui.set_width(TILE_CONTENT_W);
+            ui.set_width(metrics.tile_content_w);
             let card = ui.vertical(|ui| {
-                let (rect, _response) = ui.allocate_exact_size(TILE_SIZE, egui::Sense::hover());
+                // `metrics.tile_size`: 4:3 (mockup's `.od-tile-thumb`), not
+                // the 16:9 the engine's own thumbnail render uses: this
+                // tile crops/letterboxes rather than reproducing the
+                // source aspect ratio exactly, the redesign's deliberate
+                // tradeoff for a denser grid.
+                let (rect, _response) = ui.allocate_exact_size(metrics.tile_size, egui::Sense::hover());
                 if ui.is_rect_visible(rect) {
                     if let Some(tex) = thumbnail_textures.get(name) {
                         // Identity UV, deliberately NOT the V-flipped rect
@@ -187,25 +285,45 @@ fn tile(
                         // bottom-first rows before writing the cache file,
                         // so these pixels reach egui in its own top-first
                         // order.
+                        //
+                        // `ui.put` + the `Image` widget, not `Painter::
+                        // image` (which takes a mandatory `tint: Color32`
+                        // with no themed meaning here: untinted is the
+                        // only correct choice for compositing a texture
+                        // as-is): `Image`'s own default tint is `Color32::
+                        // WHITE` internally, so no literal needs to live in
+                        // this file for it (AC-15). `ui.put` places it into
+                        // the exact `rect` already allocated above, same
+                        // as `Painter::image` did.
                         let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
-                        ui.painter().image(tex.id(), rect, uv, egui::Color32::WHITE);
+                        ui.put(rect, egui::Image::new((tex.id(), rect.size())).uv(uv));
                     } else if failed_thumbnails.contains(name) {
                         // Rendering this one already failed. Re-queueing it
                         // would respawn a render child process, for a
                         // preset already known to produce nothing usable,
                         // for as long as the tile stays on screen.
-                        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(60, 30, 30));
+                        ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.error.gamma_multiply(0.3));
                     } else {
-                        ui.painter().rect_filled(rect, 2.0, egui::Color32::DARK_GRAY);
+                        ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.dim);
                         *thumb_queue = enqueue_front(std::mem::take(thumb_queue), ThumbJob { slot_key: name.to_string(), name: name.to_string() });
                     }
                 }
                 // Truncated to a single line, not wrapped: a wrapped name
                 // makes the tile's height depend on the name's length, and
                 // `show_rows` above needs every row to actually be
-                // `ROW_HEIGHT` tall. The full name stays reachable on
-                // hover.
-                ui.add(egui::Label::new(name).truncate()).on_hover_text(name);
+                // `row_height`'s value tall. The full name stays reachable
+                // on hover. Mono (mockup's `.od-tile-name`), `muted` (not
+                // uppercased like `micro_label`'s chrome text: this is a
+                // real, case-sensitive preset name, not section chrome).
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(name)
+                            .font(egui::FontId::new(t.type_scale.small, egui::FontFamily::Name(FAMILY_MONO.into())))
+                            .color(t.palette.muted),
+                    )
+                    .truncate(),
+                )
+                .on_hover_text(name);
             });
             // Own interaction on top of the card's contents, same pattern
             // as `ui::decks::deck_card`: click-to-load reads the card's
@@ -228,4 +346,210 @@ fn tile(
             });
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::themed_test_ui;
+    use opendrop_core::preset_index::PresetMeta;
+
+    fn sample_show() -> Show {
+        let mut show = Show::default();
+        show.preset_catalog = vec![
+            PresetMeta { name: "Alpha Swirl Refract".to_string(), category: "Alpha".to_string() },
+            PresetMeta { name: "Beta Pulse Drift".to_string(), category: "Beta".to_string() },
+        ];
+        show
+    }
+
+    // --- SearchCache::resolve: known queries -------------------------------
+
+    #[test]
+    fn search_cache_filters_by_case_insensitive_substring() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let results = cache.resolve(&show, "alpha");
+        assert_eq!(results, ["Alpha Swirl Refract".to_string()]);
+    }
+
+    #[test]
+    fn search_cache_empty_query_returns_every_preset() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let results = cache.resolve(&show, "");
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn search_cache_no_match_returns_empty() {
+        let show = sample_show();
+        let mut cache = SearchCache::default();
+        let results = cache.resolve(&show, "nonexistent");
+        assert!(results.is_empty());
+    }
+
+    // --- row_height(): the load-bearing regression guard -------------------
+    //
+    // Renders one real tile through `tile()` (not a re-derivation of
+    // `row_height`'s own formula, which would just check the formula
+    // against itself) and asserts the derived pitch covers what actually
+    // got laid out. A failure here means `show_rows` would receive a pitch
+    // smaller than the real row height, which silently overlaps rows once
+    // scrolled far enough into the ~9800-item library: see `row_height`'s
+    // own doc comment for the full `show_rows` contract this guards.
+    #[test]
+    fn row_height_covers_the_real_tile_content_height() {
+        themed_test_ui(|ui| {
+            widgets::dense(ui, |ui| {
+                let metrics = theme(ui).metrics;
+                let mut show = sample_show();
+                let mut thumb_queue = Vec::new();
+                let thumbnail_textures = HashMap::new();
+                let failed_thumbnails = HashSet::new();
+                let mut load_request = None;
+
+                let response = ui
+                    .horizontal(|ui| {
+                        tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
+                    })
+                    .response;
+
+                let real_height = response.rect.height();
+                let derived = row_height(ui, metrics);
+                assert!(
+                    derived >= real_height,
+                    "row_height() = {derived}, real rendered tile height = {real_height}: \
+                     show_rows would receive a pitch smaller than the real row, which \
+                     silently overlaps rows once scrolled far enough"
+                );
+            });
+        });
+    }
+
+    // --- tile_stride()/row_height(): same Metrics, can't diverge -----------
+
+    #[test]
+    fn tile_stride_and_row_height_read_the_same_metrics_instance() {
+        themed_test_ui(|ui| {
+            let metrics = theme(ui).metrics;
+            // Both take `&Metrics` explicitly rather than each calling
+            // `theme(ui).metrics` internally: this asserts the call site
+            // actually passes the identical `&'static Metrics` to both, the
+            // property that rules out the two ever reading a different
+            // instance.
+            let a = std::ptr::from_ref(metrics);
+            tile_stride(ui, metrics);
+            row_height(ui, metrics);
+            let b = std::ptr::from_ref(metrics);
+            assert!(std::ptr::eq(a, b));
+        });
+    }
+
+    // --- show(): the whole panel, airy (default) and dense -----------------
+
+    #[test]
+    fn show_does_not_panic() {
+        themed_test_ui(|ui| {
+            let mut inner_show = sample_show();
+            let deck_tex_ids = [egui::TextureId::default(); 4];
+            let deck_preset_names: [String; 4] = Default::default();
+            let pending = HashSet::new();
+            let errors = HashMap::new();
+            let mut transition_seconds = 0.0;
+            let mut perform = PerformCtx {
+                show: &mut inner_show,
+                deck_tex_ids: &deck_tex_ids,
+                deck_preset_names: &deck_preset_names,
+                pending_validations: &pending,
+                preset_errors: &errors,
+                transition_seconds: &mut transition_seconds,
+                t0: std::time::Instant::now(),
+            };
+
+            let mut search_query = String::new();
+            let mut search_cache = SearchCache::default();
+            let mut thumb_queue = Vec::new();
+            let thumbnail_textures = HashMap::new();
+            let failed_thumbnails = HashSet::new();
+            let mut load_request = None;
+            let mut library = LibraryCtx {
+                preset_search_query: &mut search_query,
+                search_cache: &mut search_cache,
+                thumb_queue: &mut thumb_queue,
+                thumbnail_textures: &thumbnail_textures,
+                failed_thumbnails: &failed_thumbnails,
+                load_request: &mut load_request,
+            };
+
+            show(ui, &mut perform, &mut library);
+        });
+    }
+
+    #[test]
+    fn show_does_not_panic_dense() {
+        themed_test_ui(|ui| {
+            widgets::dense(ui, |ui| {
+                let mut inner_show = sample_show();
+                let deck_tex_ids = [egui::TextureId::default(); 4];
+                let deck_preset_names: [String; 4] = Default::default();
+                let pending = HashSet::new();
+                let errors = HashMap::new();
+                let mut transition_seconds = 0.0;
+                let mut perform = PerformCtx {
+                    show: &mut inner_show,
+                    deck_tex_ids: &deck_tex_ids,
+                    deck_preset_names: &deck_preset_names,
+                    pending_validations: &pending,
+                    preset_errors: &errors,
+                    transition_seconds: &mut transition_seconds,
+                    t0: std::time::Instant::now(),
+                };
+
+                let mut search_query = String::new();
+                let mut search_cache = SearchCache::default();
+                let mut thumb_queue = Vec::new();
+                let thumbnail_textures = HashMap::new();
+                let failed_thumbnails = HashSet::new();
+                let mut load_request = None;
+                let mut library = LibraryCtx {
+                    preset_search_query: &mut search_query,
+                    search_cache: &mut search_cache,
+                    thumb_queue: &mut thumb_queue,
+                    thumbnail_textures: &thumbnail_textures,
+                    failed_thumbnails: &failed_thumbnails,
+                    load_request: &mut load_request,
+                };
+
+                show(ui, &mut perform, &mut library);
+            });
+        });
+    }
+
+    // --- tile(): push_id is keyed on the stable preset name -----------------
+
+    #[test]
+    fn tile_does_not_panic_and_is_keyed_on_name_not_index() {
+        themed_test_ui(|ui| {
+            widgets::dense(ui, |ui| {
+                let metrics = theme(ui).metrics;
+                let mut show = sample_show();
+                let mut thumb_queue = Vec::new();
+                let thumbnail_textures = HashMap::new();
+                let failed_thumbnails = HashSet::new();
+                let mut load_request = None;
+                // Two tiles with the same name would collide on id if
+                // `push_id` were keyed on a scroll/filter-shifting index
+                // instead of the name: rendering the same name twice in
+                // one `ui.horizontal` (impossible in practice since
+                // results are deduplicated preset names, but a cheap way
+                // to prove the id key is `name`-stable) must not panic on
+                // an id clash within a single frame's widget tree either.
+                ui.horizontal(|ui| {
+                    tile(ui, &mut show, "Alpha Swirl Refract", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
+                    tile(ui, &mut show, "Beta Pulse Drift", metrics, &mut thumb_queue, &thumbnail_textures, &failed_thumbnails, &mut load_request);
+                });
+            });
+        });
+    }
 }

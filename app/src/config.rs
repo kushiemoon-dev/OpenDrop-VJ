@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::theme::registry::ThemeId;
+use crate::InvisibleMode;
 
 /// Serde "remote type" shadow for `theme::registry::ThemeId`
 /// (https://serde.rs/remote-derive.html): `ThemeId` is a Step 3 type we
@@ -36,6 +37,14 @@ enum ThemeIdWire {
     Kushie,
     OpenDropClassic,
     Cyan,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "InvisibleMode")]
+enum InvisibleModeWire {
+    Eco,
+    Pause,
+    Off,
 }
 
 /// Mirror of `main.rs`'s `Panel` enum (`main.rs:136-153`), kept as its own
@@ -93,7 +102,8 @@ pub(crate) struct UiConfig {
     pub(crate) obs_port: u16,
     pub(crate) twitch_channel: String,
     pub(crate) kick_channel: String,
-    pub(crate) invisible_mode: bool,
+    #[serde(with = "InvisibleModeWire")]
+    pub(crate) invisible_mode: InvisibleMode,
     pub(crate) target_fps: u32,
 }
 
@@ -111,7 +121,7 @@ impl Default for UiConfig {
             obs_port: 4455,
             twitch_channel: String::new(),
             kick_channel: String::new(),
-            invisible_mode: false,
+            invisible_mode: InvisibleMode::Eco,
             target_fps: 60,
         }
     }
@@ -186,7 +196,7 @@ mod tests {
             obs_port: 4444,
             twitch_channel: "kushiemoon".to_string(),
             kick_channel: "kushiemoon".to_string(),
-            invisible_mode: true,
+            invisible_mode: InvisibleMode::Pause,
             target_fps: 144,
         };
 

@@ -1744,11 +1744,21 @@ impl ApplicationHandler for App {
             // immédiatement à chaque changement de thème runtime"). Same
             // read-modify-write idiom as the runtime theme-switch handler,
             // so this never clobbers `theme` (or any other already-
-            // persisted field) saved elsewhere.
+            // persisted field) saved elsewhere. Also owns the 8 already-
+            // UI-controlled fields below, not just `active_panel`/
+            // `stage_mode`.
             let config_path = config::config_file_path();
             let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
             ui_config.active_panel = state.active_panel.into();
             ui_config.stage_mode = state.stage_mode;
+            ui_config.output_monitor = state.selected_output_monitor.clone();
+            ui_config.audio_input_device = state.selected_input_device.clone();
+            ui_config.osc_port = state.osc_port;
+            ui_config.obs_host = state.obs_host.clone();
+            ui_config.obs_port = state.obs_port;
+            ui_config.twitch_channel = state.twitch_channel.clone();
+            ui_config.kick_channel = state.kick_channel.clone();
+            ui_config.invisible_mode = state.invisible_mode;
             config::save_config(config_path.as_deref(), &ui_config);
 
             state.egui_glow.destroy();
@@ -2232,10 +2242,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         // panel never calls `list_input_devices()` itself, per the brief
         // ("the list doesn't change mid-session").
         input_devices: opendrop_audio::list_input_devices(),
-        selected_input_device: None,
+        // Panel settings restored from the same `ui_config` loaded above,
+        // not just navigation state.
+        selected_input_device: ui_config.audio_input_device.clone(),
         last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
-        invisible_mode: InvisibleMode::Eco,
+        invisible_mode: ui_config.invisible_mode,
         pending_mesh_size: [None; deck::DECK_COUNT],
         show,
         registry: create_default_registry(),
@@ -2272,7 +2284,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         thumbnail_in_flight: None,
         thumbnail_killed: Vec::new(),
         thumbnail_cache_dir: thumbnail_cache_dir(),
-        selected_output_monitor: None,
+        selected_output_monitor: ui_config.output_monitor.clone(),
         midi: opendrop_io::midi::spawn(),
         midi_led_state: HashMap::new(),
         midi_learning: None,
@@ -2281,16 +2293,16 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_last_beat_count: 0,
         midi_led_flash_off_at: HashMap::new(),
         osc: opendrop_io::osc::spawn(),
-        osc_port: 7000,
+        osc_port: ui_config.osc_port,
         remote_ws: opendrop_io::remote_ws::spawn(),
         obs: opendrop_io::obs::spawn(),
-        obs_host: "localhost".to_string(),
-        obs_port: 4455,
+        obs_host: ui_config.obs_host.clone(),
+        obs_port: ui_config.obs_port,
         twitch: opendrop_io::twitch::spawn(chat_tx.clone()),
-        twitch_channel: String::new(),
+        twitch_channel: ui_config.twitch_channel.clone(),
         twitch_oauth_token_input: String::new(),
         kick: opendrop_io::kick::spawn(chat_tx),
-        kick_channel: String::new(),
+        kick_channel: ui_config.kick_channel.clone(),
         kick_bearer_token_input: String::new(),
         kick_xsrf_token_input: String::new(),
         kick_cookies_input: String::new(),

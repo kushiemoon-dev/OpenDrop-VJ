@@ -1273,8 +1273,8 @@ impl ApplicationHandler for App {
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
 
-            for i in 0..deck::DECK_COUNT {
-                let visible = layer_inputs[i].opacity > 0.001;
+            for (i, layer_input) in layer_inputs.iter().enumerate() {
+                let visible = layer_input.opacity > 0.001;
                 // See `InvisibleMode`: `Eco` is the original always-on
                 // throttle, `Pause` skips rendering this deck entirely while
                 // invisible (its texture keeps showing the last frame it
@@ -1394,14 +1394,14 @@ impl ApplicationHandler for App {
 
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
-            for i in 0..deck::DECK_COUNT {
+            for (i, layer_input) in layer_inputs.iter().enumerate() {
                 // Whole-branch review Finding I5: this used to be
                 // open-coded (`lowest_active == Some(i)`), untested here:
                 // now the tested `opendrop_core::blend::
                 // should_force_normal_for_lowest_slot` port of `compositor.
                 // ts:140`'s `shouldForceNormalForLowestSlot`.
                 let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
-                state.compositor.composite_layer(&state.gl, state.decks[i].texture, &layer_inputs[i], force_normal);
+                state.compositor.composite_layer(&state.gl, state.decks[i].texture, layer_input, force_normal);
             }
             // NDI-in layer, composited last, over every deck, as part of
             // this same shared pass: `render_and_swap*` later just blits
@@ -2123,7 +2123,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (Task 19: see `v4l2_frame_tx`'s doc comment on `AppState`).
     let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
     let (v4l2_frame_tx, v4l2_frame_rx) = mpsc::channel::<Vec<u8>>();
-    let (deck_frame_tx, deck_frame_rx): ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]) = {
+    type DeckFrameChannels = ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]);
+    let (deck_frame_tx, deck_frame_rx): DeckFrameChannels = {
         let mut tx_v = Vec::with_capacity(deck::DECK_COUNT);
         let mut rx_v = Vec::with_capacity(deck::DECK_COUNT);
         for _ in 0..deck::DECK_COUNT {

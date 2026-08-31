@@ -78,25 +78,25 @@ pub fn show(
 
     ui.label("Mesh size");
     ui.horizontal(|ui| {
-        for i in 0..deck::DECK_COUNT {
+        for (i, mesh_size) in pending_mesh_size.iter_mut().enumerate() {
             ui.push_id(i, |ui| {
                 ui.vertical(|ui| {
                     ui.label(format!("Deck {i}"));
                     if ui.button("Low").clicked() {
-                        pending_mesh_size[i] = Some(MESH_LOW);
+                        *mesh_size = Some(MESH_LOW);
                     }
                     if ui.button("Medium").clicked() {
-                        pending_mesh_size[i] = Some(MESH_MEDIUM);
+                        *mesh_size = Some(MESH_MEDIUM);
                     }
                     if ui.button("High").clicked() {
-                        pending_mesh_size[i] = Some(MESH_HIGH);
+                        *mesh_size = Some(MESH_HIGH);
                     }
                     // Minor #18: a mesh-size change only applies once
                     // `about_to_wait`'s per-deck loop actually renders this
                     // deck, which an invisible deck in `Pause` mode may not
                     // do for a while: previously silent, so a click could
                     // look like it did nothing.
-                    if pending_mesh_size[i].is_some() {
+                    if mesh_size.is_some() {
                         ui.label("(queued)");
                     }
                 });

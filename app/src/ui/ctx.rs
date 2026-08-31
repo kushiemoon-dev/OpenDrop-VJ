@@ -58,9 +58,10 @@ use crate::{InvisibleMode, Panel};
 /// hold the nav row.
 pub(crate) struct ShellCtx<'a> {
     pub(crate) active_panel: &'a mut Panel,
-    /// Header's Stage toggle (`⛶`, `ghost_button`): not yet wired to any
-    /// rendering/layout behavior beyond flipping this bool; a later step
-    /// gives it real meaning.
+    /// Header's Stage toggle (`⛶`, `ghost_button`) and the `F11` keyboard
+    /// toggle in `main.rs`'s `window_event`: drives `ui_root`'s choice
+    /// between the Normal and Stage variants of the header/nav/status
+    /// bar (Step 11 of the Phase 7 UI redesign plan).
     pub(crate) stage_mode: &'a mut bool,
     /// Status bar's fps/frame-ms readout: wall-clock swap-to-swap time
     /// from `main.rs`'s `about_to_wait`, one frame stale by construction
@@ -70,6 +71,11 @@ pub(crate) struct ShellCtx<'a> {
     /// (same convention as `SourcesCtx::last_vu_level`), since nothing
     /// needs to mutate it from inside `ui_root`.
     pub(crate) last_wall_ms: Option<f64>,
+    /// Whether the Stage bottom bar's preset drawer (`Panel::bottom("od_
+    /// presets_drawer").show_collapsible`) is open: Stage-mode-only UI
+    /// state (Step 11), toggled by a `ghost_button` in `status_bar_stage`,
+    /// not by `stage_mode` itself.
+    pub(crate) presets_drawer_open: &'a mut bool,
 }
 
 /// Live performance state: the `Show` business object plus per-deck UI

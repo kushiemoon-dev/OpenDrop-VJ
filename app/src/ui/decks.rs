@@ -26,7 +26,12 @@ const THUMB_SIZE: egui::Vec2 = egui::vec2(160.0, 90.0);
 /// one flips V. Fixed here rather than in the GL pipeline on purpose: the
 /// live output window is correct as-is, only egui's view of the texture
 /// needs the compensation.
-const FLIPPED_V_UV: egui::Rect = egui::Rect { min: egui::pos2(0.0, 1.0), max: egui::pos2(1.0, 0.0) };
+///
+/// `pub(crate)` (Step 11 of the Phase 7 UI redesign plan): the Stage
+/// bottom bar's own deck vignettes (`ui::shell::status_bar_stage`) draw
+/// the same live textures at a smaller size and need this exact flip too
+///: reused, not redefined, so the two never drift.
+pub(crate) const FLIPPED_V_UV: egui::Rect = egui::Rect { min: egui::pos2(0.0, 1.0), max: egui::pos2(1.0, 0.0) };
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(

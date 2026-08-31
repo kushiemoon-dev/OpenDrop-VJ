@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::Key;
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 mod config;
@@ -397,10 +397,13 @@ struct AppState {
     deck_tex_ids: [egui::TextureId; 4],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
-    /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan):
-    /// not yet wired to any rendering/layout behavior beyond the toggle
-    /// itself; a later step gives it real meaning.
+    /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
+    /// wired to the Normal/Stage shell switch at Step 11.
     stage_mode: bool,
+    /// Whether the Stage bottom bar's collapsible preset drawer is open
+    /// (Step 11): independent of `stage_mode` itself, so leaving Stage
+    /// mode doesn't need to also reset it.
+    presets_drawer_open: bool,
     /// Live text in the preset-browser search box.
     preset_search_query: String,
     /// Memoized `search` results for `preset_search_query`: see
@@ -742,15 +745,92 @@ fn ui_root(
     // Actually consuming it to switch themes at runtime is Step 12's job.
     let _ = theme_request;
 
-    egui::Panel::top("od_header").resizable(false).exact_size(48.0).show_separator_line(false).show(ui, |ui| {
-        ui::shell::header(ui, shell, perform);
-    });
-    egui::Panel::left("od_nav").resizable(false).exact_size(184.0).show(ui, |ui| {
+    // Step 11 of the Phase 7 UI redesign plan: Stage mode retracts the nav
+    // and switches the header/status bar to compact, translucent variants
+    // while live-mixing. `Panel::show_switched` is a `Panel`-associated
+    // function, not a method chained onto one builder as the brief's own
+    // prose first suggested: verified against vendored egui 0.36.1 source
+    // (`egui-0.36.1/src/containers/panel.rs:563`): it takes the collapsed
+    // and expanded `Panel` builders as two separate arguments plus one
+    // shared `is_expanded: &mut bool`, and animates the slide between
+    // them. Normal is always the "expanded" side, Stage the "collapsed"
+    // side, for both the header and the status bar: matching `nav`'s own
+    // collapse direction below. Both switches use a *local* `bool` derived
+    // fresh from `*shell.stage_mode` every frame (never written back):
+    // every panel below is `resizable(false)`, so egui never mutates
+    // `is_expanded` internally (drag-to-collapse/expand and the resize
+    // double-click both live inside `if resizable { .. }` in
+    // `show_inside_dyn`): the only writer of `*shell.stage_mode` is the
+    // `F11` handler in `window_event` and the header's own `⛶` button
+    // (`ui::shell::header`), and a write-back here would race the latter:
+    // the button flips `*shell.stage_mode` *during* this same call, and
+    // overwriting it with a value computed before the call would silently
+    // discard that click.
+    //
+    // Distinct `Id`s are mandatory between each zone's Normal/Stage panel
+    // (`"od_header"` vs `"od_header_stage"`, `"od_status"` vs `"od_status_
+    // stage"`): `show_switched` itself `debug_assert!`s on this. All
+    // Stage-mode chrome shares one `Frame::multiply_with_opacity(0.6)`:
+    // background + border + shadow modulated together in one operation
+    // (`egui-0.36.1/src/containers/frame.rs:313`), never a per-color
+    // `gamma_multiply` hack: so the live GL compositor (confirmed opaque
+    // and hidden behind Normal-mode chrome, Task 1) shows through the
+    // retracted areas.
+    let stage_frame = egui::Frame::side_top_panel(ui.style()).multiply_with_opacity(0.6);
+
+    let mut header_expanded = !*shell.stage_mode;
+    egui::Panel::show_switched(
+        ui,
+        &mut header_expanded,
+        egui::Panel::top("od_header_stage").resizable(false).exact_size(28.0).show_separator_line(false).frame(stage_frame),
+        egui::Panel::top("od_header").resizable(false).exact_size(48.0).show_separator_line(false),
+        |ui, expanded| {
+            if expanded {
+                ui::shell::header(ui, shell, perform);
+            } else {
+                ui::shell::header_stage(ui);
+            }
+        },
+    );
+
+    let mut nav_open = !*shell.stage_mode;
+    egui::Panel::left("od_nav").resizable(false).exact_size(184.0).show_collapsible(ui, &mut nav_open, |ui| {
         ui::shell::nav(ui, shell);
     });
-    egui::Panel::bottom("od_status").resizable(false).exact_size(26.0).show(ui, |ui| {
-        ui::shell::status_bar(ui, shell, perform, library, sources, output, stream, control);
-    });
+
+    let mut status_expanded = !*shell.stage_mode;
+    egui::Panel::show_switched(
+        ui,
+        &mut status_expanded,
+        egui::Panel::bottom("od_status_stage").resizable(false).exact_size(64.0).frame(stage_frame),
+        egui::Panel::bottom("od_status").resizable(false).exact_size(26.0),
+        |ui, expanded| {
+            if expanded {
+                ui::shell::status_bar(ui, shell, perform, library, sources, output, stream, control);
+            } else {
+                ui::shell::status_bar_stage(ui, shell, perform, sources);
+            }
+        },
+    );
+
+    // Preset drawer: Stage-only, collapsible over the live content
+    // (`Panel::bottom("od_presets_drawer").show_collapsible`), toggled by
+    // a `ghost_button` inside `status_bar_stage` rather than a new
+    // keyboard binding (the brief's own "Bascule clavier" section only
+    // calls out `stage_mode`'s toggle). Gated on `*shell.stage_mode`
+    // itself, not just left permanently mounted with `presets_drawer_open`
+    // pinned to `false`: Normal mode already reaches the same content via
+    // `Panel::PresetBrowser` in the nav, so there's no reason to reserve
+    // an extra `Panel::bottom` id/slide state for it there.
+    if *shell.stage_mode {
+        egui::Panel::bottom("od_presets_drawer")
+            .resizable(false)
+            .exact_size(260.0)
+            .frame(stage_frame)
+            .show_collapsible(ui, shell.presets_drawer_open, |ui| {
+                ui::preset_browser::show(ui, perform, library);
+            });
+    }
 
     egui::CentralPanel::default().show(ui, |ui| {
         match shell.active_panel {
@@ -864,6 +944,15 @@ impl ApplicationHandler for App {
             {
                 if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
                     state.registry.dispatch(cmd_id, 1.0, &mut state.show);
+                }
+
+                // Step 11 of the Phase 7 UI redesign plan: Stage mode is a
+                // transient UI bool on `AppState`, not a `CommandId`:
+                // matched directly against the logical key here rather
+                // than routed through `state.keymap`/`state.registry.
+                // dispatch`, under the same guard as the dispatch above.
+                if key_event.logical_key == Key::Named(NamedKey::F11) {
+                    state.stage_mode = !state.stage_mode;
                 }
             }
         }
@@ -1359,6 +1448,7 @@ impl ApplicationHandler for App {
                 transition_seconds,
                 active_panel,
                 stage_mode,
+                presets_drawer_open,
                 preset_search_query,
                 preset_search_cache,
                 thumb_queue,
@@ -1420,7 +1510,7 @@ impl ApplicationHandler for App {
             // `_ctx` suffix only where the destructure already bound a
             // same-named `WindowSlot` (`control`, `output`) that's still
             // needed below for `egui_glow.run`/`&output.window`.
-            let mut shell_ctx = ui::ctx::ShellCtx { active_panel, stage_mode, last_wall_ms };
+            let mut shell_ctx = ui::ctx::ShellCtx { active_panel, stage_mode, last_wall_ms, presets_drawer_open };
             let mut perform_ctx = ui::ctx::PerformCtx {
                 show,
                 deck_tex_ids,
@@ -2062,6 +2152,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_tex_ids,
         active_panel: Panel::default(),
         stage_mode: false,
+        presets_drawer_open: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),
         failed_thumbnails: HashSet::new(),

@@ -27,9 +27,19 @@
 //! Task 12), not from this panel: by the time this panel is ever shown,
 //! `NdiSnapshot::sources` is already populated (or empty, if nothing is on
 //! the network yet).
+//!
+//! Reskinned (Step 18 of the Phase 7 UI redesign plan): the NDI input
+//! connection row swaps its `label(if snapshot.receive_active {...})`
+//! branch for `widgets::connection_row`, same substitution as
+//! `ui::midi::show`'s connect row (Step 17). Both `Panel::NdiIn` and
+//! `Panel::NdiOut` call this same `show` (Step 9, unchanged here): this
+//! step only re-themes the combined content, it doesn't split it. The
+//! device `ComboBox` and every other row stay untouched.
 
 use opendrop_engine::deck;
 use opendrop_io::ndi::{NdiControl, NdiHandle, NdiSource};
+
+use crate::ui::widgets;
 
 const COMPOSITE_STREAM_NAME: &str = "OpenDrop";
 
@@ -79,7 +89,7 @@ pub fn show(
     ui.label("NDI input");
 
     ui.horizontal(|ui| {
-        ui.label(if snapshot.receive_active { "Receive: connected" } else { "Receive: disconnected" });
+        widgets::connection_row(ui, "Receive", snapshot.receive_active);
         if snapshot.receive_active {
             if ui.button("Disconnect").clicked() {
                 let _ = ndi.control_tx.send(NdiControl::StopReceive);

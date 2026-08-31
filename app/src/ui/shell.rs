@@ -14,16 +14,30 @@
 //! a little from nearly every context struct (connection status, audio,
 //! loading activity), so it takes all of them rather than growing a long
 //! flat parameter list the way `ui_root` itself used to before Step 9.
+//!
+//! Step 11 adds the Stage-mode counterparts `header_stage` and
+//! `status_bar_stage`, wired by `ui_root` via `egui::Panel::show_switched`
+//! instead of `header`/`status_bar` while `stage_mode` is on (see that
+//! call site's own comment). Both reuse `header`'s hand-painted pieces:
+//! `crossfader` directly, and the BPM readout via the `bpm_readout` helper
+//! `bpm_tap` was split around: rather than repainting the drag/glow logic
+//! a second time.
 
 use std::time::Instant;
 
-use opendrop_core::show::Show;
+use opendrop_core::show::{DeckBus, Show};
 
 use crate::theme::fonts::{FAMILY_MONO, FAMILY_UI_BOLD};
 use crate::theme::registry::ThemeId;
 use crate::ui::ctx::{ControlCtx, LibraryCtx, OutputCtx, PerformCtx, ShellCtx, SourcesCtx, StreamCtx};
+use crate::ui::decks::FLIPPED_V_UV;
 use crate::ui::widgets::{self, theme};
 use crate::Panel;
+
+/// Deck vignette size for the Stage bottom bar (Step 11 of the Phase 7 UI
+/// redesign plan): same 16:9 aspect as `ui::decks::THUMB_SIZE`, just
+/// scaled down to fit a single dense row instead of a full deck card.
+const STAGE_THUMB_SIZE: egui::Vec2 = egui::vec2(48.0, 27.0);
 
 // --- Header --------------------------------------------------------------
 
@@ -57,6 +71,23 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx)
                     *shell.stage_mode = !*shell.stage_mode;
                 }
             });
+        });
+    });
+}
+
+/// Stage-mode header (Step 11): a 28px band replacing `header`'s 48px:
+/// just the wordmark plus a `STAGE` mode indicator, no crossfader/BPM/
+/// theme controls (those move to `status_bar_stage`, and the toggle back
+/// to Normal is `F11`, not a button here). Exists mainly so the user
+/// retains a stable, unambiguous cue that Stage mode is active once the
+/// rest of the header/nav chrome retracts.
+pub fn header_stage(ui: &mut egui::Ui) {
+    let t = theme(ui);
+    widgets::dense(ui, |ui| {
+        ui.horizontal(|ui| {
+            wordmark(ui);
+            ui.add_space(t.metrics.spacing_dense.x);
+            widgets::pill(ui, "Stage", t.palette.accent);
         });
     });
 }
@@ -156,31 +187,12 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 /// `playlists.rs:44-75`, already a single self-contained `ui.horizontal`
 /// row there, which is why the whole block (not just the BPM readout)
 /// fits the header cleanly. Only the BPM readout itself gets the header's
-/// special treatment: mono font with a light glow (Step 10 brief).
+/// special treatment: mono font with a light glow (Step 10 brief), factored
+/// into `bpm_readout` below (Step 11) so `status_bar_stage`'s BPM display
+/// can reuse the same hand-painted glow instead of repainting it.
 fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
-    let t = theme(ui);
     ui.horizontal(|ui| {
-        let bpm = show.current_bpm();
-        // Bare number, no "BPM" unit suffix (Step 10 fix-round-1): sitting
-        // directly next to "Tap"/"Clear" already makes it unambiguous, and
-        // dropping the 3-letter suffix was part of closing the header
-        // overflow found in review: see `header`'s own doc comment.
-        let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
-        let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
-        let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
-        let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
-        if ui.is_rect_visible(rect) {
-            // Light glow: a single low-opacity accent backdrop, smaller
-            // and fainter than the crossfader handle's halo (the brief
-            // calls for "un glow léger similaire", not the same
-            // intensity).
-            ui.painter().rect_filled(
-                rect.expand(5.0),
-                egui::CornerRadius::from(t.metrics.radius_md),
-                t.palette.accent.gamma_multiply(0.08),
-            );
-            ui.painter().galley(rect.min, galley, t.palette.text);
-        }
+        bpm_readout(ui, show);
 
         // "Tap" (Step 10 fix-round-1: shortened from "Tap Tempo" to help
         // the header row fit the app's default/untouched window width:
@@ -216,6 +228,36 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
             show.reset_auto_xfade_count();
         }
     });
+}
+
+/// The BPM readout alone: bare number (or `—` if unknown), mono font, with
+/// the light accent glow described on `bpm_tap`. Split out of `bpm_tap`
+/// (Step 11 of the Phase 7 UI redesign plan) so `status_bar_stage` can show
+/// just the number, without the Tap/Clear/beats-per-change/auto-crossfade
+/// controls that stay header-only, while still painting the exact same
+/// glow rather than a second hand-rolled copy of it.
+fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
+    let t = theme(ui);
+    let bpm = show.current_bpm();
+    // Bare number, no "BPM" unit suffix (Step 10 fix-round-1): sitting
+    // directly next to "Tap"/"Clear" already makes it unambiguous, and
+    // dropping the 3-letter suffix was part of closing the header
+    // overflow found in review: see `header`'s own doc comment.
+    let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
+    let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
+    let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
+    let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        // Light glow: a single low-opacity accent backdrop, smaller and
+        // fainter than the crossfader handle's halo (the brief calls for
+        // "un glow léger similaire", not the same intensity).
+        ui.painter().rect_filled(
+            rect.expand(5.0),
+            egui::CornerRadius::from(t.metrics.radius_md),
+            t.palette.accent.gamma_multiply(0.08),
+        );
+        ui.painter().galley(rect.min, galley, t.palette.text);
+    }
 }
 
 /// Read-only theme picker (Step 10 brief): shows the current theme via a
@@ -378,6 +420,75 @@ pub fn status_bar(
             // through any context struct, only `AppState` itself).
             let loading = !perform.pending_validations.is_empty() || !library.thumb_queue.is_empty();
             status_dot(ui, "LOAD", loading);
+        });
+    });
+}
+
+/// Stage bottom bar (Step 11): the live-transport counterpart to
+/// `status_bar`, shown instead of it while `stage_mode` is on: 4 deck
+/// vignettes, a bus A/B deck-count readout, the crossfader, VU, BPM, and
+/// FPS, plus the preset drawer's open/close toggle. Deliberately narrower
+/// than `status_bar`'s own reads: no connection pills or loading activity
+/// here, since those aren't part of the brief's Stage-bar listing and this
+/// bar already reuses `crossfader`/`bpm_readout` rather than growing new
+/// hand-painted pieces of its own. Takes `SourcesCtx` (for `last_vu_level`)
+/// but not `LibraryCtx`/`OutputCtx`/`StreamCtx`/`ControlCtx`: nothing
+/// here reads them.
+pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx, sources: &mut SourcesCtx) {
+    let t = theme(ui);
+    widgets::dense(ui, |ui| {
+        ui.vertical(|ui| {
+            // Row 1: what's playing: 4 deck vignettes, the bus A/B
+            // deck-count readout, then the crossfader.
+            ui.horizontal(|ui| {
+                for tex_id in perform.deck_tex_ids {
+                    ui.add(egui::Image::new((*tex_id, STAGE_THUMB_SIZE)).uv(FLIPPED_V_UV));
+                }
+                sep(ui);
+
+                // `accent` = bus A, `ok` = bus B (the same mapping
+                // `Metrics`' own doc comment establishes for Step 13's
+                // Decks panel), so this reads consistently with the
+                // bus-cycle buttons once those are themed.
+                let bus_a = perform.show.deck_bus.iter().filter(|&&b| b == DeckBus::A).count();
+                let bus_b = perform.show.deck_bus.iter().filter(|&&b| b == DeckBus::B).count();
+                widgets::pill(ui, &format!("A {bus_a}"), t.palette.accent);
+                widgets::pill(ui, &format!("B {bus_b}"), t.palette.ok);
+                sep(ui);
+
+                crossfader(ui, perform.show);
+            });
+
+            // Row 2: live readouts: VU, BPM, FPS, and the preset drawer
+            // toggle. Split onto its own row rather than packed into row
+            // 1 (measured live at the app's default ~622px content width,
+            // same instrumented-probe technique Step 10 used for the
+            // header's own overflow): `vu_meter` floors its width at
+            // `Metrics::tile_content_w` (110px, sized for the Audio
+            // panel's own full-width usage) regardless of the space handed
+            // to it, which alone left no room for BPM/FPS/the drawer
+            // toggle after 4 vignettes + bus pills + the crossfader on one
+            // row.
+            ui.horizontal(|ui| {
+                ui.allocate_ui(egui::vec2(110.0, 12.0), |ui| {
+                    widgets::vu_meter(ui, sources.last_vu_level as f32);
+                });
+                sep(ui);
+
+                bpm_readout(ui, perform.show);
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let fps_text = match shell.last_wall_ms {
+                        Some(ms) if ms > 0.0 => format!("{:.0}FPS", 1000.0 / ms),
+                        _ => "--FPS".to_string(),
+                    };
+                    widgets::micro_label(ui, &fps_text);
+                    sep(ui);
+                    if widgets::ghost_button(ui, "☰").clicked() {
+                        *shell.presets_drawer_open = !*shell.presets_drawer_open;
+                    }
+                });
+            });
         });
     });
 }

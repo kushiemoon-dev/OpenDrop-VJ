@@ -76,6 +76,13 @@ pub fn style(t: &Theme) -> Style {
         visuals: visuals(t),
         text_styles: super::fonts::text_styles(t),
         spacing: egui::style::Spacing { item_spacing: t.metrics.spacing_airy, ..Default::default() },
+        // Step 11 of the Phase 7 UI redesign plan: the Stage mode
+        // nav/header slide (`Panel::show_collapsible`/`show_switched`)
+        // rides this for free rather than a bespoke tween: `durations.
+        // base` (0.25s) is this theme's one animation-speed token, so
+        // every future `animate_bool`-driven transition in the app
+        // inherits the same pace by construction.
+        animation_time: t.durations.base,
         ..Default::default()
     }
 }

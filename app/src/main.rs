@@ -4,7 +4,7 @@ use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, PossiblyC
 use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
-use glutin_winit::DisplayBuilder;
+use glutin_winit::{ApiPreference, DisplayBuilder};
 use opendrop_core::blend::{should_force_normal_for_lowest_slot, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
@@ -1794,6 +1794,7 @@ fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> R
         .with_stencil_size(0);
 
     let (window, gl_config) = DisplayBuilder::new()
+        .with_preference(ApiPreference::PreferEgl)
         .with_window_attributes(Some(attrs))
         .build(event_loop, template, |mut configs| {
             // DisplayBuilder's picker callback must return a Config, not a

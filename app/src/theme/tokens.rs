@@ -28,12 +28,13 @@ pub struct Palette {
 }
 
 /// Layout constants shared by all 3 themes (the same `&'static Metrics` for
-/// every `Theme`), so switching themes never reflows a layout. `thumb_size`/
-/// `tile_size`/`tile_content_w` are repatriated from `ui::decks::THUMB_SIZE`
-/// (`decks.rs:14`) and `ui::preset_browser::{TILE_SIZE, TILE_CONTENT_W}`
-/// (`preset_browser.rs:36,41`): those call sites keep their own local
-/// consts until the panels are themed (Steps 13/14); `ROW_HEIGHT` stays
-/// local to `preset_browser.rs` and migrates separately at Step 14.
+/// every `Theme`), so switching themes never reflows a layout. `thumb_size`
+/// (`ui::decks`, Step 13) and `tile_size`/`tile_content_w` (`ui::
+/// preset_browser`, Step 14) were repatriated from those panels' own former
+/// local consts; both panels now read straight from here. `ROW_HEIGHT`
+/// never joined this struct: Step 14 replaced that fixed constant with
+/// `preset_browser::row_height`, derived from `tile_size` plus the live
+/// style instead.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
     pub radius_sm: f32,

@@ -24,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::Key;
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 mod config;
@@ -74,7 +74,7 @@ const CHAT_LOG_CAP: usize = 50;
 /// `Off` disables the throttle, rendering invisible decks at full rate same
 /// as visible ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InvisibleMode {
+pub(crate) enum InvisibleMode {
     Eco,
     Pause,
     Off,
@@ -134,8 +134,10 @@ fn create_ndi_in_texture(
 /// per-tick work that only matters while its panel is visible (Step 17: the
 /// thumbnail pump only runs while `PresetBrowser` is on screen), besides
 /// driving `ui_root`'s own tab row.
+// `pub(crate)`: read by `ui::ctx::ShellCtx` (Step 9 of the Phase 7 UI
+// redesign plan), a different module from this one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Panel {
+pub(crate) enum Panel {
     #[default]
     Decks,
     PresetBrowser,
@@ -144,7 +146,14 @@ enum Panel {
     Quality,
     Output,
     Midi,
-    Ndi,
+    // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
+    // is unchanged (it already renders both the output toggles and the
+    // input selector in one call): both variants currently drive that
+    // same call from `ui_root`'s match. Step 10 gave this variant its own
+    // nav button (SOURCES section, `ui::shell::nav`): a future step still
+    // owes it its own half of `ndi.rs`.
+    NdiIn,
+    NdiOut,
     Osc,
     RemoteWs,
     Streaming,
@@ -152,6 +161,59 @@ enum Panel {
     Link,
     V4l2,
     About,
+}
+
+/// Whole-branch review fix wave, finding 1 (AC-10): `config::PanelId` ->
+/// `Panel`, for restoring `AppState::active_panel` from a loaded `ui.json`
+/// at bootstrap. Kept as an explicit conversion rather than merging the
+/// two enums, per `config.rs`'s own module doc comment (`Panel` must not
+/// derive `Serialize`/`Deserialize`).
+impl From<config::PanelId> for Panel {
+    fn from(id: config::PanelId) -> Self {
+        match id {
+            config::PanelId::Decks => Panel::Decks,
+            config::PanelId::PresetBrowser => Panel::PresetBrowser,
+            config::PanelId::Playlists => Panel::Playlists,
+            config::PanelId::Audio => Panel::Audio,
+            config::PanelId::Quality => Panel::Quality,
+            config::PanelId::Output => Panel::Output,
+            config::PanelId::Midi => Panel::Midi,
+            config::PanelId::NdiIn => Panel::NdiIn,
+            config::PanelId::NdiOut => Panel::NdiOut,
+            config::PanelId::Osc => Panel::Osc,
+            config::PanelId::RemoteWs => Panel::RemoteWs,
+            config::PanelId::Streaming => Panel::Streaming,
+            #[cfg(feature = "link")]
+            config::PanelId::Link => Panel::Link,
+            config::PanelId::V4l2 => Panel::V4l2,
+            config::PanelId::About => Panel::About,
+        }
+    }
+}
+
+/// The reverse of the above, for saving `AppState::active_panel` into
+/// `UiConfig` on exit.
+impl From<Panel> for config::PanelId {
+    fn from(panel: Panel) -> Self {
+        match panel {
+            Panel::Decks => config::PanelId::Decks,
+            Panel::PresetBrowser => config::PanelId::PresetBrowser,
+            Panel::Playlists => config::PanelId::Playlists,
+            Panel::Audio => config::PanelId::Audio,
+            Panel::Quality => config::PanelId::Quality,
+            Panel::Output => config::PanelId::Output,
+            Panel::Midi => config::PanelId::Midi,
+            Panel::NdiIn => config::PanelId::NdiIn,
+            Panel::NdiOut => config::PanelId::NdiOut,
+            Panel::Osc => config::PanelId::Osc,
+            Panel::RemoteWs => config::PanelId::RemoteWs,
+            Panel::Streaming => config::PanelId::Streaming,
+            #[cfg(feature = "link")]
+            Panel::Link => config::PanelId::Link,
+            Panel::V4l2 => config::PanelId::V4l2,
+            Panel::About => config::PanelId::About,
+        }
+    }
 }
 
 struct WindowSlot {
@@ -351,6 +413,13 @@ struct AppState {
     /// tick are close enough together that this is a faithful "previous
     /// tick's real elapsed-time reference", without a second field.
     last_output_swap_at: Option<Instant>,
+    /// Wall-clock swap-to-swap frame time in ms, mirrored from the
+    /// `wall_ms` local computed right after each render (see that call
+    /// site, just below `last_output_swap_at`'s own write): one frame
+    /// stale by construction, same as `last_output_swap_at` itself.
+    /// `None` before the first tick. Feeds the status bar's fps/frame-ms
+    /// readout (Step 10 of the Phase 7 UI redesign plan).
+    last_wall_ms: Option<f64>,
     perf_tick: u64,
     /// Sender handed to `preflight::spawn_preflight`: cloned once per
     /// `request_preset_load` call so each validation request gets its own
@@ -381,6 +450,13 @@ struct AppState {
     deck_tex_ids: [egui::TextureId; 4],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
+    /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
+    /// wired to the Normal/Stage shell switch at Step 11.
+    stage_mode: bool,
+    /// Whether the Stage bottom bar's collapsible preset drawer is open
+    /// (Step 11): independent of `stage_mode` itself, so leaving Stage
+    /// mode doesn't need to also reset it.
+    presets_drawer_open: bool,
     /// Live text in the preset-browser search box.
     preset_search_query: String,
     /// Memoized `search` results for `preset_search_query`: see
@@ -686,153 +762,192 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`: `CentralPanel::show` in this vendored
 /// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). One panel per `Panel` variant,
-/// switched via the tab row.
+/// Task 2's notes on this same drift). A 4-zone shell (Step 10 of the Phase
+/// 7 UI redesign plan): header, sectioned nav, status bar, then content:
+/// `egui::Panel::top`/`left`/`bottom` (not `SidePanel`/`TopBottomPanel`,
+/// which don't exist in this vendored egui 0.36.1), `CentralPanel` last, in
+/// that mandated order. `ui::shell::{header,nav,status_bar}` hold the zone
+/// bodies; this function only wires them up plus the unchanged content
+/// match (Step 9's version, just relocated into the new `CentralPanel`
+/// zone).
 ///
 /// Takes individual `AppState` fields, not `&mut AppState`: see
 /// `ui::decks::show`'s doc comment for why. `load_request` is an out-param:
 /// the preset-browser panel can't call `request_preset_load` itself (that
 /// needs the whole `AppState`), so a click just records the name here for
 /// the caller to act on once this frame's egui pass is done.
+// Step 9 (Phase 7 UI redesign plan): the 51 (53 with `--features link`)
+// individual `AppState`-derived params this function used to take are
+// grouped into 7 disjoint `&mut` context structs (`ui::ctx`) plus
+// `theme_request` as an 8th, standalone out-param: pure re-packaging, see
+// `ui::ctx`'s module doc comment for the field-to-struct assignment and the
+// borrow-check reasoning behind it.
 #[allow(clippy::too_many_arguments)]
 fn ui_root(
     ui: &mut egui::Ui,
-    show: &mut Show,
-    deck_tex_ids: &[egui::TextureId; 4],
-    deck_preset_names: &[String; 4],
-    pending_validations: &HashSet<usize>,
-    preset_errors: &HashMap<usize, String>,
-    transition_seconds: &mut f64,
-    active_panel: &mut Panel,
-    preset_search_query: &mut String,
-    preset_search_cache: &mut ui::preset_browser::SearchCache,
-    thumb_queue: &mut Vec<ThumbJob>,
-    thumbnail_textures: &HashMap<String, egui::TextureHandle>,
-    failed_thumbnails: &HashSet<String>,
-    audio: &opendrop_audio::AudioHandle,
-    input_devices: &Vec<String>,
-    selected_input_device: &mut Option<String>,
-    last_vu_level: f64,
-    load_request: &mut Option<String>,
-    t0: Instant,
-    refresh_interval: &mut Duration,
-    invisible_mode: &mut InvisibleMode,
-    pending_mesh_size: &mut [Option<(usize, usize)>; deck::DECK_COUNT],
-    event_loop: &ActiveEventLoop,
-    output_window: &Window,
-    selected_output_monitor: &mut Option<String>,
-    registry: &CommandRegistry,
-    midi: &opendrop_io::midi::MidiHandle,
-    midi_learning: &mut Option<(CommandId, Option<MidiTriggerKey>)>,
-    ndi: &opendrop_io::ndi::NdiHandle,
-    ndi_composite_active: &mut bool,
-    ndi_deck_active: &mut [bool; deck::DECK_COUNT],
-    ndi_in_selected_source: &mut Option<opendrop_io::ndi::NdiSource>,
-    osc: &opendrop_io::osc::OscHandle,
-    osc_port: &mut u16,
-    remote_ws: &opendrop_io::remote_ws::RemoteWsHandle,
-    obs: &opendrop_io::obs::ObsHandle,
-    obs_host: &mut String,
-    obs_port: &mut u16,
-    twitch: &opendrop_io::twitch::TwitchHandle,
-    twitch_channel: &mut String,
-    twitch_oauth_token_input: &mut String,
-    kick: &opendrop_io::kick::KickHandle,
-    kick_channel: &mut String,
-    kick_bearer_token_input: &mut String,
-    kick_xsrf_token_input: &mut String,
-    kick_cookies_input: &mut String,
-    chat_log: &VecDeque<opendrop_io::chat::ChatMessage>,
-    streaming_secret_save_error: &mut Option<String>,
-    #[cfg(feature = "link")] link: &opendrop_io::link::LinkHandle,
-    #[cfg(feature = "link")] link_tempo_input: &mut f64,
-    v4l2: &opendrop_io::v4l2loopback::V4l2Handle,
-    v4l2_active: &mut bool,
-    v4l2_device: &mut Option<Option<PathBuf>>,
+    shell: &mut ui::ctx::ShellCtx,
+    perform: &mut ui::ctx::PerformCtx,
+    library: &mut ui::ctx::LibraryCtx,
+    sources: &mut ui::ctx::SourcesCtx,
+    output: &mut ui::ctx::OutputCtx,
+    stream: &mut ui::ctx::StreamCtx,
+    control: &mut ui::ctx::ControlCtx,
+    theme_request: &mut Option<theme::registry::ThemeId>,
 ) {
-    egui::CentralPanel::default().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.selectable_value(active_panel, Panel::Decks, "Decks");
-            ui.selectable_value(active_panel, Panel::PresetBrowser, "Presets");
-            ui.selectable_value(active_panel, Panel::Playlists, "Playlists");
-            ui.selectable_value(active_panel, Panel::Audio, "Audio");
-            ui.selectable_value(active_panel, Panel::Quality, "Quality");
-            ui.selectable_value(active_panel, Panel::Output, "Output");
-            ui.selectable_value(active_panel, Panel::Midi, "MIDI");
-            ui.selectable_value(active_panel, Panel::Ndi, "NDI");
-            ui.selectable_value(active_panel, Panel::Osc, "OSC");
-            ui.selectable_value(active_panel, Panel::RemoteWs, "Remote");
-            ui.selectable_value(active_panel, Panel::Streaming, "Streaming");
-            #[cfg(feature = "link")]
-            ui.selectable_value(active_panel, Panel::Link, "Link");
-            ui.selectable_value(active_panel, Panel::V4l2, "V4L2");
-            ui.selectable_value(active_panel, Panel::About, "About");
-        });
-        ui.separator();
-        match active_panel {
-            Panel::Decks => {
-                ui::decks::show(ui, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors, transition_seconds);
+    // Step 11 of the Phase 7 UI redesign plan: Stage mode retracts the nav
+    // and switches the header/status bar to compact, translucent variants
+    // while live-mixing. `Panel::show_switched` is a `Panel`-associated
+    // function, not a method chained onto one builder as the brief's own
+    // prose first suggested: verified against vendored egui 0.36.1 source
+    // (`egui-0.36.1/src/containers/panel.rs:563`): it takes the collapsed
+    // and expanded `Panel` builders as two separate arguments plus one
+    // shared `is_expanded: &mut bool`, and animates the slide between
+    // them. Normal is always the "expanded" side, Stage the "collapsed"
+    // side, for both the header and the status bar: matching `nav`'s own
+    // collapse direction below. Both switches use a *local* `bool` derived
+    // fresh from `*shell.stage_mode` every frame (never written back):
+    // every panel below is `resizable(false)`, so egui never mutates
+    // `is_expanded` internally (drag-to-collapse/expand and the resize
+    // double-click both live inside `if resizable { .. }` in
+    // `show_inside_dyn`): the only writer of `*shell.stage_mode` is the
+    // `F11` handler in `window_event` and the header's own `⛶` button
+    // (`ui::shell::header`), and a write-back here would race the latter:
+    // the button flips `*shell.stage_mode` *during* this same call, and
+    // overwriting it with a value computed before the call would silently
+    // discard that click.
+    //
+    // Distinct `Id`s are mandatory between each zone's Normal/Stage panel
+    // (`"od_header"` vs `"od_header_stage"`, `"od_status"` vs `"od_status_
+    // stage"`): `show_switched` itself `debug_assert!`s on this. All
+    // Stage-mode chrome shares one `Frame::multiply_with_opacity(0.6)`:
+    // background + border + shadow modulated together in one operation
+    // (`egui-0.36.1/src/containers/frame.rs:313`), never a per-color
+    // `gamma_multiply` hack: so the live GL compositor (confirmed opaque
+    // and hidden behind Normal-mode chrome, Task 1) shows through the
+    // retracted areas.
+    let stage_frame = egui::Frame::side_top_panel(ui.style()).multiply_with_opacity(0.6);
+
+    let mut header_expanded = !*shell.stage_mode;
+    egui::Panel::show_switched(
+        ui,
+        &mut header_expanded,
+        egui::Panel::top("od_header_stage").resizable(false).exact_size(28.0).show_separator_line(false).frame(stage_frame),
+        egui::Panel::top("od_header").resizable(false).exact_size(48.0).show_separator_line(false),
+        |ui, expanded| {
+            if expanded {
+                ui::shell::header(ui, shell, perform, theme_request);
+            } else {
+                ui::shell::header_stage(ui, shell.stage_mode);
             }
-            Panel::PresetBrowser => {
-                ui::preset_browser::show(
+        },
+    );
+
+    let mut nav_open = !*shell.stage_mode;
+    egui::Panel::left("od_nav").resizable(false).exact_size(184.0).show_collapsible(ui, &mut nav_open, |ui| {
+        ui::shell::nav(ui, shell);
+    });
+
+    let mut status_expanded = !*shell.stage_mode;
+    egui::Panel::show_switched(
+        ui,
+        &mut status_expanded,
+        egui::Panel::bottom("od_status_stage").resizable(false).exact_size(64.0).frame(stage_frame),
+        egui::Panel::bottom("od_status").resizable(false).exact_size(26.0),
+        |ui, expanded| {
+            if expanded {
+                ui::shell::status_bar(ui, shell, perform, library, sources, output, stream, control);
+            } else {
+                ui::shell::status_bar_stage(ui, shell, perform, sources);
+            }
+        },
+    );
+
+    // Preset drawer: Stage-only, collapsible over the live content
+    // (`Panel::bottom("od_presets_drawer").show_collapsible`), toggled by
+    // a `ghost_button` inside `status_bar_stage` rather than a new
+    // keyboard binding (the brief's own "Bascule clavier" section only
+    // calls out `stage_mode`'s toggle). Gated on `*shell.stage_mode`
+    // itself, not just left permanently mounted with `presets_drawer_open`
+    // pinned to `false`: Normal mode already reaches the same content via
+    // `Panel::PresetBrowser` in the nav, so there's no reason to reserve
+    // an extra `Panel::bottom` id/slide state for it there.
+    if *shell.stage_mode {
+        egui::Panel::bottom("od_presets_drawer")
+            .resizable(false)
+            .exact_size(260.0)
+            .frame(stage_frame)
+            .show_collapsible(ui, shell.presets_drawer_open, |ui| {
+                ui::preset_browser::show(ui, perform, library);
+            });
+    }
+
+    egui::CentralPanel::default().show(ui, |ui| {
+        match shell.active_panel {
+            Panel::Decks => {
+                ui::decks::show(
                     ui,
-                    show,
-                    preset_search_query,
-                    preset_search_cache,
-                    thumb_queue,
-                    thumbnail_textures,
-                    failed_thumbnails,
-                    load_request,
+                    perform.show,
+                    perform.deck_tex_ids,
+                    perform.deck_preset_names,
+                    perform.pending_validations,
+                    perform.preset_errors,
+                    perform.transition_seconds,
                 );
             }
+            Panel::PresetBrowser => {
+                ui::preset_browser::show(ui, perform, library);
+            }
             Panel::Playlists => {
-                ui::playlists::show(ui, show, t0);
+                ui::playlists::show(ui, perform.show, library);
             }
             Panel::Audio => {
-                ui::audio::show(ui, audio, input_devices, selected_input_device, last_vu_level);
+                ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);
             }
             Panel::Quality => {
-                ui::quality::show(ui, refresh_interval, invisible_mode, pending_mesh_size);
+                ui::quality::show(ui, output.refresh_interval, output.invisible_mode, output.pending_mesh_size);
             }
             Panel::Output => {
-                ui::output::show(ui, event_loop, output_window, selected_output_monitor);
+                ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
             Panel::Midi => {
-                ui::midi::show(ui, midi, registry, midi_learning);
+                ui::midi::show(ui, sources.midi, sources.registry, sources.midi_learning);
             }
-            Panel::Ndi => {
-                ui::ndi::show(ui, ndi, ndi_composite_active, ndi_deck_active, ndi_in_selected_source);
+            Panel::NdiIn => {
+                ui::ndi::show_in(ui, output.ndi, sources.ndi_in_selected_source);
+            }
+            Panel::NdiOut => {
+                ui::ndi::show_out(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active);
             }
             Panel::Osc => {
-                ui::osc::show(ui, osc, osc_port);
+                ui::osc::show(ui, sources.osc, sources.osc_port);
             }
             Panel::RemoteWs => {
-                ui::remote::show(ui, remote_ws);
+                ui::remote::show(ui, sources.remote_ws);
             }
             Panel::Streaming => {
                 ui::streaming::show(
                     ui,
-                    obs,
-                    obs_host,
-                    obs_port,
-                    twitch,
-                    twitch_channel,
-                    twitch_oauth_token_input,
-                    kick,
-                    kick_channel,
-                    kick_bearer_token_input,
-                    kick_xsrf_token_input,
-                    kick_cookies_input,
-                    chat_log,
-                    streaming_secret_save_error,
+                    stream.obs,
+                    stream.obs_host,
+                    stream.obs_port,
+                    stream.twitch,
+                    stream.twitch_channel,
+                    stream.twitch_oauth_token_input,
+                    stream.kick,
+                    stream.kick_channel,
+                    stream.kick_bearer_token_input,
+                    stream.kick_xsrf_token_input,
+                    stream.kick_cookies_input,
+                    stream.chat_log,
+                    stream.streaming_secret_save_error,
                 );
             }
             #[cfg(feature = "link")]
             Panel::Link => {
-                ui::link::show(ui, link, link_tempo_input);
+                ui::link::show(ui, control.link, control.link_tempo_input);
             }
             Panel::V4l2 => {
-                ui::v4l2loopback::show(ui, v4l2, v4l2_active, v4l2_device);
+                ui::v4l2loopback::show(ui, sources.v4l2, sources.v4l2_active, sources.v4l2_device);
             }
             Panel::About => {
                 ui::about::show(ui);
@@ -878,6 +993,15 @@ impl ApplicationHandler for App {
             {
                 if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
                     state.registry.dispatch(cmd_id, 1.0, &mut state.show);
+                }
+
+                // Step 11 of the Phase 7 UI redesign plan: Stage mode is a
+                // transient UI bool on `AppState`, not a `CommandId`:
+                // matched directly against the logical key here rather
+                // than routed through `state.keymap`/`state.registry.
+                // dispatch`, under the same guard as the dispatch above.
+                if key_event.logical_key == Key::Named(NamedKey::F11) {
+                    state.stage_mode = !state.stage_mode;
                 }
             }
         }
@@ -1350,6 +1474,11 @@ impl ApplicationHandler for App {
             // either way.
             let t0 = state.t0;
             let last_vu_level = state.last_vu_level;
+            // Status bar's fps/frame-ms readout (Step 10): same by-value
+            // copy-before-destructure convention as `last_vu_level` above,
+            // since `ShellCtx::last_wall_ms` is a plain `Option<f64>`, not
+            // a `&mut` field.
+            let last_wall_ms = state.last_wall_ms;
 
             // Decks (Step 16), preset-browser (Step 17), playlists (Step
             // 18), and audio (Step 19) panels: real content, replacing the
@@ -1367,6 +1496,8 @@ impl ApplicationHandler for App {
                 preset_errors,
                 transition_seconds,
                 active_panel,
+                stage_mode,
+                presets_drawer_open,
                 preset_search_query,
                 preset_search_cache,
                 thumb_queue,
@@ -1417,63 +1548,96 @@ impl ApplicationHandler for App {
             // `request_preset_load` call has to wait until after `run()`
             // returns, below.
             let mut preset_load_request: Option<String> = None;
+            // Step 9: plumbing only, not consumed yet: see `ui_root`'s own
+            // comment on this parameter.
+            let mut theme_request: Option<theme::registry::ThemeId> = None;
+
+            // Step 9: group the bindings the destructure above just
+            // produced into the 7 context structs `ui_root` now takes,
+            // instead of 51/53 individual arguments. Every field here is
+            // exactly one of those bindings: no new state. Named with a
+            // `_ctx` suffix only where the destructure already bound a
+            // same-named `WindowSlot` (`control`, `output`) that's still
+            // needed below for `egui_glow.run`/`&output.window`.
+            let mut shell_ctx = ui::ctx::ShellCtx { active_panel, stage_mode, last_wall_ms, presets_drawer_open };
+            let mut perform_ctx = ui::ctx::PerformCtx {
+                show,
+                deck_tex_ids,
+                deck_preset_names,
+                pending_validations,
+                preset_errors,
+                transition_seconds,
+                t0,
+            };
+            let mut library_ctx = ui::ctx::LibraryCtx {
+                preset_search_query,
+                search_cache: preset_search_cache,
+                thumb_queue,
+                thumbnail_textures,
+                failed_thumbnails,
+                load_request: &mut preset_load_request,
+            };
+            let mut sources_ctx = ui::ctx::SourcesCtx {
+                audio,
+                input_devices,
+                selected_input_device,
+                last_vu_level,
+                registry,
+                midi,
+                midi_learning,
+                ndi_in_selected_source,
+                osc,
+                osc_port,
+                remote_ws,
+                v4l2,
+                v4l2_active,
+                v4l2_device,
+            };
+            let mut output_ctx = ui::ctx::OutputCtx {
+                refresh_interval,
+                invisible_mode,
+                pending_mesh_size,
+                event_loop,
+                output_window: &output.window,
+                selected_output_monitor,
+                ndi,
+                ndi_composite_active,
+                ndi_deck_active,
+            };
+            let mut stream_ctx = ui::ctx::StreamCtx {
+                obs,
+                obs_host,
+                obs_port,
+                twitch,
+                twitch_channel,
+                twitch_oauth_token_input,
+                kick,
+                kick_channel,
+                kick_bearer_token_input,
+                kick_xsrf_token_input,
+                kick_cookies_input,
+                chat_log,
+                streaming_secret_save_error,
+            };
+            let mut control_ctx = ui::ctx::ControlCtx {
+                #[cfg(feature = "link")]
+                link,
+                #[cfg(feature = "link")]
+                link_tempo_input,
+                #[cfg(not(feature = "link"))]
+                _marker: std::marker::PhantomData,
+            };
             egui_glow.run(&control.window, |ui| {
                 ui_root(
                     ui,
-                    show,
-                    deck_tex_ids,
-                    deck_preset_names,
-                    pending_validations,
-                    preset_errors,
-                    transition_seconds,
-                    active_panel,
-                    preset_search_query,
-                    preset_search_cache,
-                    thumb_queue,
-                    thumbnail_textures,
-                    failed_thumbnails,
-                    audio,
-                    input_devices,
-                    selected_input_device,
-                    last_vu_level,
-                    &mut preset_load_request,
-                    t0,
-                    refresh_interval,
-                    invisible_mode,
-                    pending_mesh_size,
-                    event_loop,
-                    &output.window,
-                    selected_output_monitor,
-                    registry,
-                    midi,
-                    midi_learning,
-                    ndi,
-                    ndi_composite_active,
-                    ndi_deck_active,
-                    ndi_in_selected_source,
-                    osc,
-                    osc_port,
-                    remote_ws,
-                    obs,
-                    obs_host,
-                    obs_port,
-                    twitch,
-                    twitch_channel,
-                    twitch_oauth_token_input,
-                    kick,
-                    kick_channel,
-                    kick_bearer_token_input,
-                    kick_xsrf_token_input,
-                    kick_cookies_input,
-                    chat_log,
-                    streaming_secret_save_error,
-                    #[cfg(feature = "link")]
-                    link,
-                    #[cfg(feature = "link")]
-                    link_tempo_input,
-                    v4l2,
-                    v4l2_active,
-                    v4l2_device,
+                    &mut shell_ctx,
+                    &mut perform_ctx,
+                    &mut library_ctx,
+                    &mut sources_ctx,
+                    &mut output_ctx,
+                    &mut stream_ctx,
+                    &mut control_ctx,
+                    &mut theme_request,
                 );
             });
             if let Some(name) = preset_load_request {
@@ -1482,6 +1646,40 @@ impl ApplicationHandler for App {
                 // `Deck::load_preset` call, which would bypass the pre-flight
                 // validation Step 14 added.
                 request_preset_load(state, state.show.selected_slot, name);
+            }
+            if let Some(new_id) = theme_request {
+                // `state.egui_glow`, not the local `egui_glow` binding from
+                // the destructure above (its last use is `egui_glow.run(..)`
+                // ahead of `preset_load_request`'s handling, which already
+                // needs `state` whole again for `request_preset_load`):
+                // same reborrow-after-`state`-is-whole-again idiom that
+                // block uses for `state.show`.
+                //
+                // Step 12: same idiom as bootstrap's own Step 6 wiring
+                // (`set_style_of` on both `egui::Theme::Dark` and `Light`
+                // with the same `Arc<Style>`): `set_fonts` is deliberately
+                // not re-called here, only ever at bootstrap.
+                let new_theme = theme::registry::get(new_id);
+                let new_style = Arc::new(theme::visuals::style(new_theme));
+                state.egui_glow.egui_ctx.set_style_of(egui::Theme::Dark, new_style.clone());
+                state.egui_glow.egui_ctx.set_style_of(egui::Theme::Light, new_style);
+                // Ruling B (controller pre-flight analysis): also refresh
+                // THEME_ID_KEY in ctx.data, the same key Step 6's bootstrap
+                // wiring wrote: `set_style_of` alone only re-themes native
+                // egui controls; `ui::widgets::theme(ui)` (Step 8) reads
+                // this key for every custom-painted helper (badges, pills,
+                // the crossfader, the nav rail), which would otherwise keep
+                // rendering the old theme's palette after this switch.
+                state.egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), new_id));
+
+                // Persist immediately (Step 7's `config.rs`, not yet wired
+                // anywhere else): read-modify-write just the `theme` field
+                // so a future step wiring the rest of `UiConfig` (active
+                // panel, stage mode, ...) isn't clobbered by this one.
+                let config_path = config::config_file_path();
+                let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
+                ui_config.theme = new_id;
+                config::save_config(config_path.as_deref(), &ui_config);
             }
 
             // Two windows, one context: each surface is made current in
@@ -1509,6 +1707,9 @@ impl ApplicationHandler for App {
             let swap_now = Instant::now();
             let wall_ms = state.last_output_swap_at.map(|prev| (swap_now - prev).as_secs_f64() * 1000.0);
             state.last_output_swap_at = Some(swap_now);
+            // Status bar's fps/frame-ms readout (Step 10): same one-frame
+            // staleness as `last_output_swap_at` above, by construction.
+            state.last_wall_ms = wall_ms;
 
             state.perf_tick += 1;
             if state.perf_tick % 60 == 0 {
@@ -1537,6 +1738,19 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(state) = &mut self.state {
+            // Whole-branch review fix wave, finding 1 (AC-10): persist
+            // `active_panel`/`stage_mode` on exit, matching Step 7's
+            // original "How" text ("écriture sur exiting ... et
+            // immédiatement à chaque changement de thème runtime"). Same
+            // read-modify-write idiom as the runtime theme-switch handler,
+            // so this never clobbers `theme` (or any other already-
+            // persisted field) saved elsewhere.
+            let config_path = config::config_file_path();
+            let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
+            ui_config.active_panel = state.active_panel.into();
+            ui_config.stage_mode = state.stage_mode;
+            config::save_config(config_path.as_deref(), &ui_config);
+
             state.egui_glow.destroy();
         }
     }
@@ -1840,9 +2054,19 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (examples/pure_glow.rs:188).
     let mut egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
 
-    // Step 6 (Phase 7 UI redesign plan): wire the default Kushie theme +
-    // fonts onto the bootstrap Context, once. `set_fonts` is only ever
-    // called here: a runtime theme change (Step 12) re-applies
+    // Whole-branch review fix wave, finding 1 (AC-10): load the persisted
+    // `ui.json` once, here, before the theme/active_panel/stage_mode it
+    // carries are wired onto the Context/AppState below: Step 7's `config.
+    // rs` landed with this load call deferred (Ruling D: `AppState` didn't
+    // have `active_panel`/`stage_mode` yet), and that wiring was never
+    // revisited once Steps 10/11 added them. Without this, the runtime
+    // theme-switch handler's `config::save_config` call was writing a
+    // preference file the app then ignored on every restart.
+    let ui_config = config::config_file_path().map(|p| config::load_config(&p)).unwrap_or_default();
+
+    // Step 6 (Phase 7 UI redesign plan): wire the persisted (or default)
+    // theme + fonts onto the bootstrap Context, once. `set_fonts` is only
+    // ever called here: a runtime theme change (Step 12) re-applies
     // `set_style_of` but never re-registers fonts. `set_style_of` is applied
     // to both `Theme::Dark` and `Theme::Light` with the same `Arc<Style>` so
     // no internal egui route (tooltips, `Area`, anything reading
@@ -1850,7 +2074,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // `theme_preference` changes later.
     egui_glow.egui_ctx.set_fonts(theme::fonts::font_definitions());
     egui_glow.egui_ctx.options_mut(|o| o.theme_preference = egui::ThemePreference::Dark);
-    let default_theme_id = theme::registry::ThemeId::default();
+    let default_theme_id = ui_config.theme;
     let default_theme = theme::registry::get(default_theme_id);
     let default_style = Arc::new(theme::visuals::style(default_theme));
     egui_glow.egui_ctx.set_style_of(egui::Theme::Dark, default_style.clone());
@@ -2018,6 +2242,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         blit_control_timer,
         blit_output_timer,
         last_output_swap_at: None,
+        last_wall_ms: None,
         perf_tick: 0,
         preflight_tx,
         preflight_rx,
@@ -2031,7 +2256,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_preset_names: std::array::from_fn(|i| preset_display_name(&preset_root, &presets[i])),
         transition_seconds: 0.0,
         deck_tex_ids,
-        active_panel: Panel::default(),
+        // Whole-branch review fix wave, finding 1 (AC-10): restored from
+        // the same `ui_config` loaded above, instead of always starting on
+        // the hardcoded defaults.
+        active_panel: ui_config.active_panel.into(),
+        stage_mode: ui_config.stage_mode,
+        presets_drawer_open: false,
         preset_search_query: String::new(),
         preset_search_cache: ui::preset_browser::SearchCache::default(),
         failed_thumbnails: HashSet::new(),

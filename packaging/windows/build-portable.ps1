@@ -49,6 +49,8 @@ $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 $Binary = Join-Path $RepoRoot "target\release\opendrop-app.exe"
 $CargoToml = Join-Path $RepoRoot "app\Cargo.toml"
 $License = Join-Path $RepoRoot "LICENSE"
+$InterOfl = Join-Path $RepoRoot "app\assets\fonts\Inter-OFL.txt"
+$JetBrainsMonoOfl = Join-Path $RepoRoot "app\assets\fonts\JetBrainsMono-OFL.txt"
 
 # Real directory on this build machine holding the 9795-file preset pack,
 # scp'd over from /srv/http/opendrop-presets on the Linux side (see
@@ -179,6 +181,16 @@ if (-not (Test-Path $License -PathType Leaf)) {
     exit 1
 }
 
+if (-not (Test-Path $InterOfl -PathType Leaf)) {
+    Write-Error "Inter-OFL.txt not found at $InterOfl"
+    exit 1
+}
+
+if (-not (Test-Path $JetBrainsMonoOfl -PathType Leaf)) {
+    Write-Error "JetBrainsMono-OFL.txt not found at $JetBrainsMonoOfl"
+    exit 1
+}
+
 # --- 4. Assemble the flat portable folder ---
 
 Write-Output "Assembling $OutDir ..."
@@ -190,6 +202,8 @@ Copy-Item $ndiDll $OutDir
 foreach ($dll in $resolvedVcpkgDlls) { Copy-Item $dll $OutDir }
 foreach ($dll in $resolvedVcRedistDlls) { Copy-Item $dll $OutDir }
 Copy-Item $License (Join-Path $OutDir "LICENSE")
+Copy-Item $InterOfl (Join-Path $OutDir "Inter-OFL.txt")
+Copy-Item $JetBrainsMonoOfl (Join-Path $OutDir "JetBrainsMono-OFL.txt")
 
 # Sibling-of-exe "presets" folder, flat layout: matches preset_dir_from's
 # Windows branch (app/src/main.rs), verified against real MSVC in Step 14.

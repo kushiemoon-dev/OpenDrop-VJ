@@ -9,6 +9,24 @@
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as the
 //! other panels (`ui::decks`, `ui::audio`, `ui::quality`).
+//!
+//! Audited for the theme pass (Step 17 of the Phase 7 UI redesign plan):
+//! no `Color32` literals, the monitor `ComboBox` already re-themes itself
+//! automatically (untouched here, per this step's brief), and the
+//! fullscreen toggle stays a plain `ui.button`, matching the precedent set
+//! by other panels' action buttons that were left unstyled (for example
+//! playlists' Play/Pause/Prev/Next) rather than converted to a
+//! `widgets::primary_button`/`ghost_button` variant. No code change was
+//! needed here beyond this note.
+//!
+//! Not unit-tested: `show` takes `&ActiveEventLoop` and `&Window`, real
+//! winit types with no in-crate way to construct an `ActiveEventLoop`
+//! outside a running platform event loop (winit provides no test/mock
+//! constructor for it), so this panel cannot be exercised under
+//! `themed_test_ui`/`__run_test_ui` the way every other panel here is. Same
+//! determination `ui::audio` made for `AudioHandle` (a real-hardware-only
+//! handle, Step 19): not fabricating a stand-in for an unmockable external
+//! handle.
 
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;

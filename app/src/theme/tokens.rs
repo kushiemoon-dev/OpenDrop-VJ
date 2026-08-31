@@ -28,12 +28,13 @@ pub struct Palette {
 }
 
 /// Layout constants shared by all 3 themes (the same `&'static Metrics` for
-/// every `Theme`), so switching themes never reflows a layout. `thumb_size`/
-/// `tile_size`/`tile_content_w` are repatriated from `ui::decks::THUMB_SIZE`
-/// (`decks.rs:14`) and `ui::preset_browser::{TILE_SIZE, TILE_CONTENT_W}`
-/// (`preset_browser.rs:36,41`): those call sites keep their own local
-/// consts until the panels are themed (Steps 13/14); `ROW_HEIGHT` stays
-/// local to `preset_browser.rs` and migrates separately at Step 14.
+/// every `Theme`), so switching themes never reflows a layout. `thumb_size`
+/// (`ui::decks`, Step 13) and `tile_size`/`tile_content_w` (`ui::
+/// preset_browser`, Step 14) were repatriated from those panels' own former
+/// local consts; both panels now read straight from here. `ROW_HEIGHT`
+/// never joined this struct: Step 14 replaced that fixed constant with
+/// `preset_browser::row_height`, derived from `tile_size` plus the live
+/// style instead.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
     pub radius_sm: f32,
@@ -50,6 +51,13 @@ pub struct Metrics {
     pub thumb_size: Vec2,
     pub tile_size: Vec2,
     pub tile_content_w: f32,
+    /// Small 16:9 preview used where a row needs a thumbnail but not a full
+    /// deck/tile-sized one: the Stage bottom bar's deck thumbnails
+    /// (`ui::shell`, Step 11) and playlist item rows (`ui::playlists`,
+    /// found live post-Phase-7: added visual preview parity with
+    /// Decks/Presets). Repatriated from `ui::shell`'s own former
+    /// `STAGE_THUMB_SIZE` local const.
+    pub mini_thumb_size: Vec2,
 }
 
 /// Animation durations, in seconds.
@@ -93,6 +101,11 @@ pub struct Theme {
 
 /// WCAG 2.x relative luminance
 /// (<https://www.w3.org/TR/WCAG21/#dfn-relative-luminance>).
+///
+/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// caller is a palette invariant test in this file, `visuals.rs`, or
+/// `registry.rs`, never production code.
+#[cfg(test)]
 pub(crate) fn relative_luminance(color: Color32) -> f32 {
     fn channel(c: u8) -> f32 {
         let c = c as f32 / 255.0;
@@ -108,6 +121,10 @@ pub(crate) fn relative_luminance(color: Color32) -> f32 {
 /// WCAG 2.x contrast ratio between two colors
 /// (<https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio>): `(L1 + 0.05) /
 /// (L2 + 0.05)` where `L1` is the lighter of the two relative luminances.
+///
+/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// caller is a palette invariant test, never production code.
+#[cfg(test)]
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f32 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
     let (lighter, darker) = if la >= lb { (la, lb) } else { (lb, la) };

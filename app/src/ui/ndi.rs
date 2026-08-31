@@ -12,7 +12,7 @@
 //!
 //! `composite_active`/`deck_active` are the caller's own toggle state, but
 //! resynced from `NdiSnapshot::composite_active`/`deck_active` at the top of
-//! every `show` call (whole-branch review Finding M5): a sender that failed
+//! every `show_out` call (whole-branch review Finding M5): a sender that failed
 //! to start (SDK error) or died mid-session leaves the snapshot's flag
 //! false on its own, and without this resync the checkbox would stay
 //! checked forever for a stream that isn't actually running. The resync
@@ -27,9 +27,27 @@
 //! Task 12), not from this panel: by the time this panel is ever shown,
 //! `NdiSnapshot::sources` is already populated (or empty, if nothing is on
 //! the network yet).
+//!
+//! Reskinned (Step 18 of the Phase 7 UI redesign plan): the NDI input
+//! connection row swaps its `label(if snapshot.receive_active {...})`
+//! branch for `widgets::connection_row`, same substitution as
+//! `ui::midi::show`'s connect row (Step 17). The device `ComboBox` and
+//! every other row stay untouched.
+//!
+//! Split into `show_out`/`show_in` (whole-branch review fix wave, finding
+//! 3): Step 18's brief required `Panel::NdiIn`/`Panel::NdiOut` to render
+//! their own distinct half, "pas de fusion visuelle des deux": both nav
+//! entries called the same combined `show` until this fix. The seam
+//! between the two sections (output toggles vs. input connect/ComboBox)
+//! was already there, just not split into two callable functions; the
+//! trademark attribution footer is duplicated onto both, since either
+//! panel might be the only one a viewer ever opens. Underlying business
+//! logic (`NdiControl` messages, snapshot resync) is unchanged.
 
 use opendrop_engine::deck;
 use opendrop_io::ndi::{NdiControl, NdiHandle, NdiSource};
+
+use crate::ui::widgets;
 
 const COMPOSITE_STREAM_NAME: &str = "OpenDrop";
 
@@ -37,12 +55,13 @@ fn deck_stream_name(slot: usize) -> String {
     format!("OpenDrop Deck {}", slot + 1)
 }
 
-pub fn show(
+/// NDI output half: the composite toggle + 4 per-deck toggles. Shown by
+/// `Panel::NdiOut`.
+pub fn show_out(
     ui: &mut egui::Ui,
     ndi: &NdiHandle,
     composite_active: &mut bool,
     deck_active: &mut [bool; deck::DECK_COUNT],
-    selected_source: &mut Option<NdiSource>,
 ) {
     let snapshot = ndi.latest();
 
@@ -75,11 +94,18 @@ pub fn show(
         }
     }
 
-    ui.separator();
+    attribution_footer(ui);
+}
+
+/// NDI input half: the discovered-source dropdown + Connect/Disconnect
+/// toggle. Shown by `Panel::NdiIn`.
+pub fn show_in(ui: &mut egui::Ui, ndi: &NdiHandle, selected_source: &mut Option<NdiSource>) {
+    let snapshot = ndi.latest();
+
     ui.label("NDI input");
 
     ui.horizontal(|ui| {
-        ui.label(if snapshot.receive_active { "Receive: connected" } else { "Receive: disconnected" });
+        widgets::connection_row(ui, "Receive", snapshot.receive_active);
         if snapshot.receive_active {
             if ui.button("Disconnect").clicked() {
                 let _ = ndi.control_tx.send(NdiControl::StopReceive);
@@ -111,6 +137,13 @@ pub fn show(
         });
     }
 
+    attribution_footer(ui);
+}
+
+/// Mandatory NDI trademark attribution (Task 10 of the plan), shared by
+/// both halves above so it's present regardless of which of the two panels
+/// a viewer opens.
+fn attribution_footer(ui: &mut egui::Ui) {
     ui.separator();
     ui.hyperlink_to("ndi.video", "https://ndi.video");
     ui.label("NDI® is a registered trademark of Vizrt NDI AB");

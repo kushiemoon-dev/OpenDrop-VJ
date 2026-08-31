@@ -13,9 +13,31 @@
 //! active selection, only list `device_names` and dispatch `SelectPort` on
 //! click. A judgment call: acceptable since nothing else in this panel
 //! needs that state.
+//!
+//! Reskinned (Step 17 of the Phase 7 UI redesign plan): the connection row
+//! swaps its `label(if snapshot.connected {...})` branch for `widgets::
+//! connection_row`, which reports the same connected/offline state through
+//! a `pill` (theme's `ok`/`dim` colors) instead of plain text. The MIDI
+//! learn rows (the `for cmd in commands` loop inside the `ScrollArea`) are
+//! wrapped in `widgets::dense`, one of the plan's 3 permanently-dense zones
+//! (with the presets grid and Playlists). The connection row and port
+//! dropdown above stay at the default airy spacing, since they aren't part
+//! of that fixed-dense zone. The port `ComboBox` is untouched, already
+//! re-themed automatically.
+//!
+//! Not unit-tested: `MidiHandle`'s only public constructor is `spawn()`
+//! (`opendrop_io::midi::handle`), which starts a real background thread.
+//! Its `state`/internals are private, so this panel's test module has no
+//! way to build a stand-in `MidiHandle` with a chosen `MidiSnapshot`. Its
+//! run loop also polls real system MIDI port enumeration on a timer
+//! (`check_hotplug`), an external I/O dependency a unit test shouldn't
+//! spin up. Same shape and same determination as `ui::audio`'s
+//! `AudioHandle` (Step 19): an unmockable external handle, not faked here.
 
 use opendrop_core::commands::{CommandId, CommandRegistry};
 use opendrop_io::midi::{MidiControl, MidiHandle, MidiTriggerKey, TriggerKind};
+
+use crate::ui::widgets;
 
 fn format_trigger(key: &MidiTriggerKey) -> String {
     match key.kind {
@@ -34,7 +56,7 @@ pub fn show(
     let snapshot = midi.latest();
 
     ui.horizontal(|ui| {
-        ui.label(if snapshot.connected { "MIDI: connected" } else { "MIDI: disconnected" });
+        widgets::connection_row(ui, "MIDI", snapshot.connected);
         if snapshot.connected {
             if ui.button("Disconnect").clicked() {
                 let _ = midi.control_tx.send(MidiControl::Disconnect);
@@ -70,32 +92,34 @@ pub fn show(
     let commands = registry.all();
 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        for cmd in commands {
-            ui.horizontal(|ui| {
-                ui.label(cmd.label);
-                let trigger_text = snapshot.mapping.get(&cmd.id).map(format_trigger).unwrap_or_else(|| "not mapped".to_string());
-                ui.label(trigger_text);
+        widgets::dense(ui, |ui| {
+            for cmd in commands {
+                ui.horizontal(|ui| {
+                    ui.label(cmd.label);
+                    let trigger_text = snapshot.mapping.get(&cmd.id).map(format_trigger).unwrap_or_else(|| "not mapped".to_string());
+                    ui.label(trigger_text);
 
-                let is_learning = matches!(midi_learning, Some((id, _)) if *id == cmd.id);
-                let learn_label = if is_learning { "waiting..." } else { "Learn" };
-                if ui.add_enabled(!is_learning, egui::Button::new(learn_label)).clicked() {
-                    let _ = midi.control_tx.send(MidiControl::StartLearn(cmd.id));
-                    // Snapshot the pre-existing mapping entry (if any) so
-                    // `about_to_wait` can tell "learn completed" apart from
-                    // "still the old entry": StartLearn doesn't clear it.
-                    *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
-                }
-                // Whole-branch review Finding M10: before this, the only
-                // way out of learn mode was a real MIDI message arriving:
-                // no way to back out of a Learn clicked by mistake.
-                if is_learning && ui.button("Cancel").clicked() {
-                    let _ = midi.control_tx.send(MidiControl::StopLearn);
-                    *midi_learning = None;
-                }
-                if ui.button("Clear").clicked() {
-                    let _ = midi.control_tx.send(MidiControl::ClearMapping(cmd.id));
-                }
-            });
-        }
+                    let is_learning = matches!(midi_learning, Some((id, _)) if *id == cmd.id);
+                    let learn_label = if is_learning { "waiting..." } else { "Learn" };
+                    if ui.add_enabled(!is_learning, egui::Button::new(learn_label)).clicked() {
+                        let _ = midi.control_tx.send(MidiControl::StartLearn(cmd.id));
+                        // Snapshot the pre-existing mapping entry (if any) so
+                        // `about_to_wait` can tell "learn completed" apart from
+                        // "still the old entry": StartLearn doesn't clear it.
+                        *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
+                    }
+                    // Whole-branch review Finding M10: before this, the only
+                    // way out of learn mode was a real MIDI message arriving:
+                    // no way to back out of a Learn clicked by mistake.
+                    if is_learning && ui.button("Cancel").clicked() {
+                        let _ = midi.control_tx.send(MidiControl::StopLearn);
+                        *midi_learning = None;
+                    }
+                    if ui.button("Clear").clicked() {
+                        let _ = midi.control_tx.send(MidiControl::ClearMapping(cmd.id));
+                    }
+                });
+            }
+        });
     });
 }

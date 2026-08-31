@@ -30,6 +30,23 @@
 //! normal password-field UX convention. A blur with nothing typed is a
 //! no-op (guarded by `is_empty()`) so tabbing through the form can't
 //! accidentally overwrite an already-stored secret with a blank one.
+//!
+//! Reskinned (Step 20 of the Phase 7 UI redesign plan): each of the OBS/
+//! Twitch/Kick connected-status rows swaps its own `label(if
+//! snapshot.connected {...})` branch for `widgets::connection_row`, same
+//! substitution as `ui::midi`/`ui::ndi`/`ui::osc`/`ui::remote` (Steps
+//! 17-19). The Connect/Disconnect button pair around each row was
+//! otherwise identical across all three services, so that row shape is
+//! factored into this file's own `service_connect_row` helper instead of
+//! being triplicated verbatim. This is a local helper, not a
+//! `connection_row` signature change: unlike `ui::osc`/`ui::remote`'s
+//! sibling detail labels, OBS's host+port and Twitch/Kick's channel name
+//! don't need a detail label of their own next to the pill, since they're
+//! already shown as this panel's own editable fields directly above each
+//! row. Every `ui.colored_label(Color32::RED, ...)` on a `last_error`
+//! becomes `widgets::error_banner`; Kick's amber "unofficial protocol"
+//! disclaimer isn't an error, so it becomes `widgets::warn_banner`
+//! instead.
 
 use std::collections::VecDeque;
 
@@ -37,6 +54,8 @@ use opendrop_io::chat::{ChatMessage, ChatPlatform};
 use opendrop_io::kick::{KickControl, KickHandle};
 use opendrop_io::obs::{ObsControl, ObsHandle};
 use opendrop_io::twitch::{TwitchControl, TwitchHandle};
+
+use crate::ui::widgets;
 
 #[allow(clippy::too_many_arguments)]
 pub fn show(
@@ -70,18 +89,19 @@ pub fn show(
         clear_secret_button(ui, "OBS password", opendrop_io::secrets::OBS_PASSWORD, secret_save_error);
     });
 
-    ui.horizontal(|ui| {
-        ui.label(if snapshot.connected { "OBS: connected" } else { "OBS: not connected" });
-        if snapshot.connected {
-            if ui.button("Disconnect").clicked() {
-                let _ = obs.control_tx.send(ObsControl::Disconnect);
-            }
-        } else if ui.button("Connect").clicked() {
+    service_connect_row(
+        ui,
+        "OBS",
+        snapshot.connected,
+        || {
             let _ = obs.control_tx.send(ObsControl::Connect(obs_host.clone(), *obs_port));
-        }
-    });
+        },
+        || {
+            let _ = obs.control_tx.send(ObsControl::Disconnect);
+        },
+    );
     if let Some(err) = &snapshot.last_error {
-        ui.colored_label(egui::Color32::RED, err);
+        widgets::error_banner(ui, err);
     }
 
     if snapshot.connected {
@@ -106,25 +126,26 @@ pub fn show(
         ui.label("Channel");
         ui.add_enabled(!twitch_snapshot.connected, egui::TextEdit::singleline(twitch_channel).desired_width(140.0));
     });
-    ui.horizontal(|ui| {
-        ui.label(if twitch_snapshot.connected { "Twitch: connected" } else { "Twitch: not connected" });
-        if twitch_snapshot.connected {
-            if ui.button("Disconnect").clicked() {
-                let _ = twitch.control_tx.send(TwitchControl::Disconnect);
-            }
-        } else if ui.button("Connect").clicked() {
+    service_connect_row(
+        ui,
+        "Twitch",
+        twitch_snapshot.connected,
+        || {
             let _ = twitch.control_tx.send(TwitchControl::Connect(twitch_channel.clone()));
-        }
-    });
+        },
+        || {
+            let _ = twitch.control_tx.send(TwitchControl::Disconnect);
+        },
+    );
     if let Some(err) = &twitch_snapshot.last_error {
-        ui.colored_label(egui::Color32::RED, err);
+        widgets::error_banner(ui, err);
     }
     save_secret_field(ui, "OAuth token", twitch_oauth_token_input, opendrop_io::secrets::TWITCH_OAUTH_TOKEN, secret_save_error);
 
     ui.separator();
     ui.label("Kick");
-    ui.colored_label(
-        egui::Color32::from_rgb(230, 160, 40),
+    widgets::warn_banner(
+        ui,
         "unofficial, reverse-engineered protocol: may break without notice if Kick changes its server implementation, no service guarantee",
     );
 
@@ -133,25 +154,26 @@ pub fn show(
         ui.label("Channel");
         ui.add_enabled(!kick_snapshot.connected, egui::TextEdit::singleline(kick_channel).desired_width(140.0));
     });
-    ui.horizontal(|ui| {
-        ui.label(if kick_snapshot.connected { "Kick: connected" } else { "Kick: not connected" });
-        if kick_snapshot.connected {
-            if ui.button("Disconnect").clicked() {
-                let _ = kick.control_tx.send(KickControl::Disconnect);
-            }
-        } else if ui.button("Connect").clicked() {
+    service_connect_row(
+        ui,
+        "Kick",
+        kick_snapshot.connected,
+        || {
             let _ = kick.control_tx.send(KickControl::Connect(kick_channel.clone()));
-        }
-    });
+        },
+        || {
+            let _ = kick.control_tx.send(KickControl::Disconnect);
+        },
+    );
     if let Some(err) = &kick_snapshot.last_error {
-        ui.colored_label(egui::Color32::RED, err);
+        widgets::error_banner(ui, err);
     }
     save_secret_field(ui, "Bearer token", kick_bearer_token_input, opendrop_io::secrets::KICK_BEARER_TOKEN, secret_save_error);
     save_secret_field(ui, "XSRF token", kick_xsrf_token_input, opendrop_io::secrets::KICK_XSRF_TOKEN, secret_save_error);
     save_secret_field(ui, "Cookies", kick_cookies_input, opendrop_io::secrets::KICK_COOKIES, secret_save_error);
 
     if let Some(err) = secret_save_error {
-        ui.colored_label(egui::Color32::RED, format!("Secret save failed: {err}"));
+        widgets::error_banner(ui, &format!("Secret save failed: {err}"));
     }
 
     ui.separator();
@@ -166,6 +188,27 @@ pub fn show(
                 ChatPlatform::Kick => "Kick",
             };
             ui.label(format!("[{platform}] {}: {}", msg.username, msg.content));
+        }
+    });
+}
+
+/// A `widgets::connection_row` pill followed by a Connect or Disconnect
+/// button, whichever `connected` calls for. Shared by the OBS/Twitch/Kick
+/// blocks above, which are otherwise identical in this one row (only the
+/// label and the connect/disconnect action differ per service: OBS's
+/// `Connect` takes a host+port, Twitch/Kick's a channel name, and each has
+/// its own `Handle`/`Control` type). `on_connect`/`on_disconnect` are
+/// `FnOnce` so each call site can close over its own handle and fields
+/// without this helper needing to know any service-specific type.
+fn service_connect_row(ui: &mut egui::Ui, label: &str, connected: bool, on_connect: impl FnOnce(), on_disconnect: impl FnOnce()) {
+    ui.horizontal(|ui| {
+        widgets::connection_row(ui, label, connected);
+        if connected {
+            if ui.button("Disconnect").clicked() {
+                on_disconnect();
+            }
+        } else if ui.button("Connect").clicked() {
+            on_connect();
         }
     });
 }

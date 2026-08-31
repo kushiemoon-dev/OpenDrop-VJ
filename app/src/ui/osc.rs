@@ -11,8 +11,18 @@
 //!
 //! No soft-takeover, no mapping/learn UI: unlike MIDI, OSC has no such
 //! concept in the existing app (the brief is explicit about this).
+//!
+//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the listening row
+//! swaps its `label(if snapshot.listening {...})` branch for `widgets::
+//! connection_row`, same substitution as `ui::midi`/`ui::ndi` (Steps
+//! 17-18). Unlike those, `snapshot.listening`'s label carried the bound
+//! port too, so that detail is kept as a plain label right after the
+//! `connection_row` pill rather than dropped. The port `DragValue` above
+//! is untouched.
 
 use opendrop_io::osc::{OscControl, OscHandle};
+
+use crate::ui::widgets;
 
 pub fn show(ui: &mut egui::Ui, osc: &OscHandle, osc_port: &mut u16) {
     let snapshot = osc.latest();
@@ -23,12 +33,9 @@ pub fn show(ui: &mut egui::Ui, osc: &OscHandle, osc_port: &mut u16) {
     });
 
     ui.horizontal(|ui| {
-        ui.label(if snapshot.listening {
-            format!("OSC: listening on {}", snapshot.port)
-        } else {
-            "OSC: not listening".to_string()
-        });
+        widgets::connection_row(ui, "OSC", snapshot.listening);
         if snapshot.listening {
+            ui.label(format!("on port {}", snapshot.port));
             if ui.button("Stop").clicked() {
                 let _ = osc.control_tx.send(OscControl::Stop);
             }

@@ -158,6 +158,8 @@ echo "Copying presets from $PRESETS_SRC ..."
 rsync -a --exclude='.git' "$PRESETS_SRC/" "$APPDIR/usr/share/opendrop/presets/"
 
 cp "$REPO_ROOT/LICENSE" "$APPDIR/usr/share/opendrop/LICENSE"
+cp "$REPO_ROOT/app/assets/fonts/Inter-OFL.txt" "$APPDIR/usr/share/opendrop/Inter-OFL.txt"
+cp "$REPO_ROOT/app/assets/fonts/JetBrainsMono-OFL.txt" "$APPDIR/usr/share/opendrop/JetBrainsMono-OFL.txt"
 
 # --- 3. Build the AppImage ---
 

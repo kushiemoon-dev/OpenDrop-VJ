@@ -40,6 +40,7 @@ use opendrop_core::show::Show;
 use opendrop_core::thumb_queue::{enqueue_front, prune_to_visible, ThumbJob};
 use std::collections::{HashMap, HashSet};
 
+use crate::theme::easing::ease_out_kushie;
 use crate::theme::fonts::FAMILY_MONO;
 use crate::theme::tokens::Metrics;
 use crate::ui::ctx::{LibraryCtx, PerformCtx};
@@ -273,7 +274,7 @@ fn tile(
     // bearing for widget ids from this step on; Step 22 reuses this same
     // key for animation ids.
     ui.push_id(name, |ui| {
-        egui::Frame::group(ui.style()).show(ui, |ui| {
+        let frame = egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(metrics.tile_content_w);
             // `ui.vertical` here, not just the bare `Frame::group` content
             // ui: a `Frame`'s content ui inherits whatever layout the
@@ -385,7 +386,36 @@ fn tile(
                 });
             });
         });
+
+        // Hover lift + glow (Step 22 of the Phase 7 UI redesign plan):
+        // `name` (the `push_id` above, already established at Step 14) is
+        // the stable animation key: never a scroll/filter-shifting index.
+        // Hit-test (`frame.response.hovered()`) always reads the tile's
+        // real, un-lifted `Response::rect` from the layout above: only
+        // `tile_hover_glow`'s decorative overlay rect is ever translated,
+        // the same "hit-test on the un-lifted rect" pattern `ui::decks::
+        // deck_card` uses for its own hover glow.
+        let d = t.durations.fast.max(4.0 * ui.ctx().input(|i| i.stable_dt));
+        let hover_t = ui.ctx().animate_bool_with_time_and_easing(ui.id().with("hover"), frame.response.hovered(), d, ease_out_kushie);
+        if hover_t > 0.0 {
+            tile_hover_glow(ui, frame.response.rect, hover_t);
+        }
     });
+}
+
+/// Hover lift + glow overlay (Step 22), the tile counterpart of `ui::
+/// decks::hover_glow`: painted from the tile's already laid-out, un-lifted
+/// `Response::rect` (`tile()`'s own comment above), faded in by `hover_t`
+/// and translated upward only for this decorative overlay: the tile's
+/// real content and hit-test never move.
+fn tile_hover_glow(ui: &egui::Ui, rect: egui::Rect, hover_t: f32) {
+    let t = theme(ui);
+    let corner_radius = egui::CornerRadius::from(t.metrics.radius_md);
+    let lifted = rect.translate(egui::vec2(0.0, -3.0 * hover_t));
+    for (expand, alpha) in [(10.0, 16u8), (5.0, 30u8)] {
+        let alpha = (alpha as f32 * hover_t) as u8;
+        ui.painter().rect_filled(lifted.expand(expand), corner_radius, t.palette.accent.gamma_multiply_u8(alpha));
+    }
 }
 
 #[cfg(test)]

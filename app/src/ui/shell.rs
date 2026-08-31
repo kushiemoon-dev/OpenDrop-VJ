@@ -296,9 +296,14 @@ fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
 /// Sectioned nav: PERFORM / SOURCES / SORTIE / CONTRÔLE, About pinned at
 /// the bottom outside the 4 sections (Step 10 brief).
 pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
+    // Filled in by whichever `nav_item` call below is active this frame,
+    // used after the `vertical` block to slide the one shared accent rail
+    // toward it (Step 22 of the Phase 7 UI redesign plan).
+    let mut active_rect: Option<egui::Rect> = None;
+
     ui.vertical(|ui| {
         widgets::section(ui, "Perform");
-        nav_item(ui, shell.active_panel, Panel::Decks, "Decks");
+        nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
         // `PresetBrowser` isn't named in this step's brief's PERFORM/
         // SOURCES/SORTIE/CONTRÔLE section listing (13 entries across the 4
         // sections in the default build): a gap in that listing: the
@@ -309,29 +314,29 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         // (the old tab row's "Presets" button is gone). Placed here since
         // browsing presets is part of the live-performance workflow.
         // Documented as a judgment call in the task report.
-        nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets");
-        nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists");
+        nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists", &mut active_rect);
 
         ui.add_space(12.0);
         widgets::section(ui, "Sources");
-        nav_item(ui, shell.active_panel, Panel::Audio, "Audio");
-        nav_item(ui, shell.active_panel, Panel::Midi, "MIDI");
-        nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In");
-        nav_item(ui, shell.active_panel, Panel::Osc, "OSC");
-        nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote");
-        nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2");
+        nav_item(ui, shell.active_panel, Panel::Audio, "Audio", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Midi, "MIDI", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Osc, "OSC", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2", &mut active_rect);
         #[cfg(feature = "link")]
-        nav_item(ui, shell.active_panel, Panel::Link, "Link");
+        nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);
 
         ui.add_space(12.0);
         widgets::section(ui, "Sortie");
-        nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out");
-        nav_item(ui, shell.active_panel, Panel::Output, "Output");
-        nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming");
+        nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
 
         ui.add_space(12.0);
         widgets::section(ui, "Contrôle");
-        nav_item(ui, shell.active_panel, Panel::Quality, "Quality");
+        nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
 
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout
@@ -339,24 +344,40 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         // panel's height and bottom-anchors its one item inside it:
         // standard egui idiom for a sidebar's pinned-bottom item.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            nav_item(ui, shell.active_panel, Panel::About, "About");
+            nav_item(ui, shell.active_panel, Panel::About, "About", &mut active_rect);
         });
     });
+
+    // Sliding accent rail (Step 22): one persistent rail whose vertical
+    // position animates toward the active item's real rect via
+    // `animate_value_with_time`, instead of `nav_item` hand-painting a
+    // fresh static one at each active item's position every frame (Step
+    // 10's original behavior). Fixed `Id`: `nav` has exactly one call site
+    // (`main.rs`'s `ui_root`), called once per frame, so a literal key is
+    // stable by construction: not a scroll/filter-shifting one.
+    if let Some(rect) = active_rect {
+        let t = theme(ui);
+        let d = t.durations.base.max(4.0 * ui.ctx().input(|i| i.stable_dt));
+        let y = ui.ctx().animate_value_with_time(egui::Id::new("od_nav_accent_rail"), rect.top(), d);
+        let rail = egui::Rect::from_min_size(egui::pos2(rect.left(), y), egui::vec2(2.0, rect.height()));
+        ui.painter().rect_filled(rail, egui::CornerRadius::ZERO, t.palette.accent);
+    }
 }
 
-/// One nav row: a `selectable_label` plus, when active, a hand-painted 2px
-/// accent rail at its left edge (egui has no border-left primitive: Step
-/// 10 brief).
-fn nav_item(ui: &mut egui::Ui, active_panel: &mut Panel, panel: Panel, label: &str) {
+/// One nav row: a `selectable_label`. When active, records its rect into
+/// `active_rect` (Step 22) so `nav`'s own accent rail: now a single,
+/// animated rail slid between active items via `animate_value_with_time`
+///: knows where to slide toward, instead of this function hand-painting a
+/// fresh static rail at each active item's position every frame (Step 10's
+/// original behavior).
+fn nav_item(ui: &mut egui::Ui, active_panel: &mut Panel, panel: Panel, label: &str, active_rect: &mut Option<egui::Rect>) {
     let is_active = *active_panel == panel;
     let response = ui.selectable_label(is_active, label);
     if response.clicked() {
         *active_panel = panel;
     }
     if is_active {
-        let t = theme(ui);
-        let rail = egui::Rect::from_min_size(response.rect.left_top(), egui::vec2(2.0, response.rect.height()));
-        ui.painter().rect_filled(rail, egui::CornerRadius::ZERO, t.palette.accent);
+        *active_rect = Some(response.rect);
     }
 }
 

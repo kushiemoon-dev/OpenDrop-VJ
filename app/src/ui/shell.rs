@@ -1,6 +1,6 @@
 //! Shell chrome (Step 10 of the Phase 7 UI redesign plan): the header
 //! (wordmark, hand-painted crossfader, BPM/tap mini-transport, Stage
-//! toggle, read-only theme picker), the sectioned nav, and the status bar.
+//! toggle, theme picker), the sectioned nav, and the status bar.
 //! `main.rs`'s `ui_root` wires these 3 zones plus the unchanged content
 //! `CentralPanel` into the mandated `egui::Panel::top`/`left`/`bottom`/
 //! `CentralPanel` order.
@@ -44,7 +44,7 @@ const STAGE_THUMB_SIZE: egui::Vec2 = egui::vec2(48.0, 27.0);
 /// Always visible regardless of `active_panel` (Step 10 brief): this is
 /// the header zone, drawn once per frame before the content match, not
 /// gated on which panel is active.
-pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx) {
+pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx, theme_request: &mut Option<ThemeId>) {
     // `dense` (Step 8's density-scope helper): the header packs a lot into
     // 48px: wordmark, crossfader, the whole BPM/tap row, and the
     // right-aligned Stage/theme group: so this tightens `item_spacing`
@@ -64,9 +64,9 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx)
             bpm_tap(ui, perform.show, perform.t0);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Rightmost: read-only theme picker (Step 10 brief: wiring
-                // it to actually switch themes is Step 12's job).
-                theme_combo(ui);
+                // Rightmost: the theme picker (Step 12: now interactive:
+                // see `theme_combo`'s own doc comment).
+                theme_combo(ui, theme_request);
                 if widgets::ghost_button(ui, "⛶").clicked() {
                     *shell.stage_mode = !*shell.stage_mode;
                 }
@@ -268,13 +268,14 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     }
 }
 
-/// Read-only theme picker (Step 10 brief): shows the current theme via a
-/// real `ComboBox`, but its entries are plain labels, not
-/// selectable/clickable: there is no way to trigger a switch from here
-/// yet. Wiring it to actually change the active theme is Step 12's job;
-/// the brief is explicit this step should NOT make it interactive, to
-/// avoid a "combo visible but does nothing on click" intermediate state.
-fn theme_combo(ui: &mut egui::Ui) {
+/// Theme picker (Step 12): shows the current theme via a real `ComboBox`,
+/// now interactive: selecting a different entry writes it to the
+/// `theme_request` out-param (posed at Step 9) instead of switching
+/// anything directly. `ui_root` can't apply a theme change itself (that
+/// needs the live `egui::Context`, not available here), so this mirrors
+/// `library.load_request`'s idiom: `main.rs` drains `theme_request` once
+/// `egui_glow.run()` returns and applies the switch there.
+fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
     let t = theme(ui);
     // `.width(48.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults to
     // a 100px minimum width regardless of content, a real contributor to
@@ -283,7 +284,9 @@ fn theme_combo(ui: &mut egui::Ui) {
     // without padding every other, shorter name out to 100px too.
     egui::ComboBox::from_id_salt("od_theme_combo").width(48.0).selected_text(format!("{:?}", t.id)).show_ui(ui, |ui| {
         for id in [ThemeId::Kushie, ThemeId::OpenDropClassic, ThemeId::Cyan] {
-            ui.label(format!("{id:?}"));
+            if ui.selectable_label(t.id == id, format!("{id:?}")).clicked() && id != t.id {
+                *theme_request = Some(id);
+            }
         }
     });
 }

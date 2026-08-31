@@ -741,10 +741,6 @@ fn ui_root(
     control: &mut ui::ctx::ControlCtx,
     theme_request: &mut Option<theme::registry::ThemeId>,
 ) {
-    // Plumbing only for now (Step 9): no UI element writes to this yet.
-    // Actually consuming it to switch themes at runtime is Step 12's job.
-    let _ = theme_request;
-
     // Step 11 of the Phase 7 UI redesign plan: Stage mode retracts the nav
     // and switches the header/status bar to compact, translucent variants
     // while live-mixing. `Panel::show_switched` is a `Panel`-associated
@@ -786,7 +782,7 @@ fn ui_root(
         egui::Panel::top("od_header").resizable(false).exact_size(48.0).show_separator_line(false),
         |ui, expanded| {
             if expanded {
-                ui::shell::header(ui, shell, perform);
+                ui::shell::header(ui, shell, perform, theme_request);
             } else {
                 ui::shell::header_stage(ui, shell.stage_mode);
             }
@@ -1597,6 +1593,40 @@ impl ApplicationHandler for App {
                 // `Deck::load_preset` call, which would bypass the pre-flight
                 // validation Step 14 added.
                 request_preset_load(state, state.show.selected_slot, name);
+            }
+            if let Some(new_id) = theme_request {
+                // `state.egui_glow`, not the local `egui_glow` binding from
+                // the destructure above (its last use is `egui_glow.run(..)`
+                // ahead of `preset_load_request`'s handling, which already
+                // needs `state` whole again for `request_preset_load`):
+                // same reborrow-after-`state`-is-whole-again idiom that
+                // block uses for `state.show`.
+                //
+                // Step 12: same idiom as bootstrap's own Step 6 wiring
+                // (`set_style_of` on both `egui::Theme::Dark` and `Light`
+                // with the same `Arc<Style>`): `set_fonts` is deliberately
+                // not re-called here, only ever at bootstrap.
+                let new_theme = theme::registry::get(new_id);
+                let new_style = Arc::new(theme::visuals::style(new_theme));
+                state.egui_glow.egui_ctx.set_style_of(egui::Theme::Dark, new_style.clone());
+                state.egui_glow.egui_ctx.set_style_of(egui::Theme::Light, new_style);
+                // Ruling B (controller pre-flight analysis): also refresh
+                // THEME_ID_KEY in ctx.data, the same key Step 6's bootstrap
+                // wiring wrote: `set_style_of` alone only re-themes native
+                // egui controls; `ui::widgets::theme(ui)` (Step 8) reads
+                // this key for every custom-painted helper (badges, pills,
+                // the crossfader, the nav rail), which would otherwise keep
+                // rendering the old theme's palette after this switch.
+                state.egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), new_id));
+
+                // Persist immediately (Step 7's `config.rs`, not yet wired
+                // anywhere else): read-modify-write just the `theme` field
+                // so a future step wiring the rest of `UiConfig` (active
+                // panel, stage mode, ...) isn't clobbered by this one.
+                let config_path = config::config_file_path();
+                let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
+                ui_config.theme = new_id;
+                config::save_config(config_path.as_deref(), &ui_config);
             }
 
             // Two windows, one context: each surface is made current in

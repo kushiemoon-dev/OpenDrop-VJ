@@ -16,6 +16,8 @@
 
 use opendrop_audio::AudioHandle;
 
+use crate::ui::widgets;
+
 pub fn show(
     ui: &mut egui::Ui,
     audio: &AudioHandle,
@@ -46,8 +48,12 @@ pub fn show(
 
     ui.horizontal(|ui| {
         ui.label("VU");
-        // `ProgressBar::new` clamps to [0, 1] itself, so no clamp is needed
-        // here. `last_vu_level` is read as-is, not recomputed.
-        ui.add(egui::ProgressBar::new(last_vu_level as f32).desired_width(200.0));
+        // `vu_meter` (Step 8, `widgets.rs`) clamps to [0, 1] and colors
+        // itself internally, so no clamp is needed here. `last_vu_level`
+        // is read as-is, not recomputed. It sizes itself to
+        // `ui.available_width()`, which is the full-width usage it was
+        // built for (see the narrower `allocate_ui`-wrapped call in
+        // `shell.rs`'s dense header for the other case).
+        widgets::vu_meter(ui, last_vu_level as f32);
     });
 }

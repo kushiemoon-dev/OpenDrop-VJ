@@ -13,8 +13,6 @@
 //! panel in this app.
 
 pub fn show(ui: &mut egui::Ui) {
-    ui.separator();
-
     ui.label("Visuals rendered by projectM, dynamically linked.");
     ui.hyperlink_to("projectM", "https://github.com/projectM-visualizer/projectm");
     ui.label("Version used: 4.1.6");
@@ -29,4 +27,43 @@ pub fn show(ui: &mut egui::Ui) {
     ui.label("Network video powered by NDI®.");
     ui.hyperlink_to("NDI", "https://ndi.video");
     ui.label("NDI® is a registered trademark of Vizrt NDI AB");
+
+    ui.separator();
+
+    ui.label("Interface font: Inter.");
+    ui.hyperlink_to("Inter", "https://github.com/rsms/inter");
+    ui.label("Release used: v4.0");
+    ui.hyperlink_to(
+        "Exact source release",
+        "https://github.com/rsms/inter/releases/download/v4.0/Inter-4.0.zip",
+    );
+    ui.label("Licensed under the SIL Open Font License 1.1.");
+
+    ui.separator();
+
+    ui.label("Monospace font: JetBrains Mono.");
+    ui.hyperlink_to("JetBrains Mono", "https://github.com/JetBrains/JetBrainsMono");
+    ui.label("Release used: v2.304");
+    ui.hyperlink_to(
+        "Exact source release",
+        "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
+    );
+    ui.label("Licensed under the SIL Open Font License 1.1.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::widgets::themed_test_ui;
+
+    // `show` takes no fields at all (this panel has no mutable state,
+    // unlike every other panel in this app), anticipated as testable
+    // already at Step 8, no external handle needed.
+
+    #[test]
+    fn show_does_not_panic() {
+        themed_test_ui(|ui| {
+            show(ui);
+        });
+    }
 }

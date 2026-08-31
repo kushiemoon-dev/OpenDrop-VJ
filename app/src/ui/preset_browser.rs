@@ -111,10 +111,15 @@ fn tile_stride(ui: &egui::Ui, metrics: &Metrics) -> f32 {
 /// rows too far apart (wasted room, not an overlap); passing one that
 /// undercounts the row's actual rendered height is the dangerous
 /// direction: `show_rows` would then assume a shorter pitch than what
-/// `set_min_height` (in `show()`, below) actually forces each row to be,
-/// and every row from that point on would render fractionally lower than
-/// its assumed slot, compounding into a real overlap by the time the
-/// ~9800-item library has been scrolled through.
+/// `set_min_height` (in `show()`, below) actually forces each row to be.
+/// `show_rows` re-derives its visible row range from `viewport.min.y /
+/// row_height_with_spacing` fresh every frame (it isn't a bug that
+/// accumulates across frames), but that division uses the one, too-small
+/// assumed pitch for every row alike, so the row index it computes for a
+/// given scroll offset drifts further from the row actually rendered at
+/// that pixel position the deeper into the ~9800-item library the offset
+/// falls: small near the top of the list, a real overlap once scrolled
+/// far enough.
 ///
 /// Derived, not hardcoded, by walking the exact same widget tree `tile()`
 /// builds: the `Frame::group` margins that wrap each card, `metrics.
@@ -270,79 +275,114 @@ fn tile(
     ui.push_id(name, |ui| {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(metrics.tile_content_w);
-            let card = ui.vertical(|ui| {
-                // `metrics.tile_size`: 4:3 (mockup's `.od-tile-thumb`), not
-                // the 16:9 the engine's own thumbnail render uses: this
-                // tile crops/letterboxes rather than reproducing the
-                // source aspect ratio exactly, the redesign's deliberate
-                // tradeoff for a denser grid.
-                let (rect, _response) = ui.allocate_exact_size(metrics.tile_size, egui::Sense::hover());
-                if ui.is_rect_visible(rect) {
-                    if let Some(tex) = thumbnail_textures.get(name) {
-                        // Identity UV, deliberately NOT the V-flipped rect
-                        // `ui::decks` needs for the live deck texture: the
-                        // `--render-thumbnail` child reverses glReadPixels'
-                        // bottom-first rows before writing the cache file,
-                        // so these pixels reach egui in its own top-first
-                        // order.
-                        //
-                        // `ui.put` + the `Image` widget, not `Painter::
-                        // image` (which takes a mandatory `tint: Color32`
-                        // with no themed meaning here: untinted is the
-                        // only correct choice for compositing a texture
-                        // as-is): `Image`'s own default tint is `Color32::
-                        // WHITE` internally, so no literal needs to live in
-                        // this file for it (AC-15). `ui.put` places it into
-                        // the exact `rect` already allocated above, same
-                        // as `Painter::image` did.
-                        let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
-                        ui.put(rect, egui::Image::new((tex.id(), rect.size())).uv(uv));
-                    } else if failed_thumbnails.contains(name) {
-                        // Rendering this one already failed. Re-queueing it
-                        // would respawn a render child process, for a
-                        // preset already known to produce nothing usable,
-                        // for as long as the tile stays on screen.
-                        ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.error.gamma_multiply(0.3));
-                    } else {
-                        ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.dim);
-                        *thumb_queue = enqueue_front(std::mem::take(thumb_queue), ThumbJob { slot_key: name.to_string(), name: name.to_string() });
+            // `ui.vertical` here, not just the bare `Frame::group` content
+            // ui: a `Frame`'s content ui inherits whatever layout the
+            // caller currently has (confirmed from source, `Frame::begin`
+            // -> `ui.new_child(UiBuilder::new()...)` with no `.layout(...)`
+            // override -> `Ui::new_child`'s `layout.unwrap_or_else(|| *self.
+            // layout())`), and `tile()` is always called from inside
+            // `show()`'s `ui.horizontal(|ui| { ... })`. Without this
+            // wrapper, `card` (below) and the "+A"/"+B" row are two
+            // siblings placed into a *left-to-right* content ui, so they'd
+            // render side by side instead of stacked: silently wasting
+            // grid density (though not corrupting `show_rows`'s pitch:
+            // `row_height` still overcounts a side-by-side layout, so
+            // `set_min_height` still binds safely either way). This
+            // `ui.vertical` is what actually makes `row_height`'s summed
+            // derivation (frame margins + thumb + name + button row, all
+            // stacked) match the real render.
+            ui.vertical(|ui| {
+                let card = ui.vertical(|ui| {
+                    // `metrics.tile_size`: 4:3 (mockup's `.od-tile-thumb`),
+                    // not the 16:9 the engine's own thumbnail render uses.
+                    // The `uv` below crops the source horizontally to a 4:3
+                    // center slice (keeping full height) so it displays
+                    // undistorted rather than stretched into the narrower
+                    // box.
+                    let (rect, _response) = ui.allocate_exact_size(metrics.tile_size, egui::Sense::hover());
+                    if ui.is_rect_visible(rect) {
+                        if let Some(tex) = thumbnail_textures.get(name) {
+                            // Horizontal center crop: source is
+                            // `opendrop_engine::thumbnail::{THUMB_W,
+                            // THUMB_H}` = 192x108 (16:9); target `rect` is
+                            // 4:3. Crop fraction = target_aspect /
+                            // source_aspect = (4/3) / (16/9) = 0.75 of the
+                            // width, centered: keeps the full height, trims
+                            // 12.5% off each side. A full `0.0..1.0` UV
+                            // mapped into a differently-proportioned `rect`
+                            // would squeeze/stretch every thumbnail in the
+                            // ~9800-preset library instead of cropping it.
+                            //
+                            // Deliberately NOT the V-flipped rect `ui::
+                            // decks` needs for the live deck texture: the
+                            // `--render-thumbnail` child reverses
+                            // glReadPixels' bottom-first rows before
+                            // writing the cache file, so these pixels reach
+                            // egui in its own top-first order already.
+                            //
+                            // `ui.put` + the `Image` widget, not `Painter::
+                            // image` (which takes a mandatory `tint:
+                            // Color32` with no themed meaning here:
+                            // untinted is the only correct choice for
+                            // compositing a texture as-is): `Image`'s own
+                            // default tint is `Color32::WHITE` internally,
+                            // so no literal needs to live in this file for
+                            // it (AC-15). `ui.put` places it into the exact
+                            // `rect` already allocated above, same as
+                            // `Painter::image` did.
+                            let uv = egui::Rect::from_min_max(egui::pos2(0.125, 0.0), egui::pos2(0.875, 1.0));
+                            ui.put(rect, egui::Image::new((tex.id(), rect.size())).uv(uv));
+                        } else if failed_thumbnails.contains(name) {
+                            // Rendering this one already failed. Re-queueing
+                            // it would respawn a render child process, for a
+                            // preset already known to produce nothing
+                            // usable, for as long as the tile stays on
+                            // screen.
+                            ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.error.gamma_multiply(0.3));
+                        } else {
+                            ui.painter().rect_filled(rect, egui::CornerRadius::from(metrics.radius_sm), t.palette.dim);
+                            *thumb_queue = enqueue_front(std::mem::take(thumb_queue), ThumbJob { slot_key: name.to_string(), name: name.to_string() });
+                        }
                     }
-                }
-                // Truncated to a single line, not wrapped: a wrapped name
-                // makes the tile's height depend on the name's length, and
-                // `show_rows` above needs every row to actually be
-                // `row_height`'s value tall. The full name stays reachable
-                // on hover. Mono (mockup's `.od-tile-name`), `muted` (not
-                // uppercased like `micro_label`'s chrome text: this is a
-                // real, case-sensitive preset name, not section chrome).
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(name)
-                            .font(egui::FontId::new(t.type_scale.small, egui::FontFamily::Name(FAMILY_MONO.into())))
-                            .color(t.palette.muted),
+                    // Truncated to a single line, not wrapped: a wrapped
+                    // name makes the tile's height depend on the name's
+                    // length, and `show_rows` above needs every row to
+                    // actually be `row_height`'s value tall. The full name
+                    // stays reachable on hover. Mono (mockup's `.od-tile-
+                    // name`), `muted` (not uppercased like `micro_label`'s
+                    // chrome text: this is a real, case-sensitive preset
+                    // name, not section chrome).
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(name)
+                                .font(egui::FontId::new(t.type_scale.small, egui::FontFamily::Name(FAMILY_MONO.into())))
+                                .color(t.palette.muted),
+                        )
+                        .truncate(),
                     )
-                    .truncate(),
-                )
-                .on_hover_text(name);
-            });
-            // Own interaction on top of the card's contents, same pattern
-            // as `ui::decks::deck_card`: click-to-load reads the card's
-            // response rather than adding a competing Sense to each child
-            // widget.
-            if card.response.interact(egui::Sense::click()).clicked() {
-                *load_request = Some(name.to_string());
-            }
+                    .on_hover_text(name);
+                });
+                // Own interaction on top of the card's contents, same
+                // pattern as `ui::decks::deck_card`: click-to-load reads
+                // the card's response rather than adding a competing Sense
+                // to each child widget.
+                if card.response.interact(egui::Sense::click()).clicked() {
+                    *load_request = Some(name.to_string());
+                }
 
-            // Laid out in its own row below the card, so its rect never
-            // overlaps the card's: same reasoning as the bus-cycle button
-            // in `ui::decks::deck_card`.
-            ui.horizontal(|ui| {
-                if ui.button("+A").clicked() {
-                    show.playlists.add_to_playlist(Deck::A, name.to_string());
-                }
-                if ui.button("+B").clicked() {
-                    show.playlists.add_to_playlist(Deck::B, name.to_string());
-                }
+                // Laid out in its own row below the card (genuinely below
+                // now that the outer `ui.vertical` above forces top-down
+                // stacking), so its rect never overlaps the card's: same
+                // reasoning as the bus-cycle button in `ui::decks::
+                // deck_card`.
+                ui.horizontal(|ui| {
+                    if ui.button("+A").clicked() {
+                        show.playlists.add_to_playlist(Deck::A, name.to_string());
+                    }
+                    if ui.button("+B").clicked() {
+                        show.playlists.add_to_playlist(Deck::B, name.to_string());
+                    }
+                });
             });
         });
     });
@@ -427,26 +467,16 @@ mod tests {
         });
     }
 
-    // --- tile_stride()/row_height(): same Metrics, can't diverge -----------
-
-    #[test]
-    fn tile_stride_and_row_height_read_the_same_metrics_instance() {
-        themed_test_ui(|ui| {
-            let metrics = theme(ui).metrics;
-            // Both take `&Metrics` explicitly rather than each calling
-            // `theme(ui).metrics` internally: this asserts the call site
-            // actually passes the identical `&'static Metrics` to both, the
-            // property that rules out the two ever reading a different
-            // instance.
-            let a = std::ptr::from_ref(metrics);
-            tile_stride(ui, metrics);
-            row_height(ui, metrics);
-            let b = std::ptr::from_ref(metrics);
-            assert!(std::ptr::eq(a, b));
-        });
-    }
-
     // --- show(): the whole panel, airy (default) and dense -----------------
+    //
+    // `tile_stride()`/`row_height()` sharing one `Metrics` instance isn't
+    // separately unit-tested: `show()`'s own source computes `let metrics =
+    // theme(ui).metrics;` once and threads that single reference to both
+    // calls, so the property is structural, visible by reading the code:
+    // a `ptr::eq` test that calls both functions itself (rather than going
+    // through `show()`) would only prove the test's own local variable
+    // equals itself, not exercise the real call site. `show_does_not_panic`
+    // below does exercise the real call site end to end.
 
     #[test]
     fn show_does_not_panic() {

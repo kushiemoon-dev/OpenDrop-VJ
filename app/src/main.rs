@@ -788,7 +788,7 @@ fn ui_root(
             if expanded {
                 ui::shell::header(ui, shell, perform);
             } else {
-                ui::shell::header_stage(ui);
+                ui::shell::header_stage(ui, shell.stage_mode);
             }
         },
     );

@@ -22,6 +22,7 @@ use std::path::Path;
 use crate::ffi;
 use crate::gl_debug;
 use crate::gl_state;
+use crate::preset_patch;
 use crate::timing::PassTimer;
 
 pub const DECK_W: u32 = 1280;
@@ -59,6 +60,25 @@ impl Deck {
             .map_err(|e| format!("preset path {} is not a valid C string: {e}", path.display()))?;
         unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), smooth_transition) };
         Ok(())
+    }
+
+    /// Loads preset text held in memory instead of from a path: the patched
+    /// output of `preset_patch::patch_preset`. Same passage point rules as
+    /// `load_preset`: this deck's context must be current.
+    pub fn load_preset_data(&self, text: &str, smooth_transition: bool) -> Result<(), String> {
+        let c_text = CString::new(text)
+            .map_err(|e| format!("patched preset text is not a valid C string: {e}"))?;
+        unsafe { ffi::projectm_load_preset_data(self.handle, c_text.as_ptr(), smooth_transition) };
+        Ok(())
+    }
+
+    /// Writes one `(index, value)` pair into this deck's running preset: the
+    /// host to preset side channel Time and Qvar modulate through. Cheap
+    /// enough to call every frame; see `engine::preset_patch` for why it goes
+    /// through `projectm_set_fps` and what the preset must be patched with
+    /// first.
+    pub fn set_param(&self, index: u16, value: f64) {
+        unsafe { ffi::projectm_set_fps(self.handle, preset_patch::encode_param(index, value)) };
     }
 
     /// Sets the soft-cut transition duration in seconds.

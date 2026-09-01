@@ -1,0 +1,452 @@
+//! Host → running-preset numeric injection for projectM 4.
+//!
+//! # Why this exists
+//!
+//! Time (8 params/deck) and Qvar (32 watches/deck) both need the host to feed
+//! a number into a preset that is already rendering, continuously: a slider
+//! dragged live, or the LFO engine ticking every frame. libprojectM 4.1.6
+//! exports 47 C functions and not one of them addresses a preset-internal
+//! variable (see `TIME-QVAR-SPIKE.md` at the repo root for the full audit).
+//! The obvious fallback (patch the preset text and call
+//! `projectm_load_preset_data` every time the value changes) was measured and
+//! rejected: a reload costs 3.5-9.2 ms (3-10x a whole rendered frame) and, far
+//! worse, re-runs `per_frame_init`, so every accumulator the preset integrates
+//! frame over frame (`basstime = basstime + bass*0.005`, `tt = tt + tic*treb`)
+//! snaps back to zero at the reload rate. Continuous modulation by reload is
+//! not possible.
+//!
+//! # The mechanism
+//!
+//! `projectm_set_fps` is the one host-writable value that reaches a running
+//! preset. Its own header says the value is "passed on to presets, which may
+//! choose to use it for calculations. It is not used in any other way by the
+//! library". projectM never reads it back, it only forwards it to the
+//! Milkdrop `fps` variable, live, with no reload. That makes it a free 32-bit
+//! word per projectM instance (so: per deck), writable once per frame.
+//!
+//! So: patch the preset text **once, at load time** with a small demux
+//! prologue that unpacks that word into persistent per-frame registers, then
+//! write one `(index, value)` pair per frame with `Deck::set_param`. The
+//! registers are ordinary Milkdrop per-frame variables, so they hold their
+//! value between frames and the preset's own animation state is never
+//! disturbed.
+//!
+//! Wire format, verified end to end against libprojectM 4.1.6 on Mesa:
+//!
+//! ```text
+//! code = round((value + 2.0) * 1000) * 1000 + index
+//! ```
+//!
+//! giving 0.001 resolution over -2.0..2.0 (both panels' sliders step by 0.01)
+//! and indices 1..=999 (0 = no-op). Max code 4_000_999, comfortably inside
+//! both `int32_t` and a 24-bit float mantissa, so it survives whatever
+//! precision the expression evaluator uses.
+//!
+//! # The collision, and why the `fps` rewrite is mandatory
+//!
+//! 2871 of the 9795 presets in the reference library (29%) read `fps`
+//! themselves, almost always for framerate-independent physics (`60/fps`,
+//! `.../fps`). Feeding them a code word instead would silently collapse their
+//! motion. `patch_preset` therefore also rewrites every standalone `fps`
+//! identifier in the preset's own equation blocks to the literal 60, which is
+//! exactly what those presets see today, since the app never calls
+//! `projectm_set_fps` and projectM's documented default is 60.
+
+/// Index range of the packed word. Indices are `1..=MAX_INDEX`; 0 is a no-op
+/// the preset ignores, so the host can write "nothing changed this frame".
+const INDEX_SPAN: i32 = 1000;
+
+/// Fixed-point scale of the value half of the packed word: 0.001 resolution.
+const VALUE_SCALE: f64 = 1000.0;
+
+/// Added before scaling so negative values fit an unsigned code, subtracted
+/// again by the preset-side decoder.
+const VALUE_OFFSET: f64 = 2.0;
+
+/// Highest usable parameter index.
+pub const MAX_INDEX: u16 = (INDEX_SPAN - 1) as u16;
+
+/// Lowest value the side channel can carry.
+pub const VALUE_MIN: f64 = -VALUE_OFFSET;
+
+/// Highest value the side channel can carry.
+pub const VALUE_MAX: f64 = VALUE_OFFSET;
+
+/// Substituted for the preset's own `fps` reads. projectM's documented default
+/// when the host never calls `projectm_set_fps`, which is what every preset in
+/// the library is seeing today, so this substitution is behaviour-preserving.
+pub const SUBSTITUTED_FPS: i32 = 60;
+
+/// Packs one `(index, value)` pair into the word `Deck::set_param` writes
+/// through `projectm_set_fps`. Index is clamped to `MAX_INDEX`, value to
+/// `VALUE_MIN..=VALUE_MAX`.
+pub fn encode_param(index: u16, value: f64) -> i32 {
+    let index = i32::from(index.min(MAX_INDEX));
+    let scaled = ((value.clamp(VALUE_MIN, VALUE_MAX) + VALUE_OFFSET) * VALUE_SCALE).round() as i32;
+    scaled * INDEX_SPAN + index
+}
+
+/// How a latched value reaches the Milkdrop variable it drives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Apply {
+    /// `var = var * od_pN;` scales whatever the preset computed (Time's
+    /// zoom/rot/warp/dx/dy/… multipliers).
+    Multiply(String),
+    /// `var = od_pN;` replaces it outright (Qvar's `q1`..`q32` overrides).
+    Assign(String),
+}
+
+/// One host-driven parameter: which slot of the side channel carries it, the
+/// value to bake in as the preset's starting point, and the Milkdrop variable
+/// it drives.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchTarget {
+    pub index: u16,
+    pub initial: f64,
+    pub apply: Apply,
+}
+
+/// Rewrites `text` so a preset loaded from it reads this host's side channel.
+///
+/// Two transformations, both purely lexical:
+///
+/// 1. every standalone `fps` identifier in the preset's own equation blocks
+///    (`per_frame_init_N`, `per_frame_N`, `per_pixel_N`, `shape_N_per_frameM`,
+///    `wave_N_per_frameM`, `wave_N_per_pointM`) becomes the literal
+///    [`SUBSTITUTED_FPS`];
+/// 2. a demux prologue, one latch per target, and the application lines are
+///    appended after the preset's own equations, numbered past the highest
+///    existing index so they run last.
+///
+/// Shader blocks (`warp_N` / `comp_N`) are deliberately left alone: the side
+/// channel does not reach them, and only 10 lines in the whole 9795-preset
+/// reference library mention `fps` there.
+pub fn patch_preset(text: &str, targets: &[PatchTarget]) -> String {
+    let mut out = String::with_capacity(text.len() + 256 + targets.len() * 96);
+    let mut max_frame = 0u32;
+    let mut max_init = 0u32;
+
+    for line in text.lines() {
+        match split_key(line) {
+            Some((key, value)) => {
+                if let Some(n) = equation_index(key, "per_frame_init_") {
+                    max_init = max_init.max(n);
+                } else if let Some(n) = equation_index(key, "per_frame_") {
+                    max_frame = max_frame.max(n);
+                }
+                if is_equation_block(key) {
+                    out.push_str(key);
+                    out.push('=');
+                    out.push_str(&substitute_fps(value));
+                } else {
+                    out.push_str(line);
+                }
+            }
+            None => out.push_str(line),
+        }
+        out.push('\n');
+    }
+
+    if targets.is_empty() {
+        return out;
+    }
+
+    for (offset, target) in targets.iter().enumerate() {
+        let n = max_init + 1 + offset as u32;
+        out.push_str(&format!(
+            "per_frame_init_{n}=od_p{i} = {v};\n",
+            i = target.index,
+            v = fmt_num(target.initial)
+        ));
+    }
+
+    let mut n = max_frame;
+    let mut emit = |code: String| {
+        n += 1;
+        out.push_str(&format!("per_frame_{n}={code}\n"));
+    };
+    emit("od_c = fps;".to_string());
+    emit(format!("od_i = od_c % {INDEX_SPAN};"));
+    emit(format!(
+        "od_v = int(od_c/{INDEX_SPAN})/{scale} - {offset};",
+        scale = fmt_num(VALUE_SCALE),
+        offset = fmt_num(VALUE_OFFSET)
+    ));
+    for target in targets {
+        let i = target.index;
+        emit(format!(
+            "od_p{i} = equal(od_i,{i})*od_v + (1-equal(od_i,{i}))*od_p{i};"
+        ));
+    }
+    for target in targets {
+        let i = target.index;
+        emit(match &target.apply {
+            Apply::Multiply(var) => format!("{var} = {var} * od_p{i};"),
+            Apply::Assign(var) => format!("{var} = od_p{i};"),
+        });
+    }
+    out
+}
+
+/// Splits `key=value`, or returns `None` for blank lines and `[section]`
+/// headers.
+fn split_key(line: &str) -> Option<(&str, &str)> {
+    let eq = line.find('=')?;
+    let key = &line[..eq];
+    if key.is_empty() || key.starts_with('[') {
+        return None;
+    }
+    Some((key, &line[eq + 1..]))
+}
+
+/// True for the preset's own equation blocks, the ones that see the Milkdrop
+/// `fps` variable. Shader blocks (`warp_`/`comp_`) are excluded on purpose.
+fn is_equation_block(key: &str) -> bool {
+    !key.starts_with("warp_")
+        && !key.starts_with("comp_")
+        && (key.contains("per_frame") || key.contains("per_pixel") || key.contains("per_point"))
+}
+
+/// `equation_index("per_frame_12", "per_frame_")` → `Some(12)`. Returns `None`
+/// when the remainder is not a bare number, so `per_frame_init_3` is not
+/// mistaken for a `per_frame_` line.
+fn equation_index(key: &str, prefix: &str) -> Option<u32> {
+    key.strip_prefix(prefix)?.parse().ok()
+}
+
+/// Replaces standalone `fps` identifiers with [`SUBSTITUTED_FPS`], leaving
+/// `myfps`, `fps2` and `bass_fps` alone.
+fn substitute_fps(code: &str) -> String {
+    let bytes = code.as_bytes();
+    let mut out = String::with_capacity(code.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i..].starts_with(b"fps")
+            && !i.checked_sub(1).is_some_and(|p| is_ident_byte(bytes[p]))
+            && !bytes.get(i + 3).copied().is_some_and(is_ident_byte)
+        {
+            out.push_str(&SUBSTITUTED_FPS.to_string());
+            i += 3;
+        } else {
+            // Advance a whole char so multi-byte UTF-8 in comments survives.
+            let step = code[i..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&code[i..i + step]);
+            i += step;
+        }
+    }
+    out
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Milkdrop equations have no notion of Rust's `1e-5`/`inf` spellings, so
+/// render numbers plainly and drop a trailing `.0`.
+fn fmt_num(v: f64) -> String {
+    let s = format!("{v:.5}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() || s == "-" {
+        "0".to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assign(index: u16, var: &str) -> PatchTarget {
+        PatchTarget {
+            index,
+            initial: 0.0,
+            apply: Apply::Assign(var.to_string()),
+        }
+    }
+
+    // ---- encode_param ----
+
+    #[test]
+    fn encodes_index_in_the_low_digits_and_value_in_the_high_ones() {
+        // 0.7 → (0.7 + 2) * 1000 = 2700, index 1.
+        assert_eq!(encode_param(1, 0.7), 2_700_001);
+    }
+
+    #[test]
+    fn encodes_the_range_endpoints_without_overflowing() {
+        assert_eq!(encode_param(1, VALUE_MIN), 1);
+        assert_eq!(encode_param(MAX_INDEX, VALUE_MAX), 4_000_999);
+        // Inside a 24-bit float mantissa, so the evaluator's precision is moot.
+        assert!(encode_param(MAX_INDEX, VALUE_MAX) < 1 << 24);
+    }
+
+    #[test]
+    fn encodes_zero_index_as_the_no_op_slot() {
+        assert_eq!(encode_param(0, 0.0) % INDEX_SPAN, 0);
+    }
+
+    #[test]
+    fn clamps_out_of_range_values_and_indices() {
+        assert_eq!(encode_param(1, 99.0), encode_param(1, VALUE_MAX));
+        assert_eq!(encode_param(1, -99.0), encode_param(1, VALUE_MIN));
+        assert_eq!(encode_param(60_000, 0.0), encode_param(MAX_INDEX, 0.0));
+    }
+
+    #[test]
+    fn round_trips_every_representable_step() {
+        let mut v = VALUE_MIN;
+        while v <= VALUE_MAX {
+            let code = encode_param(7, v);
+            assert_eq!(code % INDEX_SPAN, 7);
+            let decoded = f64::from(code / INDEX_SPAN) / VALUE_SCALE - VALUE_OFFSET;
+            assert!((decoded - v).abs() < 1e-9, "{v} decoded as {decoded}");
+            v += 0.01;
+        }
+    }
+
+    // ---- fps substitution ----
+
+    #[test]
+    fn substitutes_the_fps_variable_in_every_equation_block() {
+        let src = "per_frame_1=vy = vy - 0.0001*60/fps;\n\
+                   per_pixel_1=zoom = zoom + fps*0.001;\n\
+                   per_frame_init_1=k = fps;\n\
+                   shape_0_per_frame1=r = fps/120;\n\
+                   wave_0_per_frame1=a = fps;\n\
+                   wave_0_per_point1=x = x + fps;\n";
+        let out = patch_preset(src, &[]);
+        assert!(!out.contains("fps"), "{out}");
+        assert_eq!(out.matches("60").count(), 7); // 6 substitutions + the literal 60
+    }
+
+    #[test]
+    fn leaves_shader_blocks_alone() {
+        let src = "warp_1=`   ret = float3(fps,0,0);\ncomp_2=`   ret *= fps;\n";
+        assert_eq!(patch_preset(src, &[]), src);
+    }
+
+    #[test]
+    fn leaves_identifiers_that_merely_contain_fps_alone() {
+        let src = "per_frame_1=myfps = fps2 + _fps + bass_fps + fps;\n";
+        let out = patch_preset(src, &[]);
+        assert!(out.contains("myfps = fps2 + _fps + bass_fps + 60;"), "{out}");
+    }
+
+    #[test]
+    fn leaves_non_equation_keys_and_section_headers_alone() {
+        let src = "[preset00]\nfRating=5.000\nnWaveMode=4\n";
+        assert_eq!(patch_preset(src, &[]), src);
+    }
+
+    // ---- appended demux / latch / application ----
+
+    #[test]
+    fn appends_the_demux_prologue_after_the_presets_own_equations() {
+        let out = patch_preset("per_frame_1=zoom = 1.01;\n", &[assign(1, "q1")]);
+        let own = out.find("zoom = 1.01;").unwrap();
+        let demux = out.find("od_c = fps;").unwrap();
+        assert!(own < demux, "{out}");
+        assert!(out.contains("per_frame_2=od_c = fps;"), "{out}");
+        assert!(out.contains("per_frame_3=od_i = od_c % 1000;"), "{out}");
+        assert!(
+            out.contains("per_frame_4=od_v = int(od_c/1000)/1000 - 2;"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn numbers_appended_lines_past_the_highest_existing_index() {
+        // Gappy, out-of-order numbering is normal in real presets.
+        let src = "per_frame_9=a = 1;\nper_frame_2=b = 2;\nper_frame_init_4=c = 3;\n";
+        let out = patch_preset(src, &[assign(1, "q1")]);
+        assert!(out.contains("per_frame_init_5=od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_10=od_c = fps;"), "{out}");
+    }
+
+    #[test]
+    fn does_not_mistake_per_frame_init_for_a_per_frame_line() {
+        let out = patch_preset("per_frame_init_50=a = 1;\n", &[assign(1, "q1")]);
+        assert!(out.contains("per_frame_1=od_c = fps;"), "{out}");
+        assert!(out.contains("per_frame_init_51=od_p1 = 0;"), "{out}");
+    }
+
+    #[test]
+    fn latches_each_target_against_its_own_index() {
+        let out = patch_preset("", &[assign(3, "q3"), assign(40, "q7")]);
+        assert!(
+            out.contains("od_p3 = equal(od_i,3)*od_v + (1-equal(od_i,3))*od_p3;"),
+            "{out}"
+        );
+        assert!(
+            out.contains("od_p40 = equal(od_i,40)*od_v + (1-equal(od_i,40))*od_p40;"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn emits_multiply_and_assign_application_lines() {
+        let targets = [
+            PatchTarget {
+                index: 1,
+                initial: 1.0,
+                apply: Apply::Multiply("zoom".to_string()),
+            },
+            assign(2, "q1"),
+        ];
+        let out = patch_preset("", &targets);
+        assert!(out.contains("zoom = zoom * od_p1;"), "{out}");
+        assert!(out.contains("q1 = od_p2;"), "{out}");
+    }
+
+    #[test]
+    fn applies_every_target_after_every_latch() {
+        let targets = [
+            PatchTarget {
+                index: 1,
+                initial: 1.0,
+                apply: Apply::Multiply("zoom".to_string()),
+            },
+            assign(2, "q1"),
+        ];
+        let out = patch_preset("", &targets);
+        let last_latch = out.rfind("od_p2 = equal").unwrap();
+        assert!(out.find("zoom = zoom * od_p1;").unwrap() > last_latch, "{out}");
+    }
+
+    #[test]
+    fn bakes_the_initial_value_into_per_frame_init() {
+        let targets = [PatchTarget {
+            index: 1,
+            initial: 1.0,
+            apply: Apply::Multiply("zoom".to_string()),
+        }];
+        // Neutral until the first side-channel write lands, so loading a preset
+        // mid-set does not flash the preset's unscaled look for one frame.
+        assert!(patch_preset("", &targets).contains("od_p1 = 1;"));
+    }
+
+    #[test]
+    fn renders_fractional_initials_without_rust_float_spellings() {
+        let targets = [assign(1, "q1")];
+        let mut targets = targets.to_vec();
+        targets[0].initial = -1.755;
+        let out = patch_preset("", &targets);
+        assert!(out.contains("od_p1 = -1.755;"), "{out}");
+    }
+
+    #[test]
+    fn appends_nothing_when_there_are_no_targets() {
+        let out = patch_preset("per_frame_1=zoom = 1.01;\n", &[]);
+        assert!(!out.contains("od_c"), "{out}");
+    }
+
+    #[test]
+    fn handles_crlf_input_normalising_it_to_lf() {
+        // Plenty of .milk files in the wild are CRLF. The patched text only
+        // ever goes straight to projectm_load_preset_data, never back to disk,
+        // so normalising is fine; parsing it correctly is what matters.
+        let out = patch_preset("fRating=5.000\r\nper_frame_1=a = fps;\r\n", &[]);
+        assert_eq!(out, "fRating=5.000\nper_frame_1=a = 60;\n");
+    }
+}

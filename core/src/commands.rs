@@ -24,6 +24,16 @@ pub trait CommandContext {
     fn playlist_prev(&mut self, deck: Deck);
     fn get_playlist_playing(&self, deck: Deck) -> bool;
     fn advance_overlay_queue(&mut self, direction: i32);
+    fn set_color_hue_a(&mut self, v: f64);
+    fn set_color_sat_a(&mut self, v: f64);
+    fn set_color_bright_a(&mut self, v: f64);
+    fn set_color_contrast_a(&mut self, v: f64);
+    fn set_color_invert_a(&mut self, v: f64);
+    fn set_color_hue_b(&mut self, v: f64);
+    fn set_color_sat_b(&mut self, v: f64);
+    fn set_color_bright_b(&mut self, v: f64);
+    fn set_color_contrast_b(&mut self, v: f64);
+    fn set_color_invert_b(&mut self, v: f64);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -382,16 +392,16 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::StrobeToggle, label: "Strobe ON/OFF", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::LfoRateUp, label: "LFO Rate +", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::LfoRateDown, label: "LFO Rate −", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::ColorHueA, label: "Hue A", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorSatA, label: "Saturation A", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorBrightA, label: "Brightness A", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorContrastA, label: "Contrast A", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorInvertA, label: "Invert A", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorHueB, label: "Hue B", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorSatB, label: "Saturation B", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorBrightB, label: "Brightness B", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorContrastB, label: "Contrast B", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorInvertB, label: "Invert B", kind: CommandKind::Range, run: noop },
+        Command { id: CommandId::ColorHueA, label: "Hue A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_hue_a(v) },
+        Command { id: CommandId::ColorSatA, label: "Saturation A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_sat_a(v) },
+        Command { id: CommandId::ColorBrightA, label: "Brightness A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_bright_a(v) },
+        Command { id: CommandId::ColorContrastA, label: "Contrast A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_contrast_a(v) },
+        Command { id: CommandId::ColorInvertA, label: "Invert A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_invert_a(v) },
+        Command { id: CommandId::ColorHueB, label: "Hue B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_hue_b(v) },
+        Command { id: CommandId::ColorSatB, label: "Saturation B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_sat_b(v) },
+        Command { id: CommandId::ColorBrightB, label: "Brightness B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_bright_b(v) },
+        Command { id: CommandId::ColorContrastB, label: "Contrast B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_contrast_b(v) },
+        Command { id: CommandId::ColorInvertB, label: "Invert B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_invert_b(v) },
         Command { id: CommandId::CompositeBlend0, label: "Blend 0", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::CompositeBlend1, label: "Blend 1", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::CompositeBlend2, label: "Blend 2", kind: CommandKind::Range, run: noop },
@@ -599,6 +609,16 @@ mod tests {
         playlist_next_calls: Vec<Deck>,
         playlist_prev_calls: Vec<Deck>,
         advance_overlay_queue_calls: Vec<i32>,
+        color_hue_a: f64,
+        color_sat_a: f64,
+        color_bright_a: f64,
+        color_contrast_a: f64,
+        color_invert_a: f64,
+        color_hue_b: f64,
+        color_sat_b: f64,
+        color_bright_b: f64,
+        color_contrast_b: f64,
+        color_invert_b: f64,
     }
 
     impl CommandContext for MockCtx {
@@ -634,6 +654,36 @@ mod tests {
         }
         fn advance_overlay_queue(&mut self, direction: i32) {
             self.advance_overlay_queue_calls.push(direction);
+        }
+        fn set_color_hue_a(&mut self, v: f64) {
+            self.color_hue_a = v;
+        }
+        fn set_color_sat_a(&mut self, v: f64) {
+            self.color_sat_a = v;
+        }
+        fn set_color_bright_a(&mut self, v: f64) {
+            self.color_bright_a = v;
+        }
+        fn set_color_contrast_a(&mut self, v: f64) {
+            self.color_contrast_a = v;
+        }
+        fn set_color_invert_a(&mut self, v: f64) {
+            self.color_invert_a = v;
+        }
+        fn set_color_hue_b(&mut self, v: f64) {
+            self.color_hue_b = v;
+        }
+        fn set_color_sat_b(&mut self, v: f64) {
+            self.color_sat_b = v;
+        }
+        fn set_color_bright_b(&mut self, v: f64) {
+            self.color_bright_b = v;
+        }
+        fn set_color_contrast_b(&mut self, v: f64) {
+            self.color_contrast_b = v;
+        }
+        fn set_color_invert_b(&mut self, v: f64) {
+            self.color_invert_b = v;
         }
     }
 
@@ -761,6 +811,32 @@ mod tests {
             let mut ctx = make_ctx();
             reg.dispatch(CommandId::Crossfader, 0.3, &mut ctx);
             assert_eq!(ctx.get_crossfader(), 0.3);
+        }
+
+        #[test]
+        fn color_range_commands_call_the_correct_setter_with_the_value() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::ColorHueA, 0.1, &mut ctx);
+            assert_eq!(ctx.color_hue_a, 0.1);
+            reg.dispatch(CommandId::ColorSatA, 0.2, &mut ctx);
+            assert_eq!(ctx.color_sat_a, 0.2);
+            reg.dispatch(CommandId::ColorBrightA, 0.3, &mut ctx);
+            assert_eq!(ctx.color_bright_a, 0.3);
+            reg.dispatch(CommandId::ColorContrastA, 0.4, &mut ctx);
+            assert_eq!(ctx.color_contrast_a, 0.4);
+            reg.dispatch(CommandId::ColorInvertA, 0.5, &mut ctx);
+            assert_eq!(ctx.color_invert_a, 0.5);
+            reg.dispatch(CommandId::ColorHueB, 0.6, &mut ctx);
+            assert_eq!(ctx.color_hue_b, 0.6);
+            reg.dispatch(CommandId::ColorSatB, 0.7, &mut ctx);
+            assert_eq!(ctx.color_sat_b, 0.7);
+            reg.dispatch(CommandId::ColorBrightB, 0.8, &mut ctx);
+            assert_eq!(ctx.color_bright_b, 0.8);
+            reg.dispatch(CommandId::ColorContrastB, 0.9, &mut ctx);
+            assert_eq!(ctx.color_contrast_b, 0.9);
+            reg.dispatch(CommandId::ColorInvertB, 1.0, &mut ctx);
+            assert_eq!(ctx.color_invert_b, 1.0);
         }
 
         #[test]

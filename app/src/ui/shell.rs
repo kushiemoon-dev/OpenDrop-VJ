@@ -333,6 +333,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         ui.add_space(12.0);
         widgets::section(ui, "Contrôle");
         nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Color, "Color", &mut active_rect);
 
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout

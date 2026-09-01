@@ -8,7 +8,8 @@
 //! panel's `show` call only needs to borrow the structs it actually reads:
 //! `ShellCtx` (nav chrome), `PerformCtx` (decks/playlists/browser's shared
 //! `Show`), `LibraryCtx` (preset browser), `SourcesCtx` (external control
-//! surfaces: audio input, MIDI, OSC, remote WS, V4L2, the NDI-in selection),
+//! surfaces: audio input, MIDI, OSC, remote WS, V4L2, the NDI-in selection,
+//! the keyboard remap table),
 //! `OutputCtx` (NDI-out, the Output panel's monitor picker, the Quality
 //! panel), `StreamCtx` (OBS/Twitch/Kick), `ControlCtx` (Ableton Link, `#[cfg(
 //! feature = "link")]`-gated per field, never on the struct itself: see
@@ -39,6 +40,7 @@ use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::deck;
 use opendrop_io::midi::MidiTriggerKey;
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::Key;
 use winit::window::Window;
 
 use crate::ui::preset_browser::SearchCache;
@@ -119,6 +121,8 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) selected_input_device: &'a mut Option<String>,
     pub(crate) last_vu_level: f64,
     pub(crate) registry: &'a CommandRegistry,
+    pub(crate) keymap: &'a mut HashMap<Key, CommandId>,
+    pub(crate) keymap_learning: &'a mut Option<CommandId>,
     pub(crate) midi: &'a opendrop_io::midi::MidiHandle,
     pub(crate) midi_learning: &'a mut Option<(CommandId, Option<MidiTriggerKey>)>,
     pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,

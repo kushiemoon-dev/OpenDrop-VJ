@@ -18,7 +18,7 @@
 //! (see `app/src/ui/streaming.rs`'s `save_secret_field`/
 //! `clear_secret_button`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,7 @@ pub(crate) enum PanelId {
     Quality,
     Color,
     Composite,
+    Keymap,
     Output,
     Midi,
     NdiIn,
@@ -112,6 +113,14 @@ pub(crate) struct UiConfig {
     pub(crate) invisible_mode: InvisibleMode,
     pub(crate) target_fps: u32,
     pub(crate) favorite_presets: HashSet<String>,
+    /// On-disk shape of `AppState::keymap` (`HashMap<winit::keyboard::Key,
+    /// CommandId>`): see `keymap.rs`'s module doc comment for why this is
+    /// `HashMap<String, String>` (key-wire -> command-wire) rather than
+    /// `HashMap<Key, CommandId>` or `HashMap<String, CommandId>` directly.
+    /// Empty means "no persisted remapping yet": bootstrap falls back to
+    /// `keymap::default_keymap()` in that case, same as a missing file
+    /// falling back to the rest of `UiConfig::default()`.
+    pub(crate) keymap: HashMap<String, String>,
 }
 
 impl Default for UiConfig {
@@ -131,6 +140,7 @@ impl Default for UiConfig {
             invisible_mode: InvisibleMode::Eco,
             target_fps: 60,
             favorite_presets: HashSet::new(),
+            keymap: HashMap::new(),
         }
     }
 }
@@ -207,6 +217,7 @@ mod tests {
             invisible_mode: InvisibleMode::Pause,
             target_fps: 144,
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
+            keymap: HashMap::from([(r#"{"Named":"Tab"}"#.to_string(), "deck-switch".to_string())]),
         };
 
         let json = config_to_json(&config);
@@ -264,6 +275,7 @@ mod tests {
             PanelId::Playlists,
             PanelId::Audio,
             PanelId::Quality,
+            PanelId::Keymap,
             PanelId::Output,
             PanelId::Midi,
             PanelId::NdiIn,

@@ -146,6 +146,7 @@ pub(crate) enum Panel {
     Quality,
     Color,
     Composite,
+    Keymap,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -180,6 +181,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Quality => Panel::Quality,
             config::PanelId::Color => Panel::Color,
             config::PanelId::Composite => Panel::Composite,
+            config::PanelId::Keymap => Panel::Keymap,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -207,6 +209,7 @@ impl From<Panel> for config::PanelId {
             Panel::Quality => config::PanelId::Quality,
             Panel::Color => config::PanelId::Color,
             Panel::Composite => config::PanelId::Composite,
+            Panel::Keymap => config::PanelId::Keymap,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -410,6 +413,16 @@ struct AppState {
     show: Show,
     registry: CommandRegistry,
     keymap: HashMap<Key, CommandId>,
+    /// Command currently in keyboard learn mode, if any: set when the
+    /// Keymap panel's Learn button is clicked, cleared by `window_event`'s
+    /// `WindowEvent::KeyboardInput` handler the moment it intercepts the
+    /// next accepted key press to commit the binding. Simpler than `midi_
+    /// learning`'s `Option<(CommandId, Option<MidiTriggerKey>)>`: keyboard
+    /// events are already synchronous on this thread (no separate IO thread
+    /// to diff against per-frame), so the commit happens inline in that
+    /// same handler rather than being detected later in `about_to_wait`:
+    /// no snapshot of the pre-existing binding needs to ride along.
+    keymap_learning: Option<CommandId>,
     blit_control_timer: PassTimer,
     blit_output_timer: PassTimer,
     /// Wall-clock instant the output window's surface was last swapped, or
@@ -928,6 +941,9 @@ fn ui_root(
             Panel::Composite => {
                 ui::composite::show(ui, &mut perform.show.slot_composites, perform.show.selected_slot);
             }
+            Panel::Keymap => {
+                ui::keymap::show(ui, sources.keymap, sources.keymap_learning, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1013,17 +1029,28 @@ impl ApplicationHandler for App {
                 && !key_event.repeat
                 && !state.egui_glow.egui_ctx.egui_wants_keyboard_input()
             {
-                if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
-                    state.registry.dispatch(cmd_id, 1.0, &mut state.show);
-                }
+                // Step 3 of the Phase 8 VJ-panels plan: the Keymap panel's
+                // Learn button only records which command is waiting
+                // (`keymap_learning`); the key that commits the binding is
+                // captured right here, on the very next accepted press:
+                // intercepted ahead of normal dispatch (including the F11
+                // Stage-mode shortcut below) rather than also firing
+                // whatever that key already did/does.
+                if let Some(cmd_id) = state.keymap_learning.take() {
+                    state.keymap.insert(key_event.logical_key.clone(), cmd_id);
+                } else {
+                    if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
+                        state.registry.dispatch(cmd_id, 1.0, &mut state.show);
+                    }
 
-                // Step 11 of the Phase 7 UI redesign plan: Stage mode is a
-                // transient UI bool on `AppState`, not a `CommandId`:
-                // matched directly against the logical key here rather
-                // than routed through `state.keymap`/`state.registry.
-                // dispatch`, under the same guard as the dispatch above.
-                if key_event.logical_key == Key::Named(NamedKey::F11) {
-                    state.stage_mode = !state.stage_mode;
+                    // Step 11 of the Phase 7 UI redesign plan: Stage mode is
+                    // a transient UI bool on `AppState`, not a `CommandId`:
+                    // matched directly against the logical key here rather
+                    // than routed through `state.keymap`/`state.registry.
+                    // dispatch`, under the same guard as the dispatch above.
+                    if key_event.logical_key == Key::Named(NamedKey::F11) {
+                        state.stage_mode = !state.stage_mode;
+                    }
                 }
             }
         }
@@ -1535,6 +1562,8 @@ impl ApplicationHandler for App {
                 pending_mesh_size,
                 selected_output_monitor,
                 registry,
+                keymap,
+                keymap_learning,
                 midi,
                 midi_learning,
                 ndi,
@@ -1609,6 +1638,8 @@ impl ApplicationHandler for App {
                 selected_input_device,
                 last_vu_level,
                 registry,
+                keymap,
+                keymap_learning,
                 midi,
                 midi_learning,
                 ndi_in_selected_source,
@@ -1787,6 +1818,7 @@ impl ApplicationHandler for App {
             ui_config.twitch_channel = state.twitch_channel.clone();
             ui_config.kick_channel = state.kick_channel.clone();
             ui_config.invisible_mode = state.invisible_mode;
+            ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
 
             state.egui_glow.destroy();
@@ -2298,7 +2330,15 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         pending_mesh_size: [None; deck::DECK_COUNT],
         show,
         registry: create_default_registry(),
-        keymap: keymap::default_keymap(),
+        // Empty `ui_config.keymap` means "no persisted remapping yet" (first
+        // launch, or a `ui.json` predating this step): falls back to the
+        // hardcoded defaults rather than starting with no bindings at all.
+        // A non-empty one fully replaces the defaults: `exiting` persists
+        // `state.keymap` in its entirety (see that fn), so whatever's saved
+        // already reflects every Learn/Clear the user has ever done, not a
+        // diff against `default_keymap()`.
+        keymap: if ui_config.keymap.is_empty() { keymap::default_keymap() } else { keymap::keymap_from_wire(&ui_config.keymap) },
+        keymap_learning: None,
         blit_control_timer,
         blit_output_timer,
         last_output_swap_at: None,

@@ -148,6 +148,7 @@ pub(crate) enum Panel {
     Composite,
     Keymap,
     Snapshot,
+    Timeline,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -184,6 +185,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Composite => Panel::Composite,
             config::PanelId::Keymap => Panel::Keymap,
             config::PanelId::Snapshot => Panel::Snapshot,
+            config::PanelId::Timeline => Panel::Timeline,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -213,6 +215,7 @@ impl From<Panel> for config::PanelId {
             Panel::Composite => config::PanelId::Composite,
             Panel::Keymap => config::PanelId::Keymap,
             Panel::Snapshot => config::PanelId::Snapshot,
+            Panel::Timeline => config::PanelId::Timeline,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -950,6 +953,9 @@ fn ui_root(
             Panel::Snapshot => {
                 ui::snapshot::show(ui, perform.show, sources.registry);
             }
+            Panel::Timeline => {
+                ui::timeline::show(ui, perform.show, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1336,6 +1342,12 @@ impl ApplicationHandler for App {
             // `CommandId`s with a real `CommandContext` setter (Color/
             // Composite so far) move visibly, which is expected, not a bug.
             for (id, value) in state.show.tick_recall(dt) {
+                state.registry.dispatch(id, value, &mut state.show);
+            }
+            // Timeline playback (Step 5 of the Phase 8 VJ-panels plan).
+            // Same dt-driven cadence and registry-dispatch parity as the
+            // snapshot recall loop just above.
+            for (id, value) in state.show.tick_timeline(dt) {
                 state.registry.dispatch(id, value, &mut state.show);
             }
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);

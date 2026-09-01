@@ -46,6 +46,13 @@ pub trait CommandContext {
     /// parameterized by slot, not 8 separate methods: same shape as
     /// `set_composite_blend(slot, v)` above.
     fn recall_snapshot(&mut self, slot: usize);
+    /// Toggles timeline playback (Step 5). Starting playback resets the
+    /// loop's internal progress to 0 rather than resuming stale progress
+    /// or jumping in time: see `Show::tick_timeline`'s doc comment for why
+    /// that's a dt-accumulated elapsed counter rather than an absolute
+    /// wall-clock timestamp. No parameter, same shape as
+    /// `switch_active_deck` above.
+    fn toggle_timeline(&mut self);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -476,7 +483,7 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::TimeWave3, label: "Wave 3", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::OverlayQueueNext, label: "Overlay Queue Next", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(1) },
         Command { id: CommandId::OverlayQueuePrev, label: "Overlay Queue Prev", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(-1) },
-        Command { id: CommandId::TimelineToggle, label: "Timeline Play/Pause", kind: CommandKind::Trigger, run: noop },
+        Command { id: CommandId::TimelineToggle, label: "Timeline Play/Pause", kind: CommandKind::Trigger, run: |_, ctx| ctx.toggle_timeline() },
         Command { id: CommandId::Qvar1_0, label: "Q1: Deck 0", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::Qvar1_1, label: "Q1: Deck 1", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::Qvar1_2, label: "Q1: Deck 2", kind: CommandKind::Range, run: noop },
@@ -637,6 +644,7 @@ mod tests {
         composite_color_hue_calls: Vec<(usize, f64)>,
         composite_color_tol_calls: Vec<(usize, f64)>,
         recall_snapshot_calls: Vec<usize>,
+        toggle_timeline_calls: u32,
     }
 
     impl CommandContext for MockCtx {
@@ -720,6 +728,9 @@ mod tests {
         }
         fn recall_snapshot(&mut self, slot: usize) {
             self.recall_snapshot_calls.push(slot);
+        }
+        fn toggle_timeline(&mut self) {
+            self.toggle_timeline_calls += 1;
         }
     }
 
@@ -981,6 +992,14 @@ mod tests {
             let cmd = reg.get(CommandId::TimelineToggle);
             assert!(cmd.is_some());
             assert_eq!(cmd.unwrap().kind, CommandKind::Trigger);
+        }
+
+        #[test]
+        fn dispatch_calls_toggle_timeline() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::TimelineToggle, 1.0, &mut ctx);
+            assert_eq!(ctx.toggle_timeline_calls, 1);
         }
     }
 

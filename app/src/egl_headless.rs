@@ -63,17 +63,17 @@ pub fn init_egl() -> (Egl, egl::Display, egl::Config) {
 // No `share` context param here (unlike the spike's general-purpose
 // version): neither child process ever has more than this one context.
 pub fn create_context(inst: &Egl, display: egl::Display, config: egl::Config) -> egl::Context {
-    // UNRESOLVED (see PHASE6-WINDOWS-GLES-COMPAT.PLAN.md execution notes):
     // projectM 4.2.0's GladLoader::CheckGLRequirements() hard-requires GLES
-    // >= 3.2 (WithMinimumVersion(3, 2)) on every Windows/GLES code path, no
-    // way to opt out. This vcpkg-vendored ANGLE build (chromium_7258) can
-    // create at most a GLES 3.1 context on its D3D11 backend here (a 3.2
-    // request fails eglCreateContext with BadMatch) and has no Vulkan
-    // backend built at all (its own vcpkg.json description says ES-to-
-    // Vulkan translation is still "underway" upstream). So `projectm_create()`
-    // still returns NULL on Windows even with everything else in this file
-    // fixed: this 3.1 is the actual ceiling, not a placeholder pending a
-    // trivial bump to 3.2.
+    // >= 3.2 by default (WithMinimumVersion(3, 2)) on every Windows/GLES
+    // code path. This vcpkg-vendored ANGLE build (chromium_7258) can create
+    // at most a GLES 3.1 context on its D3D11 backend (a 3.2 request fails
+    // eglCreateContext with BadMatch) and has no Vulkan backend built at
+    // all (its own vcpkg.json description says ES-to-Vulkan translation is
+    // still "underway" upstream), so 3.1 is this ANGLE build's real
+    // ceiling, not a placeholder pending a trivial bump to 3.2. projectM's
+    // own minimum is patched down to match
+    // (packaging/windows/overlay-ports/projectm/gles31-min-version.patch),
+    // verified empirically to render correctly at 3.1.
     #[cfg(target_os = "windows")]
     let attribs = [
         egl::CONTEXT_MAJOR_VERSION,

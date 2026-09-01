@@ -39,6 +39,13 @@ pub trait CommandContext {
     fn set_composite_luma_white(&mut self, slot: usize, v: f64);
     fn set_composite_color_hue(&mut self, slot: usize, v: f64);
     fn set_composite_color_tol(&mut self, slot: usize, v: f64);
+    /// Starts a snapshot recall for `slot` (0..8): captures the current
+    /// value of every `CommandId` the target slot's snapshot holds, then
+    /// arms `Show::active_recall` so the per-frame loop in
+    /// `app::about_to_wait` can interpolate toward it. A single method
+    /// parameterized by slot, not 8 separate methods: same shape as
+    /// `set_composite_blend(slot, v)` above.
+    fn recall_snapshot(&mut self, slot: usize);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -291,7 +298,7 @@ pub struct Command {
 /// `CommandId` variants `create_default_registry` registers, 202: most
 /// `Range` commands (color/blend/lumakey/colorkey per slot, all 32 time-param
 /// families, all 128 q-var slots) and several `Trigger` commands (strobe,
-/// LFO rate, recall-snapshot, timeline-toggle): are permanent `noop` stubs,
+/// LFO rate, timeline-toggle): are permanent `noop` stubs,
 /// not placeholders forgotten mid-port. `run` only ever receives `&mut dyn
 /// CommandContext`, and `CommandContext`'s current surface (crossfader
 /// get/set, active-deck get/switch, `navigate_preset`, the playlist
@@ -427,14 +434,14 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::ColorkeyTolerance1, label: "Key Tolerance 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(1, v) },
         Command { id: CommandId::ColorkeyTolerance2, label: "Key Tolerance 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(2, v) },
         Command { id: CommandId::ColorkeyTolerance3, label: "Key Tolerance 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(3, v) },
-        Command { id: CommandId::RecallSnapshot0, label: "Recall Snapshot 0", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot1, label: "Recall Snapshot 1", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot2, label: "Recall Snapshot 2", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot3, label: "Recall Snapshot 3", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot4, label: "Recall Snapshot 4", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot5, label: "Recall Snapshot 5", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot6, label: "Recall Snapshot 6", kind: CommandKind::Trigger, run: noop },
-        Command { id: CommandId::RecallSnapshot7, label: "Recall Snapshot 7", kind: CommandKind::Trigger, run: noop },
+        Command { id: CommandId::RecallSnapshot0, label: "Recall Snapshot 0", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(0) },
+        Command { id: CommandId::RecallSnapshot1, label: "Recall Snapshot 1", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(1) },
+        Command { id: CommandId::RecallSnapshot2, label: "Recall Snapshot 2", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(2) },
+        Command { id: CommandId::RecallSnapshot3, label: "Recall Snapshot 3", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(3) },
+        Command { id: CommandId::RecallSnapshot4, label: "Recall Snapshot 4", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(4) },
+        Command { id: CommandId::RecallSnapshot5, label: "Recall Snapshot 5", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(5) },
+        Command { id: CommandId::RecallSnapshot6, label: "Recall Snapshot 6", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(6) },
+        Command { id: CommandId::RecallSnapshot7, label: "Recall Snapshot 7", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(7) },
         Command { id: CommandId::TimeSpeed0, label: "Speed 0", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::TimeSpeed1, label: "Speed 1", kind: CommandKind::Range, run: noop },
         Command { id: CommandId::TimeSpeed2, label: "Speed 2", kind: CommandKind::Range, run: noop },
@@ -629,6 +636,7 @@ mod tests {
         composite_luma_white_calls: Vec<(usize, f64)>,
         composite_color_hue_calls: Vec<(usize, f64)>,
         composite_color_tol_calls: Vec<(usize, f64)>,
+        recall_snapshot_calls: Vec<usize>,
     }
 
     impl CommandContext for MockCtx {
@@ -709,6 +717,9 @@ mod tests {
         }
         fn set_composite_color_tol(&mut self, slot: usize, v: f64) {
             self.composite_color_tol_calls.push((slot, v));
+        }
+        fn recall_snapshot(&mut self, slot: usize) {
+            self.recall_snapshot_calls.push(slot);
         }
     }
 
@@ -949,6 +960,15 @@ mod tests {
                 assert!(cmd.is_some(), "missing: {id:?}");
                 assert_eq!(cmd.unwrap().kind, CommandKind::Trigger);
             }
+        }
+
+        #[test]
+        fn recall_snapshot_triggers_call_the_correct_slot() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::RecallSnapshot0, 1.0, &mut ctx);
+            reg.dispatch(CommandId::RecallSnapshot7, 1.0, &mut ctx);
+            assert_eq!(ctx.recall_snapshot_calls, vec![0, 7]);
         }
     }
 

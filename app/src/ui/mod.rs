@@ -22,6 +22,7 @@ pub mod preset_browser;
 pub mod quality;
 pub mod remote;
 pub mod shell;
+pub mod snapshot;
 pub mod streaming;
 pub mod v4l2loopback;
 pub mod widgets;

@@ -8,6 +8,7 @@
 //! `src/routes/+page.svelte:264-269`.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::beat_detector::BeatDetector;
@@ -15,11 +16,15 @@ use crate::beat_trigger::{
     default_beat_trigger_config, default_volume_peak_state, detect_volume_peak, should_trigger_on_beat,
     BeatTriggerConfig, BeatTriggerMode, VolumePeakState,
 };
-use crate::blend::{blend_mode_from_value01, ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use crate::blend::{
+    blend_mode_from_value01, blend_mode_to_value01, ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS,
+    DEFAULT_SLOT_COMPOSITE,
+};
 use crate::clock::Clock;
-use crate::commands::{CommandContext, Deck};
+use crate::commands::{CommandContext, CommandId, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
+use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
 /// slot never shows, regardless of crossfader position.
@@ -72,6 +77,17 @@ pub struct Show {
     pub beat_sync_b: bool,
     pub beat_trigger_a: BeatTriggerConfig,
     pub beat_trigger_b: BeatTriggerConfig,
+    /// The 8 snapshot slots (Step 4 of the Phase 8 plan). `None` = empty
+    /// slot. Populated by the snapshot panel's Save button
+    /// (`capture_snapshot_values`), consumed by `recall_snapshot`/
+    /// `tick_recall`.
+    pub snapshot_slots: [Option<Snapshot>; 8],
+    /// How long a snapshot recall takes to fully interpolate, in seconds.
+    /// Slider range 0.1-10s (snapshot panel).
+    pub snapshot_recall_duration_sec: f64,
+    /// The in-progress recall, if any: armed by `recall_snapshot`,
+    /// advanced each render tick by `tick_recall`.
+    pub active_recall: Option<ActiveRecall>,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -131,6 +147,9 @@ impl Default for Show {
             beat_sync_b: false,
             beat_trigger_a: default_beat_trigger_config(),
             beat_trigger_b: default_beat_trigger_config(),
+            snapshot_slots: std::array::from_fn(|_| None),
+            snapshot_recall_duration_sec: 1.0,
+            active_recall: None,
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -360,7 +379,112 @@ impl Show {
             self.advance_or_navigate(deck);
         }
     }
+
+    /// Reads back the current value of a snapshot-capturable `CommandId`:
+    /// the inverse of the `CommandContext::set_*` setters those same ids
+    /// dispatch to. `None` for any `CommandId` outside
+    /// `SNAPSHOT_CAPTURABLE_IDS` (not yet addressable by a real setter).
+    pub fn get_command_value(&self, id: CommandId) -> Option<f64> {
+        match id {
+            CommandId::ColorHueA => Some(self.color_params_a.hue_rotate),
+            CommandId::ColorSatA => Some(self.color_params_a.saturate),
+            CommandId::ColorBrightA => Some(self.color_params_a.brightness),
+            CommandId::ColorContrastA => Some(self.color_params_a.contrast),
+            CommandId::ColorInvertA => Some(self.color_params_a.invert),
+            CommandId::ColorHueB => Some(self.color_params_b.hue_rotate),
+            CommandId::ColorSatB => Some(self.color_params_b.saturate),
+            CommandId::ColorBrightB => Some(self.color_params_b.brightness),
+            CommandId::ColorContrastB => Some(self.color_params_b.contrast),
+            CommandId::ColorInvertB => Some(self.color_params_b.invert),
+            CommandId::CompositeBlend0 => Some(blend_mode_to_value01(self.slot_composites[0].blend)),
+            CommandId::CompositeBlend1 => Some(blend_mode_to_value01(self.slot_composites[1].blend)),
+            CommandId::CompositeBlend2 => Some(blend_mode_to_value01(self.slot_composites[2].blend)),
+            CommandId::CompositeBlend3 => Some(blend_mode_to_value01(self.slot_composites[3].blend)),
+            CommandId::LumakeyBlack0 => Some(self.slot_composites[0].luma_black),
+            CommandId::LumakeyBlack1 => Some(self.slot_composites[1].luma_black),
+            CommandId::LumakeyBlack2 => Some(self.slot_composites[2].luma_black),
+            CommandId::LumakeyBlack3 => Some(self.slot_composites[3].luma_black),
+            CommandId::LumakeyWhite0 => Some(self.slot_composites[0].luma_white),
+            CommandId::LumakeyWhite1 => Some(self.slot_composites[1].luma_white),
+            CommandId::LumakeyWhite2 => Some(self.slot_composites[2].luma_white),
+            CommandId::LumakeyWhite3 => Some(self.slot_composites[3].luma_white),
+            CommandId::ColorkeyHue0 => Some(self.slot_composites[0].color_hue),
+            CommandId::ColorkeyHue1 => Some(self.slot_composites[1].color_hue),
+            CommandId::ColorkeyHue2 => Some(self.slot_composites[2].color_hue),
+            CommandId::ColorkeyHue3 => Some(self.slot_composites[3].color_hue),
+            CommandId::ColorkeyTolerance0 => Some(self.slot_composites[0].color_tol),
+            CommandId::ColorkeyTolerance1 => Some(self.slot_composites[1].color_tol),
+            CommandId::ColorkeyTolerance2 => Some(self.slot_composites[2].color_tol),
+            CommandId::ColorkeyTolerance3 => Some(self.slot_composites[3].color_tol),
+            _ => None,
+        }
+    }
+
+    /// Captures the current value of every snapshot-capturable `CommandId`
+    /// (`SNAPSHOT_CAPTURABLE_IDS`): what the snapshot panel's Save button
+    /// stores into a slot.
+    pub fn capture_snapshot_values(&self) -> HashMap<CommandId, f64> {
+        SNAPSHOT_CAPTURABLE_IDS.iter().filter_map(|&id| self.get_command_value(id).map(|v| (id, v))).collect()
+    }
+
+    /// Advances an in-progress snapshot recall by `dt_sec` (same
+    /// caller-supplied-dt convention as `tick_playlists`) and returns the
+    /// interpolated `(CommandId, value)` pairs for this tick. Dispatching
+    /// them is the caller's job (`app::about_to_wait`, through
+    /// `CommandRegistry::dispatch`) so a recall stays on the same
+    /// keyboard/MIDI/OSC/remote-ws parity path as every other command.
+    /// Returns an empty `Vec` when no recall is active, or when the target
+    /// slot was cleared mid-recall (which also clears `active_recall`).
+    pub fn tick_recall(&mut self, dt_sec: f64) -> Vec<(CommandId, f64)> {
+        let Some(active) = &self.active_recall else { return Vec::new() };
+        let slot = active.slot;
+        let Some(snapshot) = &self.snapshot_slots[slot] else {
+            self.active_recall = None;
+            return Vec::new();
+        };
+        let (values, next) = tick_active_recall(active, &snapshot.values, self.snapshot_recall_duration_sec, dt_sec);
+        self.active_recall = next;
+        values.into_iter().collect()
+    }
 }
+
+/// `CommandId`s the snapshot panel's Save button captures and a recall
+/// interpolates toward: the subset of commands currently addressable by a
+/// real `CommandContext` setter (Color/Composite, steps 1-2 of the Phase 8
+/// plan). Grows as later steps add their own setters; Keymap (step 3) added
+/// none. See `Show::get_command_value`.
+const SNAPSHOT_CAPTURABLE_IDS: [CommandId; 30] = [
+    CommandId::ColorHueA,
+    CommandId::ColorSatA,
+    CommandId::ColorBrightA,
+    CommandId::ColorContrastA,
+    CommandId::ColorInvertA,
+    CommandId::ColorHueB,
+    CommandId::ColorSatB,
+    CommandId::ColorBrightB,
+    CommandId::ColorContrastB,
+    CommandId::ColorInvertB,
+    CommandId::CompositeBlend0,
+    CommandId::CompositeBlend1,
+    CommandId::CompositeBlend2,
+    CommandId::CompositeBlend3,
+    CommandId::LumakeyBlack0,
+    CommandId::LumakeyBlack1,
+    CommandId::LumakeyBlack2,
+    CommandId::LumakeyBlack3,
+    CommandId::LumakeyWhite0,
+    CommandId::LumakeyWhite1,
+    CommandId::LumakeyWhite2,
+    CommandId::LumakeyWhite3,
+    CommandId::ColorkeyHue0,
+    CommandId::ColorkeyHue1,
+    CommandId::ColorkeyHue2,
+    CommandId::ColorkeyHue3,
+    CommandId::ColorkeyTolerance0,
+    CommandId::ColorkeyTolerance1,
+    CommandId::ColorkeyTolerance2,
+    CommandId::ColorkeyTolerance3,
+];
 
 impl CommandContext for Show {
     fn get_crossfader(&self) -> f64 {
@@ -506,6 +630,13 @@ impl CommandContext for Show {
     fn set_composite_color_tol(&mut self, slot: usize, v: f64) {
         self.slot_composites[slot].color_tol = v.clamp(0.0, 1.0);
     }
+
+    fn recall_snapshot(&mut self, slot: usize) {
+        let Some(snapshot) = &self.snapshot_slots[slot] else { return };
+        let start_values: HashMap<CommandId, f64> =
+            snapshot.values.keys().filter_map(|&id| self.get_command_value(id).map(|v| (id, v))).collect();
+        self.active_recall = Some(ActiveRecall { slot, start_values, elapsed_sec: 0.0 });
+    }
 }
 
 #[cfg(test)]
@@ -513,6 +644,7 @@ mod tests {
     use super::*;
     use crate::blend::BlendMode;
     use crate::commands::{create_default_registry, CommandId};
+    use crate::snapshot::smoothstep;
 
     mod bus_gain {
         use super::*;
@@ -853,6 +985,135 @@ mod tests {
             assert_eq!(show.slot_composites[3].color_tol, 1.0);
             show.set_composite_color_tol(3, -0.5);
             assert_eq!(show.slot_composites[3].color_tol, 0.0);
+        }
+    }
+
+    mod get_command_value {
+        use super::*;
+
+        #[test]
+        fn reads_back_a_color_param() {
+            let mut show = Show::default();
+            show.set_color_hue_a(0.3);
+            assert_eq!(show.get_command_value(CommandId::ColorHueA), Some(0.3));
+        }
+
+        #[test]
+        fn reads_back_a_composite_blend_as_its_bucket_center() {
+            let show = Show::default(); // slot_composites[0].blend defaults to Normal
+            assert_eq!(show.get_command_value(CommandId::CompositeBlend0), Some(blend_mode_to_value01(BlendMode::Normal)));
+        }
+
+        #[test]
+        fn reads_back_a_composite_key_field_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_black(2, 0.4);
+            assert_eq!(show.get_command_value(CommandId::LumakeyBlack2), Some(0.4));
+            assert_eq!(show.get_command_value(CommandId::LumakeyBlack0), Some(DEFAULT_SLOT_COMPOSITE.luma_black));
+        }
+
+        #[test]
+        fn returns_none_for_a_command_id_with_no_real_setter() {
+            let show = Show::default();
+            assert_eq!(show.get_command_value(CommandId::Crossfader), None);
+            assert_eq!(show.get_command_value(CommandId::TimeSpeed0), None);
+        }
+    }
+
+    mod capture_snapshot_values {
+        use super::*;
+
+        #[test]
+        fn captures_all_30_addressable_command_ids() {
+            let show = Show::default();
+            assert_eq!(show.capture_snapshot_values().len(), 30);
+        }
+
+        #[test]
+        fn captures_the_live_value_not_the_default() {
+            let mut show = Show::default();
+            show.set_color_sat_b(0.9);
+            let captured = show.capture_snapshot_values();
+            assert_eq!(captured.get(&CommandId::ColorSatB), Some(&0.9));
+        }
+    }
+
+    mod recall_snapshot {
+        use super::*;
+
+        #[test]
+        fn recalling_an_empty_slot_does_nothing() {
+            let mut show = Show::default();
+            show.recall_snapshot(0);
+            assert!(show.active_recall.is_none());
+        }
+
+        #[test]
+        fn recalling_a_populated_slot_captures_the_current_value_as_start_and_arms_active_recall() {
+            let mut show = Show::default();
+            show.set_color_hue_a(0.3); // current live value: recall must start from here, not from the target
+            show.snapshot_slots[5] = Some(Snapshot { name: "Slot 6".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.9)]) });
+
+            show.recall_snapshot(5);
+
+            let active = show.active_recall.as_ref().expect("recall should be armed");
+            assert_eq!(active.slot, 5);
+            assert_eq!(active.start_values, HashMap::from([(CommandId::ColorHueA, 0.3)]));
+            assert_eq!(active.elapsed_sec, 0.0);
+        }
+
+        #[test]
+        fn keyboard_dispatch_through_the_registry_arms_the_correct_slot() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.snapshot_slots[3] = Some(Snapshot { name: "Slot 4".to_string(), values: HashMap::new() });
+            reg.dispatch(CommandId::RecallSnapshot3, 1.0, &mut show);
+            assert_eq!(show.active_recall.as_ref().map(|a| a.slot), Some(3));
+        }
+    }
+
+    mod tick_recall {
+        use super::*;
+
+        #[test]
+        fn no_active_recall_returns_no_values() {
+            let mut show = Show::default();
+            assert!(show.tick_recall(0.5).is_empty());
+        }
+
+        #[test]
+        fn mid_recall_returns_the_eased_value_and_keeps_the_recall_active() {
+            let mut show = Show { snapshot_recall_duration_sec: 1.0, ..Default::default() };
+            show.set_color_hue_a(0.0);
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+
+            let values = show.tick_recall(0.5);
+            assert_eq!(values, vec![(CommandId::ColorHueA, smoothstep(0.5))]);
+            assert!(show.active_recall.is_some());
+        }
+
+        #[test]
+        fn reaching_the_configured_duration_returns_the_exact_target_and_clears_the_recall() {
+            let mut show = Show { snapshot_recall_duration_sec: 1.0, ..Default::default() };
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+
+            let values = show.tick_recall(1.5); // overshoots the 1s duration
+            assert_eq!(values, vec![(CommandId::ColorHueA, 1.0)]);
+            assert!(show.active_recall.is_none());
+        }
+
+        #[test]
+        fn clearing_the_target_slot_mid_recall_cancels_it() {
+            let mut show = Show { snapshot_recall_duration_sec: 10.0, ..Default::default() };
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+            show.snapshot_slots[0] = None; // cleared mid-recall
+
+            let values = show.tick_recall(0.1);
+            assert!(values.is_empty());
+            assert!(show.active_recall.is_none());
         }
     }
 

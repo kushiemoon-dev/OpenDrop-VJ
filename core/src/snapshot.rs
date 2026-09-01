@@ -42,6 +42,42 @@ pub fn interpolate_snapshot(
     out
 }
 
+/// State for a snapshot recall in progress, advanced by `Show::tick_recall`
+/// (via `tick_active_recall`). `elapsed_sec` accumulates from
+/// caller-supplied `dt`, the same convention as `Show::tick_playlists`'s
+/// `dt_ms`, rather than an absolute wall-clock timestamp: `Show` has no
+/// wall clock of its own (see `Show::reseed_rng`'s doc comment).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActiveRecall {
+    pub slot: usize,
+    pub start_values: HashMap<CommandId, f64>,
+    pub elapsed_sec: f64,
+}
+
+/// Advances `active` by `dt_sec` against `target` (the values of the
+/// snapshot slot being recalled) and `duration_sec`
+/// (`Show::snapshot_recall_duration_sec`). Returns the eased
+/// `(CommandId, value)` pairs to dispatch this tick, and the next
+/// `ActiveRecall` to store: `None` once the recall has fully completed
+/// (`elapsed_sec >= duration_sec`), signalling the caller to clear
+/// `Show::active_recall`.
+pub fn tick_active_recall(
+    active: &ActiveRecall,
+    target: &HashMap<CommandId, f64>,
+    duration_sec: f64,
+    dt_sec: f64,
+) -> (HashMap<CommandId, f64>, Option<ActiveRecall>) {
+    let elapsed_sec = active.elapsed_sec + dt_sec;
+    let progress01 = (elapsed_sec / duration_sec).clamp(0.0, 1.0);
+    let values = interpolate_snapshot(&active.start_values, target, smoothstep(progress01));
+    let next = if progress01 >= 1.0 {
+        None
+    } else {
+        Some(ActiveRecall { slot: active.slot, start_values: active.start_values.clone(), elapsed_sec })
+    };
+    (values, next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +159,54 @@ mod tests {
             let out = interpolate_snapshot(&start, &target, 0.5);
             assert_eq!(out, HashMap::from([(A, 0.5)]));
             assert!(!out.contains_key(&CommandId::Crossfader));
+        }
+    }
+
+    mod tick_active_recall_tests {
+        use super::*;
+
+        const A: CommandId = CommandId::ColorHueA;
+
+        fn recall(elapsed_sec: f64) -> ActiveRecall {
+            ActiveRecall { slot: 2, start_values: HashMap::from([(A, 0.0)]), elapsed_sec }
+        }
+
+        #[test]
+        fn mid_recall_returns_the_eased_value_and_keeps_the_recall_active() {
+            let active = recall(0.0);
+            let target = HashMap::from([(A, 1.0)]);
+            let (values, next) = tick_active_recall(&active, &target, 1.0, 0.5);
+            assert_eq!(values, HashMap::from([(A, smoothstep(0.5))]));
+            let next = next.expect("recall not yet complete");
+            assert_eq!(next.slot, 2);
+            assert_eq!(next.elapsed_sec, 0.5);
+        }
+
+        #[test]
+        fn reaching_the_configured_duration_returns_the_exact_target_and_clears_the_recall() {
+            let active = recall(0.9);
+            let target = HashMap::from([(A, 1.0)]);
+            let (values, next) = tick_active_recall(&active, &target, 1.0, 0.2); // elapsed 1.1 > duration 1.0
+            assert_eq!(values, HashMap::from([(A, 1.0)]));
+            assert!(next.is_none());
+        }
+
+        #[test]
+        fn exactly_reaching_the_duration_clears_the_recall() {
+            let active = recall(0.5);
+            let target = HashMap::from([(A, 1.0)]);
+            let (_values, next) = tick_active_recall(&active, &target, 1.0, 0.5); // elapsed exactly 1.0
+            assert!(next.is_none());
+        }
+
+        #[test]
+        fn preserves_the_slot_and_start_values_across_ticks() {
+            let active = recall(0.0);
+            let target = HashMap::from([(A, 1.0)]);
+            let (_values, next) = tick_active_recall(&active, &target, 10.0, 1.0);
+            let next = next.expect("recall not yet complete");
+            assert_eq!(next.slot, active.slot);
+            assert_eq!(next.start_values, active.start_values);
         }
     }
 }

@@ -147,6 +147,7 @@ pub(crate) enum Panel {
     Color,
     Composite,
     Keymap,
+    Snapshot,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -182,6 +183,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Color => Panel::Color,
             config::PanelId::Composite => Panel::Composite,
             config::PanelId::Keymap => Panel::Keymap,
+            config::PanelId::Snapshot => Panel::Snapshot,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -210,6 +212,7 @@ impl From<Panel> for config::PanelId {
             Panel::Color => config::PanelId::Color,
             Panel::Composite => config::PanelId::Composite,
             Panel::Keymap => config::PanelId::Keymap,
+            Panel::Snapshot => config::PanelId::Snapshot,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -944,6 +947,9 @@ fn ui_root(
             Panel::Keymap => {
                 ui::keymap::show(ui, sources.keymap, sources.keymap_learning, sources.registry);
             }
+            Panel::Snapshot => {
+                ui::snapshot::show(ui, perform.show, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1319,6 +1325,19 @@ impl ApplicationHandler for App {
             // the current item. Same `dt` as `clock.step`, converted to the
             // milliseconds `PlaylistEngine` works in.
             state.show.tick_playlists(dt * 1000.0);
+            // Snapshot recall (Step 4 of the Phase 8 VJ-panels plan). Same
+            // dt-driven cadence as `tick_playlists` just above: `Show` has
+            // no wall clock of its own (see `Show::reseed_rng`'s doc
+            // comment), so `tick_recall` accumulates elapsed time from this
+            // same `dt` rather than an `Instant`. Dispatching the returned
+            // pairs through `state.registry`, instead of writing
+            // `state.show`'s fields directly, keeps a recall on the exact
+            // same command path as keyboard/MIDI/OSC/remote-ws: only
+            // `CommandId`s with a real `CommandContext` setter (Color/
+            // Composite so far) move visibly, which is expected, not a bug.
+            for (id, value) in state.show.tick_recall(dt) {
+                state.registry.dispatch(id, value, &mut state.show);
+            }
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
 

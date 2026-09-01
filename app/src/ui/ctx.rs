@@ -113,8 +113,9 @@ pub(crate) struct LibraryCtx<'a> {
 }
 
 /// External control/device surfaces: Audio input, MIDI, OSC, remote WS,
-/// V4L2loopback, and the NDI-in panel's own selected-source state (the NDI
-/// handle and its composite/deck toggles are output-side: see `OutputCtx`).
+/// V4L2loopback, CloudPresets, and the NDI-in panel's own selected-source
+/// state (the NDI handle and its composite/deck toggles are output-side:
+/// see `OutputCtx`).
 pub(crate) struct SourcesCtx<'a> {
     pub(crate) audio: &'a opendrop_audio::AudioHandle,
     pub(crate) input_devices: &'a Vec<String>,
@@ -132,6 +133,19 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
     pub(crate) v4l2_active: &'a mut bool,
     pub(crate) v4l2_device: &'a mut Option<Option<PathBuf>>,
+    pub(crate) cloud_presets: &'a opendrop_io::cloud_presets::CloudPresetsHandle,
+    pub(crate) cloud_presets_api_url: &'a mut String,
+    pub(crate) cloud_presets_token_input: &'a mut String,
+    /// Local (non-network) panel errors: see `AppState::
+    /// cloud_presets_secret_error`'s doc comment.
+    pub(crate) cloud_presets_secret_error: &'a mut Option<String>,
+    /// Id + edit buffer of the entry currently being renamed inline, if
+    /// any: mirrors `SidebarCloudPresets.svelte`'s `renamingId`/
+    /// `renameValue` local state, promoted to `AppState` since this panel
+    /// (like every other one) takes individual fields, not a place to
+    /// stash cross-frame widget state of its own (see `ui::quality`'s
+    /// module doc comment on that convention).
+    pub(crate) cloud_presets_rename: &'a mut Option<(String, String)>,
 }
 
 /// Output-side state: the NDI-out handle and its composite/per-deck

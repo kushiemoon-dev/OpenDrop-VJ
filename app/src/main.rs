@@ -165,6 +165,7 @@ pub(crate) enum Panel {
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    CloudPresets,
     About,
 }
 
@@ -196,6 +197,7 @@ impl From<config::PanelId> for Panel {
             #[cfg(feature = "link")]
             config::PanelId::Link => Panel::Link,
             config::PanelId::V4l2 => Panel::V4l2,
+            config::PanelId::CloudPresets => Panel::CloudPresets,
             config::PanelId::About => Panel::About,
         }
     }
@@ -226,6 +228,7 @@ impl From<Panel> for config::PanelId {
             #[cfg(feature = "link")]
             Panel::Link => config::PanelId::Link,
             Panel::V4l2 => config::PanelId::V4l2,
+            Panel::CloudPresets => config::PanelId::CloudPresets,
             Panel::About => config::PanelId::About,
         }
     }
@@ -376,6 +379,32 @@ struct AppState {
     /// the first frame that panel is shown: see that module's doc comment
     /// for why this is deliberately not re-queried per frame.
     v4l2_device: Option<Option<PathBuf>>,
+    /// Handle to the dedicated CloudPresets thread (Step 6): `latest()`
+    /// gives the current entries/busy/last-error snapshot, `control_tx`
+    /// sends List/Upload/Rename/Delete/Download.
+    cloud_presets: opendrop_io::cloud_presets::CloudPresetsHandle,
+    /// The CloudPresets panel's own base-URL field, read by every action at
+    /// click time: not part of `CloudPresetsSnapshot`, same reasoning as
+    /// `osc_port`/`obs_host`. Empty means the feature is disabled (Override
+    /// 4); mirrored to/from `UiConfig::cloud_presets_api_url: Option<
+    /// String>` at bootstrap/exit (empty String <-> `None`), same pattern
+    /// `selected_output_monitor` uses for its own already-`Option<String>`
+    /// `UiConfig` field, just with an extra empty-string fold since this
+    /// one is edited via a plain `TextEdit`.
+    cloud_presets_api_url: String,
+    /// "Link device" token-paste field: same masked/write-through/clear-
+    /// after-blur convention as `kick_bearer_token_input` etc., see
+    /// `ui::streaming`'s module doc comment.
+    cloud_presets_token_input: String,
+    /// Local (non-network) panel errors: keyring save/link failures for
+    /// the token fields above (same convention as
+    /// `streaming_secret_save_error`), plus a picked upload file that
+    /// failed to read from disk. Network/API errors surface separately,
+    /// through `CloudPresetsSnapshot::last_error`.
+    cloud_presets_secret_error: Option<String>,
+    /// Id + edit buffer of the cloud preset currently being renamed
+    /// inline, if any: see `ui::ctx::SourcesCtx`'s field doc comment.
+    cloud_presets_rename: Option<(String, String)>,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -998,6 +1027,16 @@ fn ui_root(
             }
             Panel::V4l2 => {
                 ui::v4l2loopback::show(ui, sources.v4l2, sources.v4l2_active, sources.v4l2_device);
+            }
+            Panel::CloudPresets => {
+                ui::cloud_presets::show(
+                    ui,
+                    sources.cloud_presets,
+                    sources.cloud_presets_api_url,
+                    sources.cloud_presets_token_input,
+                    sources.cloud_presets_secret_error,
+                    sources.cloud_presets_rename,
+                );
             }
             Panel::About => {
                 ui::about::show(ui);
@@ -1624,6 +1663,11 @@ impl ApplicationHandler for App {
                 v4l2,
                 v4l2_active,
                 v4l2_device,
+                cloud_presets,
+                cloud_presets_api_url,
+                cloud_presets_token_input,
+                cloud_presets_secret_error,
+                cloud_presets_rename,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1680,6 +1724,11 @@ impl ApplicationHandler for App {
                 v4l2,
                 v4l2_active,
                 v4l2_device,
+                cloud_presets,
+                cloud_presets_api_url,
+                cloud_presets_token_input,
+                cloud_presets_secret_error,
+                cloud_presets_rename,
             };
             let mut output_ctx = ui::ctx::OutputCtx {
                 refresh_interval,
@@ -1848,6 +1897,8 @@ impl ApplicationHandler for App {
             ui_config.obs_port = state.obs_port;
             ui_config.twitch_channel = state.twitch_channel.clone();
             ui_config.kick_channel = state.kick_channel.clone();
+            ui_config.cloud_presets_api_url =
+                if state.cloud_presets_api_url.trim().is_empty() { None } else { Some(state.cloud_presets_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
@@ -2342,6 +2393,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         v4l2_active: false,
         v4l2: opendrop_io::v4l2loopback::spawn(v4l2_frame_rx),
         v4l2_device: None,
+        cloud_presets: opendrop_io::cloud_presets::spawn(),
+        cloud_presets_api_url: ui_config.cloud_presets_api_url.clone().unwrap_or_default(),
+        cloud_presets_token_input: String::new(),
+        cloud_presets_secret_error: None,
+        cloud_presets_rename: None,
         gl,
         egui_glow,
         refresh_interval,

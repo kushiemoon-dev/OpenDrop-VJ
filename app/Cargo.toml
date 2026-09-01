@@ -21,6 +21,11 @@ egui = "0.36.1"
 egui_glow = { version = "0.36.1", features = ["winit"] }
 khronos-egl = { version = "6", features = ["dynamic"] }
 directories = "6"
+# Native file dialog (`ui::cloud_presets`'s Upload button): absent from
+# the workspace before this step, confirmed. Linux backend needs GTK or
+# xdg-desktop-portal at build/runtime; see the root README if that's
+# unavailable in a given environment.
+rfd = "0.15"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 

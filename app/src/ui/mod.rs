@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod audio;
+pub mod cloud_presets;
 pub mod color;
 pub mod composite;
 pub mod ctx;

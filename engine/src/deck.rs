@@ -170,7 +170,7 @@ pub fn create_one_deck_context(
     debug_label: &'static str,
 ) -> Result<Deck, String> {
     #[cfg(target_os = "windows")]
-    let context_api = ContextApi::Gles(Some(Version::new(3, 0)));
+    let context_api = ContextApi::Gles(Some(Version::new(2, 0)));
     #[cfg(not(target_os = "windows"))]
     let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
 

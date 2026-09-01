@@ -1791,7 +1791,7 @@ fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> R
     // there yields zero matching configs. Everywhere else glutin's EGL
     // backend is fronting real desktop GL drivers, so keep requesting that.
     #[cfg(target_os = "windows")]
-    let api = Api::GLES3;
+    let api = Api::GLES2;
     #[cfg(not(target_os = "windows"))]
     let api = Api::OPENGL;
 
@@ -2004,7 +2004,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .map_err(|e| format!("control window has no raw handle: {e}"))?
         .as_raw();
     #[cfg(target_os = "windows")]
-    let context_api = ContextApi::Gles(Some(Version::new(3, 0)));
+    let context_api = ContextApi::Gles(Some(Version::new(2, 0)));
     #[cfg(not(target_os = "windows"))]
     let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
 

@@ -3,6 +3,7 @@
 
 pub mod about;
 pub mod audio;
+pub mod color;
 pub mod ctx;
 pub mod decks;
 // Feature-gated on the `mod` declaration itself, mirroring `opendrop_io

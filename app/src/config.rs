@@ -74,6 +74,7 @@ pub(crate) enum PanelId {
     Playlists,
     Audio,
     Quality,
+    Color,
     Output,
     Midi,
     NdiIn,

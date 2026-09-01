@@ -446,6 +446,46 @@ impl CommandContext for Show {
     // header note: most CommandId variants are no-op stubs in the TS
     // source too, wired up by later milestones).
     fn advance_overlay_queue(&mut self, _direction: i32) {}
+
+    fn set_color_hue_a(&mut self, v: f64) {
+        self.color_params_a.hue_rotate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_sat_a(&mut self, v: f64) {
+        self.color_params_a.saturate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_bright_a(&mut self, v: f64) {
+        self.color_params_a.brightness = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_contrast_a(&mut self, v: f64) {
+        self.color_params_a.contrast = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_invert_a(&mut self, v: f64) {
+        self.color_params_a.invert = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_hue_b(&mut self, v: f64) {
+        self.color_params_b.hue_rotate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_sat_b(&mut self, v: f64) {
+        self.color_params_b.saturate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_bright_b(&mut self, v: f64) {
+        self.color_params_b.brightness = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_contrast_b(&mut self, v: f64) {
+        self.color_params_b.contrast = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_invert_b(&mut self, v: f64) {
+        self.color_params_b.invert = v.clamp(0.0, 1.0);
+    }
 }
 
 #[cfg(test)]
@@ -656,6 +696,96 @@ mod tests {
             show.switch_active_deck(); // active_deck becomes B, but no slot maps to it
             assert_eq!(show.get_active_deck(), Deck::B);
             assert_eq!(show.selected_slot, 0); // unchanged, not reset to something wrong
+        }
+
+        #[test]
+        fn set_color_hue_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_hue_a(1.5);
+            assert_eq!(show.color_params_a.hue_rotate, 1.0);
+            show.set_color_hue_a(-0.5);
+            assert_eq!(show.color_params_a.hue_rotate, 0.0);
+        }
+
+        #[test]
+        fn set_color_sat_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_sat_a(1.5);
+            assert_eq!(show.color_params_a.saturate, 1.0);
+            show.set_color_sat_a(-0.5);
+            assert_eq!(show.color_params_a.saturate, 0.0);
+        }
+
+        #[test]
+        fn set_color_bright_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_bright_a(1.5);
+            assert_eq!(show.color_params_a.brightness, 1.0);
+            show.set_color_bright_a(-0.5);
+            assert_eq!(show.color_params_a.brightness, 0.0);
+        }
+
+        #[test]
+        fn set_color_contrast_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_contrast_a(1.5);
+            assert_eq!(show.color_params_a.contrast, 1.0);
+            show.set_color_contrast_a(-0.5);
+            assert_eq!(show.color_params_a.contrast, 0.0);
+        }
+
+        #[test]
+        fn set_color_invert_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_invert_a(1.5);
+            assert_eq!(show.color_params_a.invert, 1.0);
+            show.set_color_invert_a(-0.5);
+            assert_eq!(show.color_params_a.invert, 0.0);
+        }
+
+        #[test]
+        fn set_color_hue_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_hue_b(1.5);
+            assert_eq!(show.color_params_b.hue_rotate, 1.0);
+            show.set_color_hue_b(-0.5);
+            assert_eq!(show.color_params_b.hue_rotate, 0.0);
+        }
+
+        #[test]
+        fn set_color_sat_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_sat_b(1.5);
+            assert_eq!(show.color_params_b.saturate, 1.0);
+            show.set_color_sat_b(-0.5);
+            assert_eq!(show.color_params_b.saturate, 0.0);
+        }
+
+        #[test]
+        fn set_color_bright_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_bright_b(1.5);
+            assert_eq!(show.color_params_b.brightness, 1.0);
+            show.set_color_bright_b(-0.5);
+            assert_eq!(show.color_params_b.brightness, 0.0);
+        }
+
+        #[test]
+        fn set_color_contrast_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_contrast_b(1.5);
+            assert_eq!(show.color_params_b.contrast, 1.0);
+            show.set_color_contrast_b(-0.5);
+            assert_eq!(show.color_params_b.contrast, 0.0);
+        }
+
+        #[test]
+        fn set_color_invert_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_invert_b(1.5);
+            assert_eq!(show.color_params_b.invert, 1.0);
+            show.set_color_invert_b(-0.5);
+            assert_eq!(show.color_params_b.invert, 0.0);
         }
     }
 

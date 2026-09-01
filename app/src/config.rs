@@ -89,6 +89,7 @@ pub(crate) enum PanelId {
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    CloudPresets,
     About,
     #[serde(other)]
     Decks,
@@ -115,6 +116,13 @@ pub(crate) struct UiConfig {
     pub(crate) invisible_mode: InvisibleMode,
     pub(crate) target_fps: u32,
     pub(crate) favorite_presets: HashSet<String>,
+    /// Base URL of the CloudPresets backend Worker (`workers/presets-
+    /// cloud/` in the sibling `OpenDrop-VJ` repo). `None`/empty means the
+    /// feature is disabled: same convention as the web app's
+    /// `PUBLIC_CLOUD_PRESETS_API=` (empty in `.env.example`), see Step 6's
+    /// Override 4: no production URL is committed anywhere yet, the user
+    /// must supply one before this panel does anything.
+    pub(crate) cloud_presets_api_url: Option<String>,
     /// On-disk shape of `AppState::keymap` (`HashMap<winit::keyboard::Key,
     /// CommandId>`): see `keymap.rs`'s module doc comment for why this is
     /// `HashMap<String, String>` (key-wire -> command-wire) rather than
@@ -142,6 +150,7 @@ impl Default for UiConfig {
             invisible_mode: InvisibleMode::Eco,
             target_fps: 60,
             favorite_presets: HashSet::new(),
+            cloud_presets_api_url: None,
             keymap: HashMap::new(),
         }
     }
@@ -219,6 +228,7 @@ mod tests {
             invisible_mode: InvisibleMode::Pause,
             target_fps: 144,
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
+            cloud_presets_api_url: Some("https://presets-cloud.example.workers.dev".to_string()),
             keymap: HashMap::from([(r#"{"Named":"Tab"}"#.to_string(), "deck-switch".to_string())]),
         };
 
@@ -288,6 +298,7 @@ mod tests {
             PanelId::RemoteWs,
             PanelId::Streaming,
             PanelId::V4l2,
+            PanelId::CloudPresets,
             PanelId::About,
         ];
         for variant in variants {

@@ -33,6 +33,14 @@ pub const KICK_XSRF_TOKEN: &str = "kick-xsrf-token";
 /// Mirrors `secretsStore.getSecret('kick-cookies')` in `electron/main.cjs`.
 pub const KICK_COOKIES: &str = "kick-cookies";
 
+/// CloudPresets anonymous device identity token, sent as the `X-Cloud-
+/// Token` header on every request to the CloudPresets backend Worker.
+/// Mirrors the *key name* convention of `OpenDrop-VJ/src/lib/engine/
+/// cloud-presets.ts`'s `TOKEN_KEY = 'od-cloud-token'` (a `localStorage` key
+/// there, this OS keyring here): there is no Electron-side counterpart to
+/// mirror, this is a native-only feature.
+pub const CLOUD_PRESETS_TOKEN: &str = "cloud-presets-token";
+
 /// Retrieve a secret from the OS keyring.
 ///
 /// Returns `Ok(None)` when no secret is stored under `key` (a missing
@@ -64,10 +72,12 @@ pub fn clear_secret(key: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    /// The 5 key strings must exactly mirror the ones used by
+    /// The first 5 key strings must exactly mirror the ones used by
     /// `electron/secrets-store.cjs`'s callers in `electron/main.cjs`
-    /// (verified there, not invented). This assertion needs no keyring
-    /// backend, so it always runs.
+    /// (verified there, not invented); `CLOUD_PRESETS_TOKEN` has no
+    /// Electron-side counterpart (native-only feature, see its own doc
+    /// comment) and is just pinned against regression here. This
+    /// assertion needs no keyring backend, so it always runs.
     #[test]
     fn secret_key_constants_match_electron_reference() {
         assert_eq!(TWITCH_OAUTH_TOKEN, "twitch-oauth-token");
@@ -75,6 +85,7 @@ mod tests {
         assert_eq!(KICK_BEARER_TOKEN, "kick-bearer-token");
         assert_eq!(KICK_XSRF_TOKEN, "kick-xsrf-token");
         assert_eq!(KICK_COOKIES, "kick-cookies");
+        assert_eq!(CLOUD_PRESETS_TOKEN, "cloud-presets-token");
     }
 
     /// Exercises the real OS keyring end-to-end. Ignored by default: this

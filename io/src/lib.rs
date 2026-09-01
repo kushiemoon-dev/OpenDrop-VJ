@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod cloud_presets;
 pub mod command_names;
 pub mod kick;
 // Feature-gated on the `mod` declaration itself (not on `#[cfg]` inside

@@ -67,3 +67,15 @@ doit rester **absent de tout binaire empaqueté ou distribué par défaut**
 (voir la Phase 6 du plan): la feature `link` n'est destinée qu'à des
 builds locaux/optionnels assumant explicitement cette contamination de
 licence.
+
+## Sélecteur de fichier natif (`rfd`)
+
+Le panneau CloudPresets (`ui::cloud_presets`, bouton Upload) utilise `rfd`
+pour ouvrir un sélecteur de fichier natif. Sur Linux, le backend par défaut
+de `rfd` (features `xdg-portal` + `async-std`, pas `gtk3`) passe par
+xdg-desktop-portal via D-Bus (`ashpd`): aucune bibliothèque GTK3 requise au
+build ni au lien. À l'exécution, ce backend a en revanche besoin d'un
+service `xdg-desktop-portal` (+ son implémentation de portail, ex.
+`xdg-desktop-portal-gtk`/`-kde`/`-hyprland`) actif sur la session ; en son
+absence, le bouton Upload échoue silencieusement à ouvrir un sélecteur
+plutôt que de faire échouer le build.

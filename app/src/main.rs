@@ -1809,7 +1809,9 @@ fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> R
             // DisplayBuilder's picker callback must return a Config, not a
             // Result: an empty match here means the template's constraints
             // (see above) can't be satisfied on this driver at all.
-            configs.next().expect("EGL returned zero configs matching the WINDOW|PBUFFER/OpenGL/alpha8/depth0/stencil0 template")
+            configs.next().unwrap_or_else(|| {
+                panic!("EGL returned zero configs matching the WINDOW|PBUFFER template (requested api: {api:?}, alpha8/depth0/stencil0)")
+            })
         })
         .map_err(|e| format!("failed to bootstrap EGL display/config: {e}"))?;
     let window = window.ok_or_else(|| "DisplayBuilder did not create the requested window".to_string())?;
@@ -2004,7 +2006,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .map_err(|e| format!("control window has no raw handle: {e}"))?
         .as_raw();
     #[cfg(target_os = "windows")]
-    let context_api = ContextApi::Gles(Some(Version::new(2, 0)));
+    let context_api = ContextApi::Gles(None);
     #[cfg(not(target_os = "windows"))]
     let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
 

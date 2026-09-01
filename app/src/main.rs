@@ -1786,8 +1786,17 @@ impl ApplicationHandler for App {
 /// glutin-winit's DisplayBuilder (the only way to get the first window and
 /// the Config in one negotiation).
 fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> Result<(Window, Config), String> {
+    // ANGLE's EGL implementation on Windows only ever advertises GLES
+    // renderable-type bits (never desktop GL), so requesting Api::OPENGL
+    // there yields zero matching configs. Everywhere else glutin's EGL
+    // backend is fronting real desktop GL drivers, so keep requesting that.
+    #[cfg(target_os = "windows")]
+    let api = Api::GLES3;
+    #[cfg(not(target_os = "windows"))]
+    let api = Api::OPENGL;
+
     let template = ConfigTemplateBuilder::new()
-        .with_api(Api::OPENGL)
+        .with_api(api)
         .with_surface_type(ConfigSurfaceTypes::WINDOW | ConfigSurfaceTypes::PBUFFER)
         .with_alpha_size(8)
         .with_depth_size(0)
@@ -1994,10 +2003,15 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .window_handle()
         .map_err(|e| format!("control window has no raw handle: {e}"))?
         .as_raw();
+    #[cfg(target_os = "windows")]
+    let context_api = ContextApi::Gles(Some(Version::new(3, 0)));
+    #[cfg(not(target_os = "windows"))]
+    let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
+
     let ctx_attrs = ContextAttributesBuilder::new()
         .with_debug(cfg!(debug_assertions))
         .with_profile(GlProfile::Core)
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_context_api(context_api)
         .build(Some(raw_window_handle));
 
     // Anchor context: created here, converted to PossiblyCurrent, but not

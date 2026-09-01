@@ -33,13 +33,16 @@
 //! Preset format: cloud presets are Butterchurn JSON (`cloud-presets.ts`'s
 //! `parsePresetFile` doc comment: "the uploaded file must already be in
 //! Butterchurn format"), the web engine's own preset format: not this
-//! native app's `.milk`/projectM format. Whether/how a downloaded
-//! Butterchurn JSON preset could ever be converted into something
-//! projectM's `.milk` loader accepts is unverified (the plan's Override 4
-//! says so explicitly), so `Download` here only writes the raw JSON to a
-//! local cache file; it does not attempt to insert anything into `Show::
-//! preset_catalog` or make the download playable on a deck: seeing the
-//! JSON's on-disk path is as far as this task goes.
+//! native app's `.milk`/projectM format. This app's loader only reaches
+//! projectM through `projectm_load_preset_file`/`projectm_load_preset_data`
+//! (both take `.milk` text), and no Butterchurn->`.milk` converter exists
+//! or is scoped anywhere in this 14-task plan: confirmed, not merely
+//! unverified; building one is explicitly out of scope for this step. So
+//! `Download` here only writes the raw JSON to a local cache file; it does
+//! not attempt to insert anything into `Show::preset_catalog` or make the
+//! download playable on a deck. `ui::cloud_presets` (the panel) surfaces
+//! this gap directly to the end user (a `warn_banner` above the preset
+//! list), not just here.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -438,10 +441,18 @@ async fn delete_with_token(base_url: &str, id: &str) -> Result<(), String> {
 
 async fn download_with_token(base_url: String, id: String) -> Result<PathBuf, String> {
     let token = ensure_token()?;
+    download_and_cache(base_url, token, id, cloud_presets_cache_dir()).await
+}
+
+/// Downloads preset `id`'s raw JSON and writes it to `<cache_dir>/<id>.json`
+///: split out from `download_with_token` so tests can exercise this
+/// against a real mock server with a fixed token and a scratch directory,
+/// without touching the real OS keyring (`ensure_token`) or the real cache
+/// dir (`cloud_presets_cache_dir`).
+async fn download_and_cache(base_url: String, token: String, id: String, cache_dir: PathBuf) -> Result<PathBuf, String> {
     let json_text = CloudPresetsClient::new(base_url, token).get(&id).await?;
-    let dir = cloud_presets_cache_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create cache dir: {e}"))?;
-    let path = dir.join(format!("{id}.json"));
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("failed to create cache dir: {e}"))?;
+    let path = cache_dir.join(format!("{id}.json"));
     std::fs::write(&path, &json_text).map_err(|e| format!("failed to write cache file: {e}"))?;
     Ok(path)
 }
@@ -482,8 +493,15 @@ fn generate_token() -> String {
 /// rather than shared since this crate can't depend on `app` (wrong
 /// direction) and `app`'s version isn't `pub`.
 fn cloud_presets_cache_dir() -> PathBuf {
-    let xdg = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from);
-    let home_cache = std::env::var_os("HOME").map(PathBuf::from).map(|h| h.join(".cache"));
+    cloud_presets_cache_dir_from(std::env::var_os("XDG_CACHE_HOME"), std::env::var_os("HOME"))
+}
+
+/// The env-reading half of `cloud_presets_cache_dir`, split out so the
+/// fallback order is testable without mutating process-global environment
+/// state: same split as `app::thumbnail_cache_dir_from`.
+fn cloud_presets_cache_dir_from(xdg_cache_home: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> PathBuf {
+    let xdg = xdg_cache_home.map(PathBuf::from);
+    let home_cache = home.map(PathBuf::from).map(|h| h.join(".cache"));
     xdg.into_iter()
         .chain(home_cache)
         .find(|p| p.is_absolute())
@@ -680,6 +698,94 @@ mod tests {
             let err = client.get("does-not-exist").await.unwrap_err();
             assert_eq!(err, "preset not found");
         });
+    }
+
+    /// Scratch directory for the `download_and_cache` tests below: same
+    /// pid-suffixed-under-`temp_dir` convention as `app/src/config.rs`'s
+    /// `save_then_load_round_trips_through_the_real_filesystem`, kept
+    /// distinct per test (suffix) so the two tests can't collide.
+    fn scratch_cache_dir(suffix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("opendrop-io-test-cloud-presets-cache-{}-{suffix}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn download_and_cache_writes_the_raw_json_to_the_given_cache_dir() {
+        block_on(async {
+            let backend = MockBackend::default();
+            backend.0.lock().unwrap().data.insert("id-1".to_string(), serde_json::json!({"shapes": []}));
+            let base_url = start_mock_server(backend).await;
+            let cache_dir = scratch_cache_dir("hit");
+
+            let path = download_and_cache(base_url, "t".to_string(), "id-1".to_string(), cache_dir.clone()).await.unwrap();
+
+            assert_eq!(path, cache_dir.join("id-1.json"));
+            let written = std::fs::read_to_string(&path).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&written).unwrap();
+            assert_eq!(value, serde_json::json!({"shapes": []}));
+
+            let _ = std::fs::remove_dir_all(&cache_dir);
+        });
+    }
+
+    #[test]
+    fn download_and_cache_surfaces_a_missing_id_as_an_error_without_writing_anything() {
+        block_on(async {
+            let base_url = start_mock_server(MockBackend::default()).await;
+            let cache_dir = scratch_cache_dir("miss");
+
+            let err = download_and_cache(base_url, "t".to_string(), "does-not-exist".to_string(), cache_dir.clone()).await.unwrap_err();
+
+            assert_eq!(err, "preset not found");
+            assert!(!cache_dir.exists(), "must not create the cache dir on a failed download");
+        });
+    }
+
+    mod cloud_presets_cache_dir_tests {
+        use super::*;
+
+        // Only used by the POSIX-only fixtures below; gated the same way
+        // `app::thumbnail_cache_dir_tests` gates its own `os` helper, so
+        // it doesn't trip an unused-function warning on Windows.
+        #[cfg(not(target_os = "windows"))]
+        fn os(s: &str) -> Option<std::ffi::OsString> {
+            Some(std::ffi::OsString::from(s))
+        }
+
+        // Mirrors `app::thumbnail_cache_dir_tests` exactly (same fallback
+        // logic, deliberately duplicated: see `cloud_presets_cache_dir`'s
+        // doc comment): POSIX-absolute literals exercise the
+        // `.is_absolute()` branch, which requires a drive/UNC prefix on
+        // Windows, so these 3 are POSIX-only.
+        #[test]
+        #[cfg(not(target_os = "windows"))]
+        fn prefers_xdg_cache_home() {
+            let dir = cloud_presets_cache_dir_from(os("/xdg"), os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/xdg/opendrop/cloud-presets"));
+        }
+
+        #[test]
+        #[cfg(not(target_os = "windows"))]
+        fn falls_back_to_home_dot_cache() {
+            let dir = cloud_presets_cache_dir_from(None, os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/cloud-presets"));
+        }
+
+        #[test]
+        #[cfg(not(target_os = "windows"))]
+        fn ignores_a_relative_xdg_cache_home() {
+            let dir = cloud_presets_cache_dir_from(os("relative/cache"), os("/home/u"));
+            assert_eq!(dir, PathBuf::from("/home/u/.cache/opendrop/cloud-presets"));
+        }
+
+        #[test]
+        fn never_lands_directly_in_a_shared_tmp_root() {
+            // Even the last-resort branch nests under its own subdirectory
+            // rather than a bare, world-predictable path.
+            let dir = cloud_presets_cache_dir_from(None, None);
+            assert!(dir.ends_with("opendrop/cloud-presets"));
+        }
     }
 
     /// Full thread-wiring smoke test: `spawn()`, send `List`, poll

@@ -169,10 +169,15 @@ pub fn create_one_deck_context(
     h: u32,
     debug_label: &'static str,
 ) -> Result<Deck, String> {
+    #[cfg(target_os = "windows")]
+    let context_api = ContextApi::Gles(Some(Version::new(3, 0)));
+    #[cfg(not(target_os = "windows"))]
+    let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
+
     let deck_ctx_attrs = ContextAttributesBuilder::new()
         .with_debug(cfg!(debug_assertions))
         .with_profile(GlProfile::Core)
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_context_api(context_api)
         .with_sharing(anchor)
         .build(None);
     let not_current = unsafe { display.create_context(config, &deck_ctx_attrs) }

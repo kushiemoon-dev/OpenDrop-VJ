@@ -2351,7 +2351,28 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     })
 }
 
+// projectM only ships `projectm_set_log_callback` from 4.2.0 onward (the
+// pinned Windows/GLES overlay port); the Arch `projectm-4.pc` package this
+// links against on Linux is still 4.1.6, so this diagnostic hook is
+// Windows-only. Without it, every internal GLResolver/GladLoader failure
+// reason (e.g. "no current GL context") is silently discarded, and
+// `projectm_create()` returning NULL carries no explanation at all.
+#[cfg(target_os = "windows")]
+unsafe extern "C" fn log_projectm_message(
+    message: *const std::os::raw::c_char,
+    log_level: opendrop_engine::ffi::projectm_log_level,
+    _user_data: *mut std::os::raw::c_void,
+) {
+    let msg = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+    eprintln!("[projectM level={log_level}] {msg}");
+}
+
 fn main() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        opendrop_engine::ffi::projectm_set_log_callback(Some(log_projectm_message), false, std::ptr::null_mut());
+    }
+
     // Hidden subcommands, both of them this same binary re-invoked as a
     // child process by the parent app, both of them `-> !`. Neither is a
     // user-facing CLI: the parent builds these argv lines itself, and the

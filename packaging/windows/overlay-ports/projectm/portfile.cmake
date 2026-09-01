@@ -4,8 +4,6 @@ vcpkg_from_github(
     REF "88f23c76743a38c6d8456a8c354c62186270f661"
     SHA512 "7d7b8bc58c2d0f63c06f93c612540dfa91c0d95e5838c6ee37d455dc8fa95b86a63bb0e6594a25ec5ae746a42368fc6da71ed0996373915a620900f173f75fb5"
     HEAD_REF master
-    PATCHES
-        macos-pkgconfig.patch
 )
 
 vcpkg_check_features(OUT_FEATURE_OPTIONS FEATURE_OPTIONS

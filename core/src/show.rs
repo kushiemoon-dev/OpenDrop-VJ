@@ -25,6 +25,7 @@ use crate::commands::{CommandContext, CommandId, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
+use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
 /// slot never shows, regardless of crossfader position.
@@ -88,6 +89,22 @@ pub struct Show {
     /// The in-progress recall, if any: armed by `recall_snapshot`,
     /// advanced each render tick by `tick_recall`.
     pub active_recall: Option<ActiveRecall>,
+    /// Up to 8 keyframes (Step 5 of the Phase 8 plan) sequencing playback
+    /// across the existing snapshot slots. Kept sorted by `time_sec` by
+    /// the timeline panel (`app::ui::timeline`): `timeline_values_at`
+    /// assumes sorted input.
+    pub timeline_keyframes: Vec<TimelineKeyframe>,
+    /// Whether the timeline loop is currently advancing. Toggled through
+    /// `CommandContext::toggle_timeline` (keyboard/MIDI/OSC/remote-ws
+    /// parity), advanced each render tick by `tick_timeline`.
+    pub timeline_playing: bool,
+    /// Seconds elapsed since timeline playback last started, accumulated
+    /// by `tick_timeline` from caller-supplied dt: same "no wall clock of
+    /// its own" convention as `tick_recall` (see that method's doc
+    /// comment). Reset to 0 by `toggle_timeline` on every transition to
+    /// `true`, so play always restarts at the beginning of the current
+    /// loop cycle rather than resuming stale progress or jumping in time.
+    timeline_elapsed_sec: f64,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -150,6 +167,9 @@ impl Default for Show {
             snapshot_slots: std::array::from_fn(|_| None),
             snapshot_recall_duration_sec: 1.0,
             active_recall: None,
+            timeline_keyframes: Vec::new(),
+            timeline_playing: false,
+            timeline_elapsed_sec: 0.0,
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -446,6 +466,27 @@ impl Show {
         self.active_recall = next;
         values.into_iter().collect()
     }
+
+    /// Advances timeline playback by `dt_sec` (same caller-supplied-dt
+    /// convention as `tick_recall`/`tick_playlists` above) and returns the
+    /// interpolated `(CommandId, value)` pairs for this tick: dispatching
+    /// them is the caller's job (`app::about_to_wait`, through
+    /// `CommandRegistry::dispatch`), same keyboard/MIDI/OSC/remote-ws
+    /// parity reasoning as `tick_recall`. Returns an empty `Vec` when not
+    /// playing, or when there are fewer than 2 keyframes (nothing to loop
+    /// over: `timeline_loop_duration` is 0 in that case).
+    pub fn tick_timeline(&mut self, dt_sec: f64) -> Vec<(CommandId, f64)> {
+        if !self.timeline_playing {
+            return Vec::new();
+        }
+        let duration = timeline_loop_duration(&self.timeline_keyframes);
+        if duration <= 0.0 {
+            return Vec::new();
+        }
+        self.timeline_elapsed_sec += dt_sec;
+        let t = self.timeline_elapsed_sec % duration;
+        timeline_values_at(&self.timeline_keyframes, &self.snapshot_slots, t).into_iter().collect()
+    }
 }
 
 /// `CommandId`s the snapshot panel's Save button captures and a recall
@@ -636,6 +677,13 @@ impl CommandContext for Show {
         let start_values: HashMap<CommandId, f64> =
             snapshot.values.keys().filter_map(|&id| self.get_command_value(id).map(|v| (id, v))).collect();
         self.active_recall = Some(ActiveRecall { slot, start_values, elapsed_sec: 0.0 });
+    }
+
+    fn toggle_timeline(&mut self) {
+        self.timeline_playing = !self.timeline_playing;
+        if self.timeline_playing {
+            self.timeline_elapsed_sec = 0.0;
+        }
     }
 }
 
@@ -1114,6 +1162,93 @@ mod tests {
             let values = show.tick_recall(0.1);
             assert!(values.is_empty());
             assert!(show.active_recall.is_none());
+        }
+    }
+
+    mod toggle_timeline {
+        use super::*;
+
+        #[test]
+        fn toggles_playing_on_and_off() {
+            let mut show = Show::default();
+            assert!(!show.timeline_playing);
+            show.toggle_timeline();
+            assert!(show.timeline_playing);
+            show.toggle_timeline();
+            assert!(!show.timeline_playing);
+        }
+
+        #[test]
+        fn starting_playback_resets_elapsed_progress_to_the_beginning_of_the_cycle() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline(); // start playing
+            let mid = show.tick_timeline(5.0); // halfway through the loop
+            assert!((mid.iter().find(|(id, _)| *id == CommandId::ColorHueA).unwrap().1 - 0.5).abs() < 1e-9);
+
+            show.toggle_timeline(); // pause
+            show.toggle_timeline(); // resume: must restart at the beginning, not jump back to 5.0
+            let restarted = show.tick_timeline(0.0);
+            assert_eq!(restarted, vec![(CommandId::ColorHueA, 0.0)]);
+        }
+
+        #[test]
+        fn keyboard_dispatch_through_the_registry_toggles_playing() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            reg.dispatch(CommandId::TimelineToggle, 1.0, &mut show);
+            assert!(show.timeline_playing);
+        }
+    }
+
+    mod tick_timeline {
+        use super::*;
+
+        #[test]
+        fn not_playing_returns_no_values() {
+            let keyframes = vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+            let mut show = Show { timeline_keyframes: keyframes, ..Default::default() };
+            assert!(show.tick_timeline(1.0).is_empty());
+        }
+
+        #[test]
+        fn fewer_than_2_keyframes_returns_no_values_even_while_playing() {
+            let keyframes = vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }];
+            let mut show = Show { timeline_keyframes: keyframes, ..Default::default() };
+            show.toggle_timeline();
+            assert!(show.tick_timeline(1.0).is_empty());
+        }
+
+        #[test]
+        fn accumulates_dt_across_multiple_ticks() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline();
+            show.tick_timeline(3.0);
+            let values = show.tick_timeline(2.0); // total elapsed 5.0 -> midpoint
+            assert!((values.iter().find(|(id, _)| *id == CommandId::ColorHueA).unwrap().1 - 0.5).abs() < 1e-9);
+        }
+
+        #[test]
+        fn loops_back_to_the_start_after_the_full_duration() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline();
+            let values = show.tick_timeline(12.0); // wraps past the 10s loop, t = 2.0
+            let expected = timeline_values_at(&show.timeline_keyframes, &show.snapshot_slots, 2.0);
+            assert_eq!(values.into_iter().collect::<HashMap<_, _>>(), expected);
         }
     }
 

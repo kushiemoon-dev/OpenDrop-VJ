@@ -7,6 +7,7 @@ pub mod color;
 pub mod composite;
 pub mod ctx;
 pub mod decks;
+pub mod keymap;
 // Feature-gated on the `mod` declaration itself, mirroring `opendrop_io
 // ::link`'s own gating: with the `link` feature off (the default), this
 // file is never parsed. See Task 18's brief and PLAN.md's Risque 5.

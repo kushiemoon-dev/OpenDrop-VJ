@@ -75,6 +75,7 @@ pub(crate) enum PanelId {
     Audio,
     Quality,
     Color,
+    Composite,
     Output,
     Midi,
     NdiIn,

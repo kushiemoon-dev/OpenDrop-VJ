@@ -34,6 +34,11 @@ pub trait CommandContext {
     fn set_color_bright_b(&mut self, v: f64);
     fn set_color_contrast_b(&mut self, v: f64);
     fn set_color_invert_b(&mut self, v: f64);
+    fn set_composite_blend(&mut self, slot: usize, v: f64);
+    fn set_composite_luma_black(&mut self, slot: usize, v: f64);
+    fn set_composite_luma_white(&mut self, slot: usize, v: f64);
+    fn set_composite_color_hue(&mut self, slot: usize, v: f64);
+    fn set_composite_color_tol(&mut self, slot: usize, v: f64);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -402,26 +407,26 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::ColorBrightB, label: "Brightness B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_bright_b(v) },
         Command { id: CommandId::ColorContrastB, label: "Contrast B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_contrast_b(v) },
         Command { id: CommandId::ColorInvertB, label: "Invert B", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_invert_b(v) },
-        Command { id: CommandId::CompositeBlend0, label: "Blend 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::CompositeBlend1, label: "Blend 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::CompositeBlend2, label: "Blend 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::CompositeBlend3, label: "Blend 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyBlack0, label: "Luma Black 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyBlack1, label: "Luma Black 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyBlack2, label: "Luma Black 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyBlack3, label: "Luma Black 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyWhite0, label: "Luma White 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyWhite1, label: "Luma White 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyWhite2, label: "Luma White 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::LumakeyWhite3, label: "Luma White 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyHue0, label: "Key Hue 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyHue1, label: "Key Hue 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyHue2, label: "Key Hue 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyHue3, label: "Key Hue 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyTolerance0, label: "Key Tolerance 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyTolerance1, label: "Key Tolerance 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyTolerance2, label: "Key Tolerance 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::ColorkeyTolerance3, label: "Key Tolerance 3", kind: CommandKind::Range, run: noop },
+        Command { id: CommandId::CompositeBlend0, label: "Blend 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_blend(0, v) },
+        Command { id: CommandId::CompositeBlend1, label: "Blend 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_blend(1, v) },
+        Command { id: CommandId::CompositeBlend2, label: "Blend 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_blend(2, v) },
+        Command { id: CommandId::CompositeBlend3, label: "Blend 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_blend(3, v) },
+        Command { id: CommandId::LumakeyBlack0, label: "Luma Black 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_black(0, v) },
+        Command { id: CommandId::LumakeyBlack1, label: "Luma Black 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_black(1, v) },
+        Command { id: CommandId::LumakeyBlack2, label: "Luma Black 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_black(2, v) },
+        Command { id: CommandId::LumakeyBlack3, label: "Luma Black 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_black(3, v) },
+        Command { id: CommandId::LumakeyWhite0, label: "Luma White 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_white(0, v) },
+        Command { id: CommandId::LumakeyWhite1, label: "Luma White 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_white(1, v) },
+        Command { id: CommandId::LumakeyWhite2, label: "Luma White 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_white(2, v) },
+        Command { id: CommandId::LumakeyWhite3, label: "Luma White 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_luma_white(3, v) },
+        Command { id: CommandId::ColorkeyHue0, label: "Key Hue 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_hue(0, v) },
+        Command { id: CommandId::ColorkeyHue1, label: "Key Hue 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_hue(1, v) },
+        Command { id: CommandId::ColorkeyHue2, label: "Key Hue 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_hue(2, v) },
+        Command { id: CommandId::ColorkeyHue3, label: "Key Hue 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_hue(3, v) },
+        Command { id: CommandId::ColorkeyTolerance0, label: "Key Tolerance 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(0, v) },
+        Command { id: CommandId::ColorkeyTolerance1, label: "Key Tolerance 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(1, v) },
+        Command { id: CommandId::ColorkeyTolerance2, label: "Key Tolerance 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(2, v) },
+        Command { id: CommandId::ColorkeyTolerance3, label: "Key Tolerance 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_composite_color_tol(3, v) },
         Command { id: CommandId::RecallSnapshot0, label: "Recall Snapshot 0", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::RecallSnapshot1, label: "Recall Snapshot 1", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::RecallSnapshot2, label: "Recall Snapshot 2", kind: CommandKind::Trigger, run: noop },
@@ -619,6 +624,11 @@ mod tests {
         color_bright_b: f64,
         color_contrast_b: f64,
         color_invert_b: f64,
+        composite_blend_calls: Vec<(usize, f64)>,
+        composite_luma_black_calls: Vec<(usize, f64)>,
+        composite_luma_white_calls: Vec<(usize, f64)>,
+        composite_color_hue_calls: Vec<(usize, f64)>,
+        composite_color_tol_calls: Vec<(usize, f64)>,
     }
 
     impl CommandContext for MockCtx {
@@ -684,6 +694,21 @@ mod tests {
         }
         fn set_color_invert_b(&mut self, v: f64) {
             self.color_invert_b = v;
+        }
+        fn set_composite_blend(&mut self, slot: usize, v: f64) {
+            self.composite_blend_calls.push((slot, v));
+        }
+        fn set_composite_luma_black(&mut self, slot: usize, v: f64) {
+            self.composite_luma_black_calls.push((slot, v));
+        }
+        fn set_composite_luma_white(&mut self, slot: usize, v: f64) {
+            self.composite_luma_white_calls.push((slot, v));
+        }
+        fn set_composite_color_hue(&mut self, slot: usize, v: f64) {
+            self.composite_color_hue_calls.push((slot, v));
+        }
+        fn set_composite_color_tol(&mut self, slot: usize, v: f64) {
+            self.composite_color_tol_calls.push((slot, v));
         }
     }
 
@@ -890,6 +915,22 @@ mod tests {
                 assert!(cmd.is_some(), "missing: {id:?}");
                 assert_eq!(cmd.unwrap().kind, CommandKind::Range, "wrong kind: {id:?}");
             }
+        }
+
+        #[test]
+        fn composite_range_commands_call_the_correct_setter_with_the_slot_and_value() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::CompositeBlend2, 0.75, &mut ctx);
+            assert_eq!(ctx.composite_blend_calls, vec![(2, 0.75)]);
+            reg.dispatch(CommandId::LumakeyBlack1, 0.3, &mut ctx);
+            assert_eq!(ctx.composite_luma_black_calls, vec![(1, 0.3)]);
+            reg.dispatch(CommandId::LumakeyWhite3, 0.9, &mut ctx);
+            assert_eq!(ctx.composite_luma_white_calls, vec![(3, 0.9)]);
+            reg.dispatch(CommandId::ColorkeyHue0, 0.2, &mut ctx);
+            assert_eq!(ctx.composite_color_hue_calls, vec![(0, 0.2)]);
+            reg.dispatch(CommandId::ColorkeyTolerance3, 0.6, &mut ctx);
+            assert_eq!(ctx.composite_color_tol_calls, vec![(3, 0.6)]);
         }
     }
 

@@ -15,7 +15,7 @@ use crate::beat_trigger::{
     default_beat_trigger_config, default_volume_peak_state, detect_volume_peak, should_trigger_on_beat,
     BeatTriggerConfig, BeatTriggerMode, VolumePeakState,
 };
-use crate::blend::{ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use crate::blend::{blend_mode_from_value01, ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use crate::clock::Clock;
 use crate::commands::{CommandContext, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
@@ -486,11 +486,32 @@ impl CommandContext for Show {
     fn set_color_invert_b(&mut self, v: f64) {
         self.color_params_b.invert = v.clamp(0.0, 1.0);
     }
+
+    fn set_composite_blend(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].blend = blend_mode_from_value01(v);
+    }
+
+    fn set_composite_luma_black(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].luma_black = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_luma_white(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].luma_white = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_color_hue(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].color_hue = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_color_tol(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].color_tol = v.clamp(0.0, 1.0);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blend::BlendMode;
     use crate::commands::{create_default_registry, CommandId};
 
     mod bus_gain {
@@ -786,6 +807,52 @@ mod tests {
             assert_eq!(show.color_params_b.invert, 1.0);
             show.set_color_invert_b(-0.5);
             assert_eq!(show.color_params_b.invert, 0.0);
+        }
+
+        #[test]
+        fn set_composite_blend_decodes_the_value_into_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_blend(2, 0.75); // bucket 3 -> Multiply, see blend_mode_from_value01
+            assert_eq!(show.slot_composites[2].blend, BlendMode::Multiply);
+            // Other slots untouched.
+            assert_eq!(show.slot_composites[0].blend, BlendMode::Normal);
+        }
+
+        #[test]
+        fn set_composite_luma_black_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_black(1, 1.5);
+            assert_eq!(show.slot_composites[1].luma_black, 1.0);
+            show.set_composite_luma_black(1, -0.5);
+            assert_eq!(show.slot_composites[1].luma_black, 0.0);
+            assert_eq!(show.slot_composites[0].luma_black, DEFAULT_SLOT_COMPOSITE.luma_black);
+        }
+
+        #[test]
+        fn set_composite_luma_white_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_white(3, 1.5);
+            assert_eq!(show.slot_composites[3].luma_white, 1.0);
+            show.set_composite_luma_white(3, -0.5);
+            assert_eq!(show.slot_composites[3].luma_white, 0.0);
+        }
+
+        #[test]
+        fn set_composite_color_hue_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_color_hue(0, 1.5);
+            assert_eq!(show.slot_composites[0].color_hue, 1.0);
+            show.set_composite_color_hue(0, -0.5);
+            assert_eq!(show.slot_composites[0].color_hue, 0.0);
+        }
+
+        #[test]
+        fn set_composite_color_tol_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_color_tol(3, 1.5);
+            assert_eq!(show.slot_composites[3].color_tol, 1.0);
+            show.set_composite_color_tol(3, -0.5);
+            assert_eq!(show.slot_composites[3].color_tol, 0.0);
         }
     }
 

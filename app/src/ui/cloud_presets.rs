@@ -11,11 +11,17 @@
 //!
 //! No "Load onto deck" here, unlike `SidebarCloudPresets.svelte`'s
 //! `onLoadPreset`: cloud presets are Butterchurn JSON (the web engine's
-//! own format), not this native app's `.milk`/projectM format, and
-//! whether/how one could ever be converted is explicitly unverified by
-//! the plan (Override 4): see `opendrop_io::cloud_presets`'s module doc
-//! comment. "Download" here only writes the raw JSON to a local cache
-//! file and reports the path; it does not touch `Show::preset_catalog`.
+//! own format), not this native app's `.milk`/projectM format: this
+//! app's loader only reaches projectM through
+//! `projectm_load_preset_file`/`projectm_load_preset_data` (both `.milk`
+//! text), and no Butterchurn->`.milk` converter exists or is scoped
+//! anywhere in this 14-task plan (confirmed, not merely unverified:
+//! building one is explicitly out of scope for this step; see
+//! `opendrop_io::cloud_presets`'s module doc comment). "Download" here
+//! only writes the raw JSON to a local cache file and reports the path;
+//! it does not touch `Show::preset_catalog`. The format gap is surfaced
+//! to the end user directly in this panel (the `warn_banner` above the
+//! preset list), not just in this doc comment.
 //!
 //! No `window.confirm()` equivalent on Delete, unlike
 //! `SidebarCloudPresets.svelte`'s `handleDelete`: this codebase has no
@@ -102,8 +108,20 @@ pub fn show(
         }
     });
 
+    // Makes the format gap visible in the UI itself, not just in dev-facing
+    // doc comments: same `warn_banner` convention `ui::streaming` uses for
+    // Kick's "unofficial protocol" disclaimer: a real, non-error caveat the
+    // user needs up front, before they click Download expecting a preset
+    // to show up on a deck.
+    widgets::warn_banner(
+        ui,
+        "Cloud presets are Butterchurn JSON (the retired web app's format). This app's preset \
+         engine (projectM) only loads .milk files, so Download saves the raw JSON to a local \
+         cache file for backup/inspection: it can't be loaded onto a deck here.",
+    );
+
     if let Some(path) = snapshot.last_downloaded.as_ref() {
-        ui.label(format!("Downloaded to {}", path.display()));
+        ui.label(format!("Downloaded (not deck-loadable, see above) to {}", path.display()));
     }
 
     if snapshot.entries.is_empty() {

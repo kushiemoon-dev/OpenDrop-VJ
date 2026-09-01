@@ -45,6 +45,10 @@ pub struct Deck {
     width: u32,
     height: u32,
     handle: ffi::projectm_handle,
+    /// What this instance's `fps` held before `set_param` ever hijacked it.
+    /// Captured at construction because `projectm_get_fps` stops being able to
+    /// answer the question the moment the side channel is in use.
+    default_fps: i32,
     render_timer: PassTimer,
     copy_timer: PassTimer,
 }
@@ -63,8 +67,17 @@ impl Deck {
     }
 
     /// Loads preset text held in memory instead of from a path: the patched
-    /// output of `preset_patch::patch_preset`. Same passage point rules as
-    /// `load_preset`: this deck's context must be current.
+    /// output of `preset_patch::patch_preset`. Same context rule as
+    /// `load_preset`, this deck's context must be current.
+    ///
+    /// **This bypasses Phase 4's preflight validation.** `load_preset` is the
+    /// single passage point for *files*, and preflight validates a file in an
+    /// isolated child process before it can reach a live deck. Text arriving
+    /// here has been through `patch_preset` since, so what actually gets
+    /// compiled was never seen by preflight. Callers must still preflight the
+    /// pre-patch file; the patch step itself is treated as trusted because it
+    /// is this crate's own deterministic, unit-tested transform, not
+    /// user-supplied content.
     pub fn load_preset_data(&self, text: &str, smooth_transition: bool) -> Result<(), String> {
         let c_text = CString::new(text)
             .map_err(|e| format!("patched preset text is not a valid C string: {e}"))?;
@@ -77,8 +90,22 @@ impl Deck {
     /// enough to call every frame; see `engine::preset_patch` for why it goes
     /// through `projectm_set_fps` and what the preset must be patched with
     /// first.
+    ///
+    /// **Sticky.** The written word is instance state that outlives preset
+    /// loads, so from the first call onwards every preset loaded on this deck
+    /// must be a patched one (`load_preset_data`), or its own `fps` reads see
+    /// the raw code word. Call [`Deck::reset_param_channel`] before going back
+    /// to plain `load_preset`.
     pub fn set_param(&self, index: u16, value: f64) {
         unsafe { ffi::projectm_set_fps(self.handle, preset_patch::encode_param(index, value)) };
+    }
+
+    /// Puts `fps` back to the value this instance started with, undoing
+    /// `set_param`'s hijack. Required before loading an unpatched preset on a
+    /// deck that has been modulated, otherwise that preset's own
+    /// framerate-dependent physics reads a ~10^7 code word.
+    pub fn reset_param_channel(&self) {
+        unsafe { ffi::projectm_set_fps(self.handle, self.default_fps) };
     }
 
     /// Sets the soft-cut transition duration in seconds.
@@ -234,7 +261,9 @@ pub fn create_one_deck_context(
     let render_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} render_timer: {e}"))?;
     let copy_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} copy_timer: {e}"))?;
 
-    Ok(Deck { context, surface, gl, texture, width: w, height: h, handle, render_timer, copy_timer })
+    let default_fps = unsafe { ffi::projectm_get_fps(handle) };
+
+    Ok(Deck { context, surface, gl, texture, width: w, height: h, handle, default_fps, render_timer, copy_timer })
 }
 
 /// Copies a `w` x `h` region of this context's own pbuffer (FBO 0) into its

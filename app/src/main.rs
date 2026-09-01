@@ -2005,8 +2005,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .window_handle()
         .map_err(|e| format!("control window has no raw handle: {e}"))?
         .as_raw();
+    // See engine/src/deck.rs's anchor-context creation for why this asks
+    // for GLES 3.1 explicitly instead of leaving it to `Gles(None)`.
     #[cfg(target_os = "windows")]
-    let context_api = ContextApi::Gles(None);
+    let context_api = ContextApi::Gles(Some(Version::new(3, 1)));
     #[cfg(not(target_os = "windows"))]
     let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
 

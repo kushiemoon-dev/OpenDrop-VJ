@@ -18,7 +18,7 @@ use crate::timing::PassTimer;
 pub const COMP_W: u32 = 1920;
 pub const COMP_H: u32 = 1080;
 
-const VERTEX_SRC: &str = r#"#version 330 core
+const VERTEX_SRC: &str = r#"#version 300 es
 const vec2 verts[6] = vec2[6](vec2(-1.0,-1.0), vec2(1.0,-1.0), vec2(-1.0,1.0), vec2(-1.0,1.0), vec2(1.0,-1.0), vec2(1.0,1.0));
 out vec2 vUV;
 void main() {
@@ -28,7 +28,9 @@ void main() {
 }
 "#;
 
-const FRAGMENT_SRC: &str = r#"#version 330 core
+const FRAGMENT_SRC: &str = r#"#version 300 es
+precision highp float;
+precision highp sampler2D;
 uniform sampler2D uTex;
 uniform bool uMultiply;
 uniform float uOpacity;

@@ -100,7 +100,7 @@ pub fn restore(gl: &glow::Context, s: &GlState) {
         gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, s.draw_framebuffer);
         gl.bind_framebuffer(glow::READ_FRAMEBUFFER, s.read_framebuffer);
         gl.read_buffer(s.read_buffer as u32);
-        gl.draw_buffer(s.draw_buffer as u32);
+        gl.draw_buffers(&[s.draw_buffer as u32]);
         gl.active_texture(s.active_texture as u32);
         gl.bind_texture(glow::TEXTURE_2D, s.texture_binding_2d);
         if s.blend_enabled {

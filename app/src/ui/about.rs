@@ -49,6 +49,12 @@ pub fn show(ui: &mut egui::Ui) {
         "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
     );
     ui.label("Licensed under the SIL Open Font License 1.1.");
+
+    ui.separator();
+
+    ui.label("OpenGL ES/EGL provided on Windows by ANGLE, dynamically linked.");
+    ui.hyperlink_to("ANGLE", "https://github.com/google/angle");
+    ui.label("Licensed under BSD 3-Clause.");
 }
 
 #[cfg(test)]

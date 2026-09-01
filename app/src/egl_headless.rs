@@ -1,6 +1,7 @@
 //! Minimal headless EGL bootstrap for this binary's child-process
-//! subcommands: an EGL display, a core-profile OpenGL 3.3 context, and a
-//! pbuffer to render into, with no window and no winit/glutin involvement.
+//! subcommands: an EGL display, a pbuffer to render into, and a GL context
+//! (a core-profile OpenGL 3.3 context on non-Windows, a GLES 3.0 context on
+//! Windows via ANGLE), with no window and no winit/glutin involvement.
 //!
 //! Two callers, both of them child processes re-invoked from the parent
 //! app: `preflight::run_preflight_check` (`--preflight-check`) and
@@ -18,16 +19,30 @@ use khronos_egl as egl;
 pub type Egl = egl::DynamicInstance<egl::Latest>;
 
 pub fn init_egl() -> (Egl, egl::Display, egl::Config) {
+    #[cfg(target_os = "windows")]
+    let inst = unsafe { egl::DynamicInstance::<egl::Latest>::load_required_from_filename("libEGL.dll") }
+        .expect("failed to load libEGL.dll");
+    #[cfg(not(target_os = "windows"))]
     let inst = unsafe { egl::DynamicInstance::<egl::Latest>::load_required() }.expect("failed to load libEGL.so.1");
+
     let display = unsafe { inst.get_display(egl::DEFAULT_DISPLAY) }.expect("eglGetDisplay failed");
     inst.initialize(display).expect("eglInitialize failed");
+
+    #[cfg(target_os = "windows")]
+    inst.bind_api(egl::OPENGL_ES_API).expect("eglBindAPI(OPENGL_ES_API) failed");
+    #[cfg(not(target_os = "windows"))]
     inst.bind_api(egl::OPENGL_API).expect("eglBindAPI(OPENGL_API) failed");
+
+    #[cfg(target_os = "windows")]
+    let renderable_type = egl::OPENGL_ES3_BIT;
+    #[cfg(not(target_os = "windows"))]
+    let renderable_type = egl::OPENGL_BIT;
 
     let config_attribs = [
         egl::SURFACE_TYPE,
         egl::PBUFFER_BIT,
         egl::RENDERABLE_TYPE,
-        egl::OPENGL_BIT,
+        renderable_type,
         egl::RED_SIZE,
         8,
         egl::GREEN_SIZE,
@@ -48,6 +63,26 @@ pub fn init_egl() -> (Egl, egl::Display, egl::Config) {
 // No `share` context param here (unlike the spike's general-purpose
 // version): neither child process ever has more than this one context.
 pub fn create_context(inst: &Egl, display: egl::Display, config: egl::Config) -> egl::Context {
+    // projectM 4.2.0's GladLoader::CheckGLRequirements() hard-requires GLES
+    // >= 3.2 by default (WithMinimumVersion(3, 2)) on every Windows/GLES
+    // code path. This vcpkg-vendored ANGLE build (chromium_7258) can create
+    // at most a GLES 3.1 context on its D3D11 backend (a 3.2 request fails
+    // eglCreateContext with BadMatch) and has no Vulkan backend built at
+    // all (its own vcpkg.json description says ES-to-Vulkan translation is
+    // still "underway" upstream), so 3.1 is this ANGLE build's real
+    // ceiling, not a placeholder pending a trivial bump to 3.2. projectM's
+    // own minimum is patched down to match
+    // (packaging/windows/overlay-ports/projectm/gles31-min-version.patch),
+    // verified empirically to render correctly at 3.1.
+    #[cfg(target_os = "windows")]
+    let attribs = [
+        egl::CONTEXT_MAJOR_VERSION,
+        3,
+        egl::CONTEXT_MINOR_VERSION,
+        1,
+        egl::NONE,
+    ];
+    #[cfg(not(target_os = "windows"))]
     let attribs = [
         egl::CONTEXT_MAJOR_VERSION,
         3,

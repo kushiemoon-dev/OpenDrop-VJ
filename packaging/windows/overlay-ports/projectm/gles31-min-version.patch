@@ -1,0 +1,17 @@
+--- a/src/libprojectM/Renderer/Platform/GladLoader.cpp
++++ b/src/libprojectM/Renderer/Platform/GladLoader.cpp
+@@ -47,8 +47,12 @@
+
+     glCheck
+         .WithApi(GLApi::OpenGLES)
+-        .WithMinimumVersion(3, 2)
+-        .WithMinimumShaderLanguageVersion(3, 20)
++        // Lowered from the upstream default of (3, 2)/(3, 20): this vcpkg-
++        // vendored ANGLE build (chromium_7258) can only create up to a
++        // GLES 3.1 context on its D3D11 backend (a 3.2 request fails
++        // eglCreateContext with BadMatch), and has no Vulkan backend.
++        .WithMinimumVersion(3, 1)
++        .WithMinimumShaderLanguageVersion(3, 10)
+         //        .WithRequiredExtension("GL_OES_texture_float")
+         //        .WithRequiredExtension("GL_OES_standard_derivatives")
+         .WithRequireCoreProfile(false);

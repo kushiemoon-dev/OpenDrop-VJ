@@ -4,7 +4,7 @@ use glutin::context::{ContextApi, ContextAttributesBuilder, GlProfile, PossiblyC
 use glutin::display::{Display, GetGlDisplay};
 use glutin::prelude::*;
 use glutin::surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface};
-use glutin_winit::DisplayBuilder;
+use glutin_winit::{ApiPreference, DisplayBuilder};
 use opendrop_core::blend::{should_force_normal_for_lowest_slot, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
@@ -1786,20 +1786,32 @@ impl ApplicationHandler for App {
 /// glutin-winit's DisplayBuilder (the only way to get the first window and
 /// the Config in one negotiation).
 fn bootstrap_display(event_loop: &ActiveEventLoop, attrs: WindowAttributes) -> Result<(Window, Config), String> {
+    // ANGLE's EGL implementation on Windows only ever advertises GLES
+    // renderable-type bits (never desktop GL), so requesting Api::OPENGL
+    // there yields zero matching configs. Everywhere else glutin's EGL
+    // backend is fronting real desktop GL drivers, so keep requesting that.
+    #[cfg(target_os = "windows")]
+    let api = Api::GLES2;
+    #[cfg(not(target_os = "windows"))]
+    let api = Api::OPENGL;
+
     let template = ConfigTemplateBuilder::new()
-        .with_api(Api::OPENGL)
+        .with_api(api)
         .with_surface_type(ConfigSurfaceTypes::WINDOW | ConfigSurfaceTypes::PBUFFER)
         .with_alpha_size(8)
         .with_depth_size(0)
         .with_stencil_size(0);
 
     let (window, gl_config) = DisplayBuilder::new()
+        .with_preference(ApiPreference::PreferEgl)
         .with_window_attributes(Some(attrs))
         .build(event_loop, template, |mut configs| {
             // DisplayBuilder's picker callback must return a Config, not a
             // Result: an empty match here means the template's constraints
             // (see above) can't be satisfied on this driver at all.
-            configs.next().expect("EGL returned zero configs matching the WINDOW|PBUFFER/OpenGL/alpha8/depth0/stencil0 template")
+            configs.next().unwrap_or_else(|| {
+                panic!("EGL returned zero configs matching the WINDOW|PBUFFER template (requested api: {api:?}, alpha8/depth0/stencil0)")
+            })
         })
         .map_err(|e| format!("failed to bootstrap EGL display/config: {e}"))?;
     let window = window.ok_or_else(|| "DisplayBuilder did not create the requested window".to_string())?;
@@ -1993,10 +2005,17 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         .window_handle()
         .map_err(|e| format!("control window has no raw handle: {e}"))?
         .as_raw();
+    // See engine/src/deck.rs's anchor-context creation for why this asks
+    // for GLES 3.1 explicitly instead of leaving it to `Gles(None)`.
+    #[cfg(target_os = "windows")]
+    let context_api = ContextApi::Gles(Some(Version::new(3, 1)));
+    #[cfg(not(target_os = "windows"))]
+    let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
+
     let ctx_attrs = ContextAttributesBuilder::new()
         .with_debug(cfg!(debug_assertions))
         .with_profile(GlProfile::Core)
-        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_context_api(context_api)
         .build(Some(raw_window_handle));
 
     // Anchor context: created here, converted to PossiblyCurrent, but not
@@ -2334,7 +2353,28 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     })
 }
 
+// projectM only ships `projectm_set_log_callback` from 4.2.0 onward (the
+// pinned Windows/GLES overlay port); the Arch `projectm-4.pc` package this
+// links against on Linux is still 4.1.6, so this diagnostic hook is
+// Windows-only. Without it, every internal GLResolver/GladLoader failure
+// reason (e.g. "no current GL context") is silently discarded, and
+// `projectm_create()` returning NULL carries no explanation at all.
+#[cfg(target_os = "windows")]
+unsafe extern "C" fn log_projectm_message(
+    message: *const std::os::raw::c_char,
+    log_level: opendrop_engine::ffi::projectm_log_level,
+    _user_data: *mut std::os::raw::c_void,
+) {
+    let msg = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
+    eprintln!("[projectM level={log_level}] {msg}");
+}
+
 fn main() {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        opendrop_engine::ffi::projectm_set_log_callback(Some(log_projectm_message), false, std::ptr::null_mut());
+    }
+
     // Hidden subcommands, both of them this same binary re-invoked as a
     // child process by the parent app, both of them `-> !`. Neither is a
     // user-facing CLI: the parent builds these argv lines itself, and the

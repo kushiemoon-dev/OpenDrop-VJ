@@ -145,6 +145,7 @@ pub(crate) enum Panel {
     Audio,
     Quality,
     Color,
+    Composite,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -178,6 +179,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Audio => Panel::Audio,
             config::PanelId::Quality => Panel::Quality,
             config::PanelId::Color => Panel::Color,
+            config::PanelId::Composite => Panel::Composite,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -204,6 +206,7 @@ impl From<Panel> for config::PanelId {
             Panel::Audio => config::PanelId::Audio,
             Panel::Quality => config::PanelId::Quality,
             Panel::Color => config::PanelId::Color,
+            Panel::Composite => config::PanelId::Composite,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -921,6 +924,9 @@ fn ui_root(
             }
             Panel::Color => {
                 ui::color::show(ui, &mut perform.show.color_params_a, &mut perform.show.color_params_b);
+            }
+            Panel::Composite => {
+                ui::composite::show(ui, &mut perform.show.slot_composites, perform.show.selected_slot);
             }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);

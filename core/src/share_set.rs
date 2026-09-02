@@ -95,7 +95,7 @@ pub struct ShareSetState {
 
 impl Default for ShareSetState {
     fn default() -> Self {
-        Self { name: String::new(), copy_label: "Copier le lien".to_string(), pending: None }
+        Self { name: String::new(), copy_label: "Copy Link".to_string(), pending: None }
     }
 }
 
@@ -144,7 +144,7 @@ mod tests {
         fn starts_with_an_empty_name_the_default_copy_label_and_no_pending_set() {
             let state = ShareSetState::default();
             assert_eq!(state.name, "");
-            assert_eq!(state.copy_label, "Copier le lien");
+            assert_eq!(state.copy_label, "Copy Link");
             assert!(state.pending.is_none());
         }
     }

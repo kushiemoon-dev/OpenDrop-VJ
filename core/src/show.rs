@@ -25,6 +25,7 @@ use crate::commands::{CommandContext, CommandId, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
+use crate::time_params::{clamp_time_mult, DeckTimeParams};
 use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
@@ -64,6 +65,11 @@ pub struct Show {
     pub slot_composites: [SlotComposite; 4],
     pub color_params_a: ColorParams,
     pub color_params_b: ColorParams,
+    /// The 8 Time multipliers per deck slot (Step 8 of the Phase 8 plan),
+    /// written by the Time panel and by the 32 `CommandId::Time*` setters.
+    /// Read by `app`'s per-frame push loop, which forwards the changed ones
+    /// into each deck's running preset: `Show` itself stays engine-free.
+    pub time_params: [DeckTimeParams; 4],
     pub preset_catalog: Vec<PresetMeta>,
     preset_index_a: usize,
     preset_index_b: usize,
@@ -150,6 +156,7 @@ impl Default for Show {
             slot_composites: [DEFAULT_SLOT_COMPOSITE; 4],
             color_params_a: DEFAULT_COLOR_PARAMS,
             color_params_b: DEFAULT_COLOR_PARAMS,
+            time_params: [DeckTimeParams::default(); 4],
             preset_catalog: Vec::new(),
             preset_index_a: 0,
             preset_index_b: 0,
@@ -652,6 +659,38 @@ impl CommandContext for Show {
         self.color_params_b.invert = v.clamp(0.0, 1.0);
     }
 
+    fn set_time_speed(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].speed_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_zoom(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].zoom_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_rot(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].rot_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_warp(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].warp_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_dx(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].dx_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_dy(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].dy_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_stretch(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].stretch_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_wave(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].wave_mult = clamp_time_mult(v);
+    }
+
     fn set_composite_blend(&mut self, slot: usize, v: f64) {
         self.slot_composites[slot].blend = blend_mode_from_value01(v);
     }
@@ -751,6 +790,11 @@ mod tests {
             let show = Show::default();
             assert_eq!(show.color_params_a, DEFAULT_COLOR_PARAMS);
             assert_eq!(show.color_params_b, DEFAULT_COLOR_PARAMS);
+        }
+
+        #[test]
+        fn time_params_start_neutral_on_every_slot() {
+            assert_eq!(Show::default().time_params, [DeckTimeParams::default(); 4]);
         }
 
         #[test]
@@ -1033,6 +1077,47 @@ mod tests {
             assert_eq!(show.slot_composites[3].color_tol, 1.0);
             show.set_composite_color_tol(3, -0.5);
             assert_eq!(show.slot_composites[3].color_tol, 0.0);
+        }
+
+        #[test]
+        fn each_time_setter_writes_its_own_multiplier_in_its_own_slot() {
+            // One `Show`, all 8 setters on 4 different slots: proves both
+            // that no setter writes a neighbour's field and that no slot
+            // bleeds into another.
+            let mut show = Show::default();
+            show.set_time_speed(0, 0.1);
+            show.set_time_zoom(1, 0.2);
+            show.set_time_rot(2, 0.3);
+            show.set_time_warp(3, 0.4);
+            show.set_time_dx(0, 0.5);
+            show.set_time_dy(1, 0.6);
+            show.set_time_stretch(2, 0.7);
+            show.set_time_wave(3, 0.8);
+            assert_eq!(
+                show.time_params[0],
+                DeckTimeParams { speed_mult: 0.1, dx_mult: 0.5, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[1],
+                DeckTimeParams { zoom_mult: 0.2, dy_mult: 0.6, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[2],
+                DeckTimeParams { rot_mult: 0.3, stretch_mult: 0.7, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[3],
+                DeckTimeParams { warp_mult: 0.4, wave_mult: 0.8, ..DeckTimeParams::default() }
+            );
+        }
+
+        #[test]
+        fn time_setters_clamp_to_the_panels_0_to_2_range() {
+            let mut show = Show::default();
+            show.set_time_zoom(0, 9.0);
+            assert_eq!(show.time_params[0].zoom_mult, 2.0);
+            show.set_time_zoom(0, -9.0);
+            assert_eq!(show.time_params[0].zoom_mult, 0.0);
         }
     }
 

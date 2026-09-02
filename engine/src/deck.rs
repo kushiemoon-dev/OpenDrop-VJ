@@ -15,7 +15,8 @@ use glutin::context::{
 };
 use glutin::display::{Display, GlDisplay};
 use glutin::surface::{PbufferSurface, Surface, SurfaceAttributesBuilder};
-use std::ffi::CString;
+use std::cell::RefCell;
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::num::NonZeroU32;
 use std::path::Path;
 
@@ -49,21 +50,83 @@ pub struct Deck {
     /// Captured at construction because `projectm_get_fps` stops being able to
     /// answer the question the moment the side channel is in use.
     default_fps: i32,
+    /// Where projectM's preset-switch-failed callback deposits its message.
+    /// `Box`ed so the address handed to C as `user_data` survives this
+    /// `Deck` being moved into the deck `Vec`; a `RefCell` rather than an
+    /// atomic because the callback is synchronous (measured) and fires on
+    /// the same thread as the load that triggered it.
+    ///
+    /// Without this, a load that projectM *rejects* is invisible: the FFI
+    /// call returns nothing, and `core.h` specifies that when a preset can't
+    /// be loaded "no switch takes place": so the deck silently keeps
+    /// rendering its previous preset while the app believes the new one is
+    /// up. That failure mode matters more since every load goes through
+    /// `load_preset_patched`, which can be rejected where the original file
+    /// would not have been.
+    load_failure: Box<RefCell<Option<String>>>,
     render_timer: PassTimer,
     copy_timer: PassTimer,
 }
 
+/// projectM's preset-switch-failed callback. `user_data` is the address of
+/// the owning deck's `load_failure` cell.
+///
+/// # Safety
+/// Called by libprojectM with a NUL-terminated `message` (or null), and the
+/// `user_data` pointer registered in `create_one_deck_context`: which points
+/// at a `RefCell<Option<String>>` owned by a live `Deck`, since the callback
+/// is unregistered by `projectm_destroy` before that cell is dropped.
+unsafe extern "C" fn on_preset_load_failed(_filename: *const c_char, message: *const c_char, user_data: *mut c_void) {
+    if user_data.is_null() {
+        return;
+    }
+    let cell = unsafe { &*(user_data as *const RefCell<Option<String>>) };
+    let msg = if message.is_null() {
+        "projectM rejected the preset (no message)".to_string()
+    } else {
+        unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned()
+    };
+    // `try_borrow_mut` rather than `borrow_mut`: panicking across an FFI
+    // boundary is undefined behaviour, and dropping one message is a far
+    // better outcome than that if projectM ever re-enters here.
+    if let Ok(mut slot) = cell.try_borrow_mut() {
+        *slot = Some(msg);
+    }
+}
+
 impl Deck {
-    /// The single passage point for loading a preset into this deck.
-    /// Phase 4's per-preset pre-flight validation (a subprocess that loads
-    /// the file first, so a bad preset can't take down a running deck)
-    /// hooks in here without touching how contexts are structured. Must be
-    /// called while this deck's context is current.
+    /// Loads a preset straight from its file, unpatched.
+    ///
+    /// **This has no callers in the app any more**: since Step 8, every live
+    /// load goes through [`Deck::load_preset_patched`], because the
+    /// `set_param` side channel is sticky instance state that corrupts any
+    /// unpatched preset loaded onto a deck that has ever been modulated (see
+    /// that method). Kept as the unpatched entry point for a future caller
+    /// that has first called [`Deck::reset_param_channel`]. Must be called
+    /// while this deck's context is current.
     pub fn load_preset(&self, path: &Path, smooth_transition: bool) -> Result<(), String> {
         let c_path = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|e| format!("preset path {} is not a valid C string: {e}", path.display()))?;
+        self.clear_load_failure();
         unsafe { ffi::projectm_load_preset_file(self.handle, c_path.as_ptr(), smooth_transition) };
-        Ok(())
+        self.take_load_failure()
+    }
+
+    /// Drops any message left over from an earlier load, so
+    /// [`Deck::take_load_failure`] can only ever report this load's own.
+    fn clear_load_failure(&self) {
+        self.load_failure.borrow_mut().take();
+    }
+
+    /// `Err` if projectM's failure callback fired during the load just made.
+    /// Sound because that callback is synchronous with the load call
+    /// (measured against libprojectM 4.1.6: the message is already deposited
+    /// by the time `projectm_load_preset_data` returns).
+    fn take_load_failure(&self) -> Result<(), String> {
+        match self.load_failure.borrow_mut().take() {
+            Some(msg) => Err(format!("projectM rejected the preset: {msg}")),
+            None => Ok(()),
+        }
     }
 
     /// Loads preset text held in memory instead of from a path: the patched
@@ -81,8 +144,9 @@ impl Deck {
     pub fn load_preset_data(&self, text: &str, smooth_transition: bool) -> Result<(), String> {
         let c_text = CString::new(text)
             .map_err(|e| format!("patched preset text is not a valid C string: {e}"))?;
+        self.clear_load_failure();
         unsafe { ffi::projectm_load_preset_data(self.handle, c_text.as_ptr(), smooth_transition) };
-        Ok(())
+        self.take_load_failure()
     }
 
     /// Loads `path` with the host-to-preset side channel patched in: reads
@@ -298,7 +362,33 @@ pub fn create_one_deck_context(
 
     let default_fps = unsafe { ffi::projectm_get_fps(handle) };
 
-    Ok(Deck { context, surface, gl, texture, width: w, height: h, handle, default_fps, render_timer, copy_timer })
+    // Same callback `app::preflight` and `app::thumbnail_child` already
+    // register in their own child processes: live decks went without it,
+    // which made a rejected load indistinguishable from a successful one.
+    // Registered against the `Box`'s heap address, which survives the `Deck`
+    // being moved into the deck `Vec`.
+    let load_failure: Box<RefCell<Option<String>>> = Box::new(RefCell::new(None));
+    unsafe {
+        ffi::projectm_set_preset_switch_failed_event_callback(
+            handle,
+            Some(on_preset_load_failed),
+            std::ptr::from_ref::<RefCell<Option<String>>>(&load_failure).cast::<c_void>().cast_mut(),
+        )
+    };
+
+    Ok(Deck {
+        context,
+        surface,
+        gl,
+        texture,
+        width: w,
+        height: h,
+        handle,
+        default_fps,
+        load_failure,
+        render_timer,
+        copy_timer,
+    })
 }
 
 /// Copies a `w` x `h` region of this context's own pbuffer (FBO 0) into its

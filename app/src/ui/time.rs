@@ -16,9 +16,10 @@
 //!
 //! Unlike Color and Composite, these values are not consumed by this app's
 //! own GPU compositor: they are pushed into each deck's *running projectM
-//! preset*, one changed value per deck per frame, by `main.rs`'s
-//! `push_time_params` (see `engine::time_patch` for the mechanism and
-//! `TIME-QVAR-SPIKE.md` for why it works that way). Speed is the one
+//! preset*, one changed value per deck per frame, by the per-deck block in
+//! `main.rs`'s `about_to_wait` that calls `next_time_param_to_push` (see
+//! `engine::time_patch` for the mechanism and `TIME-QVAR-SPIKE.md` for why it
+//! works that way). Speed is the one
 //! exception: it is stored and fully addressable but has no reachable
 //! Milkdrop target; `engine::time_patch`'s module docs explain what was
 //! measured and why.

@@ -410,7 +410,10 @@ impl Show {
     /// Reads back the current value of a snapshot-capturable `CommandId`:
     /// the inverse of the `CommandContext::set_*` setters those same ids
     /// dispatch to. `None` for any `CommandId` outside
-    /// `SNAPSHOT_CAPTURABLE_IDS` (not yet addressable by a real setter).
+    /// `SNAPSHOT_CAPTURABLE_IDS`, whether because it has no real setter yet
+    /// or because it is deliberately excluded: the `CommandId::Time*`
+    /// family does have real setters (step 8) and still returns `None` here
+    /// on purpose; see `SNAPSHOT_CAPTURABLE_IDS` for why.
     pub fn get_command_value(&self, id: CommandId) -> Option<f64> {
         match id {
             CommandId::ColorHueA => Some(self.color_params_a.hue_rotate),
@@ -501,6 +504,28 @@ impl Show {
 /// real `CommandContext` setter (Color/Composite, steps 1-2 of the Phase 8
 /// plan). Grows as later steps add their own setters; Keymap (step 3) added
 /// none. See `Show::get_command_value`.
+///
+/// **The 32 `CommandId::Time*` setters (step 8) are deliberately left out**,
+/// rather than overlooked. Two reasons, both worth revisiting once the LFO
+/// step lands and the trade-off is easier to judge:
+///
+/// - *Bandwidth.* Time values reach the decks through a side channel that
+///   carries one value per deck per frame (see `engine::preset_patch`). A
+///   recall interpolates every captured id every frame, so adding Time would
+///   put up to 7 continuously-changing values per deck on a 1-per-frame
+///   channel: each would land at roughly 1/7 the recall's own rate, making a
+///   recall visibly step rather than glide, and starving whatever else was
+///   already moving. Every id currently in this list is applied host-side by
+///   the GPU compositor, with no such ceiling.
+/// - *Round-tripping the scale.* Everything here is stored 0..1, which is
+///   also the `value01` a recall dispatches. Time is stored 0..2 (see
+///   `time_params::TIME_MULT_MAX`), so `get_command_value` would have to
+///   divide by `TIME_MULT_MAX` to invert `commands::time_mult` exactly:
+///   easy to get wrong, and silently wrong if it ever is, since a snapshot
+///   would recall to half or double what was saved.
+///
+/// Consequence to be aware of: saving a snapshot does not capture Time, and
+/// recalling one leaves the Time params where they are.
 const SNAPSHOT_CAPTURABLE_IDS: [CommandId; 30] = [
     CommandId::ColorHueA,
     CommandId::ColorSatA,
@@ -1149,7 +1174,22 @@ mod tests {
         fn returns_none_for_a_command_id_with_no_real_setter() {
             let show = Show::default();
             assert_eq!(show.get_command_value(CommandId::Crossfader), None);
-            assert_eq!(show.get_command_value(CommandId::TimeSpeed0), None);
+        }
+
+        #[test]
+        fn returns_none_for_time_params_even_though_they_have_real_setters() {
+            // Deliberate exclusion, not a gap: see `SNAPSHOT_CAPTURABLE_IDS`
+            // for the bandwidth and scale-inversion reasons. Pinned as its own
+            // test so a future reader sees the intent rather than reading this
+            // as an id someone forgot to wire up.
+            let mut show = Show::default();
+            show.set_time_zoom(0, 1.5);
+            assert_eq!(show.time_params[0].zoom_mult, 1.5);
+            assert_eq!(show.get_command_value(CommandId::TimeZoom0), None);
+            assert!(!show.capture_snapshot_values().keys().any(|id| matches!(
+                id,
+                CommandId::TimeSpeed0 | CommandId::TimeZoom0 | CommandId::TimeRot0 | CommandId::TimeWave3
+            )));
         }
     }
 

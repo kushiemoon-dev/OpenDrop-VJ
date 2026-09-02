@@ -91,6 +91,7 @@ pub(crate) enum PanelId {
     Overlays,
     RemoteWs,
     Streaming,
+    Share,
     #[cfg(feature = "link")]
     Link,
     V4l2,
@@ -302,6 +303,7 @@ mod tests {
             PanelId::Osc,
             PanelId::RemoteWs,
             PanelId::Streaming,
+            PanelId::Share,
             PanelId::V4l2,
             PanelId::CloudPresets,
             PanelId::About,

@@ -60,6 +60,12 @@ pub enum FontFamily {
     Comic,
 }
 
+/// `Clone` (Step 13 of the Phase 8 plan): the Share panel builds an owned
+/// `SharedSet` snapshot of the currently shareable overlays
+/// (`share_set::filter_shareable_overlays` returns borrowed `&Overlay`s,
+/// but `SharedSet::overlays: Vec<Overlay>` needs owned values): no other
+/// consumer needed this before now.
+#[derive(Debug, Clone)]
 pub struct Overlay {
     pub id: String,
     pub name: String,

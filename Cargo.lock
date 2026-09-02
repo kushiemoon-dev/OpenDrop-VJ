@@ -3316,7 +3316,9 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "base64",
  "directories",
+ "flate2",
  "futures-util",
  "grafton-ndi",
  "keyring",

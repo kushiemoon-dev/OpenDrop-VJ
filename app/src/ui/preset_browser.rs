@@ -592,6 +592,7 @@ mod tests {
             let pending = HashSet::new();
             let errors = HashMap::new();
             let mut transition_seconds = 0.0;
+            let mut share_set_name = String::new();
             let mut perform = PerformCtx {
                 show: &mut inner_show,
                 deck_tex_ids: &deck_tex_ids,
@@ -599,6 +600,7 @@ mod tests {
                 pending_validations: &pending,
                 preset_errors: &errors,
                 transition_seconds: &mut transition_seconds,
+                share_set_name: &mut share_set_name,
                 t0: std::time::Instant::now(),
             };
 
@@ -635,6 +637,7 @@ mod tests {
                 let pending = HashSet::new();
                 let errors = HashMap::new();
                 let mut transition_seconds = 0.0;
+                let mut share_set_name = String::new();
                 let mut perform = PerformCtx {
                     show: &mut inner_show,
                     deck_tex_ids: &deck_tex_ids,
@@ -642,6 +645,7 @@ mod tests {
                     pending_validations: &pending,
                     preset_errors: &errors,
                     transition_seconds: &mut transition_seconds,
+                    share_set_name: &mut share_set_name,
                     t0: std::time::Instant::now(),
                 };
 

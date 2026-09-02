@@ -6,7 +6,14 @@ edition = "2021"
 [dependencies]
 arc-swap = "1.9"
 axum = { version = "0.8", features = ["ws"] }
+# Share panel's link codec (`io::share_codec`): already resolved
+# transitively at this exact version (`reqwest`/etc.), added here as a
+# direct dependency (Step 13 of the Phase 8 plan, PLAN.md Override E).
+base64 = "0.22.1"
 directories = "6"
+# Share panel's link codec (`io::share_codec`): gzip compression, same
+# Override E as `base64` above.
+flate2 = "1.1.10"
 # Kick chat's Pusher WebSocket (`io::kick`): read/write on `WebSocketStream`,
 # TLS backend matched to `reqwest`'s below (native-tls) so only one TLS
 # stack is pulled into the dependency tree.

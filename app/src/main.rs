@@ -338,6 +338,7 @@ pub(crate) enum Panel {
     Overlays,
     RemoteWs,
     Streaming,
+    Share,
     #[cfg(feature = "link")]
     Link,
     V4l2,
@@ -375,6 +376,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Overlays => Panel::Overlays,
             config::PanelId::RemoteWs => Panel::RemoteWs,
             config::PanelId::Streaming => Panel::Streaming,
+            config::PanelId::Share => Panel::Share,
             #[cfg(feature = "link")]
             config::PanelId::Link => Panel::Link,
             config::PanelId::V4l2 => Panel::V4l2,
@@ -411,6 +413,7 @@ impl From<Panel> for config::PanelId {
             Panel::Overlays => config::PanelId::Overlays,
             Panel::RemoteWs => config::PanelId::RemoteWs,
             Panel::Streaming => config::PanelId::Streaming,
+            Panel::Share => config::PanelId::Share,
             #[cfg(feature = "link")]
             Panel::Link => config::PanelId::Link,
             Panel::V4l2 => config::PanelId::V4l2,
@@ -683,6 +686,10 @@ struct AppState {
     /// Soft-cut transition duration applied to every load routed through
     /// `request_preset_load`: one global setting, not per-slot (see Step 16).
     transition_seconds: f64,
+    /// Live text in the Share panel's name field (Step 13 of the Phase 8
+    /// plan): transient scratch state, deliberately not part of `UiConfig`
+    /// (a share link's name is a one-off label, not persistent UI state).
+    share_set_name: String,
     /// `egui::TextureId` for each deck's live GPU texture, registered once
     /// at bootstrap via `painter.register_native_texture`: never
     /// re-registered per frame, which would leak a texture handle in
@@ -1441,6 +1448,9 @@ fn ui_root(
                     stream.streaming_secret_save_error,
                 );
             }
+            Panel::Share => {
+                ui::share::show(ui, perform.show, perform.deck_preset_names, *perform.transition_seconds, perform.share_set_name);
+            }
             #[cfg(feature = "link")]
             Panel::Link => {
                 ui::link::show(ui, control.link, control.link_tempo_input);
@@ -2136,6 +2146,7 @@ impl ApplicationHandler for App {
                 pending_validations,
                 preset_errors,
                 transition_seconds,
+                share_set_name,
                 active_panel,
                 stage_mode,
                 presets_drawer_open,
@@ -2219,6 +2230,7 @@ impl ApplicationHandler for App {
                 pending_validations,
                 preset_errors,
                 transition_seconds,
+                share_set_name,
                 t0,
             };
             let mut library_ctx = ui::ctx::LibraryCtx {
@@ -3002,6 +3014,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         // on it.
         deck_preset_names: std::array::from_fn(|i| preset_display_name(&preset_root, &presets[i])),
         transition_seconds: 0.0,
+        share_set_name: String::new(),
         deck_tex_ids,
         // Whole-branch review fix wave, finding 1 (AC-10): restored from
         // the same `ui_config` loaded above, instead of always starting on

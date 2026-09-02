@@ -83,7 +83,7 @@ pub fn show(
 
     if show.video.enabled {
         ui.separator();
-        opacity_row(ui, &mut show.video.opacity, external_feed);
+        opacity_row(ui, &mut show.video.opacity, ndi_active);
         advance_row(ui, show, external_feed);
         reactive_row(ui, show, external_feed);
     }
@@ -101,16 +101,17 @@ pub fn show(
 /// The α crossfader: the layer's own opacity, independent of the deck
 /// crossfader (`SidebarVideo.svelte`'s `.crossfader-row`).
 ///
-/// Disabled while an external feed drives the layer, for the same reason
-/// `advance_row`/`reactive_row` are but arrived at differently: this slider
-/// is not merely inapplicable then, it is *inert*. With NDI receiving,
-/// `desired_video_input` returns `None`, so `composite_video_layer` never
-/// runs and never reads `show.video.opacity`; the NDI-in layer is composited
-/// separately in `main.rs` at a hardcoded `opacity: 1.0`. Leaving it enabled
-/// offered a control that silently did nothing (whole-branch review Finding
-/// M1).
-fn opacity_row(ui: &mut egui::Ui, opacity: &mut f64, external_feed: bool) {
-    ui.add_enabled_ui(!external_feed, |ui| {
+/// Disabled while NDI is receiving: not merely inapplicable then, but
+/// *inert*: with NDI receiving, `desired_video_input` returns `None`, so
+/// `composite_video_layer` never runs and never reads `show.video.opacity`;
+/// the NDI-in layer is composited separately in `main.rs` at a hardcoded
+/// `opacity: 1.0`. Leaving it enabled offered a control that silently did
+/// nothing (whole-branch review Finding M1). Unlike `advance_row`/
+/// `reactive_row`, this must NOT also gate on a live camera feed: under a
+/// camera, `desired_video_input` returns `Camera` and `opacity` is still a
+/// real, live control.
+fn opacity_row(ui: &mut egui::Ui, opacity: &mut f64, ndi_active: bool) {
+    ui.add_enabled_ui(!ndi_active, |ui| {
         ui.horizontal(|ui| {
             widgets::micro_label(ui, "α");
             ui.add(egui::Slider::new(opacity, 0.0..=1.0).step_by(0.01).show_value(false));

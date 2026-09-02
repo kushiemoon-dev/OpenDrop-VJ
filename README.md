@@ -68,10 +68,26 @@ doit rester **absent de tout binaire empaqueté ou distribué par défaut**
 builds locaux/optionnels assumant explicitement cette contamination de
 licence.
 
+## `ffmpeg` (dépendance runtime)
+
+Deux fonctionnalités passent par un sous-processus `ffmpeg`, qui doit donc
+être présent dans le `PATH` à l'exécution (rien n'est lié au build) :
+
+- **sortie v4l2loopback** (`io::v4l2loopback`): le compositeur écrit ses
+  frames RGBA dans un device v4l2loopback ;
+- **panneau Video** (`io::video_capture`): décodage des clips locaux et
+  capture caméra, dans l'autre sens : `ffmpeg` écrit des frames RGBA brutes
+  sur son stdout, l'application les téléverse en texture GL.
+
+En l'absence de `ffmpeg`, ces deux panneaux affichent une erreur et le
+reste de l'application fonctionne normalement. Les clips vidéo eux-mêmes
+ne sont pas fournis : voir `app/assets/video-loops/README.md`.
+
 ## Sélecteur de fichier natif (`rfd`)
 
-Le panneau CloudPresets (`ui::cloud_presets`, bouton Upload) utilise `rfd`
-pour ouvrir un sélecteur de fichier natif. Sur Linux, le backend par défaut
+Les panneaux CloudPresets (`ui::cloud_presets`, bouton Upload) et Video
+(`ui::video`, bouton « + Video ») utilisent `rfd` pour ouvrir un sélecteur
+de fichier natif. Sur Linux, le backend par défaut
 de `rfd` (features `xdg-portal` + `async-std`, pas `gtk3`) passe par
 xdg-desktop-portal via D-Bus (`ashpd`): aucune bibliothèque GTK3 requise au
 build ni au lien. À l'exécution, ce backend a en revanche besoin d'un

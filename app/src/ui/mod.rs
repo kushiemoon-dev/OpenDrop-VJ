@@ -33,4 +33,5 @@ pub mod strobe;
 pub mod time;
 pub mod timeline;
 pub mod v4l2loopback;
+pub mod video;
 pub mod widgets;

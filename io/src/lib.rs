@@ -18,3 +18,4 @@ pub mod secrets;
 pub mod share_codec;
 pub mod twitch;
 pub mod v4l2loopback;
+pub mod video_capture;

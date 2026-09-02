@@ -149,6 +149,26 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
     pub(crate) v4l2_active: &'a mut bool,
     pub(crate) v4l2_device: &'a mut Option<Option<PathBuf>>,
+    /// Video panel (Step 14 of the Phase 8 VJ-panels plan): the clip
+    /// library, the camera picker's cached device list and its current
+    /// selection, and the panel's own synchronous import/delete errors.
+    /// Same split as the Overlays fields above: the layer's *state* lives
+    /// on `Show` (`PerformCtx::show`), these are the I/O-side halves
+    /// `core::video` deliberately does not own. The capture handle itself
+    /// stays out of every context struct, like the GL texture cache: the
+    /// panel takes a `VideoCaptureSnapshot`, and `main.rs` (its only other
+    /// reader) owns the handle.
+    pub(crate) video_clips: &'a mut Vec<crate::video_clips::VideoClip>,
+    pub(crate) video_cameras: &'a Vec<opendrop_io::video_capture::CameraDevice>,
+    pub(crate) video_camera_device: &'a mut String,
+    pub(crate) video_local_error: &'a mut Option<String>,
+    pub(crate) video_capture: &'a opendrop_io::video_capture::VideoCaptureSnapshot,
+    /// The Video panel's one outbound NDI intent for this frame, applied
+    /// by `main.rs` right after `ui_root` returns: same out-param idiom
+    /// as `LibraryCtx::load_request`, and for the same reason: the NDI
+    /// handle is borrowed by `OutputCtx` for the whole closure, so the
+    /// panel records what it wants instead of sending it itself.
+    pub(crate) video_ndi_request: &'a mut Option<crate::ui::video::VideoNdiRequest>,
     pub(crate) cloud_presets: &'a opendrop_io::cloud_presets::CloudPresetsHandle,
     pub(crate) cloud_presets_api_url: &'a mut String,
     pub(crate) cloud_presets_token_input: &'a mut String,

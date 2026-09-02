@@ -1800,8 +1800,13 @@ impl ApplicationHandler for App {
             // this tick) both read it: the same shared FBO is what makes
             // the flash show up in the control preview, the output window,
             // and NDI/v4l2 alike, with no separate wiring for any of them.
+            // Absolute beats elapsed (beat_count + phase01), not phase01
+            // alone: a rate < 1 (e.g. 0.25, "once every 4 beats") needs to
+            // know which beat this is, not just where in the current one
+            // we are (see strobe_flash_intensity's own doc comment).
+            let clock_beats_abs = state.show.clock.beat_count() as f64 + state.show.clock.phase01();
             let strobe_intensity =
-                strobe_flash_intensity(&state.show.strobe, state.show.clock.phase01(), state.show.clock.bpm(), now_ms / 1000.0);
+                strobe_flash_intensity(&state.show.strobe, clock_beats_abs, state.show.clock.bpm(), now_ms / 1000.0);
             state.compositor.render_strobe_flash(&state.gl, state.show.strobe.color, strobe_intensity);
             state.compositor.end_frame(&state.gl);
 

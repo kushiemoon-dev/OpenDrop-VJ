@@ -46,7 +46,7 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
         );
     }
 
-    if ui.button("Copier le lien").clicked() {
+    if ui.button("Copy Link").clicked() {
         let preset_a = preset_name_for_bus(show, deck_preset_names, DeckBus::A);
         let preset_b = preset_name_for_bus(show, deck_preset_names, DeckBus::B);
 

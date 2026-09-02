@@ -22,6 +22,7 @@ use crate::blend::{
 };
 use crate::clock::Clock;
 use crate::commands::{CommandContext, CommandId, Deck};
+use crate::lfo::LfoEngine;
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
@@ -130,6 +131,16 @@ pub struct Show {
     /// `strobe::strobe_flash_intensity(&show.strobe, ...)` and handed to
     /// the compositor: `Show` stores only the user-facing state, no GL.
     pub strobe: StrobeState,
+    /// 4 modulation slots (Step 11 of the Phase 8 plan), written directly
+    /// by the LFO panel (`app::ui::lfo`): same "direct field mutation"
+    /// convention as `strobe`'s rate/intensity/color above. Ticked each
+    /// frame by `app::about_to_wait` (`LfoEngine::tick`, driven by
+    /// `clock.phase01()`); the resulting `(CommandId, value01)` pairs are
+    /// dispatched through the registry, not written to `Show` here: same
+    /// registry-dispatch parity as `tick_recall`/`tick_timeline` above, so
+    /// an LFO route moves its target through the exact same
+    /// keyboard/MIDI/OSC/remote-ws-equivalent path.
+    pub lfo_engine: LfoEngine,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -198,6 +209,7 @@ impl Default for Show {
             timeline_playing: false,
             timeline_elapsed_sec: 0.0,
             strobe: StrobeState::default(),
+            lfo_engine: LfoEngine::new(),
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -233,6 +245,10 @@ impl Show {
         if let Some(engine) = self.playlists.engine_b_mut() {
             engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
         }
+        // LFO Sample & Hold (Step 11 of the Phase 8 plan): an unrelated
+        // RNG consumer, no lockstep risk with the playlist engines above,
+        // so it reseeds from the raw `seed` rather than an XOR'd variant.
+        self.lfo_engine.reseed_rng(seed);
     }
 
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
@@ -287,6 +303,9 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
+        // Refreshes any LFO slot in `Sh` (sample & hold) shape: see
+        // `LfoEngine::randomize_sh`'s doc comment ("call on each downbeat").
+        self.lfo_engine.randomize_sh();
     }
 
     /// Restarts the auto-crossfade cadence from the top. Port of the
@@ -2199,6 +2218,88 @@ mod tests {
                 })
                 .collect();
             assert_ne!(draws_a, draws_b);
+        }
+    }
+
+    /// AC-9's minimum bar: an LFO must actually reach at least one Color,
+    /// one Composite, one Time, and one Qvar target end to end: tick the
+    /// engine, dispatch the resulting `(CommandId, value01)` through the
+    /// real registry (same path `app::about_to_wait` uses), assert `Show`
+    /// changed. `amount: 0.0` pins `LfoEngine::compute`'s output to
+    /// `center` regardless of phase/shape/S&H state (`value = center +
+    /// (raw - 0.5) * amount`): deterministic without depending on a
+    /// specific shape's waveform, which `lfo.rs`'s own tests already cover.
+    mod lfo_end_to_end_dispatch {
+        use super::*;
+        use crate::lfo::LfoSlot;
+
+        fn slot(center: f64, target: CommandId) -> LfoSlot {
+            LfoSlot { enabled: true, center, amount: 0.0, target: Some(target), ..Default::default() }
+        }
+
+        fn tick_and_dispatch(reg: &crate::commands::CommandRegistry, show: &mut Show) {
+            let outputs = show.lfo_engine.tick(show.clock.phase01());
+            for output in outputs {
+                if let Some(id) = output.target {
+                    reg.dispatch(id, output.value01, show);
+                }
+            }
+        }
+
+        #[test]
+        fn reaches_a_color_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(0.6, CommandId::ColorHueA);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.color_params_a.hue_rotate, 0.6);
+        }
+
+        #[test]
+        fn reaches_a_composite_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(0.9, CommandId::CompositeBlend0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.slot_composites[0].blend, blend_mode_from_value01(0.9));
+        }
+
+        #[test]
+        fn reaches_a_time_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(1.0, CommandId::TimeSpeed0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.time_params[0].speed_mult, crate::time_params::TIME_MULT_MAX);
+        }
+
+        #[test]
+        fn reaches_a_qvar_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(1.0, CommandId::Qvar1_0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert!(show.q_var_params[0].enabled[0]);
+            assert_eq!(show.q_var_params[0].value[0], crate::q_vars::Q_VAR_MAX);
+        }
+
+        #[test]
+        fn a_disabled_slot_dispatches_nothing() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = LfoSlot { enabled: false, target: Some(CommandId::ColorHueA), ..Default::default() };
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.color_params_a.hue_rotate, 0.0); // untouched default
         }
     }
 }

@@ -342,6 +342,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         nav_item(ui, shell.active_panel, Panel::Time, "Time", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Qvar, "Q-vars", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Strobe, "Strobe", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Lfo, "LFO", &mut active_rect);
 
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout

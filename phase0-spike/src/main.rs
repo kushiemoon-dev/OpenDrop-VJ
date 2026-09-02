@@ -1,8 +1,8 @@
-//! Phase 0 spike (jetable): voir /srv/http/OpenDrop-Native/PLAN.md § Phase 0.
-//! Prouve : bindgen maison + libprojectM systeme, 4 contextes EGL pbuffer en
-//! groupe de partage (un par deck), glCopyTexSubImage2D vers texture partagee,
-//! compositeur dans un 5e contexte, sauvegarde/restauration d'etat GL autour de
-//! chaque render_frame, mesure ms/frame et taux de compat presets.
+//! Phase 0 spike (throwaway): see /srv/http/OpenDrop-Native/PLAN.md, Phase 0 section.
+//! Proves out: home-grown bindgen plus the system libprojectM, 4 EGL pbuffer contexts
+//! sharing one share group (one per deck), glCopyTexSubImage2D into a shared texture,
+//! a compositor in a 5th context, GL state save/restore around each render_frame, and
+//! measures ms/frame plus the preset compat rate.
 
 #[allow(non_camel_case_types, non_snake_case, non_upper_case_globals, dead_code)]
 mod ffi {

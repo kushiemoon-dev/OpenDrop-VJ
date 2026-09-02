@@ -36,7 +36,7 @@
 //!
 //! Split into `show_out`/`show_in` (whole-branch review fix wave, finding
 //! 3): Step 18's brief required `Panel::NdiIn`/`Panel::NdiOut` to render
-//! their own distinct half, "pas de fusion visuelle des deux": both nav
+//! their own distinct half, "no visual merging of the two": both nav
 //! entries called the same combined `show` until this fix. The seam
 //! between the two sections (output toggles vs. input connect/ComboBox)
 //! was already there, just not split into two callable functions; the

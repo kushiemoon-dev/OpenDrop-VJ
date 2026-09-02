@@ -42,7 +42,7 @@ pub struct Metrics {
     pub radius_lg: f32,
     pub radius_xl: f32,
     pub border_width: f32,
-    /// Default spacing scale (loose/"aéré"), used everywhere except the
+    /// Default spacing scale (airy), used everywhere except the
     /// scopes `dense` (Step 8's density-scope helper) overrides.
     pub spacing_airy: Vec2,
     /// Tighter spacing scale, frozen (no user toggle) to the presets grid,

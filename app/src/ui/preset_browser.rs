@@ -32,7 +32,7 @@
 //! `ROW_HEIGHT` constant is replaced by `row_height`, derived from the
 //! live style rather than hand-picked: see that function's doc comment
 //! for why. This panel is one of 3 density-frozen zones in the app (always
-//! dense, no user toggle), unlike Decks (Step 13, aéré by default).
+//! dense, no user toggle), unlike Decks (Step 13, airy by default).
 
 use opendrop_core::commands::Deck;
 use opendrop_core::preset_index::{filter_favorites, search};

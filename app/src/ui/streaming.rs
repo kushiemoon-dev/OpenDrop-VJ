@@ -1,6 +1,6 @@
 //! Streaming panel: OBS WebSocket connect/disconnect + scene control (Task
 //! 16 of the plan), plus Twitch chat and Kick chat connect/disconnect
-//! (Task 17). See PHASE5-IO.PLAN's découpage note for why the three share
+//! (Task 17). See PHASE5-IO.PLAN's breakdown note for why the three share
 //! one file rather than three separate ones (comparable size to the other
 //! single-file panels once all three sections exist, not yet the case with
 //! only OBS built).

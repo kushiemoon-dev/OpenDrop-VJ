@@ -543,17 +543,18 @@ impl Compositor {
     /// so a fully faded-out layer costs nothing.
     pub fn composite_video_layer(&self, gl: &glow::Context, video_tex: glow::NativeTexture, opacity: f32, color: ColorParams) {
         let input = LayerInput { opacity, composite: DEFAULT_SLOT_COMPOSITE, color };
-        // `force_normal: false`: `DEFAULT_SLOT_COMPOSITE` already carries
-        // `BlendMode::Normal`, and this layer is never the lowest/first-drawn
-        // one, so there is nothing to override (same reasoning as the
-        // NDI-in layer's own call site in `app`).
+        // `force_normal: false`: there is nothing to override:
+        // `DEFAULT_SLOT_COMPOSITE` already carries `BlendMode::Normal`, which
+        // is what `force_normal` would coerce it to anyway (same reasoning as
+        // the NDI-in layer's own call site in `app`).
         self.composite_layer(gl, video_tex, &input, false);
     }
 
     /// Draws the BPM-synced strobe flash (Step 10 of the Phase 8 VJ-panels
     /// plan) as a fullscreen quad, additive-blended into the composite FBO
     /// on top of everything already drawn there this frame: call once per
-    /// frame, after the deck/NDI-in `composite_layer` calls and before
+    /// frame, after the deck, video ([`Compositor::composite_video_layer`],
+    /// Step 14) and NDI-in `composite_layer` calls and before
     /// `blit_to_current_window`/the compositor readback (`FrameReadback`),
     /// so the flash shows up in the control preview, the output window,
     /// and NDI/v4l2 alike: all four read `color_tex` through this same

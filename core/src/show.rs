@@ -616,14 +616,18 @@ impl Show {
 }
 
 /// `CommandId`s the snapshot panel's Save button captures and a recall
-/// interpolates toward: the subset of commands currently addressable by a
-/// real `CommandContext` setter (Color/Composite, steps 1-2 of the Phase 8
-/// plan). Grows as later steps add their own setters; Keymap (step 3) added
-/// none. See `Show::get_command_value`.
+/// interpolates toward: the Color and Composite setters (steps 1-2 of the
+/// Phase 8 plan). See `Show::get_command_value`.
+///
+/// This is a curated subset, not "every setter that exists yet": having a
+/// real `CommandContext` setter is necessary but not sufficient, and the
+/// list is not expected to keep growing with each new one. As of the end of
+/// Phase 8, 221 of the 223 commands have a setter and only these 30 are
+/// captured: the two large families left out are excluded permanently and
+/// by design, for the reasons below.
 ///
 /// **The 32 `CommandId::Time*` setters (step 8) are deliberately left out**,
-/// rather than overlooked. Two reasons, both worth revisiting once the LFO
-/// step lands and the trade-off is easier to judge:
+/// rather than overlooked. Two reasons:
 ///
 /// - *Bandwidth.* Time values reach the decks through a side channel that
 ///   carries one value per deck per frame (see `engine::preset_patch`). A

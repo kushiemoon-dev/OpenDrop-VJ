@@ -1,9 +1,21 @@
 //! Share-link codec: `SharedSet` (`opendrop_core::share_set`) <-> a
-//! copyable, URL-safe string. Port of OpenDrop-VJ's `encodeSharedSet`/
-//! `decodeSharedSet` (`share-set.ts`): the JSON + gzip + base64url step
-//! `core::share_set`'s own module doc comment explicitly deferred to "a
-//! later, I/O-aware crate" (`core` has zero dependencies by design; this is
-//! that crate, Step 13 of the Phase 8 VJ-panels plan).
+//! copyable, URL-safe string. Ports the *algorithm* and behaviour of
+//! OpenDrop-VJ's `encodeSharedSet`/`decodeSharedSet` (`share-set.ts`): the
+//! JSON + gzip + base64url pipeline `core::share_set`'s own module doc
+//! comment explicitly deferred to "a later, I/O-aware crate" (`core` has
+//! zero dependencies by design; this is that crate, Step 13 of the Phase 8
+//! VJ-panels plan).
+//!
+//! **The wire format itself deliberately diverges from the web app's** and
+//! no interop guarantee is claimed or needed: a link produced here is meant
+//! to be read back here. That is the opposite of `CloudPresets`, where the
+//! sibling web app is a real second reader and the field names therefore
+//! have to match exactly. Concretely, the wire structs below stay in Rust's
+//! `snake_case` rather than being renamed to the TS side's `camelCase`, and
+//! they carry a `version` tag (see [`SHARE_WIRE_VERSION`]) the TS format has
+//! no counterpart for. Any future cross-app Share interop would be a
+//! deliberate new feature with its own conversion step, not something to be
+//! preserved speculatively here.
 //!
 //! `SharedSet` and everything it's built from (`DeckBus`, `ColorParams`,
 //! `SlotComposite`, `DeckTimeParams`, `DeckQVarParams`, `Snapshot`,
@@ -443,8 +455,24 @@ impl From<BeatTriggerConfigWire> for BeatTriggerConfig {
     }
 }
 
+/// Wire-format version stamped into every link [`encode_shared_set`]
+/// produces and required by [`decode_shared_set`] (whole-branch review
+/// Finding I2). The forward-compatibility hook: a future format change
+/// bumps this, and links from an older/newer build are rejected with a
+/// legible error instead of being deserialized into the wrong shape or
+/// silently losing fields. Only ever compared for equality: there is no
+/// migration path to a different version yet, and inventing one before a
+/// second version exists would be speculative.
+const SHARE_WIRE_VERSION: u8 = 1;
+
 #[derive(Serialize, Deserialize)]
 struct SharedSetWire {
+    /// See [`SHARE_WIRE_VERSION`]. `serde(default)` so a payload predating
+    /// this field (or one with the field stripped) decodes to `0` and is
+    /// rejected by the same explicit version check with the same clear
+    /// message, rather than by a raw "missing field" serde error.
+    #[serde(default)]
+    version: u8,
     name: String,
     preset_a: String,
     preset_b: String,
@@ -471,6 +499,7 @@ struct SharedSetWire {
 impl From<&SharedSet> for SharedSetWire {
     fn from(s: &SharedSet) -> Self {
         Self {
+            version: SHARE_WIRE_VERSION,
             name: s.name.clone(),
             preset_a: s.preset_a.clone(),
             preset_b: s.preset_b.clone(),
@@ -542,6 +571,9 @@ pub fn encode_shared_set(set: &SharedSet) -> Result<String, String> {
 /// The inverse of [`encode_shared_set`]. Not required by this step's AC
 /// (only "generate a link" is), kept for symmetry: see this module's doc
 /// comment.
+///
+/// Rejects any payload whose `version` isn't [`SHARE_WIRE_VERSION`],
+/// including one with no `version` at all (which decodes to `0`).
 pub fn decode_shared_set(encoded: &str) -> Result<SharedSet, String> {
     let compressed = URL_SAFE_NO_PAD.decode(encoded).map_err(|e| format!("base64url-decoding share link: {e}"))?;
 
@@ -550,6 +582,12 @@ pub fn decode_shared_set(encoded: &str) -> Result<SharedSet, String> {
     decoder.read_to_end(&mut json).map_err(|e| format!("gzip-decompressing share link: {e}"))?;
 
     let wire: SharedSetWire = serde_json::from_slice(&json).map_err(|e| format!("parsing SharedSet JSON: {e}"))?;
+    if wire.version != SHARE_WIRE_VERSION {
+        return Err(format!(
+            "unsupported share link version {} (this build reads version {SHARE_WIRE_VERSION})",
+            wire.version
+        ));
+    }
     Ok(wire.into())
 }
 
@@ -661,6 +699,64 @@ mod tests {
     #[test]
     fn decode_rejects_garbage_input() {
         assert!(decode_shared_set("not a valid share link").is_err());
+    }
+
+    /// The wire JSON inside a link, unwrapped through the same base64url +
+    /// gzip pipeline `decode_shared_set` uses.
+    fn link_json(encoded: &str) -> serde_json::Map<String, serde_json::Value> {
+        let compressed = URL_SAFE_NO_PAD.decode(encoded).expect("link is base64url");
+        let mut json = Vec::new();
+        GzDecoder::new(&compressed[..]).read_to_end(&mut json).expect("link is gzip");
+        match serde_json::from_slice(&json).expect("link body is JSON") {
+            serde_json::Value::Object(map) => map,
+            other => panic!("wire JSON should be an object, got {other:?}"),
+        }
+    }
+
+    /// A link this build would never emit itself: `sample_shared_set()`'s
+    /// wire JSON with `mutate` applied, re-gzipped and re-encoded.
+    fn tampered_link(mutate: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>)) -> String {
+        let mut value = link_json(&encode_shared_set(&sample_shared_set()).expect("encode should succeed"));
+        mutate(&mut value);
+        let json = serde_json::to_vec(&serde_json::Value::Object(value)).expect("tampered wire serializes");
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&json).expect("gzip write should succeed");
+        URL_SAFE_NO_PAD.encode(encoder.finish().expect("gzip finish should succeed"))
+    }
+
+    #[test]
+    fn encode_always_stamps_the_current_wire_version() {
+        // Finding I2: every link carries the version tag, so a future format
+        // change has something to key off.
+        let encoded = encode_shared_set(&sample_shared_set()).expect("encode should succeed");
+        assert_eq!(link_json(&encoded).get("version"), Some(&serde_json::json!(SHARE_WIRE_VERSION)));
+    }
+
+    #[test]
+    fn decode_rejects_a_wrong_wire_version() {
+        let link = tampered_link(|v| {
+            v.insert("version".to_string(), serde_json::json!(SHARE_WIRE_VERSION + 1));
+        });
+        // `let Err(..) else` rather than `expect_err`: `SharedSet` has no
+        // `Debug` impl, so `expect_err` won't compile here.
+        let Err(err) = decode_shared_set(&link) else {
+            panic!("a future wire version must be rejected");
+        };
+        assert!(err.contains("unsupported share link version 2"), "unhelpful error: {err}");
+    }
+
+    #[test]
+    fn decode_rejects_a_missing_wire_version() {
+        // A payload predating the tag: `serde(default)` gives it 0 rather
+        // than a raw "missing field" error, so it hits the same explicit
+        // check and produces the same legible message.
+        let link = tampered_link(|v| {
+            v.remove("version");
+        });
+        let Err(err) = decode_shared_set(&link) else {
+            panic!("an untagged payload must be rejected");
+        };
+        assert!(err.contains("unsupported share link version 0"), "unhelpful error: {err}");
     }
 
     #[test]

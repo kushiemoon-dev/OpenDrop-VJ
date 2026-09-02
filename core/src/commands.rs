@@ -1,8 +1,9 @@
 //! Port of OpenDrop-VJ `src/lib/engine/commands.ts`: the `CommandRegistry` keystone.
 //!
 //! 223 `CommandId` variants, `kind: Trigger | Range`, contract `run(value01, ctx)`
-//! preserved identically. Most commands are no-op stubs in the source TS too:
-//! they are wired up by later milestones (M2/M3/1.1/1.3/1.4), not missing here.
+//! preserved identically. 221 of the 223 carry a real setter; only
+//! `CommandId::LfoRateUp`/`LfoRateDown` are still `noop` stubs, permanently
+//! and by design: see `CommandRegistry`'s doc comment for why.
 
 use std::collections::HashMap;
 
@@ -343,8 +344,14 @@ pub struct Command {
 /// `CommandContext` real setters for color, composite/lumakey/colorkey,
 /// snapshot recall, timeline toggle, all 32 time-param multipliers, all
 /// 128 q-var slots, and the strobe toggle. `run` only ever receives `&mut
-/// dyn CommandContext`; wiring the 2 remaining stubs is LFO routing's job
-/// (a later step), not something to do ad hoc here.
+/// dyn CommandContext`.
+///
+/// The 2 remaining stubs stay stubs: LFO routing (Step 11 of the same plan)
+/// has shipped and deliberately did not wire them, because `LfoRateUp`/
+/// `LfoRateDown` are not in the REQUIREMENTS' transversal-setter list:
+/// LFO rate is a per-slot panel control, not a dispatchable transversal
+/// parameter. This is a closed design decision, not a gap awaiting a later
+/// step.
 #[derive(Default)]
 pub struct CommandRegistry {
     /// Insertion order matters here (whole-branch review Finding I2): 3
@@ -380,7 +387,25 @@ impl CommandRegistry {
     }
 
     /// Dispatch a command. value01 must be 0..1 (callers normalize MIDI 0-127 before calling).
+    ///
+    /// A non-finite `value01` (NaN, ±∞) is dropped here rather than handed to
+    /// `run` (whole-branch review Finding I1). Every command path funnels
+    /// through this method, so this one check covers all 221 real setters
+    /// instead of 221 individual guards. It matters because NaN survives
+    /// `f64::clamp` untouched (`clamp` is NaN-transparent), and the Time/Qvar
+    /// setters end up in `engine::preset_patch::encode_param`, whose
+    /// `(...).round() as i32` saturates NaN to `0`: which that channel's
+    /// prologue decodes as a permanent write of `-2.0` into a live preset
+    /// slot. Both remote inputs are unauthenticated (`io::osc`'s UDP socket,
+    /// remote-ws) and both can carry an arbitrary `f32`/`f64`, so the value
+    /// reaching here is attacker-controlled. Silently ignoring is the right
+    /// shape: `dispatch` has no error channel, and every caller treats an
+    /// unrecognized/undeliverable command as a no-op already (see
+    /// `dispatch_on_an_unknown_id_does_not_crash`).
     pub fn dispatch(&self, id: CommandId, value01: f64, ctx: &mut dyn CommandContext) {
+        if !value01.is_finite() {
+            return;
+        }
         if let Some(cmd) = self.get(id) {
             (cmd.run)(value01, ctx);
         }
@@ -847,6 +872,34 @@ mod tests {
             let reg = CommandRegistry::new();
             let mut ctx = make_ctx();
             reg.dispatch(CommandId::StrobeToggle, 1.0, &mut ctx);
+        }
+
+        #[test]
+        fn dispatch_ignores_non_finite_values() {
+            // Finding I1 regression test: NaN/±∞ arriving from an
+            // unauthenticated remote input (OSC UDP, remote-ws) must not
+            // reach any `run` closure. NaN in particular survives
+            // `f64::clamp` and saturates to `0` in `encode_param`'s
+            // `round() as i32`, which the Time/Qvar preset channel decodes
+            // as a permanent `-2.0` write. One representative host-side
+            // setter (Color) and one preset-channel setter (Qvar).
+            let reg = create_default_registry();
+            for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut ctx = make_ctx();
+                let before = ctx.color_hue_a;
+                reg.dispatch(CommandId::ColorHueA, bad, &mut ctx);
+                reg.dispatch(CommandId::Qvar1_1, bad, &mut ctx);
+                assert_eq!(ctx.color_hue_a, before, "ColorHueA moved on a {bad} dispatch");
+                assert!(ctx.q_var_calls.is_empty(), "Qvar1_1 reached its setter on a {bad} dispatch");
+            }
+
+            // ...and a finite value on the very same ids still lands, so the
+            // guard is not just disabling the commands outright.
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::ColorHueA, 0.25, &mut ctx);
+            reg.dispatch(CommandId::Qvar1_1, 0.25, &mut ctx);
+            assert_eq!(ctx.color_hue_a, 0.25);
+            assert_eq!(ctx.q_var_calls.len(), 1);
         }
 
         #[test]

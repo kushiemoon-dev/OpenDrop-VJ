@@ -298,60 +298,74 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
     let mut active_rect: Option<egui::Rect> = None;
 
     ui.vertical(|ui| {
-        widgets::section(ui, "Perform");
-        nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
-        // `PresetBrowser` isn't named in this step's brief's PERFORM/
-        // SOURCES/SORTIE/CONTRÔLE section listing (13 entries across the 4
-        // sections in the default build): a gap in that listing: the
-        // brief's own manual-verification line ("les 14 panneaux sont
-        // atteignables depuis la nav sectionnée") requires every
-        // default-build `Panel` variant reachable, and `PresetBrowser` is
-        // the 14th; nothing else in the app can set `active_panel` to it
-        // (the old tab row's "Presets" button is gone). Placed here since
-        // browsing presets is part of the live-performance workflow.
-        // Documented as a judgment call in the task report.
-        nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists", &mut active_rect);
+        // Wrapped in a `ScrollArea` (default settings: shrinks to content
+        // height when it fits, scrolls internally otherwise) so the list
+        // stays reachable past a fixed-height panel. Found live-testing
+        // this phase's nav, which nearly doubled item count from 14 to 27:
+        // with no scroll mechanism at all, every item past the panel's
+        // fixed height: including "About" below this block: was simply
+        // unreachable. Default `auto_shrink` (not forced false) matters:
+        // it lets the area shrink below `available_height` when the list
+        // fits, which is what leaves room for "About" to still pin at the
+        // bottom via its own `bottom_up` block afterward, unchanged.
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            widgets::section(ui, "Perform");
+            nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
+            // `PresetBrowser` isn't named in this step's brief's PERFORM/
+            // SOURCES/SORTIE/CONTRÔLE section listing (13 entries across the 4
+            // sections in the default build): a gap in that listing: the
+            // brief's own manual-verification line ("les 14 panneaux sont
+            // atteignables depuis la nav sectionnée") requires every
+            // default-build `Panel` variant reachable, and `PresetBrowser` is
+            // the 14th; nothing else in the app can set `active_panel` to it
+            // (the old tab row's "Presets" button is gone). Placed here since
+            // browsing presets is part of the live-performance workflow.
+            // Documented as a judgment call in the task report.
+            nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists", &mut active_rect);
 
-        ui.add_space(12.0);
-        widgets::section(ui, "Sources");
-        nav_item(ui, shell.active_panel, Panel::Audio, "Audio", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Midi, "MIDI", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Osc, "OSC", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Overlays, "Overlays", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Video, "Video", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::CloudPresets, "Cloud Presets", &mut active_rect);
-        #[cfg(feature = "link")]
-        nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);
+            ui.add_space(12.0);
+            widgets::section(ui, "Sources");
+            nav_item(ui, shell.active_panel, Panel::Audio, "Audio", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Midi, "MIDI", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Osc, "OSC", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Overlays, "Overlays", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Video, "Video", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::CloudPresets, "Cloud Presets", &mut active_rect);
+            #[cfg(feature = "link")]
+            nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);
 
-        ui.add_space(12.0);
-        widgets::section(ui, "Sortie");
-        nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Share, "Share", &mut active_rect);
+            ui.add_space(12.0);
+            widgets::section(ui, "Sortie");
+            nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Share, "Share", &mut active_rect);
 
-        ui.add_space(12.0);
-        widgets::section(ui, "Contrôle");
-        nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Color, "Color", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Composite, "Composite", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Keymap, "Keymap", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Snapshot, "Snapshot", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Timeline, "Timeline", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Time, "Time", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Qvar, "Q-vars", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Strobe, "Strobe", &mut active_rect);
-        nav_item(ui, shell.active_panel, Panel::Lfo, "LFO", &mut active_rect);
+            ui.add_space(12.0);
+            widgets::section(ui, "Contrôle");
+            nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Color, "Color", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Composite, "Composite", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Keymap, "Keymap", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Snapshot, "Snapshot", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Timeline, "Timeline", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Time, "Time", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Qvar, "Q-vars", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Strobe, "Strobe", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Lfo, "LFO", &mut active_rect);
+        });
 
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout
         // placed last in the outer `vertical` claims the rest of the
         // panel's height and bottom-anchors its one item inside it:
-        // standard egui idiom for a sidebar's pinned-bottom item.
+        // standard egui idiom for a sidebar's pinned-bottom item. Only
+        // reachable because the `ScrollArea` above shrinks to its content
+        // height instead of always claiming the full available height.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             nav_item(ui, shell.active_panel, Panel::About, "About", &mut active_rect);
         });

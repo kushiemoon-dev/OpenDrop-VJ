@@ -603,7 +603,7 @@ mod tests {
 
     fn sample_shared_set() -> SharedSet {
         SharedSet {
-            name: "Mon set de test".to_string(),
+            name: "My test set".to_string(),
             preset_a: "preset-a-slug".to_string(),
             preset_b: "preset-b-slug".to_string(),
             deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],
@@ -631,7 +631,7 @@ mod tests {
             ],
             overlays: vec![make_overlay(
                 "id-1".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch { kind: Some(OverlayKind::Text), text: Some("Hello".to_string()), ..Default::default() },
             )],
             beat_trigger_a: default_beat_trigger_config(),

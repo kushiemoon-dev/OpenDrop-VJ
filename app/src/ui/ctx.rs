@@ -8,7 +8,8 @@
 //! panel's `show` call only needs to borrow the structs it actually reads:
 //! `ShellCtx` (nav chrome), `PerformCtx` (decks/playlists/browser's shared
 //! `Show`), `LibraryCtx` (preset browser), `SourcesCtx` (external control
-//! surfaces: audio input, MIDI, OSC, remote WS, V4L2, the NDI-in selection),
+//! surfaces: audio input, MIDI, OSC, remote WS, V4L2, the NDI-in selection,
+//! the keyboard remap table),
 //! `OutputCtx` (NDI-out, the Output panel's monitor picker, the Quality
 //! panel), `StreamCtx` (OBS/Twitch/Kick), `ControlCtx` (Ableton Link, `#[cfg(
 //! feature = "link")]`-gated per field, never on the struct itself: see
@@ -39,6 +40,7 @@ use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::deck;
 use opendrop_io::midi::MidiTriggerKey;
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::Key;
 use winit::window::Window;
 
 use crate::ui::preset_browser::SearchCache;
@@ -89,6 +91,12 @@ pub(crate) struct PerformCtx<'a> {
     pub(crate) pending_validations: &'a HashSet<usize>,
     pub(crate) preset_errors: &'a HashMap<usize, String>,
     pub(crate) transition_seconds: &'a mut f64,
+    /// Share panel's name field (Step 13 of the Phase 8 plan): lives here
+    /// rather than a new struct because the Share panel needs the same
+    /// `show`/`deck_preset_names`/`transition_seconds` this struct already
+    /// carries (crossfade duration doubles as `SharedSet::transition_time`,
+    /// no native equivalent existed before this field).
+    pub(crate) share_set_name: &'a mut String,
     pub(crate) t0: Instant,
 }
 
@@ -111,23 +119,69 @@ pub(crate) struct LibraryCtx<'a> {
 }
 
 /// External control/device surfaces: Audio input, MIDI, OSC, remote WS,
-/// V4L2loopback, and the NDI-in panel's own selected-source state (the NDI
-/// handle and its composite/deck toggles are output-side: see `OutputCtx`).
+/// V4L2loopback, CloudPresets, and the NDI-in panel's own selected-source
+/// state (the NDI handle and its composite/deck toggles are output-side:
+/// see `OutputCtx`).
 pub(crate) struct SourcesCtx<'a> {
     pub(crate) audio: &'a opendrop_audio::AudioHandle,
     pub(crate) input_devices: &'a Vec<String>,
     pub(crate) selected_input_device: &'a mut Option<String>,
     pub(crate) last_vu_level: f64,
     pub(crate) registry: &'a CommandRegistry,
+    pub(crate) keymap: &'a mut HashMap<Key, CommandId>,
+    pub(crate) keymap_learning: &'a mut Option<CommandId>,
     pub(crate) midi: &'a opendrop_io::midi::MidiHandle,
     pub(crate) midi_learning: &'a mut Option<(CommandId, Option<MidiTriggerKey>)>,
     pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,
     pub(crate) osc: &'a opendrop_io::osc::OscHandle,
     pub(crate) osc_port: &'a mut u16,
+    /// Overlays panel (Step 12 of the Phase 8 VJ-panels plan): overlay id
+    /// → the sprite file it was created from, and the id counter. The
+    /// overlay list itself lives on `Show` (`PerformCtx::show`) like every
+    /// other business object: these two are the I/O-side halves
+    /// `core::overlay` deliberately does not own (see `ui::overlays`'s
+    /// module doc comment). The GL texture cache keyed by the same ids
+    /// stays out of every context struct: `main.rs`'s render loop is its
+    /// only reader, no panel touches it.
+    pub(crate) overlay_assets: &'a mut HashMap<String, PathBuf>,
+    pub(crate) next_overlay_id: &'a mut u64,
     pub(crate) remote_ws: &'a opendrop_io::remote_ws::RemoteWsHandle,
     pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
     pub(crate) v4l2_active: &'a mut bool,
     pub(crate) v4l2_device: &'a mut Option<Option<PathBuf>>,
+    /// Video panel (Step 14 of the Phase 8 VJ-panels plan): the clip
+    /// library, the camera picker's cached device list and its current
+    /// selection, and the panel's own synchronous import/delete errors.
+    /// Same split as the Overlays fields above: the layer's *state* lives
+    /// on `Show` (`PerformCtx::show`), these are the I/O-side halves
+    /// `core::video` deliberately does not own. The capture handle itself
+    /// stays out of every context struct, like the GL texture cache: the
+    /// panel takes a `VideoCaptureSnapshot`, and `main.rs` (its only other
+    /// reader) owns the handle.
+    pub(crate) video_clips: &'a mut Vec<crate::video_clips::VideoClip>,
+    pub(crate) video_cameras: &'a Vec<opendrop_io::video_capture::CameraDevice>,
+    pub(crate) video_camera_device: &'a mut String,
+    pub(crate) video_local_error: &'a mut Option<String>,
+    pub(crate) video_capture: &'a opendrop_io::video_capture::VideoCaptureSnapshot,
+    /// The Video panel's one outbound NDI intent for this frame, applied
+    /// by `main.rs` right after `ui_root` returns: same out-param idiom
+    /// as `LibraryCtx::load_request`, and for the same reason: the NDI
+    /// handle is borrowed by `OutputCtx` for the whole closure, so the
+    /// panel records what it wants instead of sending it itself.
+    pub(crate) video_ndi_request: &'a mut Option<crate::ui::video::VideoNdiRequest>,
+    pub(crate) cloud_presets: &'a opendrop_io::cloud_presets::CloudPresetsHandle,
+    pub(crate) cloud_presets_api_url: &'a mut String,
+    pub(crate) cloud_presets_token_input: &'a mut String,
+    /// Local (non-network) panel errors: see `AppState::
+    /// cloud_presets_secret_error`'s doc comment.
+    pub(crate) cloud_presets_secret_error: &'a mut Option<String>,
+    /// Id + edit buffer of the entry currently being renamed inline, if
+    /// any: mirrors `SidebarCloudPresets.svelte`'s `renamingId`/
+    /// `renameValue` local state, promoted to `AppState` since this panel
+    /// (like every other one) takes individual fields, not a place to
+    /// stash cross-frame widget state of its own (see `ui::quality`'s
+    /// module doc comment on that convention).
+    pub(crate) cloud_presets_rename: &'a mut Option<(String, String)>,
 }
 
 /// Output-side state: the NDI-out handle and its composite/per-deck

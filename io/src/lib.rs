@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod cloud_presets;
 pub mod command_names;
 pub mod kick;
 // Feature-gated on the `mod` declaration itself (not on `#[cfg]` inside
@@ -14,5 +15,7 @@ pub mod obs;
 pub mod osc;
 pub mod remote_ws;
 pub mod secrets;
+pub mod share_codec;
 pub mod twitch;
 pub mod v4l2loopback;
+pub mod video_capture;

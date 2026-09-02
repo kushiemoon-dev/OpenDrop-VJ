@@ -7,11 +7,42 @@
 //! time: this is what lets toggling a q-var on/off take effect without
 //! reloading the preset.
 //!
+//! That last sentence is about Butterchurn, and does **not** carry over to
+//! the native projectM path: a Milkdrop preset cannot read a host-side
+//! `enabled` flag every frame, so `engine::qvar_patch` compiles only the
+//! watches that are on into the preset text, and toggling one costs that
+//! deck a reload. Values still change without one. See that module for why
+//! the trade was made that way round.
+//!
 //! `getGlobalQVarParams` (the `window.__odQVarParams` singleton) is UI/runtime
 //! glue over a global mutable binding, untested in the TS source itself, and
 //! out of scope for this pure-logic port.
 
 use std::collections::HashMap;
+
+/// How many q-vars a preset exposes (`q1`..`q32`), and so the width of both
+/// [`DeckQVarParams`] arrays. Named for the callers that iterate them: the
+/// engine's side-channel index allocation (`engine::qvar_patch`) and the Qvar
+/// panel: rather than repeating `32` at each of them.
+pub const Q_VAR_COUNT: usize = 32;
+
+/// Lowest value a q-var override can take: `SidebarQvar.svelte`'s sliders run
+/// -2..2 in steps of 0.01. Also the range a `CommandId::Qvar*` dispatch's
+/// 0..1 value is scaled onto, so a MIDI fader at half travel lands exactly on
+/// 0.
+pub const Q_VAR_MIN: f64 = -2.0;
+
+/// Highest value a q-var override can take: see [`Q_VAR_MIN`].
+pub const Q_VAR_MAX: f64 = 2.0;
+
+/// Clamps an override to the panel's [`Q_VAR_MIN`]..[`Q_VAR_MAX`] range, the
+/// same role `time_params::clamp_time_mult` plays for the Time multipliers.
+/// That range is also exactly what the host-to-preset side channel can carry
+/// (`engine::preset_patch::VALUE_MIN`/`VALUE_MAX`), so a clamped value always
+/// survives the trip into the running preset unaltered.
+pub fn clamp_q_var_value(v: f64) -> f64 {
+    v.clamp(Q_VAR_MIN, Q_VAR_MAX)
+}
 
 /// Q-var overrides for one deck. `enabled[i]`/`value[i]` correspond to q(i+1).
 /// Fixed at 32 slots: the length invariant the TS source enforced by
@@ -105,6 +136,20 @@ mod tests {
         assert_eq!(p.value.len(), 32);
         assert!(p.enabled.iter().all(|&e| !e));
         assert!(p.value.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn q_var_count_matches_the_array_width_it_names() {
+        let p = default_q_var_params();
+        assert_eq!(Q_VAR_COUNT, p.enabled.len());
+        assert_eq!(Q_VAR_COUNT, p.value.len());
+    }
+
+    #[test]
+    fn clamp_q_var_value_holds_the_sliders_own_range() {
+        assert_eq!(clamp_q_var_value(9.0), Q_VAR_MAX);
+        assert_eq!(clamp_q_var_value(-9.0), Q_VAR_MIN);
+        assert_eq!(clamp_q_var_value(0.75), 0.75);
     }
 
     mod inject_q_var_params_tests {

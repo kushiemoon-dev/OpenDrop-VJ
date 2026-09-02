@@ -7,6 +7,18 @@ edition = "2021"
 glutin = "0.32.3"
 glow = "0.17"
 opendrop-core = { path = "../core" }
+# Overlay sprites (Step 12 of the Phase 8 VJ-panels plan): PNG/JPEG decode
+# for `overlay_texture::decode_image`. Absent from the workspace before this
+# step. `default-features = false` + an explicit codec list: the default
+# feature set pulls in ~15 more decoders (AVIF, TIFF, EXR, …) this app has
+# no use for, and the file dialog in `ui::overlays` filters to exactly these
+# extensions.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+# Overlay text rasterization (same step). Already resolved transitively via
+# egui/epaint's own text rendering; declared directly here because
+# `overlay_texture::rasterize_text` uses it: a transitive resolution is not
+# a dependency contract.
+ab_glyph = "0.2.32"
 
 [build-dependencies]
 bindgen = "0.70"

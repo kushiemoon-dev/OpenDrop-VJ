@@ -319,8 +319,11 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         nav_item(ui, shell.active_panel, Panel::Midi, "MIDI", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Osc, "OSC", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Overlays, "Overlays", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Video, "Video", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::CloudPresets, "Cloud Presets", &mut active_rect);
         #[cfg(feature = "link")]
         nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);
 
@@ -329,10 +332,20 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Share, "Share", &mut active_rect);
 
         ui.add_space(12.0);
         widgets::section(ui, "Contrôle");
         nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Color, "Color", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Composite, "Composite", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Keymap, "Keymap", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Snapshot, "Snapshot", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Timeline, "Timeline", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Time, "Time", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Qvar, "Q-vars", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Strobe, "Strobe", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Lfo, "LFO", &mut active_rect);
 
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout

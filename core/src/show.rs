@@ -8,6 +8,7 @@
 //! `src/routes/+page.svelte:264-269`.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::beat_detector::BeatDetector;
@@ -15,11 +16,23 @@ use crate::beat_trigger::{
     default_beat_trigger_config, default_volume_peak_state, detect_volume_peak, should_trigger_on_beat,
     BeatTriggerConfig, BeatTriggerMode, VolumePeakState,
 };
-use crate::blend::{ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+use crate::blend::{
+    blend_mode_from_value01, blend_mode_to_value01, ColorParams, SlotComposite, DEFAULT_COLOR_PARAMS,
+    DEFAULT_SLOT_COMPOSITE,
+};
 use crate::clock::Clock;
-use crate::commands::{CommandContext, Deck};
+use crate::commands::{CommandContext, CommandId, Deck};
+use crate::lfo::LfoEngine;
+use crate::overlay::OverlayStore;
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
+use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
+use crate::rng::Xorshift64;
+use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
+use crate::strobe::StrobeState;
+use crate::time_params::{clamp_time_mult, DeckTimeParams};
+use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
+use crate::video::VideoState;
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
 /// slot never shows, regardless of crossfader position.
@@ -58,6 +71,19 @@ pub struct Show {
     pub slot_composites: [SlotComposite; 4],
     pub color_params_a: ColorParams,
     pub color_params_b: ColorParams,
+    /// The 8 Time multipliers per deck slot (Step 8 of the Phase 8 plan),
+    /// written by the Time panel and by the 32 `CommandId::Time*` setters.
+    /// Read by `app`'s per-frame push loop, which forwards the changed ones
+    /// into each deck's running preset: `Show` itself stays engine-free.
+    pub time_params: [DeckTimeParams; 4],
+    /// The 32 q-var overrides per deck slot (Step 9 of the Phase 8 plan),
+    /// written by the Qvar panel and by the 128 `CommandId::Qvar*` setters.
+    /// Read by `app` on two different cadences, both engine-free from here:
+    /// changed *values* go into the running preset through the same
+    /// one-word-per-frame side channel Time uses, while a change to the set
+    /// of `enabled` watches needs the deck's preset re-patched and reloaded
+    /// (see `engine::qvar_patch`).
+    pub q_var_params: QVarParamsTuple,
     pub preset_catalog: Vec<PresetMeta>,
     preset_index_a: usize,
     preset_index_b: usize,
@@ -72,6 +98,84 @@ pub struct Show {
     pub beat_sync_b: bool,
     pub beat_trigger_a: BeatTriggerConfig,
     pub beat_trigger_b: BeatTriggerConfig,
+    /// The 8 snapshot slots (Step 4 of the Phase 8 plan). `None` = empty
+    /// slot. Populated by the snapshot panel's Save button
+    /// (`capture_snapshot_values`), consumed by `recall_snapshot`/
+    /// `tick_recall`.
+    pub snapshot_slots: [Option<Snapshot>; 8],
+    /// How long a snapshot recall takes to fully interpolate, in seconds.
+    /// Slider range 0.1-10s (snapshot panel).
+    pub snapshot_recall_duration_sec: f64,
+    /// The in-progress recall, if any: armed by `recall_snapshot`,
+    /// advanced each render tick by `tick_recall`.
+    pub active_recall: Option<ActiveRecall>,
+    /// Up to 8 keyframes (Step 5 of the Phase 8 plan) sequencing playback
+    /// across the existing snapshot slots. Kept sorted by `time_sec` by
+    /// the timeline panel (`app::ui::timeline`): `timeline_values_at`
+    /// assumes sorted input.
+    pub timeline_keyframes: Vec<TimelineKeyframe>,
+    /// Whether the timeline loop is currently advancing. Toggled through
+    /// `CommandContext::toggle_timeline` (keyboard/MIDI/OSC/remote-ws
+    /// parity), advanced each render tick by `tick_timeline`.
+    pub timeline_playing: bool,
+    /// Seconds elapsed since timeline playback last started, accumulated
+    /// by `tick_timeline` from caller-supplied dt: same "no wall clock of
+    /// its own" convention as `tick_recall` (see that method's doc
+    /// comment). Reset to 0 by `toggle_timeline` on every transition to
+    /// `true`, so play always restarts at the beginning of the current
+    /// loop cycle rather than resuming stale progress or jumping in time.
+    timeline_elapsed_sec: f64,
+    /// Strobe on/off/rate/intensity/color (Step 10 of the Phase 8 plan).
+    /// Toggled through `CommandContext::toggle_strobe` (keyboard/MIDI/OSC/
+    /// remote-ws parity); rate/intensity/color are written directly by
+    /// the panel (`app::ui::strobe`), same "direct field mutation"
+    /// convention as `slot_composites`/`color_params_a`. The per-frame
+    /// flash intensity itself is computed by `app::about_to_wait` via
+    /// `strobe::strobe_flash_intensity(&show.strobe, ...)` and handed to
+    /// the compositor: `Show` stores only the user-facing state, no GL.
+    pub strobe: StrobeState,
+    /// 4 modulation slots (Step 11 of the Phase 8 plan), written directly
+    /// by the LFO panel (`app::ui::lfo`): same "direct field mutation"
+    /// convention as `strobe`'s rate/intensity/color above. Ticked each
+    /// frame by `app::about_to_wait` (`LfoEngine::tick`, driven by
+    /// `clock.phase01()`); the resulting `(CommandId, value01)` pairs are
+    /// dispatched through the registry, not written to `Show` here: same
+    /// registry-dispatch parity as `tick_recall`/`tick_timeline` above, so
+    /// an LFO route moves its target through the exact same
+    /// keyboard/MIDI/OSC/remote-ws-equivalent path.
+    pub lfo_engine: LfoEngine,
+    /// Sprite/text overlays and their auto-cycling queue (Step 12 of the
+    /// Phase 8 plan). `core::overlay` was ported long before it had a
+    /// consumer; this field is what finally gives it one. Written directly
+    /// by the Overlays panel (`app::ui::overlays`): same "direct field
+    /// mutation" convention as `strobe`/`lfo_engine` above: except the
+    /// queue's ◀/▶ buttons, which go through
+    /// `CommandContext::advance_overlay_queue` for keyboard/MIDI/OSC/
+    /// remote-ws parity. The queue also self-advances: `on_beat` and
+    /// `check_volume_peak_triggers` below feed it the same two signals the
+    /// per-deck playlist advance already runs on.
+    ///
+    /// No GL and no asset paths here: `Overlay` carries only the values a
+    /// zero-I/O crate can own, and `app` keeps the id→file map and the
+    /// id→GL-texture cache alongside it (see `AppState::overlay_assets`).
+    pub overlay_store: OverlayStore,
+    /// Video background layer: on/off, opacity, clip rotation, and the 4
+    /// beat/volume-reactive toggles (Step 14 of the Phase 8 plan). Written
+    /// directly by the Video panel (`app::ui::video`): same "direct field
+    /// mutation" convention as `strobe`/`lfo_engine`/`overlay_store` above.
+    ///
+    /// Same boundary as `overlay_store`: no clip file paths, no decoder
+    /// handle, no GL here. `app` owns the clip library (id → file), the
+    /// `ffmpeg` capture thread (`opendrop_io::video_capture`), and the GL
+    /// texture the decoded frames land in; this field holds only the values
+    /// a zero-I/O crate can own. The beat-driven clip cut is
+    /// [`Show::on_video_beat`], called by `app` (not from `on_beat` itself)
+    /// because it needs that app-owned clip list.
+    pub video: VideoState,
+    /// Shuffle-mode draws for `on_video_beat`: a 5th independent
+    /// `Xorshift64` consumer alongside the two playlist engines, the LFO,
+    /// and the overlay queue. See `reseed_rng`.
+    video_rng: Xorshift64,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -117,6 +221,8 @@ impl Default for Show {
             slot_composites: [DEFAULT_SLOT_COMPOSITE; 4],
             color_params_a: DEFAULT_COLOR_PARAMS,
             color_params_b: DEFAULT_COLOR_PARAMS,
+            time_params: [DeckTimeParams::default(); 4],
+            q_var_params: [default_q_var_params(); 4],
             preset_catalog: Vec::new(),
             preset_index_a: 0,
             preset_index_b: 0,
@@ -131,6 +237,17 @@ impl Default for Show {
             beat_sync_b: false,
             beat_trigger_a: default_beat_trigger_config(),
             beat_trigger_b: default_beat_trigger_config(),
+            snapshot_slots: std::array::from_fn(|_| None),
+            snapshot_recall_duration_sec: 1.0,
+            active_recall: None,
+            timeline_keyframes: Vec::new(),
+            timeline_playing: false,
+            timeline_elapsed_sec: 0.0,
+            strobe: StrobeState::default(),
+            lfo_engine: LfoEngine::new(),
+            overlay_store: OverlayStore::new(),
+            video: VideoState::default(),
+            video_rng: Xorshift64::default(),
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -166,6 +283,37 @@ impl Show {
         if let Some(engine) = self.playlists.engine_b_mut() {
             engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
         }
+        // LFO Sample & Hold (Step 11 of the Phase 8 plan): an unrelated
+        // RNG consumer, no lockstep risk with the playlist engines above,
+        // so it reseeds from the raw `seed` rather than an XOR'd variant.
+        self.lfo_engine.reseed_rng(seed);
+        // Overlay auto-cycle queue in shuffle mode (Step 12): a third
+        // independent consumer, XOR'd like deck B's so two shuffles driven
+        // by the same beat don't advance in lockstep.
+        self.overlay_store.reseed_rng(seed ^ 0x5A5A_5A5A_5A5A_5A5A);
+        // Video-loop shuffle (Step 14): a fifth independent consumer, XOR'd
+        // with its own constant for the same anti-lockstep reason as the two
+        // above: the overlay queue and the video layer are both driven by
+        // the same beat, and two shuffles drawing identical sequences would
+        // be visible.
+        self.video_rng.reseed(seed ^ 0x3C3C_3C3C_3C3C_3C3C);
+    }
+
+    /// Beat-driven video-clip cut (Step 14 of the Phase 8 plan). Returns
+    /// `true` when the current clip actually changed, so `app` knows to
+    /// point its decoder at the new file.
+    ///
+    /// Not folded into [`Show::on_beat`] like the overlay queue's own
+    /// advance, because the clip list it rotates through is `app`-owned
+    /// (files on disk: see `Show::video`'s doc comment); `app` calls this
+    /// immediately after `on_beat`, from the same two call sites.
+    ///
+    /// `ndi_active` is `NdiSnapshot::receive_active`: see
+    /// `core::video`'s module doc comment for why that isn't mirrored into
+    /// `VideoState`.
+    pub fn on_video_beat(&mut self, all_clip_keys: &[String], ndi_active: bool) -> bool {
+        let draw = self.video_rng.next_f64();
+        self.video.on_beat(all_clip_keys, ndi_active, draw)
     }
 
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
@@ -220,6 +368,14 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
+        // Overlay auto-cycle queue (Step 12): the third `shouldTriggerOn
+        // Beat` block of `beat-tempo-actions.ts`, alongside the two
+        // per-deck ones just above. Unconditional here: the store's own
+        // guard checks `queue_enabled` and the trigger mode.
+        self.overlay_store.maybe_advance_on_beat(self.clock.beat_count() as i64);
+        // Refreshes any LFO slot in `Sh` (sample & hold) shape: see
+        // `LfoEngine::randomize_sh`'s doc comment ("call on each downbeat").
+        self.lfo_engine.randomize_sh();
     }
 
     /// Restarts the auto-crossfade cadence from the top. Port of the
@@ -341,6 +497,11 @@ impl Show {
     pub fn check_volume_peak_triggers(&mut self, rms: f64, now_ms: f64) {
         self.check_one_volume_peak(Deck::A, rms, now_ms);
         self.check_one_volume_peak(Deck::B, rms, now_ms);
+        // Overlay auto-cycle queue (Step 12): the volume-peak half of
+        // what `on_beat` does for the beat half. Its own rolling
+        // average/cooldown state lives on the store, not here (see
+        // `OverlayStore::queue_volume_state`).
+        self.overlay_store.maybe_advance_on_volume_peak(rms, now_ms);
     }
 
     fn check_one_volume_peak(&mut self, deck: Deck, rms: f64, now_ms: f64) {
@@ -360,7 +521,173 @@ impl Show {
             self.advance_or_navigate(deck);
         }
     }
+
+    /// Reads back the current value of a snapshot-capturable `CommandId`:
+    /// the inverse of the `CommandContext::set_*` setters those same ids
+    /// dispatch to. `None` for any `CommandId` outside
+    /// `SNAPSHOT_CAPTURABLE_IDS`, whether because it has no real setter yet
+    /// or because it is deliberately excluded: the `CommandId::Time*` and
+    /// `CommandId::Qvar*` families do have real setters (steps 8 and 9) and
+    /// still return `None` here on purpose; see `SNAPSHOT_CAPTURABLE_IDS`
+    /// for why.
+    pub fn get_command_value(&self, id: CommandId) -> Option<f64> {
+        match id {
+            CommandId::ColorHueA => Some(self.color_params_a.hue_rotate),
+            CommandId::ColorSatA => Some(self.color_params_a.saturate),
+            CommandId::ColorBrightA => Some(self.color_params_a.brightness),
+            CommandId::ColorContrastA => Some(self.color_params_a.contrast),
+            CommandId::ColorInvertA => Some(self.color_params_a.invert),
+            CommandId::ColorHueB => Some(self.color_params_b.hue_rotate),
+            CommandId::ColorSatB => Some(self.color_params_b.saturate),
+            CommandId::ColorBrightB => Some(self.color_params_b.brightness),
+            CommandId::ColorContrastB => Some(self.color_params_b.contrast),
+            CommandId::ColorInvertB => Some(self.color_params_b.invert),
+            CommandId::CompositeBlend0 => Some(blend_mode_to_value01(self.slot_composites[0].blend)),
+            CommandId::CompositeBlend1 => Some(blend_mode_to_value01(self.slot_composites[1].blend)),
+            CommandId::CompositeBlend2 => Some(blend_mode_to_value01(self.slot_composites[2].blend)),
+            CommandId::CompositeBlend3 => Some(blend_mode_to_value01(self.slot_composites[3].blend)),
+            CommandId::LumakeyBlack0 => Some(self.slot_composites[0].luma_black),
+            CommandId::LumakeyBlack1 => Some(self.slot_composites[1].luma_black),
+            CommandId::LumakeyBlack2 => Some(self.slot_composites[2].luma_black),
+            CommandId::LumakeyBlack3 => Some(self.slot_composites[3].luma_black),
+            CommandId::LumakeyWhite0 => Some(self.slot_composites[0].luma_white),
+            CommandId::LumakeyWhite1 => Some(self.slot_composites[1].luma_white),
+            CommandId::LumakeyWhite2 => Some(self.slot_composites[2].luma_white),
+            CommandId::LumakeyWhite3 => Some(self.slot_composites[3].luma_white),
+            CommandId::ColorkeyHue0 => Some(self.slot_composites[0].color_hue),
+            CommandId::ColorkeyHue1 => Some(self.slot_composites[1].color_hue),
+            CommandId::ColorkeyHue2 => Some(self.slot_composites[2].color_hue),
+            CommandId::ColorkeyHue3 => Some(self.slot_composites[3].color_hue),
+            CommandId::ColorkeyTolerance0 => Some(self.slot_composites[0].color_tol),
+            CommandId::ColorkeyTolerance1 => Some(self.slot_composites[1].color_tol),
+            CommandId::ColorkeyTolerance2 => Some(self.slot_composites[2].color_tol),
+            CommandId::ColorkeyTolerance3 => Some(self.slot_composites[3].color_tol),
+            _ => None,
+        }
+    }
+
+    /// Captures the current value of every snapshot-capturable `CommandId`
+    /// (`SNAPSHOT_CAPTURABLE_IDS`): what the snapshot panel's Save button
+    /// stores into a slot.
+    pub fn capture_snapshot_values(&self) -> HashMap<CommandId, f64> {
+        SNAPSHOT_CAPTURABLE_IDS.iter().filter_map(|&id| self.get_command_value(id).map(|v| (id, v))).collect()
+    }
+
+    /// Advances an in-progress snapshot recall by `dt_sec` (same
+    /// caller-supplied-dt convention as `tick_playlists`) and returns the
+    /// interpolated `(CommandId, value)` pairs for this tick. Dispatching
+    /// them is the caller's job (`app::about_to_wait`, through
+    /// `CommandRegistry::dispatch`) so a recall stays on the same
+    /// keyboard/MIDI/OSC/remote-ws parity path as every other command.
+    /// Returns an empty `Vec` when no recall is active, or when the target
+    /// slot was cleared mid-recall (which also clears `active_recall`).
+    pub fn tick_recall(&mut self, dt_sec: f64) -> Vec<(CommandId, f64)> {
+        let Some(active) = &self.active_recall else { return Vec::new() };
+        let slot = active.slot;
+        let Some(snapshot) = &self.snapshot_slots[slot] else {
+            self.active_recall = None;
+            return Vec::new();
+        };
+        let (values, next) = tick_active_recall(active, &snapshot.values, self.snapshot_recall_duration_sec, dt_sec);
+        self.active_recall = next;
+        values.into_iter().collect()
+    }
+
+    /// Advances timeline playback by `dt_sec` (same caller-supplied-dt
+    /// convention as `tick_recall`/`tick_playlists` above) and returns the
+    /// interpolated `(CommandId, value)` pairs for this tick: dispatching
+    /// them is the caller's job (`app::about_to_wait`, through
+    /// `CommandRegistry::dispatch`), same keyboard/MIDI/OSC/remote-ws
+    /// parity reasoning as `tick_recall`. Returns an empty `Vec` when not
+    /// playing, or when there are fewer than 2 keyframes (nothing to loop
+    /// over: `timeline_loop_duration` is 0 in that case).
+    pub fn tick_timeline(&mut self, dt_sec: f64) -> Vec<(CommandId, f64)> {
+        if !self.timeline_playing {
+            return Vec::new();
+        }
+        let duration = timeline_loop_duration(&self.timeline_keyframes);
+        if duration <= 0.0 {
+            return Vec::new();
+        }
+        self.timeline_elapsed_sec += dt_sec;
+        let t = self.timeline_elapsed_sec % duration;
+        timeline_values_at(&self.timeline_keyframes, &self.snapshot_slots, t).into_iter().collect()
+    }
 }
+
+/// `CommandId`s the snapshot panel's Save button captures and a recall
+/// interpolates toward: the Color and Composite setters (steps 1-2 of the
+/// Phase 8 plan). See `Show::get_command_value`.
+///
+/// This is a curated subset, not "every setter that exists yet": having a
+/// real `CommandContext` setter is necessary but not sufficient, and the
+/// list is not expected to keep growing with each new one. As of the end of
+/// Phase 8, 221 of the 223 commands have a setter and only these 30 are
+/// captured: the two large families left out are excluded permanently and
+/// by design, for the reasons below.
+///
+/// **The 32 `CommandId::Time*` setters (step 8) are deliberately left out**,
+/// rather than overlooked. Two reasons:
+///
+/// - *Bandwidth.* Time values reach the decks through a side channel that
+///   carries one value per deck per frame (see `engine::preset_patch`). A
+///   recall interpolates every captured id every frame, so adding Time would
+///   put up to 7 continuously-changing values per deck on a 1-per-frame
+///   channel: each would land at roughly 1/7 the recall's own rate, making a
+///   recall visibly step rather than glide, and starving whatever else was
+///   already moving. Every id currently in this list is applied host-side by
+///   the GPU compositor, with no such ceiling.
+/// - *Round-tripping the scale.* Everything here is stored 0..1, which is
+///   also the `value01` a recall dispatches. Time is stored 0..2 (see
+///   `time_params::TIME_MULT_MAX`), so `get_command_value` would have to
+///   divide by `TIME_MULT_MAX` to invert `commands::time_mult` exactly:
+///   easy to get wrong, and silently wrong if it ever is, since a snapshot
+///   would recall to half or double what was saved.
+///
+/// **The 128 `CommandId::Qvar*` setters (step 9) are left out for the same
+/// two reasons**, both of which apply at least as strongly: they share the
+/// very same one-value-per-deck-per-frame channel (so a captured Qvar would
+/// compete with Time *and* with the other 31 watches), and they are stored
+/// -2..2 rather than 0..1, so the same inversion of `commands::q_var_value`
+/// would have to be exact. A third reason is specific to Qvar: dispatching
+/// one *enables* the watch it addresses, so a recall would silently switch
+/// watches on, and switching a watch on re-patches and reloads the deck's
+/// preset: a recall that did that every frame would be a reload loop.
+///
+/// Consequence to be aware of: saving a snapshot captures neither Time nor
+/// Qvar, and recalling one leaves both where they are.
+const SNAPSHOT_CAPTURABLE_IDS: [CommandId; 30] = [
+    CommandId::ColorHueA,
+    CommandId::ColorSatA,
+    CommandId::ColorBrightA,
+    CommandId::ColorContrastA,
+    CommandId::ColorInvertA,
+    CommandId::ColorHueB,
+    CommandId::ColorSatB,
+    CommandId::ColorBrightB,
+    CommandId::ColorContrastB,
+    CommandId::ColorInvertB,
+    CommandId::CompositeBlend0,
+    CommandId::CompositeBlend1,
+    CommandId::CompositeBlend2,
+    CommandId::CompositeBlend3,
+    CommandId::LumakeyBlack0,
+    CommandId::LumakeyBlack1,
+    CommandId::LumakeyBlack2,
+    CommandId::LumakeyBlack3,
+    CommandId::LumakeyWhite0,
+    CommandId::LumakeyWhite1,
+    CommandId::LumakeyWhite2,
+    CommandId::LumakeyWhite3,
+    CommandId::ColorkeyHue0,
+    CommandId::ColorkeyHue1,
+    CommandId::ColorkeyHue2,
+    CommandId::ColorkeyHue3,
+    CommandId::ColorkeyTolerance0,
+    CommandId::ColorkeyTolerance1,
+    CommandId::ColorkeyTolerance2,
+    CommandId::ColorkeyTolerance3,
+];
 
 impl CommandContext for Show {
     fn get_crossfader(&self) -> f64 {
@@ -442,16 +769,147 @@ impl CommandContext for Show {
         }
     }
 
-    // The overlay queue is Phase 4/M2+ territory (see commands.rs's own
-    // header note: most CommandId variants are no-op stubs in the TS
-    // source too, wired up by later milestones).
-    fn advance_overlay_queue(&mut self, _direction: i32) {}
+    /// Step 12 of the Phase 8 VJ-panels plan: the overlay queue is real
+    /// state now (`Show::overlay_store`), so this stops being the no-op
+    /// stub it was through Phase 4/M2. `direction` is +1/-1 straight from
+    /// `CommandId::OverlayQueueNext`/`Prev`; `advance_overlay_queue`
+    /// itself treats anything that isn't +1 as "backwards", same as the
+    /// TS source's `direction === 1 ? ... : ...`.
+    fn advance_overlay_queue(&mut self, direction: i32) {
+        self.overlay_store.advance_overlay_queue(direction);
+    }
+
+    fn set_color_hue_a(&mut self, v: f64) {
+        self.color_params_a.hue_rotate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_sat_a(&mut self, v: f64) {
+        self.color_params_a.saturate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_bright_a(&mut self, v: f64) {
+        self.color_params_a.brightness = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_contrast_a(&mut self, v: f64) {
+        self.color_params_a.contrast = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_invert_a(&mut self, v: f64) {
+        self.color_params_a.invert = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_hue_b(&mut self, v: f64) {
+        self.color_params_b.hue_rotate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_sat_b(&mut self, v: f64) {
+        self.color_params_b.saturate = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_bright_b(&mut self, v: f64) {
+        self.color_params_b.brightness = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_contrast_b(&mut self, v: f64) {
+        self.color_params_b.contrast = v.clamp(0.0, 1.0);
+    }
+
+    fn set_color_invert_b(&mut self, v: f64) {
+        self.color_params_b.invert = v.clamp(0.0, 1.0);
+    }
+
+    fn set_time_speed(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].speed_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_zoom(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].zoom_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_rot(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].rot_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_warp(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].warp_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_dx(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].dx_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_dy(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].dy_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_stretch(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].stretch_mult = clamp_time_mult(v);
+    }
+
+    fn set_time_wave(&mut self, slot: usize, v: f64) {
+        self.time_params[slot].wave_mult = clamp_time_mult(v);
+    }
+
+    /// Built from `q_vars`'s two ported helpers rather than indexing the
+    /// arrays directly: they already carry the out-of-range guard the TS
+    /// port grew (`slot > 3`, `n` outside 1..=32 is a no-op, not a panic),
+    /// which matters here because `n`/`slot` come from a `CommandId` table
+    /// and an OSC/remote-ws payload rather than from this crate. Order is
+    /// load-bearing: `with_q_var_watch` resets the value to 0, so enabling
+    /// has to happen *before* the value is written, not after.
+    fn set_q_var(&mut self, slot: usize, n: usize, v: f64) {
+        let enabled = with_q_var_watch(self.q_var_params, slot, n);
+        self.q_var_params = with_q_var_value(enabled, slot, n, clamp_q_var_value(v));
+    }
+
+    fn set_composite_blend(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].blend = blend_mode_from_value01(v);
+    }
+
+    fn set_composite_luma_black(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].luma_black = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_luma_white(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].luma_white = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_color_hue(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].color_hue = v.clamp(0.0, 1.0);
+    }
+
+    fn set_composite_color_tol(&mut self, slot: usize, v: f64) {
+        self.slot_composites[slot].color_tol = v.clamp(0.0, 1.0);
+    }
+
+    fn recall_snapshot(&mut self, slot: usize) {
+        let Some(snapshot) = &self.snapshot_slots[slot] else { return };
+        let start_values: HashMap<CommandId, f64> =
+            snapshot.values.keys().filter_map(|&id| self.get_command_value(id).map(|v| (id, v))).collect();
+        self.active_recall = Some(ActiveRecall { slot, start_values, elapsed_sec: 0.0 });
+    }
+
+    fn toggle_timeline(&mut self) {
+        self.timeline_playing = !self.timeline_playing;
+        if self.timeline_playing {
+            self.timeline_elapsed_sec = 0.0;
+        }
+    }
+
+    fn toggle_strobe(&mut self) {
+        self.strobe.enabled = !self.strobe.enabled;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::beat_trigger::BeatTriggerConfigPatch;
+    use crate::blend::BlendMode;
     use crate::commands::{create_default_registry, CommandId};
+    use crate::overlay::Overlay;
+    use crate::snapshot::smoothstep;
 
     mod bus_gain {
         use super::*;
@@ -513,10 +971,25 @@ mod tests {
         }
 
         #[test]
+        fn time_params_start_neutral_on_every_slot() {
+            assert_eq!(Show::default().time_params, [DeckTimeParams::default(); 4]);
+        }
+
+        #[test]
+        fn q_var_params_start_unwatched_on_every_slot() {
+            assert_eq!(Show::default().q_var_params, [default_q_var_params(); 4]);
+        }
+
+        #[test]
         fn locks_start_false() {
             let show = Show::default();
             assert!(!show.lock_a);
             assert!(!show.lock_b);
+        }
+
+        #[test]
+        fn strobe_starts_disabled() {
+            assert!(!Show::default().strobe.enabled);
         }
     }
 
@@ -656,6 +1129,585 @@ mod tests {
             show.switch_active_deck(); // active_deck becomes B, but no slot maps to it
             assert_eq!(show.get_active_deck(), Deck::B);
             assert_eq!(show.selected_slot, 0); // unchanged, not reset to something wrong
+        }
+
+        #[test]
+        fn set_color_hue_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_hue_a(1.5);
+            assert_eq!(show.color_params_a.hue_rotate, 1.0);
+            show.set_color_hue_a(-0.5);
+            assert_eq!(show.color_params_a.hue_rotate, 0.0);
+        }
+
+        #[test]
+        fn set_color_sat_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_sat_a(1.5);
+            assert_eq!(show.color_params_a.saturate, 1.0);
+            show.set_color_sat_a(-0.5);
+            assert_eq!(show.color_params_a.saturate, 0.0);
+        }
+
+        #[test]
+        fn set_color_bright_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_bright_a(1.5);
+            assert_eq!(show.color_params_a.brightness, 1.0);
+            show.set_color_bright_a(-0.5);
+            assert_eq!(show.color_params_a.brightness, 0.0);
+        }
+
+        #[test]
+        fn set_color_contrast_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_contrast_a(1.5);
+            assert_eq!(show.color_params_a.contrast, 1.0);
+            show.set_color_contrast_a(-0.5);
+            assert_eq!(show.color_params_a.contrast, 0.0);
+        }
+
+        #[test]
+        fn set_color_invert_a_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_invert_a(1.5);
+            assert_eq!(show.color_params_a.invert, 1.0);
+            show.set_color_invert_a(-0.5);
+            assert_eq!(show.color_params_a.invert, 0.0);
+        }
+
+        #[test]
+        fn set_color_hue_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_hue_b(1.5);
+            assert_eq!(show.color_params_b.hue_rotate, 1.0);
+            show.set_color_hue_b(-0.5);
+            assert_eq!(show.color_params_b.hue_rotate, 0.0);
+        }
+
+        #[test]
+        fn set_color_sat_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_sat_b(1.5);
+            assert_eq!(show.color_params_b.saturate, 1.0);
+            show.set_color_sat_b(-0.5);
+            assert_eq!(show.color_params_b.saturate, 0.0);
+        }
+
+        #[test]
+        fn set_color_bright_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_bright_b(1.5);
+            assert_eq!(show.color_params_b.brightness, 1.0);
+            show.set_color_bright_b(-0.5);
+            assert_eq!(show.color_params_b.brightness, 0.0);
+        }
+
+        #[test]
+        fn set_color_contrast_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_contrast_b(1.5);
+            assert_eq!(show.color_params_b.contrast, 1.0);
+            show.set_color_contrast_b(-0.5);
+            assert_eq!(show.color_params_b.contrast, 0.0);
+        }
+
+        #[test]
+        fn set_color_invert_b_clamps_to_0_1() {
+            let mut show = Show::default();
+            show.set_color_invert_b(1.5);
+            assert_eq!(show.color_params_b.invert, 1.0);
+            show.set_color_invert_b(-0.5);
+            assert_eq!(show.color_params_b.invert, 0.0);
+        }
+
+        #[test]
+        fn set_composite_blend_decodes_the_value_into_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_blend(2, 0.75); // bucket 3 -> Multiply, see blend_mode_from_value01
+            assert_eq!(show.slot_composites[2].blend, BlendMode::Multiply);
+            // Other slots untouched.
+            assert_eq!(show.slot_composites[0].blend, BlendMode::Normal);
+        }
+
+        #[test]
+        fn set_composite_luma_black_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_black(1, 1.5);
+            assert_eq!(show.slot_composites[1].luma_black, 1.0);
+            show.set_composite_luma_black(1, -0.5);
+            assert_eq!(show.slot_composites[1].luma_black, 0.0);
+            assert_eq!(show.slot_composites[0].luma_black, DEFAULT_SLOT_COMPOSITE.luma_black);
+        }
+
+        #[test]
+        fn set_composite_luma_white_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_white(3, 1.5);
+            assert_eq!(show.slot_composites[3].luma_white, 1.0);
+            show.set_composite_luma_white(3, -0.5);
+            assert_eq!(show.slot_composites[3].luma_white, 0.0);
+        }
+
+        #[test]
+        fn set_composite_color_hue_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_color_hue(0, 1.5);
+            assert_eq!(show.slot_composites[0].color_hue, 1.0);
+            show.set_composite_color_hue(0, -0.5);
+            assert_eq!(show.slot_composites[0].color_hue, 0.0);
+        }
+
+        #[test]
+        fn set_composite_color_tol_clamps_to_0_1_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_color_tol(3, 1.5);
+            assert_eq!(show.slot_composites[3].color_tol, 1.0);
+            show.set_composite_color_tol(3, -0.5);
+            assert_eq!(show.slot_composites[3].color_tol, 0.0);
+        }
+
+        #[test]
+        fn each_time_setter_writes_its_own_multiplier_in_its_own_slot() {
+            // One `Show`, all 8 setters on 4 different slots: proves both
+            // that no setter writes a neighbour's field and that no slot
+            // bleeds into another.
+            let mut show = Show::default();
+            show.set_time_speed(0, 0.1);
+            show.set_time_zoom(1, 0.2);
+            show.set_time_rot(2, 0.3);
+            show.set_time_warp(3, 0.4);
+            show.set_time_dx(0, 0.5);
+            show.set_time_dy(1, 0.6);
+            show.set_time_stretch(2, 0.7);
+            show.set_time_wave(3, 0.8);
+            assert_eq!(
+                show.time_params[0],
+                DeckTimeParams { speed_mult: 0.1, dx_mult: 0.5, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[1],
+                DeckTimeParams { zoom_mult: 0.2, dy_mult: 0.6, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[2],
+                DeckTimeParams { rot_mult: 0.3, stretch_mult: 0.7, ..DeckTimeParams::default() }
+            );
+            assert_eq!(
+                show.time_params[3],
+                DeckTimeParams { warp_mult: 0.4, wave_mult: 0.8, ..DeckTimeParams::default() }
+            );
+        }
+
+        #[test]
+        fn time_setters_clamp_to_the_panels_0_to_2_range() {
+            let mut show = Show::default();
+            show.set_time_zoom(0, 9.0);
+            assert_eq!(show.time_params[0].zoom_mult, 2.0);
+            show.set_time_zoom(0, -9.0);
+            assert_eq!(show.time_params[0].zoom_mult, 0.0);
+        }
+
+        #[test]
+        fn set_q_var_writes_its_own_q_var_in_its_own_slot() {
+            let mut show = Show::default();
+            show.set_q_var(2, 7, 1.25);
+            show.set_q_var(0, 32, -0.5);
+            assert_eq!(show.q_var_params[2].value[6], 1.25);
+            assert_eq!(show.q_var_params[0].value[31], -0.5);
+            // Nothing else moved: one watch on each of two slots, none
+            // anywhere else.
+            assert_eq!(show.q_var_params[2].enabled.iter().filter(|&&e| e).count(), 1);
+            assert_eq!(show.q_var_params[0].enabled.iter().filter(|&&e| e).count(), 1);
+            assert_eq!(show.q_var_params[1], default_q_var_params());
+            assert_eq!(show.q_var_params[3], default_q_var_params());
+        }
+
+        #[test]
+        fn set_q_var_enables_the_watch_it_addresses() {
+            // A controller or LFO bound to a q-var has to be able to make it
+            // move without the panel being opened first.
+            let mut show = Show::default();
+            assert!(!show.q_var_params[1].enabled[4]);
+            show.set_q_var(1, 5, 0.75);
+            assert!(show.q_var_params[1].enabled[4]);
+            assert_eq!(show.q_var_params[1].value[4], 0.75);
+        }
+
+        #[test]
+        fn set_q_var_keeps_the_value_it_was_given_when_it_enables() {
+            // `with_q_var_watch` resets the value to 0, so calling it after
+            // writing the value would zero every dispatch. Pinned because
+            // the bug it guards is invisible: the watch appears, the slider
+            // just never leaves 0.
+            let mut show = Show::default();
+            show.set_q_var(0, 1, -1.5);
+            assert_eq!(show.q_var_params[0].value[0], -1.5);
+            show.set_q_var(0, 1, 1.5);
+            assert_eq!(show.q_var_params[0].value[0], 1.5);
+        }
+
+        #[test]
+        fn set_q_var_clamps_to_the_sliders_minus_2_to_2_range() {
+            let mut show = Show::default();
+            show.set_q_var(0, 1, 9.0);
+            assert_eq!(show.q_var_params[0].value[0], 2.0);
+            show.set_q_var(0, 1, -9.0);
+            assert_eq!(show.q_var_params[0].value[0], -2.0);
+        }
+
+        #[test]
+        fn set_q_var_is_a_no_op_for_an_out_of_range_slot_or_q_var() {
+            // Reaches `Show` from an OSC/remote-ws payload, so a panic here
+            // would be a remotely triggerable crash rather than a bug.
+            let mut show = Show::default();
+            show.set_q_var(4, 1, 1.0);
+            show.set_q_var(0, 0, 1.0);
+            show.set_q_var(0, 33, 1.0);
+            assert_eq!(show.q_var_params, [default_q_var_params(); 4]);
+        }
+
+        #[test]
+        fn toggle_strobe_flips_enabled() {
+            let mut show = Show::default();
+            assert!(!show.strobe.enabled);
+            show.toggle_strobe();
+            assert!(show.strobe.enabled);
+            show.toggle_strobe();
+            assert!(!show.strobe.enabled);
+        }
+
+        #[test]
+        fn advance_overlay_queue_moves_the_stores_queue_index() {
+            // Step 12: this setter was an empty no-op through Phase 4/M2.
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "c".to_string(), in_queue: true, ..Default::default() },
+            ];
+            assert_eq!(show.overlay_store.queue_index, 0);
+            show.advance_overlay_queue(1);
+            assert_eq!(show.overlay_store.queue_index, 1);
+            show.advance_overlay_queue(-1);
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+
+        #[test]
+        fn overlay_queue_next_prev_move_the_index_through_the_registry() {
+            // Recipe B parity: the panel's ◀/▶ buttons, a keyboard binding,
+            // a MIDI note and an OSC message all reach the store through
+            // this one path.
+            let registry = create_default_registry();
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+            ];
+            registry.dispatch(CommandId::OverlayQueueNext, 1.0, &mut show);
+            assert_eq!(show.overlay_store.queue_index, 1);
+            registry.dispatch(CommandId::OverlayQueuePrev, 1.0, &mut show);
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+    }
+
+    /// Step 12: the two auto-advance signals `Show` forwards into
+    /// `OverlayStore`: the store's own trigger logic is tested in
+    /// `core::overlay`; these assert the wiring from `Show`'s side.
+    mod overlay_queue_wiring {
+        use super::*;
+
+        fn show_with_two_queued_overlays() -> Show {
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+            ];
+            show.overlay_store.queue_enabled = true;
+            show
+        }
+
+        #[test]
+        fn on_beat_advances_the_queue_when_the_beat_trigger_matches() {
+            let mut show = show_with_two_queued_overlays();
+            // `Clock::beat_count` starts at 0, and the default trigger is
+            // every 8 beats at offset 0: so the very first beat matches.
+            show.on_beat();
+            assert_eq!(show.overlay_store.queue_index, 1);
+        }
+
+        #[test]
+        fn on_beat_leaves_a_disabled_queue_alone() {
+            let mut show = show_with_two_queued_overlays();
+            show.overlay_store.queue_enabled = false;
+            for _ in 0..32 {
+                show.on_beat();
+            }
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+
+        #[test]
+        fn check_volume_peak_triggers_advances_the_queue_on_a_transient() {
+            let mut show = show_with_two_queued_overlays();
+            show.overlay_store.update_overlay_queue_trigger(BeatTriggerConfigPatch {
+                mode: Some(BeatTriggerMode::VolumePeak),
+                ..Default::default()
+            });
+            // Settle the rolling average at a steady level first: it
+            // starts at 0, so the first non-silent samples read as a
+            // transient (see `core::overlay`'s own tests).
+            for i in 0..400 {
+                show.check_volume_peak_triggers(0.3, i as f64);
+            }
+            let settled = show.overlay_store.queue_index;
+            show.check_volume_peak_triggers(3.0, 5_000.0);
+            assert_ne!(show.overlay_store.queue_index, settled);
+        }
+    }
+
+    mod get_command_value {
+        use super::*;
+
+        #[test]
+        fn reads_back_a_color_param() {
+            let mut show = Show::default();
+            show.set_color_hue_a(0.3);
+            assert_eq!(show.get_command_value(CommandId::ColorHueA), Some(0.3));
+        }
+
+        #[test]
+        fn reads_back_a_composite_blend_as_its_bucket_center() {
+            let show = Show::default(); // slot_composites[0].blend defaults to Normal
+            assert_eq!(show.get_command_value(CommandId::CompositeBlend0), Some(blend_mode_to_value01(BlendMode::Normal)));
+        }
+
+        #[test]
+        fn reads_back_a_composite_key_field_in_the_right_slot() {
+            let mut show = Show::default();
+            show.set_composite_luma_black(2, 0.4);
+            assert_eq!(show.get_command_value(CommandId::LumakeyBlack2), Some(0.4));
+            assert_eq!(show.get_command_value(CommandId::LumakeyBlack0), Some(DEFAULT_SLOT_COMPOSITE.luma_black));
+        }
+
+        #[test]
+        fn returns_none_for_a_command_id_with_no_real_setter() {
+            let show = Show::default();
+            assert_eq!(show.get_command_value(CommandId::Crossfader), None);
+        }
+
+        #[test]
+        fn returns_none_for_time_params_even_though_they_have_real_setters() {
+            // Deliberate exclusion, not a gap: see `SNAPSHOT_CAPTURABLE_IDS`
+            // for the bandwidth and scale-inversion reasons. Pinned as its own
+            // test so a future reader sees the intent rather than reading this
+            // as an id someone forgot to wire up.
+            let mut show = Show::default();
+            show.set_time_zoom(0, 1.5);
+            assert_eq!(show.time_params[0].zoom_mult, 1.5);
+            assert_eq!(show.get_command_value(CommandId::TimeZoom0), None);
+            assert!(!show.capture_snapshot_values().keys().any(|id| matches!(
+                id,
+                CommandId::TimeSpeed0 | CommandId::TimeZoom0 | CommandId::TimeRot0 | CommandId::TimeWave3
+            )));
+        }
+
+        #[test]
+        fn returns_none_for_q_vars_even_though_they_have_real_setters() {
+            // Same deliberate exclusion as Time, plus one reason of its own:
+            // dispatching a q-var enables its watch, and enabling a watch
+            // reloads the deck's preset: see `SNAPSHOT_CAPTURABLE_IDS`.
+            let mut show = Show::default();
+            show.set_q_var(0, 1, 1.5);
+            assert_eq!(show.q_var_params[0].value[0], 1.5);
+            assert_eq!(show.get_command_value(CommandId::Qvar1_0), None);
+            assert!(!show
+                .capture_snapshot_values()
+                .keys()
+                .any(|id| matches!(id, CommandId::Qvar1_0 | CommandId::Qvar7_2 | CommandId::Qvar32_3)));
+        }
+    }
+
+    mod capture_snapshot_values {
+        use super::*;
+
+        #[test]
+        fn captures_all_30_addressable_command_ids() {
+            let show = Show::default();
+            assert_eq!(show.capture_snapshot_values().len(), 30);
+        }
+
+        #[test]
+        fn captures_the_live_value_not_the_default() {
+            let mut show = Show::default();
+            show.set_color_sat_b(0.9);
+            let captured = show.capture_snapshot_values();
+            assert_eq!(captured.get(&CommandId::ColorSatB), Some(&0.9));
+        }
+    }
+
+    mod recall_snapshot {
+        use super::*;
+
+        #[test]
+        fn recalling_an_empty_slot_does_nothing() {
+            let mut show = Show::default();
+            show.recall_snapshot(0);
+            assert!(show.active_recall.is_none());
+        }
+
+        #[test]
+        fn recalling_a_populated_slot_captures_the_current_value_as_start_and_arms_active_recall() {
+            let mut show = Show::default();
+            show.set_color_hue_a(0.3); // current live value: recall must start from here, not from the target
+            show.snapshot_slots[5] = Some(Snapshot { name: "Slot 6".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.9)]) });
+
+            show.recall_snapshot(5);
+
+            let active = show.active_recall.as_ref().expect("recall should be armed");
+            assert_eq!(active.slot, 5);
+            assert_eq!(active.start_values, HashMap::from([(CommandId::ColorHueA, 0.3)]));
+            assert_eq!(active.elapsed_sec, 0.0);
+        }
+
+        #[test]
+        fn keyboard_dispatch_through_the_registry_arms_the_correct_slot() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.snapshot_slots[3] = Some(Snapshot { name: "Slot 4".to_string(), values: HashMap::new() });
+            reg.dispatch(CommandId::RecallSnapshot3, 1.0, &mut show);
+            assert_eq!(show.active_recall.as_ref().map(|a| a.slot), Some(3));
+        }
+    }
+
+    mod tick_recall {
+        use super::*;
+
+        #[test]
+        fn no_active_recall_returns_no_values() {
+            let mut show = Show::default();
+            assert!(show.tick_recall(0.5).is_empty());
+        }
+
+        #[test]
+        fn mid_recall_returns_the_eased_value_and_keeps_the_recall_active() {
+            let mut show = Show { snapshot_recall_duration_sec: 1.0, ..Default::default() };
+            show.set_color_hue_a(0.0);
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+
+            let values = show.tick_recall(0.5);
+            assert_eq!(values, vec![(CommandId::ColorHueA, smoothstep(0.5))]);
+            assert!(show.active_recall.is_some());
+        }
+
+        #[test]
+        fn reaching_the_configured_duration_returns_the_exact_target_and_clears_the_recall() {
+            let mut show = Show { snapshot_recall_duration_sec: 1.0, ..Default::default() };
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+
+            let values = show.tick_recall(1.5); // overshoots the 1s duration
+            assert_eq!(values, vec![(CommandId::ColorHueA, 1.0)]);
+            assert!(show.active_recall.is_none());
+        }
+
+        #[test]
+        fn clearing_the_target_slot_mid_recall_cancels_it() {
+            let mut show = Show { snapshot_recall_duration_sec: 10.0, ..Default::default() };
+            show.snapshot_slots[0] = Some(Snapshot { name: "S".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.recall_snapshot(0);
+            show.snapshot_slots[0] = None; // cleared mid-recall
+
+            let values = show.tick_recall(0.1);
+            assert!(values.is_empty());
+            assert!(show.active_recall.is_none());
+        }
+    }
+
+    mod toggle_timeline {
+        use super::*;
+
+        #[test]
+        fn toggles_playing_on_and_off() {
+            let mut show = Show::default();
+            assert!(!show.timeline_playing);
+            show.toggle_timeline();
+            assert!(show.timeline_playing);
+            show.toggle_timeline();
+            assert!(!show.timeline_playing);
+        }
+
+        #[test]
+        fn starting_playback_resets_elapsed_progress_to_the_beginning_of_the_cycle() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline(); // start playing
+            let mid = show.tick_timeline(5.0); // halfway through the loop
+            assert!((mid.iter().find(|(id, _)| *id == CommandId::ColorHueA).unwrap().1 - 0.5).abs() < 1e-9);
+
+            show.toggle_timeline(); // pause
+            show.toggle_timeline(); // resume: must restart at the beginning, not jump back to 5.0
+            let restarted = show.tick_timeline(0.0);
+            assert_eq!(restarted, vec![(CommandId::ColorHueA, 0.0)]);
+        }
+
+        #[test]
+        fn keyboard_dispatch_through_the_registry_toggles_playing() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            reg.dispatch(CommandId::TimelineToggle, 1.0, &mut show);
+            assert!(show.timeline_playing);
+        }
+    }
+
+    mod tick_timeline {
+        use super::*;
+
+        #[test]
+        fn not_playing_returns_no_values() {
+            let keyframes = vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+            let mut show = Show { timeline_keyframes: keyframes, ..Default::default() };
+            assert!(show.tick_timeline(1.0).is_empty());
+        }
+
+        #[test]
+        fn fewer_than_2_keyframes_returns_no_values_even_while_playing() {
+            let keyframes = vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }];
+            let mut show = Show { timeline_keyframes: keyframes, ..Default::default() };
+            show.toggle_timeline();
+            assert!(show.tick_timeline(1.0).is_empty());
+        }
+
+        #[test]
+        fn accumulates_dt_across_multiple_ticks() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline();
+            show.tick_timeline(3.0);
+            let values = show.tick_timeline(2.0); // total elapsed 5.0 -> midpoint
+            assert!((values.iter().find(|(id, _)| *id == CommandId::ColorHueA).unwrap().1 - 0.5).abs() < 1e-9);
+        }
+
+        #[test]
+        fn loops_back_to_the_start_after_the_full_duration() {
+            let mut show = Show::default();
+            show.snapshot_slots[0] = Some(Snapshot { name: "A".to_string(), values: HashMap::from([(CommandId::ColorHueA, 0.0)]) });
+            show.snapshot_slots[1] = Some(Snapshot { name: "B".to_string(), values: HashMap::from([(CommandId::ColorHueA, 1.0)]) });
+            show.timeline_keyframes =
+                vec![TimelineKeyframe { slot: 0, time_sec: 0.0 }, TimelineKeyframe { slot: 1, time_sec: 10.0 }];
+
+            show.toggle_timeline();
+            let values = show.tick_timeline(12.0); // wraps past the 10s loop, t = 2.0
+            let expected = timeline_values_at(&show.timeline_keyframes, &show.snapshot_slots, 2.0);
+            assert_eq!(values.into_iter().collect::<HashMap<_, _>>(), expected);
         }
     }
 
@@ -1294,6 +2346,73 @@ mod tests {
         }
     }
 
+    /// Step 14 of the Phase 8 plan: `Show`'s half of the video-clip cut.
+    /// The cut *rules* themselves are covered in `core::video`; what's
+    /// tested here is only the seam: that `Show` feeds the layer a real
+    /// draw, and that the draw is reseedable like every other RNG consumer.
+    mod on_video_beat {
+        use super::*;
+
+        fn keys(n: usize) -> Vec<String> {
+            (0..n).map(|i| format!("clip{i}")).collect()
+        }
+
+        #[test]
+        fn a_disabled_video_layer_never_cuts() {
+            let mut show = Show::default();
+            assert!(!show.video.enabled);
+            assert!(!show.on_video_beat(&keys(4), false));
+        }
+
+        #[test]
+        fn an_enabled_layer_cuts_once_per_beats_per_cut_beats() {
+            let mut show = Show::default();
+            show.video.enabled = true;
+            show.video.beats_per_cut = 2;
+            show.video.advance = crate::video::VideoAdvance::Sequential;
+            let all = keys(3);
+            assert!(!show.on_video_beat(&all, false));
+            assert!(show.on_video_beat(&all, false));
+            assert_eq!(show.video.current_clip_index, 1);
+        }
+
+        #[test]
+        fn shuffle_draws_differ_across_seeds() {
+            let draws = |seed: u64| -> Vec<usize> {
+                let mut show = Show::default();
+                show.video.enabled = true;
+                show.video.beats_per_cut = 1;
+                show.reseed_rng(seed);
+                let all = keys(16);
+                (0..12)
+                    .map(|_| {
+                        show.on_video_beat(&all, false);
+                        show.video.current_clip_index
+                    })
+                    .collect()
+            };
+            assert_ne!(draws(1), draws(2));
+        }
+
+        #[test]
+        fn the_same_seed_reproduces_the_same_shuffle_sequence() {
+            let draws = || -> Vec<usize> {
+                let mut show = Show::default();
+                show.video.enabled = true;
+                show.video.beats_per_cut = 1;
+                show.reseed_rng(99);
+                let all = keys(16);
+                (0..12)
+                    .map(|_| {
+                        show.on_video_beat(&all, false);
+                        show.video.current_clip_index
+                    })
+                    .collect()
+            };
+            assert_eq!(draws(), draws());
+        }
+    }
+
     mod reseed_rng {
         use super::*;
 
@@ -1339,6 +2458,88 @@ mod tests {
                 })
                 .collect();
             assert_ne!(draws_a, draws_b);
+        }
+    }
+
+    /// AC-9's minimum bar: an LFO must actually reach at least one Color,
+    /// one Composite, one Time, and one Qvar target end to end: tick the
+    /// engine, dispatch the resulting `(CommandId, value01)` through the
+    /// real registry (same path `app::about_to_wait` uses), assert `Show`
+    /// changed. `amount: 0.0` pins `LfoEngine::compute`'s output to
+    /// `center` regardless of phase/shape/S&H state (`value = center +
+    /// (raw - 0.5) * amount`): deterministic without depending on a
+    /// specific shape's waveform, which `lfo.rs`'s own tests already cover.
+    mod lfo_end_to_end_dispatch {
+        use super::*;
+        use crate::lfo::LfoSlot;
+
+        fn slot(center: f64, target: CommandId) -> LfoSlot {
+            LfoSlot { enabled: true, center, amount: 0.0, target: Some(target), ..Default::default() }
+        }
+
+        fn tick_and_dispatch(reg: &crate::commands::CommandRegistry, show: &mut Show) {
+            let outputs = show.lfo_engine.tick(show.clock.phase01());
+            for output in outputs {
+                if let Some(id) = output.target {
+                    reg.dispatch(id, output.value01, show);
+                }
+            }
+        }
+
+        #[test]
+        fn reaches_a_color_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(0.6, CommandId::ColorHueA);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.color_params_a.hue_rotate, 0.6);
+        }
+
+        #[test]
+        fn reaches_a_composite_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(0.9, CommandId::CompositeBlend0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.slot_composites[0].blend, blend_mode_from_value01(0.9));
+        }
+
+        #[test]
+        fn reaches_a_time_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(1.0, CommandId::TimeSpeed0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.time_params[0].speed_mult, crate::time_params::TIME_MULT_MAX);
+        }
+
+        #[test]
+        fn reaches_a_qvar_target() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = slot(1.0, CommandId::Qvar1_0);
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert!(show.q_var_params[0].enabled[0]);
+            assert_eq!(show.q_var_params[0].value[0], crate::q_vars::Q_VAR_MAX);
+        }
+
+        #[test]
+        fn a_disabled_slot_dispatches_nothing() {
+            let reg = create_default_registry();
+            let mut show = Show::default();
+            show.lfo_engine.slots[0] = LfoSlot { enabled: false, target: Some(CommandId::ColorHueA), ..Default::default() };
+
+            tick_and_dispatch(&reg, &mut show);
+
+            assert_eq!(show.color_params_a.hue_rotate, 0.0); // untouched default
         }
     }
 }

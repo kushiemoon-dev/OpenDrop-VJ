@@ -58,6 +58,18 @@ impl PassTimer {
     }
 
     /// Non-blocking readback of whichever query is about to be reused.
+    ///
+    /// **Known pre-existing bug, deliberately not fixed here** (found during
+    /// Phase 8 Step 10's review, out of scope for that task and for the
+    /// Phase 8 fix wave): on the first `RING_LEN` frames this queries a
+    /// `NativeQuery` that `create_query` allocated but no `glBeginQuery` has
+    /// ever targeted, so `GL_QUERY_RESULT_AVAILABLE` raises
+    /// `GL_INVALID_OPERATION` (a name is only a query *object* once first
+    /// bound). Harmless: the readback is skipped, `last_ms` stays `None`,
+    /// and it self-corrects once `write_idx` has wrapped: but it does dirty
+    /// the GL error queue at startup, which can mislead anything else
+    /// calling `glGetError`. Fix would be to track how many slots have been
+    /// written and skip `poll` until the ring is full.
     fn poll(&mut self, gl: &glow::Context) {
         let q = self.queries[self.write_idx];
         let available = unsafe { gl.get_query_parameter_u32(q, glow::QUERY_RESULT_AVAILABLE) } != 0;

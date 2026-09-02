@@ -1,10 +1,13 @@
 target/
 Cargo.lock.bak
 
-# planning docs: internal, not shipped
-TICKET.md
-REQUIREMENTS.md
-PLAN.md
+# planning docs: internal, not shipped. Globbed rather than exact: this
+# repo's actual files are phase-prefixed (PHASE8-VJ-PANELS.PLAN.md,
+# PHASE8-VJ-PANELS.REQUIREMENTS.md, ...), which the bare names never matched,
+# so they showed as untracked and a `git add -A` would have committed them.
+*TICKET.md
+*REQUIREMENTS.md
+*PLAN.md
 
 # Git worktrees (isolated implementation workspaces)
 /.worktrees

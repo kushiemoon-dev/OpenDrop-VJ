@@ -8,10 +8,14 @@ use glutin_winit::{ApiPreference, DisplayBuilder};
 use opendrop_core::blend::{should_force_normal_for_lowest_slot, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
+use opendrop_core::strobe::strobe_flash_intensity;
 use opendrop_core::thumb_queue::ThumbJob;
-use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
+use opendrop_engine::compositor::{Compositor, LayerInput, OverlayBlendMode, OverlayLayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::overlay_texture;
+use opendrop_engine::qvar_patch;
 use opendrop_engine::readback::FrameReadback;
+use opendrop_engine::time_patch;
 use opendrop_engine::timing::PassTimer;
 use opendrop_io::midi::MidiTriggerKey;
 use raw_window_handle::HasWindowHandle;
@@ -35,6 +39,7 @@ mod thumbnail_child;
 mod thumbnails;
 mod theme;
 mod ui;
+mod video_clips;
 
 /// ponytail: paced off the control window's monitor only, read once at
 /// bootstrap. A VJ setup can have control and output on different-refresh
@@ -55,6 +60,15 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// per-frame `Instant` deadline check instead of an async timer, since this
 /// thread has no async runtime (Task 8).
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
+
+/// How long after a beat a `beat_reactive` overlay stays scaled up by its
+/// `beat_scale`: the native equivalent of `beatSyncState.beat`, which the
+/// JS reference sets true on each beat and clears with
+/// `setTimeout(..., 80)` (`beat-tempo-actions.ts:40-43`). Same "per-frame
+/// `Instant` deadline instead of an async timer" treatment as
+/// `MIDI_LED_FLASH_DURATION` above, for the same reason (no async runtime
+/// on this thread).
+const BEAT_PULSE_DURATION: Duration = Duration::from_millis(80);
 
 /// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
 /// real elapsed-time measurement, matching the TS reference's
@@ -97,6 +111,164 @@ fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
     })
 }
 
+/// One overlay's cached GL texture (Step 12 of the Phase 8 VJ-panels
+/// plan). `key` is a fingerprint of everything the pixels depend on: the
+/// sprite's file path, or the text's content/font/size/color: so the
+/// texture is rebuilt exactly when one of those changes, and never
+/// per-frame. `texture` is `None` for an overlay whose build failed
+/// (unreadable file, undecodable image, a string past the texture limit):
+/// the entry is still cached, under the same key, so the failure is not
+/// retried every frame until the user actually changes something.
+struct OverlayTextureEntry {
+    key: String,
+    texture: Option<(glow::NativeTexture, u32, u32)>,
+}
+
+/// The two vendored faces (`app/assets/fonts/`, Phase 7 Step 2) available
+/// to overlay text rasterization. `FontFamily` has 5 variants, ported
+/// verbatim from the web's CSS font stacks, but only Sans and Mono have a
+/// face bundled here: Serif/Impact/Comic fall back to Inter, which the
+/// panel says out loud. Bundling a serif/display/comic face is a
+/// vendoring + licensing decision, deliberately out of this step's scope.
+fn overlay_font_bytes(family: opendrop_core::overlay::FontFamily) -> &'static [u8] {
+    match family {
+        opendrop_core::overlay::FontFamily::Mono => theme::fonts::JETBRAINS_MONO_VARIABLE,
+        _ => theme::fonts::INTER_VARIABLE,
+    }
+}
+
+/// The cache key described on `OverlayTextureEntry::key`.
+fn overlay_texture_key(overlay: &opendrop_core::overlay::Overlay, asset: Option<&Path>) -> String {
+    match overlay.kind {
+        opendrop_core::overlay::OverlayKind::Media => {
+            format!("media\u{1}{}", asset.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+        }
+        opendrop_core::overlay::OverlayKind::Text => format!(
+            "text\u{1}{}\u{1}{:?}\u{1}{}\u{1}{}",
+            overlay.text, overlay.font_family, overlay.font_size, overlay.color
+        ),
+    }
+}
+
+/// Builds (or rebuilds) every overlay's texture whose cache key changed,
+/// and drops the textures of overlays that no longer exist. Runs once per
+/// render tick, right before the overlay composite pass, while the main
+/// context is current: `gl.delete_texture`/`upload_rgba` both require
+/// that.
+///
+/// Text is rasterized at `font_size` vh of the composite frame, which is
+/// how the web sized it (`font-size: {ov.fontSize}vh`); the sprite's
+/// on-screen size is then the compositor's business
+/// (`overlay_quad_half_size_px`), same for both kinds.
+fn sync_overlay_textures(
+    gl: &glow::Context,
+    store: &opendrop_core::overlay::OverlayStore,
+    assets: &HashMap<String, PathBuf>,
+    textures: &mut HashMap<String, OverlayTextureEntry>,
+) {
+    textures.retain(|id, entry| {
+        let still_there = store.overlays.iter().any(|o| &o.id == id);
+        if !still_there {
+            if let Some((tex, _, _)) = entry.texture {
+                unsafe { gl.delete_texture(tex) };
+            }
+        }
+        still_there
+    });
+
+    for overlay in &store.overlays {
+        let asset = assets.get(&overlay.id).map(PathBuf::as_path);
+        let key = overlay_texture_key(overlay, asset);
+        if textures.get(&overlay.id).is_some_and(|e| e.key == key) {
+            continue;
+        }
+        if let Some(old) = textures.remove(&overlay.id) {
+            if let Some((tex, _, _)) = old.texture {
+                unsafe { gl.delete_texture(tex) };
+            }
+        }
+        let texture = match build_overlay_texture(gl, overlay, asset) {
+            Ok(built) => Some(built),
+            Err(e) => {
+                eprintln!("[app] overlay '{}' ({}): {e}", overlay.name, overlay.id);
+                None
+            }
+        };
+        textures.insert(overlay.id.clone(), OverlayTextureEntry { key, texture });
+    }
+}
+
+/// Decodes/rasterizes one overlay's pixels and uploads them. Split out of
+/// `sync_overlay_textures` so the error path there is a single `match`.
+fn build_overlay_texture(
+    gl: &glow::Context,
+    overlay: &opendrop_core::overlay::Overlay,
+    asset: Option<&Path>,
+) -> Result<(glow::NativeTexture, u32, u32), String> {
+    let image = match overlay.kind {
+        opendrop_core::overlay::OverlayKind::Media => {
+            let path = asset.ok_or("no source file recorded for this sprite")?;
+            let bytes = std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            overlay_texture::decode_image(&bytes)?
+        }
+        opendrop_core::overlay::OverlayKind::Text => overlay_texture::rasterize_text(
+            overlay_font_bytes(overlay.font_family),
+            &overlay.text,
+            // `font_size` is in vh, exactly as the web stored it: 1 vh is
+            // 1% of the composite frame's height.
+            (overlay.font_size / 100.0 * COMP_H as f64) as f32,
+            opendrop_core::overlay::parse_hex_color(&overlay.color),
+        )?,
+    };
+    let (w, h) = (image.width, image.height);
+    let tex = overlay_texture::upload_rgba(gl, &image)?;
+    Ok((tex, w, h))
+}
+
+/// Draws every currently-visible overlay into the composite FBO. Called
+/// once per tick from `about_to_wait`, inside the compositor's
+/// `begin_frame`/`end_frame` bracket and after the strobe pass: see
+/// `Compositor::composite_overlay`'s doc comment for why that ordering.
+///
+/// "Visible" is `core::overlay::visible_overlay_ids`: every un-queued
+/// overlay, plus the single active one from the queue rotation.
+fn render_overlays(
+    gl: &glow::Context,
+    compositor: &mut Compositor,
+    store: &opendrop_core::overlay::OverlayStore,
+    textures: &HashMap<String, OverlayTextureEntry>,
+    elapsed_sec: f64,
+    beat_pulse: bool,
+) {
+    if store.overlays.is_empty() {
+        return;
+    }
+    let visible = opendrop_core::overlay::visible_overlay_ids(&store.overlays, store.queue_index);
+    for overlay in &store.overlays {
+        if !visible.contains(overlay.id.as_str()) {
+            continue;
+        }
+        let Some(&(texture, tex_w, tex_h)) = textures.get(&overlay.id).and_then(|e| e.texture.as_ref()) else {
+            continue; // not built yet, or its build failed: already logged
+        };
+        let transform = opendrop_core::overlay::overlay_transform_at(overlay, elapsed_sec, beat_pulse);
+        compositor.composite_overlay(
+            gl,
+            &OverlayLayerInput {
+                texture,
+                tex_w,
+                tex_h,
+                x: transform.x as f32,
+                y: transform.y as f32,
+                scale: transform.scale as f32,
+                rotation_deg: transform.rotation_deg as f32,
+                opacity: overlay.opacity as f32,
+                blend_mode: OverlayBlendMode::from_css(&overlay.blend_mode),
+            },
+        );
+    }
+}
+
 /// Creates a new GL texture sized/uploaded from `frame`'s own dimensions
 /// and bytes, storing it (with its size) into `slot`. Used by the NDI-in
 /// poll in `about_to_wait` both when no texture exists yet and when the
@@ -108,26 +280,74 @@ fn create_ndi_in_texture(
     frame: &opendrop_io::ndi::NdiFrame,
     slot: &mut Option<(glow::NativeTexture, u32, u32)>,
 ) {
+    create_frame_texture(gl, frame.width, frame.height, &frame.data, slot);
+}
+
+/// The shared body of the above: allocate an RGBA8 texture of exactly
+/// `width`x`height`, upload `data` into it, and record it (with its size)
+/// in `slot`. Step 14 factored this out of `create_ndi_in_texture` so the
+/// decoded-video path uploads through the exact same code rather than a
+/// second copy of it: the two differ only in where the bytes came from.
+fn create_frame_texture(
+    gl: &glow::Context,
+    width: u32,
+    height: u32,
+    data: &[u8],
+    slot: &mut Option<(glow::NativeTexture, u32, u32)>,
+) {
     unsafe {
-        let tex = gl.create_texture().expect("glGenTextures failed for the NDI-in texture");
+        let tex = gl.create_texture().expect("glGenTextures failed for an incoming-frame texture");
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
             glow::RGBA8 as i32,
-            frame.width as i32,
-            frame.height as i32,
+            width as i32,
+            height as i32,
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(&frame.data)),
+            glow::PixelUnpackData::Slice(Some(data)),
         );
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-        *slot = Some((tex, frame.width, frame.height));
+        *slot = Some((tex, width, height));
     }
+}
+
+/// What the video-capture thread should be decoding right now, given the
+/// layer's state and the clip library (Step 14 of the Phase 8 VJ-panels
+/// plan). `None` means "nothing": the layer is off, or something else is
+/// feeding it.
+///
+/// Precedence mirrors the web store's mutual exclusion, with NDI on top:
+/// an active NDI receive already reaches the compositor through its own
+/// (pre-existing) layer, so the decoder must stay out of the way rather
+/// than double-driving the frame; then a live camera; then the current
+/// clip. `current_clip_index` is taken modulo the library length, exactly
+/// as `+page.svelte`'s `allClips[i % allClips.length]` did, so a shrunken
+/// library can never index out of range.
+///
+/// Pure, and public to the test module, because this one function is what
+/// decides every Start/Stop the app ever sends.
+fn desired_video_input(
+    video: &opendrop_core::video::VideoState,
+    clips: &[crate::video_clips::VideoClip],
+    ndi_active: bool,
+) -> Option<opendrop_io::video_capture::VideoInput> {
+    use opendrop_io::video_capture::VideoInput;
+    if !video.enabled || ndi_active {
+        return None;
+    }
+    if let Some(device) = video.live_device.as_ref() {
+        return Some(VideoInput::Camera(device.clone()));
+    }
+    if clips.is_empty() {
+        return None;
+    }
+    Some(VideoInput::File(clips[video.current_clip_index % clips.len()].path.clone()))
 }
 
 /// Which top-level panel the control window is currently showing: gates
@@ -144,6 +364,15 @@ pub(crate) enum Panel {
     Playlists,
     Audio,
     Quality,
+    Color,
+    Composite,
+    Keymap,
+    Snapshot,
+    Timeline,
+    Time,
+    Qvar,
+    Strobe,
+    Lfo,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -155,11 +384,15 @@ pub(crate) enum Panel {
     NdiIn,
     NdiOut,
     Osc,
+    Overlays,
     RemoteWs,
     Streaming,
+    Share,
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    Video,
+    CloudPresets,
     About,
 }
 
@@ -176,16 +409,29 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Playlists => Panel::Playlists,
             config::PanelId::Audio => Panel::Audio,
             config::PanelId::Quality => Panel::Quality,
+            config::PanelId::Color => Panel::Color,
+            config::PanelId::Composite => Panel::Composite,
+            config::PanelId::Keymap => Panel::Keymap,
+            config::PanelId::Snapshot => Panel::Snapshot,
+            config::PanelId::Timeline => Panel::Timeline,
+            config::PanelId::Time => Panel::Time,
+            config::PanelId::Qvar => Panel::Qvar,
+            config::PanelId::Strobe => Panel::Strobe,
+            config::PanelId::Lfo => Panel::Lfo,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
             config::PanelId::NdiOut => Panel::NdiOut,
             config::PanelId::Osc => Panel::Osc,
+            config::PanelId::Overlays => Panel::Overlays,
             config::PanelId::RemoteWs => Panel::RemoteWs,
             config::PanelId::Streaming => Panel::Streaming,
+            config::PanelId::Share => Panel::Share,
             #[cfg(feature = "link")]
             config::PanelId::Link => Panel::Link,
             config::PanelId::V4l2 => Panel::V4l2,
+            config::PanelId::Video => Panel::Video,
+            config::PanelId::CloudPresets => Panel::CloudPresets,
             config::PanelId::About => Panel::About,
         }
     }
@@ -201,16 +447,29 @@ impl From<Panel> for config::PanelId {
             Panel::Playlists => config::PanelId::Playlists,
             Panel::Audio => config::PanelId::Audio,
             Panel::Quality => config::PanelId::Quality,
+            Panel::Color => config::PanelId::Color,
+            Panel::Composite => config::PanelId::Composite,
+            Panel::Keymap => config::PanelId::Keymap,
+            Panel::Snapshot => config::PanelId::Snapshot,
+            Panel::Timeline => config::PanelId::Timeline,
+            Panel::Time => config::PanelId::Time,
+            Panel::Qvar => config::PanelId::Qvar,
+            Panel::Strobe => config::PanelId::Strobe,
+            Panel::Lfo => config::PanelId::Lfo,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
             Panel::NdiOut => config::PanelId::NdiOut,
             Panel::Osc => config::PanelId::Osc,
+            Panel::Overlays => config::PanelId::Overlays,
             Panel::RemoteWs => config::PanelId::RemoteWs,
             Panel::Streaming => config::PanelId::Streaming,
+            Panel::Share => config::PanelId::Share,
             #[cfg(feature = "link")]
             Panel::Link => config::PanelId::Link,
             Panel::V4l2 => config::PanelId::V4l2,
+            Panel::Video => config::PanelId::Video,
+            Panel::CloudPresets => config::PanelId::CloudPresets,
             Panel::About => config::PanelId::About,
         }
     }
@@ -361,6 +620,74 @@ struct AppState {
     /// the first frame that panel is shown: see that module's doc comment
     /// for why this is deliberately not re-queried per frame.
     v4l2_device: Option<Option<PathBuf>>,
+    /// Handle to the dedicated video-capture thread (Step 14 of the Phase 8
+    /// VJ-panels plan): the input-side mirror of `v4l2` above: `latest()`
+    /// gives the running/last-error snapshot, `latest_frame()` the newest
+    /// decoded RGBA frame, `control_tx` sends Start/Stop/SetRate.
+    video: opendrop_io::video_capture::VideoCaptureHandle,
+    /// What the capture thread is currently decoding, or `None` while the
+    /// layer is off. Compared each tick against `desired_video_input`'s
+    /// answer, and the *only* thing that makes this app send a Start/Stop:
+    /// so a beat-driven clip cut, a camera toggle, an NDI connect and the
+    /// panel's on/off switch all converge on one restart path instead of
+    /// four.
+    video_input: Option<opendrop_io::video_capture::VideoInput>,
+    /// GL texture holding the most recently decoded video frame, with its
+    /// size: same shape and same "recreate on a resolution change" rule as
+    /// `ndi_in_texture`, though in practice the capture pipeline pins every
+    /// source to `CAPTURE_W`x`CAPTURE_H` so the recreate branch only ever
+    /// runs on the first frame.
+    video_texture: Option<(glow::NativeTexture, u32, u32)>,
+    /// `VideoFrame::seq` of the frame already in `video_texture`. The
+    /// capture thread publishes latest-wins into an `ArcSwap`, so without
+    /// this the same 3.5 MB frame would be re-uploaded on every tick that
+    /// outpaces the source's frame rate (i.e. most of them).
+    video_frame_seq: u64,
+    /// The clip library, scanned once at bootstrap and re-scanned only on
+    /// the panel's Rescan button: a directory listing per frame would be
+    /// pointless I/O, same reasoning as `input_devices`' bootstrap-only
+    /// enumeration.
+    video_clips: Vec<crate::video_clips::VideoClip>,
+    /// Cameras enumerated once at bootstrap (`video_capture::list_cameras`,
+    /// a pure sysfs scan on Linux, empty elsewhere), for the Video panel's
+    /// device dropdown.
+    video_cameras: Vec<opendrop_io::video_capture::CameraDevice>,
+    /// The camera device the panel's dropdown/text field currently holds:
+    /// the *candidate*, not the running one (that's
+    /// `Show::video.live_device`), same "panel's own field" convention as
+    /// `obs_host`/`osc_port`.
+    video_camera_device: String,
+    /// Video panel errors raised synchronously on this thread (a failed
+    /// import or delete), which therefore can't live in
+    /// `VideoCaptureSnapshot::last_error`: same split as
+    /// `cloud_presets_secret_error`.
+    video_local_error: Option<String>,
+    /// Handle to the dedicated CloudPresets thread (Step 6): `latest()`
+    /// gives the current entries/busy/last-error snapshot, `control_tx`
+    /// sends List/Upload/Rename/Delete/Download.
+    cloud_presets: opendrop_io::cloud_presets::CloudPresetsHandle,
+    /// The CloudPresets panel's own base-URL field, read by every action at
+    /// click time: not part of `CloudPresetsSnapshot`, same reasoning as
+    /// `osc_port`/`obs_host`. Empty means the feature is disabled (Override
+    /// 4); mirrored to/from `UiConfig::cloud_presets_api_url: Option<
+    /// String>` at bootstrap/exit (empty String <-> `None`), same pattern
+    /// `selected_output_monitor` uses for its own already-`Option<String>`
+    /// `UiConfig` field, just with an extra empty-string fold since this
+    /// one is edited via a plain `TextEdit`.
+    cloud_presets_api_url: String,
+    /// "Link device" token-paste field: same masked/write-through/clear-
+    /// after-blur convention as `kick_bearer_token_input` etc., see
+    /// `ui::streaming`'s module doc comment.
+    cloud_presets_token_input: String,
+    /// Local (non-network) panel errors: keyring save/link failures for
+    /// the token fields above (same convention as
+    /// `streaming_secret_save_error`), plus a picked upload file that
+    /// failed to read from disk. Network/API errors surface separately,
+    /// through `CloudPresetsSnapshot::last_error`.
+    cloud_presets_secret_error: Option<String>,
+    /// Id + edit buffer of the cloud preset currently being renamed
+    /// inline, if any: see `ui::ctx::SourcesCtx`'s field doc comment.
+    cloud_presets_rename: Option<(String, String)>,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -404,6 +731,16 @@ struct AppState {
     show: Show,
     registry: CommandRegistry,
     keymap: HashMap<Key, CommandId>,
+    /// Command currently in keyboard learn mode, if any: set when the
+    /// Keymap panel's Learn button is clicked, cleared by `window_event`'s
+    /// `WindowEvent::KeyboardInput` handler the moment it intercepts the
+    /// next accepted key press to commit the binding. Simpler than `midi_
+    /// learning`'s `Option<(CommandId, Option<MidiTriggerKey>)>`: keyboard
+    /// events are already synchronous on this thread (no separate IO thread
+    /// to diff against per-frame), so the commit happens inline in that
+    /// same handler rather than being detected later in `about_to_wait`:
+    /// no snapshot of the pre-existing binding needs to ride along.
+    keymap_learning: Option<CommandId>,
     blit_control_timer: PassTimer,
     blit_output_timer: PassTimer,
     /// Wall-clock instant the output window's surface was last swapped, or
@@ -443,11 +780,33 @@ struct AppState {
     /// Soft-cut transition duration applied to every load routed through
     /// `request_preset_load`: one global setting, not per-slot (see Step 16).
     transition_seconds: f64,
+    /// Live text in the Share panel's name field (Step 13 of the Phase 8
+    /// plan): transient scratch state, deliberately not part of `UiConfig`
+    /// (a share link's name is a one-off label, not persistent UI state).
+    share_set_name: String,
     /// `egui::TextureId` for each deck's live GPU texture, registered once
     /// at bootstrap via `painter.register_native_texture`: never
     /// re-registered per frame, which would leak a texture handle in
     /// egui_glow's painter every tick.
     deck_tex_ids: [egui::TextureId; 4],
+    /// What each deck's running preset already holds for each of the
+    /// [`CHANNEL_PARAM_COUNT`] side-channel parameters: the baseline
+    /// `next_param_to_push` diffs against. Written at preset-load time (the
+    /// values `patch_preset` baked in) and on every push, so the side channel
+    /// only ever carries real changes.
+    param_last_sent: [[f64; CHANNEL_PARAM_COUNT]; deck::DECK_COUNT],
+    /// Per-deck round-robin position for that scan, so several
+    /// simultaneously-moving parameters share the one-word-per-frame channel
+    /// instead of the lowest-numbered one monopolising it. One cursor for
+    /// Time *and* Qvar together: they compete for the same word, so two
+    /// cursors would just be two families taking turns starving each other.
+    param_cursor: [usize; deck::DECK_COUNT],
+    /// Which q-var watches are baked into each deck's *currently loaded*
+    /// preset. Unlike a watched value, the set of watches is compiled into
+    /// the preset text at load time, so this is what `show.q_var_params` is
+    /// compared against each frame to decide whether that deck needs its
+    /// preset re-patched and reloaded (`resync_deck_q_var_watches`).
+    deck_q_var_watches: [[bool; opendrop_core::q_vars::Q_VAR_COUNT]; deck::DECK_COUNT],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
     /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
@@ -546,6 +905,25 @@ struct AppState {
     /// back off once the deadline passes (no `std::thread::sleep`, no
     /// async timer).
     midi_led_flash_off_at: HashMap<CommandId, Instant>,
+    /// Overlay id → the sprite file it was created from (Step 12 of the
+    /// Phase 8 VJ-panels plan). The web kept the bytes themselves in
+    /// IndexedDB under the same key; here the file stays where the user
+    /// picked it and is read on demand by `sync_overlay_textures`. Written
+    /// by the Overlays panel's `+ Sprite` button, never by `core`
+    /// (`Overlay` is a pure value type with no path field, by design).
+    overlay_assets: HashMap<String, PathBuf>,
+    /// Monotonic source of overlay ids: see `ui::overlays::mint_id`.
+    next_overlay_id: u64,
+    /// Overlay id → its GL texture, rebuilt only when the overlay's
+    /// content changes (`OverlayTextureEntry::key`). Purely `main.rs`'s:
+    /// no panel reads it, and it must be evicted through
+    /// `gl.delete_texture` while the main context is current, which is
+    /// only true inside the render tick.
+    overlay_textures: HashMap<String, OverlayTextureEntry>,
+    /// When the last beat fired, driving the beat-reactive overlay pulse
+    /// (`beatSyncState.beat`, true for 80 ms after each beat in the TS
+    /// source: see `BEAT_PULSE_DURATION`). `None` until the first beat.
+    last_beat_at: Option<Instant>,
     /// Handle to the dedicated OSC UDP server thread (Task 13): `latest()`
     /// gives the current listening/port snapshot, `events` carries
     /// `(CommandId, value01)` dispatches drained in `about_to_wait` (no
@@ -644,7 +1022,8 @@ struct App {
 /// (keyboard navigation + playlist/beat-sync advances). Never touches a
 /// deck directly: it only marks the slot pending and hands the request off
 /// to `preflight::spawn_preflight`. `about_to_wait`'s verdict-handling drain
-/// is the only place that actually calls `Deck::load_preset`.
+/// is the only place that actually loads a preset onto a live deck (through
+/// `load_preset_onto_deck`).
 fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
     let Some(path) = should_spawn_preflight(&state.path_by_name, &mut state.pending_validations, slot, &name) else {
         return;
@@ -685,6 +1064,181 @@ fn should_spawn_preflight(
         return None;
     }
     Some(path)
+}
+
+/// Every parameter that competes for one deck's side channel: the 8 Time
+/// multipliers first (`engine::time_patch`), then the 32 Qvar watches
+/// (`engine::qvar_patch`). One flat space on purpose: the channel carries a
+/// single word per deck per frame for *both* families, so they have to be
+/// scheduled against each other rather than each against itself.
+const CHANNEL_PARAM_COUNT: usize = time_patch::TIME_PARAM_COUNT + qvar_patch::QVAR_WATCH_COUNT;
+
+/// Loads `path` onto `deck` through the patched path, and resyncs the
+/// caller's per-deck "already in the preset" baselines to what was just
+/// baked into it.
+///
+/// **The only way a preset reaches a deck in this app**, on purpose. Once
+/// `Deck::set_param` has been used on a deck, projectM keeps the code word in
+/// that instance's `fps` across preset loads, so an unpatched preset loaded
+/// afterwards reads a ~10^7 word as its own frame rate and its
+/// framerate-dependent physics is silently destroyed (spike report §5.2).
+/// Routing *every* load through the patched path: from the very first one at
+/// bootstrap, on every deck, whether or not Time has ever been touched: makes
+/// that invariant structural instead of a rule someone has to remember, and
+/// removes any need to track "has this deck been modulated yet" or to call
+/// `Deck::reset_param_channel`.
+///
+/// The `fps` literal substituted into the preset is
+/// [`preset_patch::MEASURED_DEFAULT_FPS`], not this app's target frame rate.
+/// 29% of the reference library divides by `fps` for framerate-independent
+/// physics, and libprojectM 4.1.6 hands them 35 today regardless of how fast
+/// the app actually runs; substituting the real target instead would speed
+/// that 29% up by up to 42% on every deck, as a side effect of a Time-panel
+/// change and even for a user who never opens the panel. Preserving what
+/// presets see today is the conservative half of that choice; switching to the
+/// real rate is a deliberate look change that belongs in its own step.
+fn load_preset_onto_deck(
+    deck: &Deck,
+    path: &Path,
+    time: &opendrop_core::time_params::DeckTimeParams,
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+    last_sent: &mut [f64; CHANNEL_PARAM_COUNT],
+    baked_watches: &mut [bool; opendrop_core::q_vars::Q_VAR_COUNT],
+    smooth_transition: bool,
+) -> Result<(), String> {
+    let mut targets = time_patch::targets(time);
+    targets.extend(qvar_patch::targets(q_vars));
+    // Recorded before the load can fail, and unlike `last_sent` below:
+    // this is "what this deck was last *asked* to hold", and its only
+    // reader (`resync_deck_q_var_watches`) reloads whenever it disagrees
+    // with `Show`. Updating it only on success would turn a preset projectM
+    // rejects into a fresh reload attempt on every single frame.
+    *baked_watches = q_vars.enabled;
+    deck.load_preset_patched(
+        path,
+        &targets,
+        opendrop_engine::preset_patch::MEASURED_DEFAULT_FPS,
+        smooth_transition,
+    )?;
+    // Not optional, and not the same call `Deck::reset_param_channel`'s first
+    // paragraph is about: the word left in the channel by the last
+    // `set_param` outlives this load, and the new preset's prologue latches
+    // it on its first frame, over the `initial` just baked in. Found end to
+    // end against real libprojectM by removing and re-adding a q-var, which
+    // is the case where the two disagree (`with_q_var_watch` zeroes the
+    // value): the preset came back up holding the pre-removal value while
+    // the panel read 0.00, and no push could fix it because the value the
+    // push loop compares against was already correct.
+    deck.reset_param_channel();
+    // `patch_preset` bakes these in as the preset's starting values, so the
+    // push loop must not re-send them. Only on success: a rejected load
+    // leaves the deck on its previous preset, which still holds the previous
+    // baseline.
+    *last_sent = channel_values(time, q_vars);
+    Ok(())
+}
+
+/// The current value of each of the [`CHANNEL_PARAM_COUNT`] side-channel
+/// parameters, in the flat order `next_param_to_push` and
+/// `AppState::param_last_sent` both index by.
+fn channel_values(
+    time: &opendrop_core::time_params::DeckTimeParams,
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+) -> [f64; CHANNEL_PARAM_COUNT] {
+    let time_values = time_patch::param_values(time);
+    std::array::from_fn(|p| match p.checked_sub(time_patch::TIME_PARAM_COUNT) {
+        None => time_values[p],
+        Some(watch) => q_vars.value[watch],
+    })
+}
+
+/// Where each of those parameters writes on the side channel this frame, or
+/// `None` for one that cannot be pushed at all right now.
+///
+/// Two reasons a parameter is unpushable, and both must skip rather than
+/// consume the frame's one word: Time's Speed has no reachable Milkdrop
+/// variable (`engine::time_patch`), and a q-var that is not currently watched
+/// has no register in the loaded preset to latch into (`engine::qvar_patch`).
+fn channel_indices(
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+) -> [Option<u16>; CHANNEL_PARAM_COUNT] {
+    std::array::from_fn(|p| match p.checked_sub(time_patch::TIME_PARAM_COUNT) {
+        None => time_patch::side_channel_index(p),
+        Some(watch) => qvar_patch::side_channel_index(watch).filter(|_| q_vars.enabled[watch]),
+    })
+}
+
+/// Picks the one parameter to push into a deck's running preset this frame:
+/// the first one at or after `cursor` (wrapping) that is pushable at all and
+/// whose value has drifted from what the preset already holds, paired with
+/// its side-channel index.
+///
+/// One per deck per frame is the channel's hard capacity: it is a single
+/// `projectm_set_fps` word per projectM instance per frame (see
+/// `engine::preset_patch`): and Time and Qvar share it, which is why this
+/// scans one flat list instead of one list each. The scan starts at a
+/// rotating cursor rather than at 0 so a continuously-moving param (an LFO
+/// target, once Step 11 lands) cannot starve the others: with K params moving
+/// at once each is refreshed every K frames, instead of the lowest-numbered
+/// one taking the channel forever. A single slider dragged by hand is the
+/// common case and gets the full frame rate.
+fn next_param_to_push(
+    current: &[f64; CHANNEL_PARAM_COUNT],
+    indices: &[Option<u16>; CHANNEL_PARAM_COUNT],
+    last_sent: &[f64; CHANNEL_PARAM_COUNT],
+    cursor: usize,
+) -> Option<(usize, u16)> {
+    (0..CHANNEL_PARAM_COUNT)
+        .map(|offset| (cursor + offset) % CHANNEL_PARAM_COUNT)
+        .find_map(|param| {
+            let index = indices[param]?;
+            (current[param] != last_sent[param]).then_some((param, index))
+        })
+}
+
+/// Re-patches and reloads deck `i`'s current preset when the set of q-vars it
+/// overrides no longer matches `Show`: the one thing about Qvar that the
+/// per-frame side channel cannot carry.
+///
+/// A watched *value* is a register the patched preset already has; the *set*
+/// of watches decides which registers and which `q{n} = od_p{i};` lines exist
+/// at all, and those are compiled in when the preset text is loaded. So
+/// adding or removing a watch costs a reload, which re-runs the preset's
+/// `per_frame_init` and restarts its own animation exactly as switching
+/// preset does. That is the accepted cost of an explicit, occasional click;
+/// see `engine::qvar_patch` for the alternative that was weighed against it.
+///
+/// Must be called with deck `i`'s GL context current. Loads hard-cut
+/// (`smooth_transition: false`): the target is the preset already on the
+/// deck, and cross-fading a preset with itself would only smear the
+/// animation restart over a second instead of hiding it.
+fn resync_deck_q_var_watches(state: &mut AppState, i: usize) {
+    // Cloned rather than borrowed so the `&mut` fields below stay reachable;
+    // this runs on a watch add/remove, not per frame.
+    let Some(path) = state.path_by_name.get(&state.deck_preset_names[i]).cloned() else {
+        // No known file for what this deck is showing (a preset that has
+        // left the catalog since it was loaded). Record the watches as baked
+        // anyway so this does not retry every frame; they take effect at the
+        // deck's next real preset load.
+        state.deck_q_var_watches[i] = state.show.q_var_params[i].enabled;
+        return;
+    };
+    match load_preset_onto_deck(
+        &state.decks[i],
+        &path,
+        &state.show.time_params[i],
+        &state.show.q_var_params[i],
+        &mut state.param_last_sent[i],
+        &mut state.deck_q_var_watches[i],
+        false,
+    ) {
+        Ok(()) => {
+            state.preset_errors.remove(&i);
+        }
+        Err(e) => {
+            state.preset_errors.insert(i, e);
+        }
+    }
 }
 
 /// Whether MIDI learn mode has finished for the command being learned: the
@@ -916,6 +1470,33 @@ fn ui_root(
             Panel::Quality => {
                 ui::quality::show(ui, output.refresh_interval, output.invisible_mode, output.pending_mesh_size);
             }
+            Panel::Color => {
+                ui::color::show(ui, &mut perform.show.color_params_a, &mut perform.show.color_params_b);
+            }
+            Panel::Composite => {
+                ui::composite::show(ui, &mut perform.show.slot_composites, perform.show.selected_slot);
+            }
+            Panel::Keymap => {
+                ui::keymap::show(ui, sources.keymap, sources.keymap_learning, sources.registry);
+            }
+            Panel::Snapshot => {
+                ui::snapshot::show(ui, perform.show, sources.registry);
+            }
+            Panel::Timeline => {
+                ui::timeline::show(ui, perform.show, sources.registry);
+            }
+            Panel::Time => {
+                ui::time::show(ui, &mut perform.show.time_params, perform.show.selected_slot);
+            }
+            Panel::Qvar => {
+                ui::qvar::show(ui, &mut perform.show.q_var_params, perform.show.selected_slot);
+            }
+            Panel::Strobe => {
+                ui::strobe::show(ui, perform.show, sources.registry);
+            }
+            Panel::Lfo => {
+                ui::lfo::show(ui, perform.show, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -930,6 +1511,15 @@ fn ui_root(
             }
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
+            }
+            Panel::Overlays => {
+                ui::overlays::show(
+                    ui,
+                    perform.show,
+                    sources.overlay_assets,
+                    sources.next_overlay_id,
+                    sources.registry,
+                );
             }
             Panel::RemoteWs => {
                 ui::remote::show(ui, sources.remote_ws);
@@ -952,12 +1542,44 @@ fn ui_root(
                     stream.streaming_secret_save_error,
                 );
             }
+            Panel::Share => {
+                ui::share::show(ui, perform.show, perform.deck_preset_names, *perform.transition_seconds, perform.share_set_name);
+            }
             #[cfg(feature = "link")]
             Panel::Link => {
                 ui::link::show(ui, control.link, control.link_tempo_input);
             }
             Panel::V4l2 => {
                 ui::v4l2loopback::show(ui, sources.v4l2, sources.v4l2_active, sources.v4l2_device);
+            }
+            Panel::Video => {
+                // The NDI snapshot is read here, not carried in a context
+                // struct: `output.ndi` is a shared borrow of a different
+                // struct than every `&mut` this call takes, and the `Arc`
+                // only has to outlive this one call.
+                let ndi_snapshot = output.ndi.latest();
+                ui::video::show(
+                    ui,
+                    perform.show,
+                    sources.video_clips,
+                    sources.video_cameras,
+                    sources.video_camera_device,
+                    sources.video_local_error,
+                    sources.video_capture,
+                    &ndi_snapshot,
+                    sources.ndi_in_selected_source,
+                    sources.video_ndi_request,
+                );
+            }
+            Panel::CloudPresets => {
+                ui::cloud_presets::show(
+                    ui,
+                    sources.cloud_presets,
+                    sources.cloud_presets_api_url,
+                    sources.cloud_presets_token_input,
+                    sources.cloud_presets_secret_error,
+                    sources.cloud_presets_rename,
+                );
             }
             Panel::About => {
                 ui::about::show(ui);
@@ -1001,17 +1623,28 @@ impl ApplicationHandler for App {
                 && !key_event.repeat
                 && !state.egui_glow.egui_ctx.egui_wants_keyboard_input()
             {
-                if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
-                    state.registry.dispatch(cmd_id, 1.0, &mut state.show);
-                }
+                // Step 3 of the Phase 8 VJ-panels plan: the Keymap panel's
+                // Learn button only records which command is waiting
+                // (`keymap_learning`); the key that commits the binding is
+                // captured right here, on the very next accepted press:
+                // intercepted ahead of normal dispatch (including the F11
+                // Stage-mode shortcut below) rather than also firing
+                // whatever that key already did/does.
+                if let Some(cmd_id) = state.keymap_learning.take() {
+                    state.keymap.insert(key_event.logical_key.clone(), cmd_id);
+                } else {
+                    if let Some(&cmd_id) = state.keymap.get(&key_event.logical_key) {
+                        state.registry.dispatch(cmd_id, 1.0, &mut state.show);
+                    }
 
-                // Step 11 of the Phase 7 UI redesign plan: Stage mode is a
-                // transient UI bool on `AppState`, not a `CommandId`:
-                // matched directly against the logical key here rather
-                // than routed through `state.keymap`/`state.registry.
-                // dispatch`, under the same guard as the dispatch above.
-                if key_event.logical_key == Key::Named(NamedKey::F11) {
-                    state.stage_mode = !state.stage_mode;
+                    // Step 11 of the Phase 7 UI redesign plan: Stage mode is
+                    // a transient UI bool on `AppState`, not a `CommandId`:
+                    // matched directly against the logical key here rather
+                    // than routed through `state.keymap`/`state.registry.
+                    // dispatch`, under the same guard as the dispatch above.
+                    if key_event.logical_key == Key::Named(NamedKey::F11) {
+                        state.stage_mode = !state.stage_mode;
+                    }
                 }
             }
         }
@@ -1041,10 +1674,10 @@ impl ApplicationHandler for App {
 
         // Non-blocking drain so results from spawn_preflight's threads
         // never back up in the channel. This is the only place that ever
-        // calls `Deck::load_preset` on a running deck (besides the
-        // untouched 4-preset bootstrap load): a preset only reaches here
-        // after its own preflight child process has already loaded it
-        // successfully in isolation.
+        // loads a preset onto a running deck (besides the 4-preset
+        // bootstrap load): a preset only reaches here after its own
+        // preflight child process has already loaded it successfully in
+        // isolation.
         while let Ok((slot, name, verdict)) = state.preflight_rx.try_recv() {
             state.pending_validations.remove(&slot);
             match verdict {
@@ -1054,7 +1687,15 @@ impl ApplicationHandler for App {
                             state.preset_errors.insert(slot, format!("GL error: {e}"));
                         } else {
                             state.decks[slot].set_soft_cut_duration(state.transition_seconds);
-                            if let Err(e) = state.decks[slot].load_preset(path, state.transition_seconds > 0.0) {
+                            if let Err(e) = load_preset_onto_deck(
+                                &state.decks[slot],
+                                path,
+                                &state.show.time_params[slot],
+                                &state.show.q_var_params[slot],
+                                &mut state.param_last_sent[slot],
+                                &mut state.deck_q_var_watches[slot],
+                                state.transition_seconds > 0.0,
+                            ) {
                                 state.preset_errors.insert(slot, e);
                             } else {
                                 state.preset_errors.remove(&slot);
@@ -1262,17 +1903,59 @@ impl ApplicationHandler for App {
             // Real elapsed time, not the nominal refresh_interval (Finding
             // 3): see `compute_tick_dt`'s doc comment.
             let dt = compute_tick_dt(now, state.last_output_swap_at, state.refresh_interval, MAX_TICK_DT);
+            // `beats_this_tick` (Step 12: originally a `beat_fired` bool)
+            // feeds the beat-reactive overlay pulse below: the native
+            // `beatSyncState.beat`. Counted at the same two `on_beat()`
+            // call sites, so it reflects exactly the beats the engine
+            // acted on, not an independent re-derivation. Step 14 turned
+            // it from a bool into a count: the video layer's clip cut is a
+            // per-beat *counter* (`beats_per_cut`), so a tick that carries
+            // 2 beats has to advance it twice: a bool would silently slow
+            // the cut cadence down whenever the tick rate dips below the
+            // beat rate.
+            let mut beats_this_tick = 0u32;
             if state.show.manual_bpm == 0.0 {
                 let r = state.show.beat_detector.process_sample(audio.energy_byte, now_ms);
                 if r.beat_triggered {
                     state.show.clock.pulse(Some(r.bpm));
                     if state.show.clock.bpm() == 0.0 {
                         state.show.on_beat();
+                        beats_this_tick += 1;
                     }
                 }
             }
             for _ in 0..state.show.clock.step(dt) {
                 state.show.on_beat();
+                beats_this_tick += 1;
+            }
+            let beat_fired = beats_this_tick > 0;
+            if beat_fired {
+                state.last_beat_at = Some(now);
+            }
+            // Video layer (Step 14 of the Phase 8 VJ-panels plan). Two
+            // per-tick hooks, both ports of the web's own:
+            //  - the beat-driven clip cut, called here rather than from
+            //    `Show::on_beat` because the clip list it rotates through
+            //    is `app`-owned (files on disk),
+            //  - the bass-driven speed warp, just below, next to the VU
+            //    reading it consumes.
+            // Neither one starts or stops anything itself: both only move
+            // `Show::video`, and the single reconciliation step further
+            // down turns whatever they changed into at most one
+            // Start/Stop. `ndi_active` is read once here and reused by
+            // both, the reconciliation, and the composite pass.
+            let ndi_active = state.ndi.latest().receive_active;
+            if beat_fired {
+                let clip_keys: Vec<String> = state.video_clips.iter().map(|c| c.key.clone()).collect();
+                // Once per beat, not once per tick: see `beats_this_tick`.
+                // The return value (did the clip actually change?) is not
+                // needed here: the reconciliation below compares the
+                // resolved `VideoInput`, which carries the clip's path, so
+                // a shuffle redraw of the clip already playing correctly
+                // restarts nothing.
+                for _ in 0..beats_this_tick {
+                    state.show.on_video_beat(&clip_keys, ndi_active);
+                }
             }
             // The interval-driven half of the same playlist engines the
             // beats above drive: without this the Playlists panel's
@@ -1280,8 +1963,61 @@ impl ApplicationHandler for App {
             // the current item. Same `dt` as `clock.step`, converted to the
             // milliseconds `PlaylistEngine` works in.
             state.show.tick_playlists(dt * 1000.0);
+            // Snapshot recall (Step 4 of the Phase 8 VJ-panels plan). Same
+            // dt-driven cadence as `tick_playlists` just above: `Show` has
+            // no wall clock of its own (see `Show::reseed_rng`'s doc
+            // comment), so `tick_recall` accumulates elapsed time from this
+            // same `dt` rather than an `Instant`. Dispatching the returned
+            // pairs through `state.registry`, instead of writing
+            // `state.show`'s fields directly, keeps a recall on the exact
+            // same command path as keyboard/MIDI/OSC/remote-ws: only
+            // `CommandId`s with a real `CommandContext` setter move visibly,
+            // which is 221 of the 223 as of Step 11 (`LfoRateUp`/
+            // `LfoRateDown` are the permanent exceptions). Note this is a
+            // separate question from what a snapshot *captures*: see
+            // `SNAPSHOT_CAPTURABLE_IDS` in `core::show` for the deliberate
+            // Time/Qvar exclusion there.
+            for (id, value) in state.show.tick_recall(dt) {
+                state.registry.dispatch(id, value, &mut state.show);
+            }
+            // Timeline playback (Step 5 of the Phase 8 VJ-panels plan).
+            // Same dt-driven cadence and registry-dispatch parity as the
+            // snapshot recall loop just above.
+            for (id, value) in state.show.tick_timeline(dt) {
+                state.registry.dispatch(id, value, &mut state.show);
+            }
+            // LFO modulation (Step 11 of the Phase 8 VJ-panels plan). Same
+            // registry-dispatch parity as the snapshot recall/timeline
+            // loops above, but driven by beat phase rather than dt:
+            // `LfoSlot::rate` is a multiplier of beat rate (see
+            // `core::lfo`'s doc comments), not Hz, so it reads
+            // `state.show.clock.phase01()` directly instead of
+            // accumulating its own elapsed time from `dt`.
+            let lfo_outputs = state.show.lfo_engine.tick(state.show.clock.phase01());
+            for output in lfo_outputs {
+                if let Some(id) = output.target {
+                    state.registry.dispatch(id, output.value01, &mut state.show);
+                }
+            }
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);
+            // `onVideoAudioTick(lv.bass)`, `+page.svelte:563`: the same
+            // call site, right after the volume-peak triggers. The web's
+            // `bass` is the mean of the bass FFT bins divided by 255;
+            // `AudioSnapshot::energy_byte` is the RMS of those same bins
+            // still in byte units (`audio::analysis::bass_energy`), so the
+            // /255 here puts it on the same 0..1 scale.
+            let previous_rate = state.show.video.playback_rate;
+            state.show.video.on_audio_tick(audio.energy_byte / 255.0, ndi_active);
+            // Only on a real change: this is a cross-thread store, and the
+            // rate is otherwise pinned (warp off) or moving by fractions of
+            // a percent per tick.
+            if (state.show.video.playback_rate - previous_rate).abs() > 0.001 {
+                let _ = state
+                    .video
+                    .control_tx
+                    .send(opendrop_io::video_capture::VideoCaptureControl::SetRate(state.show.video.playback_rate));
+            }
 
             for (i, layer_input) in layer_inputs.iter().enumerate() {
                 let visible = layer_input.opacity > 0.001;
@@ -1306,6 +2042,34 @@ impl ApplicationHandler for App {
                 // run while its context is current, same as `render_frame`.
                 if let Some((w, h)) = state.pending_mesh_size[i].take() {
                     state.decks[i].set_mesh_size(w, h);
+                }
+                // Qvar watch set (Step 9): the only Time/Qvar change the
+                // side channel below cannot carry, because which q-vars a
+                // preset overrides is compiled into its text. Before the
+                // push, so a watch added this frame is already in the preset
+                // when its value is sent.
+                if state.show.q_var_params[i].enabled != state.deck_q_var_watches[i] {
+                    resync_deck_q_var_watches(state, i);
+                }
+                // Time and Qvar values (Steps 8 and 9 of the Phase 8
+                // VJ-panels plan): at most one changed value per deck per
+                // frame, shared between the two families, written into the
+                // running preset through the side channel: no reload, so the
+                // preset's own animation state is untouched (see
+                // `engine::preset_patch`). Here, not on the setters, because
+                // the channel is a per-frame slot and because this is where
+                // this deck's context is already current, same rule
+                // `set_mesh_size` follows just above. Before `render_frame`:
+                // a word written after it would not reach the frame that was
+                // just drawn.
+                let values = channel_values(&state.show.time_params[i], &state.show.q_var_params[i]);
+                let indices = channel_indices(&state.show.q_var_params[i]);
+                if let Some((param, index)) =
+                    next_param_to_push(&values, &indices, &state.param_last_sent[i], state.param_cursor[i])
+                {
+                    state.decks[i].set_param(index, values[param]);
+                    state.param_last_sent[i][param] = values[param];
+                    state.param_cursor[i] = (param + 1) % CHANNEL_PARAM_COUNT;
                 }
                 state.decks[i].render_frame(&audio.pcm);
                 if !visible && state.invisible_mode == InvisibleMode::Eco {
@@ -1402,6 +2166,80 @@ impl ApplicationHandler for App {
                 }
             }
 
+            // Video layer (Step 14), the decode half. Two steps, in this
+            // order and both before the composite pass below:
+            //
+            // 1. Reconciliation. `desired_video_input` is the single
+            //    decision point for what should be playing; comparing its
+            //    answer against what the capture thread was last told is
+            //    what turns a clip cut, a camera toggle, an NDI connect
+            //    and the panel's on/off switch into at most one
+            //    Start/Stop per tick: with no message at all on the
+            //    overwhelming majority of ticks, where nothing changed.
+            let desired = desired_video_input(&state.show.video, &state.video_clips, ndi_active);
+            if desired != state.video_input {
+                use opendrop_io::video_capture::VideoCaptureControl;
+                let msg = match desired.clone() {
+                    Some(input) => VideoCaptureControl::Start(input),
+                    None => VideoCaptureControl::Stop,
+                };
+                let _ = state.video.control_tx.send(msg);
+                state.video_input = desired;
+                // The old source's last frame must not linger under a new
+                // one: the capture thread clears its own published frame,
+                // and this is the app-side half of the same clear.
+                state.video_frame_seq = 0;
+            }
+            // 2. Upload. The capture thread publishes latest-wins into an
+            //    `ArcSwap` (not a queue: see `io::video_capture`'s module
+            //    doc comment), so there is nothing to drain; the `seq`
+            //    guard is what keeps a tick faster than the source's frame
+            //    rate from re-uploading 3.5 MB it already has.
+            if let Some(frame) = state.video.latest_frame() {
+                let expected_len = frame.width as usize * frame.height as usize * 4;
+                if frame.seq == state.video_frame_seq {
+                    // already uploaded
+                } else if frame.data.len() != expected_len {
+                    eprintln!(
+                        "[app] dropping video frame with unexpected size: {} bytes, expected {expected_len} for {}x{}",
+                        frame.data.len(),
+                        frame.width,
+                        frame.height
+                    );
+                } else {
+                    match state.video_texture {
+                        Some((tex, w, h)) if (w, h) == (frame.width, frame.height) => unsafe {
+                            state.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                            state.gl.tex_sub_image_2d(
+                                glow::TEXTURE_2D,
+                                0,
+                                0,
+                                0,
+                                frame.width as i32,
+                                frame.height as i32,
+                                glow::RGBA,
+                                glow::UNSIGNED_BYTE,
+                                glow::PixelUnpackData::Slice(Some(&frame.data)),
+                            );
+                        },
+                        slot => {
+                            if let Some((tex, _, _)) = slot {
+                                unsafe { state.gl.delete_texture(tex) };
+                            }
+                            state.video_texture = None;
+                            create_frame_texture(
+                                &state.gl,
+                                frame.width,
+                                frame.height,
+                                &frame.data,
+                                &mut state.video_texture,
+                            );
+                        }
+                    }
+                    state.video_frame_seq = frame.seq;
+                }
+            }
+
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for (i, layer_input) in layer_inputs.iter().enumerate() {
@@ -1413,15 +2251,50 @@ impl ApplicationHandler for App {
                 let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
                 state.compositor.composite_layer(&state.gl, state.decks[i].texture, layer_input, force_normal);
             }
+            // Video layer (Step 14), composited over the 4 decks and under
+            // the NDI-in layer below. **On top of the decks, not behind
+            // them**: see `Compositor::composite_video_layer`'s doc
+            // comment for why that deviates from the plan's step-14
+            // sketch (short version: the OpenDrop-VJ compositor this ports
+            // records, in its own class header, that drawing it first made
+            // it vanish whenever a deck reached full opacity, which is the
+            // default at either end of the crossfader).
+            //
+            // Gated on the capture thread's own `running`, not on merely
+            // having a texture: the texture is kept across a Stop (cheap,
+            // and a restart reuses it), so without this a stopped layer
+            // would keep showing its last frame forever. `running` rather
+            // than `video_input.is_some()` (what this app *asked* for)
+            // because it also covers ffmpeg dying on its own: an
+            // unreadable file, a camera unplugged mid-set: which would
+            // otherwise freeze the last decoded frame on screen with no
+            // way out short of a clip cut. Exactly the same guard, for
+            // exactly the same reason, as the NDI-in layer's
+            // `receive_active` check just below.
+            //
+            // `beat_pulse` is computed here rather than reusing the
+            // overlay one further down only because that one is derived a
+            // few lines later; both read the same `last_beat_at`.
+            if state.video.latest().running {
+                if let Some((tex, _, _)) = state.video_texture {
+                    let pulse = state.last_beat_at.is_some_and(|at| now.duration_since(at) < BEAT_PULSE_DURATION);
+                    state.compositor.composite_video_layer(
+                        &state.gl,
+                        tex,
+                        state.show.video.opacity as f32,
+                        state.show.video.layer_color_params(pulse),
+                    );
+                }
+            }
             // NDI-in layer, composited last, over every deck, as part of
             // this same shared pass: `render_and_swap*` later just blits
             // the resulting `color_tex` to each window, so drawing this
             // here (not per-window) is what makes it appear in both control
-            // and output. `force_normal: false`: this layer is never the
-            // lowest/first-drawn slot (see `force_normal`'s doc comment in
-            // `compositor.rs`), so there is nothing to override:
-            // `DEFAULT_SLOT_COMPOSITE` already carries `BlendMode::Normal`,
-            // full opacity, no keying. Gated on `receive_active`, not just
+            // and output. `force_normal: false`: there is nothing to
+            // override (see `force_normal`'s doc comment in
+            // `compositor.rs`): `DEFAULT_SLOT_COMPOSITE` already carries
+            // `BlendMode::Normal`, full opacity, no keying, so coercing it
+            // would be a no-op. Gated on `receive_active`, not just
             // `ndi_in_texture.is_some()`: the texture is never deleted on
             // `StopReceive` (cheap to keep around for a fast reconnect), so
             // without this check a disconnected session would keep drawing
@@ -1432,6 +2305,49 @@ impl ApplicationHandler for App {
                     state.compositor.composite_layer(&state.gl, tex, &ndi_in_input, false);
                 }
             }
+            // Strobe flash (Step 10 of the Phase 8 VJ-panels plan): drawn
+            // last, on top of every deck/NDI-in layer just composited
+            // above, and still inside the `begin_frame`/`end_frame`
+            // bracket so it lands in `color_tex` before the readback below
+            // and `blit_to_current_window` (called per-window later in
+            // this tick) both read it: the same shared FBO is what makes
+            // the flash show up in the control preview, the output window,
+            // and NDI/v4l2 alike, with no separate wiring for any of them.
+            // Absolute beats elapsed (beat_count + phase01), not phase01
+            // alone: a rate < 1 (e.g. 0.25, "once every 4 beats") needs to
+            // know which beat this is, not just where in the current one
+            // we are (see strobe_flash_intensity's own doc comment).
+            let clock_beats_abs = state.show.clock.beat_count() as f64 + state.show.clock.phase01();
+            let strobe_intensity =
+                strobe_flash_intensity(&state.show.strobe, clock_beats_abs, state.show.clock.bpm(), now_ms / 1000.0);
+            state.compositor.render_strobe_flash(&state.gl, state.show.strobe.color, strobe_intensity);
+            // Overlays (Step 12): sprites and rasterized text, drawn last
+            // of all: over the decks, over the NDI-in layer, and over the
+            // strobe flash (see `Compositor::composite_overlay`'s doc
+            // comment on that last choice): but still inside the same
+            // `begin_frame`/`end_frame` bracket, for exactly the reason
+            // the strobe pass is: everything downstream (`FrameReadback`
+            // below, `blit_to_current_window` per window later this tick)
+            // reads this one `color_tex`.
+            //
+            // The upload half runs first and separately: it decodes files
+            // and rasterizes strings, does no drawing, and only does any
+            // work at all on the frame an overlay is added or edited.
+            sync_overlay_textures(
+                &state.gl,
+                &state.show.overlay_store,
+                &state.overlay_assets,
+                &mut state.overlay_textures,
+            );
+            let beat_pulse = state.last_beat_at.is_some_and(|at| now.duration_since(at) < BEAT_PULSE_DURATION);
+            render_overlays(
+                &state.gl,
+                &mut state.compositor,
+                &state.show.overlay_store,
+                &state.overlay_textures,
+                now_ms / 1000.0,
+                beat_pulse,
+            );
             state.compositor.end_frame(&state.gl);
 
             // Step 5: GPU->CPU readback feeding the NDI / v4l2loopback
@@ -1489,6 +2405,13 @@ impl ApplicationHandler for App {
             // since `ShellCtx::last_wall_ms` is a plain `Option<f64>`, not
             // a `&mut` field.
             let last_wall_ms = state.last_wall_ms;
+            // Read (and kept alive) before the destructure below, same
+            // reason `last_wall_ms` is copied out here: `SourcesCtx` takes
+            // a `&VideoCaptureSnapshot`, and the `Arc` it borrows from has
+            // to outlive the borrow. A snapshot, not the handle: see
+            // `ui::video`'s module doc comment on why no panel handle
+            // reaches that panel.
+            let video_capture_snapshot = state.video.latest();
 
             // Decks (Step 16), preset-browser (Step 17), playlists (Step
             // 18), and audio (Step 19) panels: real content, replacing the
@@ -1505,6 +2428,7 @@ impl ApplicationHandler for App {
                 pending_validations,
                 preset_errors,
                 transition_seconds,
+                share_set_name,
                 active_panel,
                 stage_mode,
                 presets_drawer_open,
@@ -1523,6 +2447,8 @@ impl ApplicationHandler for App {
                 pending_mesh_size,
                 selected_output_monitor,
                 registry,
+                keymap,
+                keymap_learning,
                 midi,
                 midi_learning,
                 ndi,
@@ -1531,6 +2457,8 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                overlay_assets,
+                next_overlay_id,
                 remote_ws,
                 obs,
                 obs_host,
@@ -1552,6 +2480,15 @@ impl ApplicationHandler for App {
                 v4l2,
                 v4l2_active,
                 v4l2_device,
+                video_clips,
+                video_cameras,
+                video_camera_device,
+                video_local_error,
+                cloud_presets,
+                cloud_presets_api_url,
+                cloud_presets_token_input,
+                cloud_presets_secret_error,
+                cloud_presets_rename,
                 ..
             } = state;
             // Out-param for the preset-browser click path: see `ui_root`'s
@@ -1560,6 +2497,11 @@ impl ApplicationHandler for App {
             // `request_preset_load` call has to wait until after `run()`
             // returns, below.
             let mut preset_load_request: Option<String> = None;
+            // Out-param for the Video panel's NDI section (Step 14): same
+            // idiom, same reason: the NDI handle is borrowed by
+            // `output_ctx` for the whole closure, so the panel records its
+            // intent and the send happens after `run()` returns.
+            let mut video_ndi_request: Option<ui::video::VideoNdiRequest> = None;
             // Step 9: plumbing only, not consumed yet: see `ui_root`'s own
             // comment on this parameter.
             let mut theme_request: Option<theme::registry::ThemeId> = None;
@@ -1579,6 +2521,7 @@ impl ApplicationHandler for App {
                 pending_validations,
                 preset_errors,
                 transition_seconds,
+                share_set_name,
                 t0,
             };
             let mut library_ctx = ui::ctx::LibraryCtx {
@@ -1597,15 +2540,30 @@ impl ApplicationHandler for App {
                 selected_input_device,
                 last_vu_level,
                 registry,
+                keymap,
+                keymap_learning,
                 midi,
                 midi_learning,
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                overlay_assets,
+                next_overlay_id,
                 remote_ws,
                 v4l2,
                 v4l2_active,
                 v4l2_device,
+                video_clips,
+                video_cameras,
+                video_camera_device,
+                video_local_error,
+                video_capture: &video_capture_snapshot,
+                video_ndi_request: &mut video_ndi_request,
+                cloud_presets,
+                cloud_presets_api_url,
+                cloud_presets_token_input,
+                cloud_presets_secret_error,
+                cloud_presets_rename,
             };
             let mut output_ctx = ui::ctx::OutputCtx {
                 refresh_interval,
@@ -1657,9 +2615,27 @@ impl ApplicationHandler for App {
             if let Some(name) = preset_load_request {
                 // Same pipeline as keyboard navigation and playlist/beat-sync
                 // advances (`take_fired_presets`, above): never a direct
-                // `Deck::load_preset` call, which would bypass the pre-flight
-                // validation Step 14 added.
+                // deck load, which would bypass the pre-flight validation
+                // Step 14 added.
                 request_preset_load(state, state.show.selected_slot, name);
+            }
+            // Video panel's NDI section (Step 14 of the Phase 8 plan):
+            // translated straight into the already-ported NDI-in
+            // subsystem's own control messages: the exact two
+            // `ui::ndi::show_in` sends, no second receiver, no second
+            // protocol. Selecting NDI also drops any live camera, the
+            // other half of `setNdiSource`'s mutual exclusion (the camera
+            // half lives in `ui::video::camera_row`).
+            match video_ndi_request {
+                Some(ui::video::VideoNdiRequest::Connect(source)) => {
+                    state.show.video.clear_live_camera();
+                    state.show.video.enabled = true;
+                    let _ = state.ndi.control_tx.send(opendrop_io::ndi::NdiControl::StartReceive(source));
+                }
+                Some(ui::video::VideoNdiRequest::Disconnect) => {
+                    let _ = state.ndi.control_tx.send(opendrop_io::ndi::NdiControl::StopReceive);
+                }
+                None => {}
             }
             if let Some(new_id) = theme_request {
                 // `state.egui_glow`, not the local `egui_glow` binding from
@@ -1774,7 +2750,10 @@ impl ApplicationHandler for App {
             ui_config.obs_port = state.obs_port;
             ui_config.twitch_channel = state.twitch_channel.clone();
             ui_config.kick_channel = state.kick_channel.clone();
+            ui_config.cloud_presets_api_url =
+                if state.cloud_presets_api_url.trim().is_empty() { None } else { Some(state.cloud_presets_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
+            ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
 
             state.egui_glow.destroy();
@@ -2044,10 +3023,37 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
             deck::DECK_COUNT
         ));
     }
+    // Every deck starts on neutral Time params and no q-var watches
+    // (`Show::default`), and the 4 bootstrap presets go through the same
+    // patched load path as every later one: see `load_preset_onto_deck` on
+    // why that is not optional.
+    let neutral_time_params = opendrop_core::time_params::DeckTimeParams::default();
+    let unwatched_q_vars = opendrop_core::q_vars::default_q_var_params();
+    let mut param_last_sent = [channel_values(&neutral_time_params, &unwatched_q_vars); deck::DECK_COUNT];
+    let mut deck_q_var_watches = [unwatched_q_vars.enabled; deck::DECK_COUNT];
+    // Seeds `AppState::preset_errors` below. A bootstrap preset projectM
+    // rejects must not abort startup: that deck just comes up empty, exactly
+    // as it did before `Deck` reported load failures at all: but it must not
+    // be invisible either: without this the deck would show the idle logo for
+    // the whole session with nothing anywhere saying why.
+    let mut preset_errors: HashMap<usize, String> = HashMap::new();
     for (i, dk) in decks.iter().enumerate() {
         dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
-        dk.load_preset(&presets[i], false)?;
-        println!("[app] deck {i} preset: {}", presets[i].display());
+        match load_preset_onto_deck(
+            dk,
+            &presets[i],
+            &neutral_time_params,
+            &unwatched_q_vars,
+            &mut param_last_sent[i],
+            &mut deck_q_var_watches[i],
+            false,
+        ) {
+            Ok(()) => println!("[app] deck {i} preset: {}", presets[i].display()),
+            Err(e) => {
+                eprintln!("[app] deck {i} bootstrap preset {} failed to load: {e}", presets[i].display());
+                preset_errors.insert(i, e);
+            }
+        }
     }
 
     // Full catalog scan (all presets, not just the 4 bootstrap picks above):
@@ -2236,6 +3242,14 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     show.reseed_rng(bootstrap_rng_seed);
     show.preset_catalog = catalog;
 
+    // Step 14: enumerated once, like `input_devices` above: a sysfs scan
+    // per frame would be pointless, and the camera list doesn't change
+    // mid-session any more than the audio device list does. The first
+    // camera is pre-selected so the panel's "Use camera" button works in
+    // one click on the common single-webcam machine.
+    let video_cameras = opendrop_io::video_capture::list_cameras();
+    let video_camera_device = video_cameras.first().map(|c| c.id.clone()).unwrap_or_default();
+
     Ok(AppState {
         display,
         main_ctx,
@@ -2264,9 +3278,28 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         ndi_deck_active: [false; deck::DECK_COUNT],
         ndi_in_texture: None,
         ndi_in_selected_source: None,
+        overlay_assets: HashMap::new(),
+        next_overlay_id: 0,
+        overlay_textures: HashMap::new(),
+        last_beat_at: None,
         v4l2_active: false,
         v4l2: opendrop_io::v4l2loopback::spawn(v4l2_frame_rx),
         v4l2_device: None,
+        video: opendrop_io::video_capture::spawn(),
+        video_input: None,
+        video_texture: None,
+        video_frame_seq: 0,
+        // Scanned once here (see the field's doc comment); the panel's
+        // Rescan button is the only thing that re-reads either directory.
+        video_clips: video_clips::scan_clips(),
+        video_cameras,
+        video_camera_device,
+        video_local_error: None,
+        cloud_presets: opendrop_io::cloud_presets::spawn(),
+        cloud_presets_api_url: ui_config.cloud_presets_api_url.clone().unwrap_or_default(),
+        cloud_presets_token_input: String::new(),
+        cloud_presets_secret_error: None,
+        cloud_presets_rename: None,
         gl,
         egui_glow,
         refresh_interval,
@@ -2284,9 +3317,20 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         invisible_mode: ui_config.invisible_mode,
         pending_mesh_size: [None; deck::DECK_COUNT],
+        param_last_sent,
+        param_cursor: [0; deck::DECK_COUNT],
+        deck_q_var_watches,
         show,
         registry: create_default_registry(),
-        keymap: keymap::default_keymap(),
+        // Empty `ui_config.keymap` means "no persisted remapping yet" (first
+        // launch, or a `ui.json` predating this step): falls back to the
+        // hardcoded defaults rather than starting with no bindings at all.
+        // A non-empty one fully replaces the defaults: `exiting` persists
+        // `state.keymap` in its entirety (see that fn), so whatever's saved
+        // already reflects every Learn/Clear the user has ever done, not a
+        // diff against `default_keymap()`.
+        keymap: if ui_config.keymap.is_empty() { keymap::default_keymap() } else { keymap::keymap_from_wire(&ui_config.keymap) },
+        keymap_learning: None,
         blit_control_timer,
         blit_output_timer,
         last_output_swap_at: None,
@@ -2296,13 +3340,14 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         preflight_rx,
         path_by_name,
         pending_validations: HashSet::new(),
-        preset_errors: HashMap::new(),
+        preset_errors,
         // Seeded from the 4 presets the bootstrap loop above actually
         // loaded: leaving these empty until the first UI-driven load meant
         // every deck card started blank even though a preset was running
         // on it.
         deck_preset_names: std::array::from_fn(|i| preset_display_name(&preset_root, &presets[i])),
         transition_seconds: 0.0,
+        share_set_name: String::new(),
         deck_tex_ids,
         // Whole-branch review fix wave, finding 1 (AC-10): restored from
         // the same `ui_config` loaded above, instead of always starting on
@@ -2739,6 +3784,106 @@ mod tests {
         }
     }
 
+    /// Step 14 (Video panel): the one function that decides every
+    /// Start/Stop the video-capture thread ever receives. Everything else
+    /// in the video path only mutates `Show::video`; if this is right, the
+    /// decoder follows.
+    mod desired_video_input_tests {
+        use super::*;
+        use opendrop_core::video::VideoState;
+        use opendrop_io::video_capture::VideoInput;
+
+        fn clips(names: &[&str]) -> Vec<video_clips::VideoClip> {
+            names
+                .iter()
+                .map(|n| video_clips::VideoClip {
+                    key: format!("/clips/{n}.webm"),
+                    name: (*n).to_string(),
+                    path: PathBuf::from(format!("/clips/{n}.webm")),
+                    builtin: false,
+                })
+                .collect()
+        }
+
+        fn enabled() -> VideoState {
+            let mut state = VideoState::default();
+            state.enabled = true;
+            state
+        }
+
+        #[test]
+        fn a_disabled_layer_wants_nothing_even_with_a_full_library() {
+            assert_eq!(desired_video_input(&VideoState::default(), &clips(&["a", "b"]), false), None);
+        }
+
+        #[test]
+        fn an_enabled_layer_wants_the_current_clip() {
+            let mut state = enabled();
+            state.current_clip_index = 1;
+            assert_eq!(
+                desired_video_input(&state, &clips(&["a", "b"]), false),
+                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+            );
+        }
+
+        #[test]
+        fn an_out_of_range_index_wraps_instead_of_panicking() {
+            // A deletion can leave `current_clip_index` past the end; the
+            // web read `allClips[i % allClips.length]` for the same reason.
+            let mut state = enabled();
+            state.current_clip_index = 7;
+            assert_eq!(
+                desired_video_input(&state, &clips(&["a", "b"]), false),
+                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+            );
+        }
+
+        #[test]
+        fn an_empty_library_wants_nothing_rather_than_a_bogus_path() {
+            assert_eq!(desired_video_input(&enabled(), &[], false), None);
+        }
+
+        #[test]
+        fn a_live_camera_outranks_the_clip_library() {
+            let mut state = enabled();
+            state.set_live_camera("/dev/video0".to_string(), "Webcam".to_string());
+            assert_eq!(
+                desired_video_input(&state, &clips(&["a"]), false),
+                Some(VideoInput::Camera("/dev/video0".to_string()))
+            );
+        }
+
+        #[test]
+        fn an_active_ndi_receive_outranks_everything_and_stops_the_decoder() {
+            // NDI-in already reaches the compositor through its own
+            // (pre-existing) layer: decoding anything here would
+            // double-drive the frame.
+            let mut state = enabled();
+            state.set_live_camera("/dev/video0".to_string(), "Webcam".to_string());
+            assert_eq!(desired_video_input(&state, &clips(&["a"]), true), None);
+        }
+
+        #[test]
+        fn advancing_the_clip_changes_the_answer_which_is_what_triggers_a_restart() {
+            let library = clips(&["a", "b", "c"]);
+            let mut state = enabled();
+            let first = desired_video_input(&state, &library, false);
+            state.current_clip_index = 2;
+            let second = desired_video_input(&state, &library, false);
+            assert_ne!(first, second);
+            assert_eq!(second, Some(VideoInput::File(PathBuf::from("/clips/c.webm"))));
+        }
+
+        #[test]
+        fn redrawing_the_same_clip_leaves_the_answer_identical_so_nothing_restarts() {
+            // Shuffle can pick the clip already playing; `about_to_wait`
+            // compares this value, so that case must be a no-op.
+            let library = clips(&["a", "b"]);
+            let state = enabled();
+            assert_eq!(desired_video_input(&state, &library, false), desired_video_input(&state, &library, false));
+        }
+    }
+
     /// Whole-branch review Finding 2: the chat-log ring-buffer capping.
     mod push_chat_message_tests {
         use super::*;
@@ -2770,6 +3915,905 @@ mod tests {
             }
             let contents: Vec<&str> = log.iter().map(|m| m.content.as_str()).collect();
             assert_eq!(contents, vec!["2", "3", "4"]);
+        }
+    }
+
+    /// Steps 8 and 9: the per-frame push loop's scheduling half: which
+    /// single parameter gets the one word this deck's side channel carries
+    /// this frame, across the Time multipliers and the Qvar watches that
+    /// share it.
+    mod next_param_to_push_tests {
+        use super::*;
+        use opendrop_core::q_vars::default_q_var_params;
+
+        const N: usize = CHANNEL_PARAM_COUNT;
+        /// Where the Qvar half of the flat parameter space starts.
+        const Q: usize = time_patch::TIME_PARAM_COUNT;
+
+        /// Every parameter at its neutral value: 1.0 for the 8 Time
+        /// multipliers, 0.0 for the 32 q-var overrides.
+        fn neutral() -> [f64; N] {
+            channel_values(&Default::default(), &default_q_var_params())
+        }
+
+        /// Side-channel indices with `watches` (0-based q-vars) enabled.
+        fn indices(watches: &[usize]) -> [Option<u16>; N] {
+            let mut q_vars = default_q_var_params();
+            for &w in watches {
+                q_vars.enabled[w] = true;
+            }
+            channel_indices(&q_vars)
+        }
+
+        #[test]
+        fn the_flat_space_is_the_8_time_params_then_the_32_watches() {
+            assert_eq!(N, 40);
+            assert_eq!(Q, 8);
+            let values = channel_values(
+                &opendrop_core::time_params::DeckTimeParams { zoom_mult: 0.5, ..Default::default() },
+                &{
+                    let mut q = default_q_var_params();
+                    q.value[31] = -1.5;
+                    q
+                },
+            );
+            assert_eq!(values[1], 0.5);
+            assert_eq!(values[Q + 31], -1.5);
+        }
+
+        #[test]
+        fn nothing_to_push_when_the_preset_already_holds_every_value() {
+            assert_eq!(next_param_to_push(&neutral(), &indices(&[0, 5]), &neutral(), 0), None);
+        }
+
+        #[test]
+        fn pushes_a_changed_time_param_with_its_side_channel_index() {
+            let mut current = neutral();
+            current[2] = 0.5; // Rotation
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), Some((2, 3)));
+        }
+
+        #[test]
+        fn pushes_a_changed_q_var_with_its_side_channel_index() {
+            let mut current = neutral();
+            current[Q + 6] = 1.25; // Q7
+            assert_eq!(next_param_to_push(&current, &indices(&[6]), &neutral(), 0), Some((Q + 6, 15)));
+        }
+
+        #[test]
+        fn never_pushes_speed_even_when_it_changed() {
+            // Speed has no reachable Milkdrop variable (see
+            // `engine::time_patch`); sending it would burn a frame's worth of
+            // the one-word channel for nothing.
+            let mut current = neutral();
+            current[0] = 0.25;
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), None);
+        }
+
+        #[test]
+        fn never_pushes_an_unwatched_q_var_even_when_it_changed() {
+            // An unwatched q-var has no register in the loaded preset (see
+            // `engine::qvar_patch`), so the word would latch nothing.
+            let mut current = neutral();
+            current[Q + 6] = 1.25;
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), None);
+            // ...and is pushed as soon as it *is* watched.
+            assert_eq!(next_param_to_push(&current, &indices(&[6]), &neutral(), 0), Some((Q + 6, 15)));
+        }
+
+        #[test]
+        fn starts_the_scan_at_the_cursor_and_wraps() {
+            let mut current = neutral();
+            current[1] = 0.5; // Zoom
+            current[6] = 0.5; // Stretch
+            let ix = indices(&[]);
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 0), Some((1, 2)));
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 2), Some((6, 7)));
+            // Past the last dirty param, the scan wraps back to the first.
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 7), Some((1, 2)));
+        }
+
+        #[test]
+        fn round_robins_between_simultaneously_moving_params() {
+            // Two params moving at once must alternate, not let the
+            // lowest-numbered one hold the channel forever.
+            let mut current = neutral();
+            current[1] = 0.5;
+            current[6] = 0.5;
+            let ix = indices(&[]);
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut order = Vec::new();
+            for _ in 0..4 {
+                match next_param_to_push(&current, &ix, &last_sent, cursor) {
+                    Some((param, _)) => {
+                        order.push(param);
+                        last_sent[param] = current[param];
+                        cursor = (param + 1) % N;
+                        // Simulate the value still moving.
+                        current[param] += 0.01;
+                    }
+                    None => break,
+                }
+            }
+            assert_eq!(order, vec![1, 6, 1, 6]);
+        }
+
+        #[test]
+        fn a_moving_time_param_and_a_moving_q_var_take_turns() {
+            // The point of one shared cursor: neither family may monopolise
+            // the deck's single word while the other one is also moving.
+            let mut current = neutral();
+            current[1] = 0.5; // Zoom
+            current[Q] = 1.0; // Q1
+            let ix = indices(&[0]);
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut order = Vec::new();
+            for _ in 0..4 {
+                let Some((param, _)) = next_param_to_push(&current, &ix, &last_sent, cursor) else {
+                    break;
+                };
+                order.push(param);
+                last_sent[param] = current[param];
+                cursor = (param + 1) % N;
+                current[param] += 0.01;
+            }
+            assert_eq!(order, vec![1, Q, 1, Q]);
+        }
+
+        #[test]
+        fn covers_every_sendable_param_when_all_of_them_move() {
+            let current = [0.5; N];
+            let ix = indices(&(0..qvar_patch::QVAR_WATCH_COUNT).collect::<Vec<_>>());
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut seen = Vec::new();
+            while let Some((param, index)) = next_param_to_push(&current, &ix, &last_sent, cursor) {
+                seen.push((param, index));
+                last_sent[param] = current[param];
+                cursor = (param + 1) % N;
+            }
+            // Every param moved; the 7 Time ones with a Milkdrop target and
+            // all 32 watches each get exactly one push, in index order, and
+            // Speed gets none.
+            let expected: Vec<(usize, u16)> = (1..=7)
+                .map(|p| (p, p as u16 + 1))
+                .chain((0..qvar_patch::QVAR_WATCH_COUNT).map(|w| (Q + w, 9 + w as u16)))
+                .collect();
+            assert_eq!(seen, expected);
+        }
+
+        #[test]
+        fn every_index_the_scheduler_can_emit_is_unique() {
+            // Time and Qvar share one channel: two params mapping to the
+            // same index would make one silently drive the other.
+            let all = indices(&(0..qvar_patch::QVAR_WATCH_COUNT).collect::<Vec<_>>());
+            let mut used: Vec<u16> = all.into_iter().flatten().collect();
+            assert_eq!(used.len(), 39, "7 Time params + 32 watches");
+            used.sort_unstable();
+            used.dedup();
+            assert_eq!(used.len(), 39);
+        }
+    }
+
+    /// Step 10 (Strobe panel): headless GL smoke test for
+    /// `Compositor::render_strobe_flash`. This codebase has no automated
+    /// UI/GPU test harness (plan Convention D: manual live-app
+    /// verification is the norm), but `egl_headless` (already used by
+    /// `--preflight-check`/`--render-thumbnail`) gives a real, windowless
+    /// GL context to any test binary, which `cargo build`/`clippy` can't
+    /// substitute for: a GLSL compile/link error is a runtime-only
+    /// failure. Each test builds its own context inline rather than
+    /// through a shared helper returning just `gl`: `khronos_egl`'s
+    /// wrapper types have no `Drop` of their own, but the `DynamicInstance`
+    /// (`egl_inst`) owns the dlopen'd `libEGL.so.1` handle and drops it
+    /// (dlclose) when it goes out of scope: dropping it before `gl`'s
+    /// loaded function pointers are done being used would be undefined
+    /// behavior, so `egl_inst`/`display`/`ctx`/`pb` all stay bound for the
+    /// whole test.
+    mod compositor_strobe_flash_smoke_test {
+        use super::*;
+        use glow::HasContext;
+        use opendrop_engine::compositor::Compositor;
+
+        #[test]
+        fn compositor_builds_and_renders_the_strobe_flash_without_a_gl_error() {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+
+            let mut compositor =
+                Compositor::new(&gl).expect("Compositor::new (including the strobe shader) should build on a real driver");
+            compositor.begin_frame(&gl);
+            // Drains one pre-existing, unrelated GL error this test
+            // uncovered: `PassTimer::poll` (`engine::timing`, not touched
+            // by this step) calls `glGetQueryObjectuiv` on a query object
+            // that has never yet had a `glBeginQuery`/`glEndQuery` pair:
+            // disallowed by the GL spec: which every `PassTimer`'s very
+            // first `begin()` call hits once. Nothing before this step ran
+            // `Compositor` against a real GL context to surface it; see
+            // this step's report for the finding. Draining it here keeps
+            // this test's assertion scoped to what it actually exercises:
+            // `render_strobe_flash`, not `timing.rs`'s pre-existing bug.
+            unsafe { gl.get_error() };
+            compositor.render_strobe_flash(&gl, [1.0, 0.5, 0.25], 0.75);
+            compositor.end_frame(&gl);
+
+            let err = unsafe { gl.get_error() };
+            assert_eq!(err, glow::NO_ERROR, "GL error after render_strobe_flash: 0x{err:x}");
+        }
+
+        #[test]
+        fn zero_intensity_is_a_no_op_and_leaves_no_gl_error() {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+
+            let mut compositor = Compositor::new(&gl).expect("Compositor::new should build");
+            compositor.begin_frame(&gl);
+            // See the sibling test's comment: drains the pre-existing
+            // `PassTimer` first-use GL error, unrelated to this test.
+            unsafe { gl.get_error() };
+            compositor.render_strobe_flash(&gl, [1.0, 1.0, 1.0], 0.0);
+            compositor.end_frame(&gl);
+
+            let err = unsafe { gl.get_error() };
+            assert_eq!(err, glow::NO_ERROR, "GL error after a 0-intensity render_strobe_flash: 0x{err:x}");
+        }
+    }
+
+    /// Step 12 (Overlays panel): headless GL coverage for the overlay
+    /// compositing primitive: `overlay_texture::upload_rgba` plus
+    /// `Compositor::composite_overlay`. Unlike the strobe smoke tests
+    /// above, these read pixels back out of the composite FBO and assert
+    /// on their values: the whole point of this pass is *where* a sprite
+    /// lands and *how* it blends, neither of which a "no GL error" check
+    /// can see, and neither of which `cargo build` can see at all (the
+    /// shaders are compiled at runtime, and the geometry math only exists
+    /// once a driver has run it).
+    ///
+    /// Same context-lifetime constraint as the strobe module above: the
+    /// `DynamicInstance` owns the dlopen'd `libEGL.so.1` and dlcloses it
+    /// on drop, so it must outlive every use of `gl`'s loaded function
+    /// pointers: hence [`HeadlessGl`], whose field order makes that
+    /// ordering explicit instead of relying on each test binding four
+    /// locals in the right order.
+    mod compositor_overlay_gl_tests {
+        use super::*;
+        use glow::HasContext;
+        use khronos_egl as egl;
+        use opendrop_engine::compositor::{
+            overlay_center_px, overlay_quad_half_size_px, Compositor, OverlayBlendMode, OverlayLayerInput,
+        };
+        use opendrop_engine::overlay_texture::{self, RgbaImage};
+
+        /// A windowless GL context plus everything that must stay alive
+        /// for it to keep working. Fields drop in declaration order, so
+        /// `gl` goes before `_egl_inst` unloads `libEGL`.
+        struct HeadlessGl {
+            gl: glow::Context,
+            _pb: egl::Surface,
+            _ctx: egl::Context,
+            _display: egl::Display,
+            _egl_inst: egl_headless::Egl,
+        }
+
+        fn headless_gl() -> HeadlessGl {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+            HeadlessGl { gl, _pb: pb, _ctx: ctx, _display: display, _egl_inst: egl_inst }
+        }
+
+        /// `begin_frame` + the one-time drain of `PassTimer::poll`'s
+        /// pre-existing first-use `GL_INVALID_OPERATION` (documented by
+        /// Step 10's own tests, in `engine::timing`, untouched here).
+        fn begin_clean_frame(gl: &glow::Context, compositor: &mut Compositor) {
+            compositor.begin_frame(gl);
+            unsafe { gl.get_error() };
+        }
+
+        /// One RGBA pixel of the composite FBO, in GL's own coordinates
+        /// (origin bottom-left).
+        fn read_composite_pixel(gl: &glow::Context, compositor: &Compositor, x: i32, y: i32) -> [u8; 4] {
+            let mut px = [0u8; 4];
+            unsafe {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(compositor.fbo));
+                gl.read_pixels(
+                    x,
+                    y,
+                    1,
+                    1,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut px)),
+                );
+            }
+            px
+        }
+
+        fn solid_rgba(width: u32, height: u32, rgba: [u8; 4]) -> RgbaImage {
+            RgbaImage {
+                width,
+                height,
+                pixels: rgba.iter().copied().cycle().take(width as usize * height as usize * 4).collect(),
+            }
+        }
+
+        fn input(texture: glow::NativeTexture, tex_w: u32, tex_h: u32) -> OverlayLayerInput {
+            OverlayLayerInput {
+                texture,
+                tex_w,
+                tex_h,
+                x: 0.5,
+                y: 0.5,
+                scale: 1.0,
+                rotation_deg: 0.0,
+                opacity: 1.0,
+                blend_mode: OverlayBlendMode::Normal,
+            }
+        }
+
+        fn assert_channel_near(actual: [u8; 4], expected_rgb: [u8; 3], mode: OverlayBlendMode) {
+            for (i, expected) in expected_rgb.iter().enumerate() {
+                let delta = actual[i] as i32 - *expected as i32;
+                assert!(
+                    delta.abs() <= 3,
+                    "{:?}: channel {i} was {}, expected ~{expected} (whole pixel {actual:?})",
+                    mode,
+                    actual[i]
+                );
+            }
+        }
+
+        /// Fills the whole composite with an opaque flat color, by drawing
+        /// a 1x1 sprite blown up well past the frame: the simplest way to
+        /// establish a known backdrop for the blend-mode assertions,
+        /// through the very pass under test (so a bug in it would be
+        /// caught by the "backdrop is what we asked for" check below
+        /// rather than silently skewing every expectation).
+        fn fill_composite(gl: &glow::Context, compositor: &mut Compositor, rgb: [u8; 3]) {
+            let img = solid_rgba(1, 1, [rgb[0], rgb[1], rgb[2], 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("1x1 upload should work");
+            let mut layer = input(tex, 1, 1);
+            layer.scale = 4000.0;
+            compositor.composite_overlay(gl, &layer);
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn an_opaque_sprite_lands_at_its_normalized_position_and_nowhere_else() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build every program");
+            begin_clean_frame(gl, &mut compositor);
+
+            // 64x64 white sprite at (0.25, 0.25): upper-LEFT quadrant in
+            // `Overlay`'s CSS convention, which is high y in GL's.
+            let img = solid_rgba(64, 64, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 64, 64);
+            layer.x = 0.25;
+            layer.y = 0.25;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            let (cx, cy) = overlay_center_px(0.25, 0.25);
+            assert_eq!((cx, cy), (480.0, 810.0));
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32, cy as i32), [255, 255, 255, 255]);
+            // Just inside the 32 px half-extent, and just outside it.
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32 + 30, cy as i32), [255, 255, 255, 255]);
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32 + 40, cy as i32), [0, 0, 0, 0]);
+            // The mirror position (0.75, 0.75) must be untouched: this is
+            // what catches a y-flip or an x/y swap.
+            assert_eq!(read_composite_pixel(gl, &compositor, 1440, 270), [0, 0, 0, 0]);
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn uploaded_pixels_reach_the_composite_in_the_right_orientation() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            // 2x2, row 0 = TOP: red top-left, green top-right,
+            // blue bottom-left, white bottom-right.
+            let img = RgbaImage {
+                width: 2,
+                height: 2,
+                pixels: vec![
+                    255, 0, 0, 255, // (0,0) top-left
+                    0, 255, 0, 255, // (1,0) top-right
+                    0, 0, 255, 255, // (0,1) bottom-left
+                    255, 255, 255, 255, // (1,1) bottom-right
+                ],
+            };
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 2, 2);
+            // half-extent = tex_w * scale * 0.5 = scale for a 2x2, so
+            // scale 400 gives an 800x800 quad centered on the frame:
+            // x in [560, 1360], y in [140, 940].
+            layer.scale = 400.0;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            assert_eq!(overlay_quad_half_size_px(2, 2, 400.0), (400.0, 400.0));
+            // Sampled 10% in from each corner: with a 2x2 texture,
+            // CLAMP_TO_EDGE + LINEAR make anything outside the texel
+            // centers (uv 0.25/0.75) exactly that corner texel.
+            // GL reads bottom-up, so high y is the image's TOP row.
+            assert_eq!(read_composite_pixel(gl, &compositor, 640, 860), [255, 0, 0, 255], "top-left should be red");
+            assert_eq!(read_composite_pixel(gl, &compositor, 1280, 860), [0, 255, 0, 255], "top-right should be green");
+            assert_eq!(read_composite_pixel(gl, &compositor, 640, 220), [0, 0, 255, 255], "bottom-left should be blue");
+            assert_eq!(
+                read_composite_pixel(gl, &compositor, 1280, 220),
+                [255, 255, 255, 255],
+                "bottom-right should be white"
+            );
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn rotation_turns_the_quad_about_its_own_center() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            // 64x8 sprite: 64 px wide, 8 px tall, centered. Unrotated it
+            // covers (960±32, 540±4); at 90 degrees it covers
+            // (960±4, 540±32).
+            let img = solid_rgba(64, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_overlay(gl, &input(tex, 64, 8));
+            compositor.end_frame(gl);
+            assert_eq!(read_composite_pixel(gl, &compositor, 985, 540)[3], 255, "unrotated: wide");
+            assert_eq!(read_composite_pixel(gl, &compositor, 960, 565)[3], 0, "unrotated: not tall");
+
+            begin_clean_frame(gl, &mut compositor);
+            let mut rotated = input(tex, 64, 8);
+            rotated.rotation_deg = 90.0;
+            compositor.composite_overlay(gl, &rotated);
+            compositor.end_frame(gl);
+            assert_eq!(read_composite_pixel(gl, &compositor, 985, 540)[3], 0, "rotated: no longer wide");
+            assert_eq!(read_composite_pixel(gl, &compositor, 960, 565)[3], 255, "rotated: now tall");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn every_blend_mode_produces_its_documented_result_over_a_known_backdrop() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            // Backdrop 64/255 = 0.25098, sprite 192/255 = 0.75294:
+            // deliberately asymmetric so `overlay` and `hard-light`
+            // (which are the same function with its arguments swapped)
+            // land on visibly different values.
+            let img = solid_rgba(8, 8, [192, 192, 192, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            // b = 0.25098, s = 0.75294:
+            //   normal      = s                        -> 192
+            //   screen      = s + b*(1-s)              -> 208
+            //   plus-lighter= b + s (clamped)          -> 255
+            //   multiply    = b*s                      -> 48
+            //   hard-light  = 1 - 2*(1-b)*(1-s)        -> 161
+            //   overlay     = 2*s*b   (b<=0.5 branch,
+            //                          arguments swapped) ->  96
+            let expected: [(OverlayBlendMode, [u8; 3]); 6] = [
+                (OverlayBlendMode::Normal, [192, 192, 192]),
+                (OverlayBlendMode::Screen, [208, 208, 208]),
+                (OverlayBlendMode::PlusLighter, [255, 255, 255]),
+                (OverlayBlendMode::Multiply, [48, 48, 48]),
+                (OverlayBlendMode::HardLight, [161, 161, 161]),
+                (OverlayBlendMode::Overlay, [96, 96, 96]),
+            ];
+
+            for (mode, want) in expected {
+                begin_clean_frame(gl, &mut compositor);
+                fill_composite(gl, &mut compositor, [64, 64, 64]);
+                // The backdrop itself must be what we asked for, or every
+                // expectation below is measured against the wrong base.
+                assert_eq!(
+                    read_composite_pixel(gl, &compositor, 960, 540),
+                    [64, 64, 64, 255],
+                    "backdrop fill went wrong before testing {mode:?}"
+                );
+
+                let mut layer = input(tex, 8, 8);
+                layer.blend_mode = mode;
+                compositor.composite_overlay(gl, &layer);
+                compositor.end_frame(gl);
+
+                assert_channel_near(read_composite_pixel(gl, &compositor, 960, 540), want, mode);
+                assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR, "GL error after {mode:?}");
+            }
+
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn opacity_scales_a_normal_blend_toward_the_backdrop() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+            fill_composite(gl, &mut compositor, [0, 0, 0]);
+
+            let img = solid_rgba(8, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 8, 8);
+            layer.opacity = 0.5;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            // 1.0*0.5 + 0.0*0.5 = 0.5 -> 128
+            assert_channel_near(read_composite_pixel(gl, &compositor, 960, 540), [128, 128, 128], layer.blend_mode);
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn a_sub_floor_opacity_or_a_zero_scale_draws_nothing_at_all() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            let img = solid_rgba(64, 64, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            for mutate in [
+                (|l: &mut OverlayLayerInput| l.opacity = 0.0) as fn(&mut OverlayLayerInput),
+                |l: &mut OverlayLayerInput| l.opacity = 0.0005,
+                |l: &mut OverlayLayerInput| l.scale = 0.0,
+                |l: &mut OverlayLayerInput| l.scale = f32::NAN,
+                |l: &mut OverlayLayerInput| l.x = f32::NAN,
+                |l: &mut OverlayLayerInput| l.rotation_deg = f32::NAN,
+                |l: &mut OverlayLayerInput| l.tex_w = 0,
+            ] {
+                begin_clean_frame(gl, &mut compositor);
+                let mut layer = input(tex, 64, 64);
+                mutate(&mut layer);
+                compositor.composite_overlay(gl, &layer);
+                compositor.end_frame(gl);
+                assert_eq!(read_composite_pixel(gl, &compositor, 960, 540), [0, 0, 0, 0]);
+                assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+            }
+
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn the_pass_leaves_texture_unit_0_active_for_whatever_draws_next() {
+            // GL state hygiene: this is the only pass in the compositor
+            // that ever touches `glActiveTexture`, and everything after it
+            // in the frame (`egui_glow`'s own draw, the deck upload paths,
+            // the next frame's `composite_layer`) assumes unit 0.
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let img = solid_rgba(8, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 8, 8);
+            // The backdrop path binds unit 1, so exercise that one.
+            layer.blend_mode = OverlayBlendMode::HardLight;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            let active = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) };
+            assert_eq!(active as u32, glow::TEXTURE0, "composite_overlay left texture unit {active:#x} active");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn a_rasterized_string_composites_as_a_sprite() {
+            // End-to-end for the text half: rasterize -> upload ->
+            // composite, and assert ink actually reached the composite.
+            // No pixel-exact expectation (that would pin the shape of a
+            // specific font's glyphs), just that the pipeline carries the
+            // requested color through.
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let img = overlay_texture::rasterize_text(theme::fonts::INTER_VARIABLE, "OD", 200.0, [255, 0, 128])
+                .expect("rasterizing should work");
+            let (w, h_px) = (img.width, img.height);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            compositor.composite_overlay(gl, &input(tex, w, h_px));
+            compositor.end_frame(gl);
+
+            let (half_w, half_h) = overlay_quad_half_size_px(w, h_px, 1.0);
+            let (cx, cy) = overlay_center_px(0.5, 0.5);
+            let mut inked = 0;
+            for dy in -(half_h as i32)..(half_h as i32) {
+                for dx in -(half_w as i32)..(half_w as i32) {
+                    let px = read_composite_pixel(gl, &compositor, cx as i32 + dx, cy as i32 + dy);
+                    if px[3] > 200 {
+                        inked += 1;
+                        assert!(px[0] > 200 && px[1] < 60 && px[2] > 100, "unexpected ink color {px:?}");
+                    }
+                }
+            }
+            assert!(inked > 100, "'OD' at 200px should leave far more than {inked} solid pixels");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+    }
+
+    /// Step 14 (Video panel): headless GL coverage for the video
+    /// background layer: `Compositor::composite_video_layer`. Same
+    /// rationale as the overlay module above: this pass's whole contract is
+    /// *where in the stack* it lands and *what the beat-reactive color
+    /// params do to it*, and both are runtime-only facts (the shader is
+    /// compiled by the driver, and the compositing order only exists once
+    /// something has actually drawn).
+    ///
+    /// The load-bearing test here is
+    /// `the_video_layer_draws_over_a_full_opacity_deck_not_under_it`: it
+    /// pins the one place this step deliberately deviates from the plan's
+    /// step-14 sketch (see `composite_video_layer`'s doc comment).
+    mod compositor_video_layer_gl_tests {
+        use super::*;
+        use glow::HasContext;
+        use khronos_egl as egl;
+        use opendrop_core::blend::{ColorParams, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
+        use opendrop_core::video::VideoState;
+        use opendrop_engine::compositor::Compositor;
+        use opendrop_engine::overlay_texture::{self, RgbaImage};
+
+        /// Same field-order-is-drop-order constraint as the overlay
+        /// module's own helper: see its doc comment.
+        struct HeadlessGl {
+            gl: glow::Context,
+            _pb: egl::Surface,
+            _ctx: egl::Context,
+            _display: egl::Display,
+            _egl_inst: egl_headless::Egl,
+        }
+
+        fn headless_gl() -> HeadlessGl {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+            HeadlessGl { gl, _pb: pb, _ctx: ctx, _display: display, _egl_inst: egl_inst }
+        }
+
+        /// `begin_frame` plus the one-time drain of `PassTimer::poll`'s
+        /// pre-existing first-use `GL_INVALID_OPERATION` (documented by
+        /// Step 10's tests, in `engine::timing`, untouched here).
+        fn begin_clean_frame(gl: &glow::Context, compositor: &mut Compositor) {
+            compositor.begin_frame(gl);
+            unsafe { gl.get_error() };
+        }
+
+        fn read_center(gl: &glow::Context, compositor: &Compositor) -> [u8; 4] {
+            let mut px = [0u8; 4];
+            unsafe {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(compositor.fbo));
+                gl.read_pixels(
+                    COMP_W as i32 / 2,
+                    COMP_H as i32 / 2,
+                    1,
+                    1,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut px)),
+                );
+            }
+            px
+        }
+
+        /// A 1x1 opaque texture: the layer is full-screen, so one texel is
+        /// all any of these assertions needs.
+        fn solid_texture(gl: &glow::Context, rgb: [u8; 3]) -> glow::NativeTexture {
+            let img = RgbaImage { width: 1, height: 1, pixels: vec![rgb[0], rgb[1], rgb[2], 255] };
+            overlay_texture::upload_rgba(gl, &img).expect("1x1 upload should work")
+        }
+
+        fn assert_near(actual: [u8; 4], expected: [u8; 4], what: &str) {
+            for (i, expected) in expected.iter().enumerate() {
+                let delta = actual[i] as i32 - *expected as i32;
+                assert!(delta.abs() <= 2, "{what}: channel {i} was {} , expected ~{expected} (pixel {actual:?})", actual[i]);
+            }
+        }
+
+        #[test]
+        fn a_full_opacity_video_layer_fills_the_whole_frame_with_its_own_pixels() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build every program");
+            begin_clean_frame(gl, &mut compositor);
+
+            let tex = solid_texture(gl, [20, 200, 90]);
+            compositor.composite_video_layer(gl, tex, 1.0, DEFAULT_COLOR_PARAMS);
+            compositor.end_frame(gl);
+
+            assert_near(read_center(gl, &compositor), [20, 200, 90, 255], "center");
+            // Full-screen: the corners must be covered too, unlike a sprite.
+            let mut corner = [0u8; 4];
+            unsafe {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(compositor.fbo));
+                gl.read_pixels(1, 1, 1, 1, glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelPackData::Slice(Some(&mut corner)));
+            }
+            assert_near(corner, [20, 200, 90, 255], "corner");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn opacity_is_the_layers_sole_strength_control() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let tex = solid_texture(gl, [255, 255, 255]);
+            compositor.composite_video_layer(gl, tex, 0.5, DEFAULT_COLOR_PARAMS);
+            compositor.end_frame(gl);
+
+            // Alpha-over onto a cleared (transparent) FBO: S*a + D*(1-a).
+            assert_near(read_center(gl, &compositor), [128, 128, 128, 128], "half opacity");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn a_zero_opacity_layer_is_skipped_entirely() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let tex = solid_texture(gl, [255, 255, 255]);
+            compositor.composite_video_layer(gl, tex, 0.0, DEFAULT_COLOR_PARAMS);
+            compositor.end_frame(gl);
+
+            assert_eq!(read_center(gl, &compositor), [0, 0, 0, 0]);
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        /// The ordering decision this step makes, pinned as behavior.
+        ///
+        /// A deck slot at full opacity covers the frame; if the video layer
+        /// were composited *before* the decks (as the plan's step-14 sketch
+        /// said), it would be completely hidden here: and "a deck at
+        /// opacity 1" is the default state at either end of the crossfader,
+        /// so the layer would be invisible in normal use. Drawing it after
+        /// the decks is what makes its own opacity slider the sole control
+        /// of how much of it shows, exactly as `compositor.ts` documents.
+        #[test]
+        fn the_video_layer_draws_over_a_full_opacity_deck_not_under_it() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let deck_tex = solid_texture(gl, [255, 0, 0]);
+            let video_tex = solid_texture(gl, [0, 0, 255]);
+            // A deck slot at full opacity, drawn first, exactly as
+            // `about_to_wait` draws them.
+            let deck = LayerInput { opacity: 1.0, composite: DEFAULT_SLOT_COMPOSITE, color: DEFAULT_COLOR_PARAMS };
+            compositor.composite_layer(gl, deck_tex, &deck, true);
+            assert_near(read_center(gl, &compositor), [255, 0, 0, 255], "the deck alone");
+
+            compositor.composite_video_layer(gl, video_tex, 1.0, DEFAULT_COLOR_PARAMS);
+            compositor.end_frame(gl);
+
+            assert_near(read_center(gl, &compositor), [0, 0, 255, 255], "the video layer over the deck");
+
+            unsafe {
+                gl.delete_texture(deck_tex);
+                gl.delete_texture(video_tex);
+            }
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        /// The half of the layer that makes "reuse the Color shader path"
+        /// a real claim rather than an intention: the exact `ColorParams`
+        /// `core::video` produces on a beat drive the deck shader's own
+        /// `uBrightnessMul`/`uHueRotateDeg`.
+        #[test]
+        fn the_beat_flash_brightens_the_layer_by_the_webs_factor() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            let tex = solid_texture(gl, [100, 100, 100]);
+            let mut state = VideoState::default();
+            state.react_flash = true;
+            state.react_hue = false;
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_video_layer(gl, tex, 1.0, state.layer_color_params(false));
+            compositor.end_frame(gl);
+            assert_near(read_center(gl, &compositor), [100, 100, 100, 255], "off the beat");
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_video_layer(gl, tex, 1.0, state.layer_color_params(true));
+            compositor.end_frame(gl);
+            // 100/255 * 1.4 = 0.549 -> 140.
+            assert_near(read_center(gl, &compositor), [140, 140, 140, 255], "on the beat");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn the_beat_hue_rotation_actually_moves_the_hue() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            let tex = solid_texture(gl, [255, 0, 0]);
+            let mut state = VideoState::default();
+            state.react_flash = false;
+            state.react_hue = true;
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_video_layer(gl, tex, 1.0, state.layer_color_params(false));
+            compositor.end_frame(gl);
+            assert_near(read_center(gl, &compositor), [255, 0, 0, 255], "off the beat: untouched red");
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_video_layer(gl, tex, 1.0, state.layer_color_params(true));
+            compositor.end_frame(gl);
+            // +35 degrees from pure red, at full saturation/value: red
+            // stays pinned and green climbs to 35/60 of full.
+            let px = read_center(gl, &compositor);
+            assert_eq!(px[0], 255, "red channel should stay saturated: {px:?}");
+            assert!((140..=160).contains(&px[1]), "green should be ~149 after +35deg, got {px:?}");
+            assert_eq!(px[2], 0, "blue should stay at 0: {px:?}");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        /// GL-state hygiene, the same check the overlay pass carries: this
+        /// pass must leave texture unit 0 active, since every other pass in
+        /// the frame (and egui_glow, and the deck upload paths) assumes it.
+        #[test]
+        fn the_pass_leaves_texture_unit_zero_active_and_no_gl_error() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let tex = solid_texture(gl, [10, 20, 30]);
+            compositor.composite_video_layer(gl, tex, 1.0, ColorParams { hue_rotate: 0.25, ..DEFAULT_COLOR_PARAMS });
+            compositor.end_frame(gl);
+
+            let active = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) };
+            assert_eq!(active as u32, glow::TEXTURE0, "composite_video_layer left texture unit {active:#x} active");
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
         }
     }
 }

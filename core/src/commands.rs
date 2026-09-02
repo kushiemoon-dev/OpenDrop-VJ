@@ -325,32 +325,26 @@ pub struct Command {
     pub id: CommandId,
     pub label: &'static str,
     pub kind: CommandKind,
-    /// See `CommandRegistry`'s doc comment: 201 of the 223 commands
-    /// registered by `create_default_registry` share the `noop` stub here,
-    /// intentionally: this is not a signature to widen casually.
+    /// See `CommandRegistry`'s doc comment: only 2 of the 223 commands
+    /// registered by `create_default_registry` still share the `noop`
+    /// stub here (`CommandId::LfoRateUp`/`LfoRateDown`): this is not a
+    /// signature to widen casually.
     pub run: fn(f64, &mut dyn CommandContext),
 }
 
 /// Dispatches by `CommandId` to a `Command`'s `run` fn.
 ///
-/// **Known, intentional debt** (whole-branch review): of the 223
-/// `CommandId` variants `create_default_registry` registers, 201: most
-/// `Range` commands (color/blend/lumakey/colorkey per slot, all 32 time-param
-/// families, all 128 q-var slots) and several `Trigger` commands (LFO rate,
-/// timeline-toggle): are permanent `noop` stubs,
-/// not placeholders forgotten mid-port. `run` only ever receives `&mut dyn
-/// CommandContext`, and `CommandContext`'s current surface (crossfader
-/// get/set, active-deck get/switch, `navigate_preset`, the playlist
-/// toggle/next/prev trio, `get_playlist_playing`, `advance_overlay_queue`)
-/// has no setters for color params, blend/lumakey/colorkey config,
-/// time-param multipliers, or q-var overrides. Building those out means
-/// wiring most of the app's command surface: a large, deliberately
-/// out-of-scope feature gap the whole-branch review flagged as known debt
-/// for a future dedicated phase, not something to grow inside a cleanup
-/// pass. `CommandContext`'s minimal surface (in particular `get_crossfader`/
-/// `get_playlist_playing`) is a deliberate boundary, not an oversight: do
-/// not add `CommandContext` methods or wire a stub's `run` body without that
-/// future phase's explicit go-ahead.
+/// Of the 223 `CommandId` variants `create_default_registry` registers,
+/// only 2: `LfoRateUp`/`LfoRateDown` (Trigger): are still permanent
+/// `noop` stubs. This used to describe a much larger gap (whole-branch
+/// review: most `Range` commands and several `Trigger` commands stubbed
+/// out pending a future dedicated phase): that gap has since been closed
+/// across Steps 1-10 of the Phase 8 VJ-panels plan, which gave
+/// `CommandContext` real setters for color, composite/lumakey/colorkey,
+/// snapshot recall, timeline toggle, all 32 time-param multipliers, all
+/// 128 q-var slots, and the strobe toggle. `run` only ever receives `&mut
+/// dyn CommandContext`; wiring the 2 remaining stubs is LFO routing's job
+/// (a later step), not something to do ad hoc here.
 #[derive(Default)]
 pub struct CommandRegistry {
     /// Insertion order matters here (whole-branch review Finding I2): 3

@@ -104,6 +104,24 @@ pub const VALUE_MIN: f64 = -VALUE_OFFSET;
 /// Highest value the side channel can carry.
 pub const VALUE_MAX: f64 = VALUE_OFFSET;
 
+/// Opens the first appended line of an equation block the preset already had
+/// lines in.
+///
+/// libprojectM concatenates a block's `per_frame_1..N` lines into a single
+/// Milkdrop program, and 703 of the 9795 presets in the reference library
+/// (7.2%, and 1162 = 11.9% for `per_frame_init`) end their last statement
+/// **without** a `;`. That is legal as the final statement of the original
+/// program, and a syntax error the moment anything is appended after it:
+/// which takes down the *whole* block, not just the appended lines: measured
+/// against real libprojectM, a preset ending in `q1 = 0.5` stopped evaluating
+/// its own equations entirely once one line was appended.
+///
+/// A `;` in the *middle* of a program is an inert empty statement, so it is
+/// emitted unconditionally rather than sniffed for. At the very *start* it is
+/// not: a program beginning with `;` fails to compile, also measured, so a
+/// block the preset had no lines in gets no separator.
+const SEPARATOR: &str = ";";
+
 /// What `projectm_get_fps` actually returns on a fresh libprojectM 4.1.6
 /// instance, measured rather than read off the header (which documents 60 and
 /// is wrong). Pass this to [`patch_preset`] to leave the corpus's
@@ -123,8 +141,17 @@ pub fn encode_param(index: u16, value: f64) -> i32 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Apply {
     /// `var = var * od_pN;` scales whatever the preset computed (Time's
-    /// zoom/rot/warp/dx/dy/… multipliers).
+    /// rot/warp/dx/dy/wave_a multipliers).
     Multiply(String),
+    /// `var = 1 + (var - 1) * od_pN;` scales the variable's *departure from
+    /// 1*, leaving 1 fixed. Required for the Milkdrop variables whose
+    /// neutral value is 1 rather than 0 (`zoom`, `sx`, `sy`): a plain
+    /// [`Apply::Multiply`] on those turns a multiplier of 0 into a collapsed
+    /// image and a multiplier of 2 on a typical `zoom = 1.01` into `2.02`, a
+    /// runaway. Mirrors the web app's own Time semantics
+    /// (`core::time_params::inject_time_params`'s `a.zoom = 1 + (a.zoom - 1)
+    /// * zoomMult` lines), which this exists to reproduce.
+    ScaleAroundOne(String),
     /// `var = od_pN;` replaces it outright (Qvar's `q1`..`q32` overrides).
     Assign(String),
 }
@@ -148,9 +175,20 @@ pub struct PatchTarget {
 /// 1. every standalone `fps` identifier in the preset's own equation blocks
 ///    (`per_frame_init_N`, `per_frame_N`, `per_pixel_N`, `shape_N_per_frameM`,
 ///    `wave_N_per_frameM`, `wave_N_per_pointM`) becomes `substituted_fps`;
-/// 2. a demux prologue, one latch per target, and the application lines are
-///    appended after the preset's own equations, numbered past the highest
-///    existing index so they run last.
+/// 2. a demux prologue, one latch per distinct target index, and one
+///    application line per target are appended after the preset's own
+///    equations, numbered past the highest existing index so they run last.
+///
+/// Appending is not a detail: the application lines have to run *after* the
+/// preset has computed `zoom`/`rot`/… to be able to scale them, and
+/// libprojectM reads `per_frame_N` from 1 upwards and stops at the first
+/// missing index (measured), so appending past `max(N)` is the only
+/// placement that neither renumbers the preset's own equations nor lands in
+/// dead space. The corollary is that a target can only drive a variable
+/// projectM reads back *out* of the per-frame block; `time` in particular is
+/// a per-frame input that is re-set by the engine every frame (measured: a
+/// value written to it does not survive to the next frame), so it cannot be
+/// driven from here at all.
 ///
 /// `substituted_fps` is the caller's call: [`MEASURED_DEFAULT_FPS`] preserves
 /// today's behaviour exactly, the deck's real target frame rate is more
@@ -194,11 +232,25 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
 
     let slot = |t: &PatchTarget| t.index.clamp(MIN_INDEX, MAX_INDEX);
 
-    for (offset, target) in targets.iter().enumerate() {
-        let n = max_init + 1 + offset as u32;
+    // One register per *index*, not per target: two targets may deliberately
+    // share a slot when one host parameter drives two Milkdrop variables
+    // (Time's Stretch drives both `sx` and `sy`), and emitting the seed or
+    // the latch twice for the same register is redundant noise in every
+    // patched preset.
+    let mut seeded: Vec<u16> = Vec::with_capacity(targets.len());
+    let mut n_init = max_init;
+    for target in targets {
+        let i = slot(target);
+        if seeded.contains(&i) {
+            continue;
+        }
+        n_init += 1;
+        // `SEPARATOR` on the first appended line only, and only when this
+        // block already had lines to be separated from: see its own docs.
+        let sep = if seeded.is_empty() && max_init > 0 { SEPARATOR } else { "" };
+        seeded.push(i);
         out.push_str(&format!(
-            "per_frame_init_{n}=od_p{i} = {v};\n",
-            i = slot(target),
+            "per_frame_init_{n_init}={sep}od_p{i} = {v};\n",
             v = fmt_num(target.initial)
         ));
     }
@@ -206,7 +258,8 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
     let mut n = max_frame;
     let mut emit = |code: String| {
         n += 1;
-        out.push_str(&format!("per_frame_{n}={code}\n"));
+        let sep = if n == max_frame + 1 && max_frame > 0 { SEPARATOR } else { "" };
+        out.push_str(&format!("per_frame_{n}={sep}{code}\n"));
     };
     emit("od_c = fps;".to_string());
     // Guard first: anything at or below WORD_GUARD is a real frame rate (or
@@ -219,8 +272,7 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
         scale = fmt_num(VALUE_SCALE),
         offset = fmt_num(VALUE_OFFSET)
     ));
-    for target in targets {
-        let i = slot(target);
+    for &i in &seeded {
         emit(format!(
             "od_p{i} = equal(od_i,{i})*od_v + (1-equal(od_i,{i}))*od_p{i};"
         ));
@@ -229,6 +281,7 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
         let i = slot(target);
         emit(match &target.apply {
             Apply::Multiply(var) => format!("{var} = {var} * od_p{i};"),
+            Apply::ScaleAroundOne(var) => format!("{var} = 1 + ({var} - 1) * od_p{i};"),
             Apply::Assign(var) => format!("{var} = od_p{i};"),
         });
     }
@@ -425,7 +478,7 @@ mod tests {
         let own = out.find("zoom = 1.01;").unwrap();
         let demux = out.find("od_c = fps;").unwrap();
         assert!(own < demux, "{out}");
-        assert!(out.contains("per_frame_2=od_c = fps;"), "{out}");
+        assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
         assert!(out.contains("per_frame_3=od_g = above(od_c,9999999);"), "{out}");
         assert!(out.contains("per_frame_4=od_i = od_g * (od_c % 1000);"), "{out}");
         assert!(
@@ -472,15 +525,15 @@ mod tests {
         // outnumbers per_frame, must both land past the right maximum.
         let src = "per_frame_9=a = 1;\nper_frame_2=b = 2;\nper_frame_init_4=c = 3;\n";
         let out = patch_preset(src, &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
-        assert!(out.contains("per_frame_init_5=od_p1 = 0;"), "{out}");
-        assert!(out.contains("per_frame_10=od_c = fps;"), "{out}");
+        assert!(out.contains("per_frame_init_5=;od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_10=;od_c = fps;"), "{out}");
     }
 
     #[test]
     fn does_not_mistake_per_frame_init_for_a_per_frame_line() {
         let out = patch_preset("per_frame_init_50=a = 1;\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
         assert!(out.contains("per_frame_1=od_c = fps;"), "{out}");
-        assert!(out.contains("per_frame_init_51=od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_init_51=;od_p1 = 0;"), "{out}");
     }
 
     #[test]
@@ -509,6 +562,81 @@ mod tests {
         let out = patch_preset("", &targets, MEASURED_DEFAULT_FPS);
         assert!(out.contains("zoom = zoom * od_p1;"), "{out}");
         assert!(out.contains("q1 = od_p2;"), "{out}");
+    }
+
+    #[test]
+    fn emits_the_scale_around_one_application_line() {
+        // `zoom`/`sx`/`sy` are neutral at 1, not 0: a plain multiply would
+        // make a 0 multiplier collapse the image and a 2 multiplier turn a
+        // typical `zoom = 1.01` into 2.02.
+        let targets = [PatchTarget {
+            index: 2,
+            initial: 1.0,
+            apply: Apply::ScaleAroundOne("zoom".to_string()),
+        }];
+        let out = patch_preset("", &targets, MEASURED_DEFAULT_FPS);
+        assert!(out.contains("zoom = 1 + (zoom - 1) * od_p2;"), "{out}");
+    }
+
+    #[test]
+    fn seeds_and_latches_a_shared_index_exactly_once() {
+        // Time's Stretch drives both `sx` and `sy` from one slider, so two
+        // targets deliberately share a register. Two applications, but only
+        // one seed and one latch.
+        let targets = [
+            PatchTarget { index: 7, initial: 1.0, apply: Apply::ScaleAroundOne("sx".to_string()) },
+            PatchTarget { index: 7, initial: 1.0, apply: Apply::ScaleAroundOne("sy".to_string()) },
+        ];
+        let out = patch_preset("", &targets, MEASURED_DEFAULT_FPS);
+        assert_eq!(out.matches("od_p7 = 1;").count(), 1, "{out}");
+        assert_eq!(out.matches("od_p7 = equal(od_i,7)").count(), 1, "{out}");
+        assert!(out.contains("sx = 1 + (sx - 1) * od_p7;"), "{out}");
+        assert!(out.contains("sy = 1 + (sy - 1) * od_p7;"), "{out}");
+    }
+
+    #[test]
+    fn keeps_appended_line_numbering_contiguous_with_a_shared_index() {
+        // libprojectM stops reading `per_frame_N` at the first gap
+        // (measured), so deduplicating the latch lines must not leave a hole
+        // in the numbering of what follows.
+        let targets = [
+            PatchTarget { index: 7, initial: 1.0, apply: Apply::ScaleAroundOne("sx".to_string()) },
+            PatchTarget { index: 7, initial: 1.0, apply: Apply::ScaleAroundOne("sy".to_string()) },
+            PatchTarget { index: 8, initial: 1.0, apply: Apply::Multiply("wave_a".to_string()) },
+        ];
+        let out = patch_preset("per_frame_1=zoom = 1.01;\n", &targets, MEASURED_DEFAULT_FPS);
+        assert_contiguous_equation_numbering(&out);
+    }
+
+    #[test]
+    fn keeps_appended_line_numbering_contiguous_for_plain_targets() {
+        let targets = [
+            PatchTarget { index: 2, initial: 1.0, apply: Apply::ScaleAroundOne("zoom".to_string()) },
+            PatchTarget { index: 3, initial: 1.0, apply: Apply::Multiply("rot".to_string()) },
+        ];
+        let out = patch_preset(
+            "per_frame_init_1=a = 0;\nper_frame_1=zoom = 1.01;\nper_frame_2=rot = 0.1;\n",
+            &targets,
+            MEASURED_DEFAULT_FPS,
+        );
+        assert_contiguous_equation_numbering(&out);
+    }
+
+    /// Asserts `per_frame_N` and `per_frame_init_N` both run 1..len with no
+    /// hole: libprojectM stops at the first missing index, so a gap
+    /// silently kills every line after it.
+    fn assert_contiguous_equation_numbering(out: &str) {
+        for prefix in ["per_frame_", "per_frame_init_"] {
+            let mut seen: Vec<u32> = out
+                .lines()
+                .filter_map(|l| l.split('=').next())
+                .filter_map(|k| equation_index(k, prefix))
+                .collect();
+            seen.sort_unstable();
+            seen.dedup();
+            let expected: Vec<u32> = (1..=seen.len() as u32).collect();
+            assert_eq!(seen, expected, "{prefix} numbering has a gap:\n{out}");
+        }
     }
 
     #[test]
@@ -545,6 +673,47 @@ mod tests {
         targets[0].initial = -1.755;
         let out = patch_preset("", &targets, MEASURED_DEFAULT_FPS);
         assert!(out.contains("od_p1 = -1.755;"), "{out}");
+    }
+
+    #[test]
+    fn opens_each_appended_block_with_a_statement_separator() {
+        // 703 of the 9795 reference presets (7.2%) end their per_frame
+        // program without a `;`, and 1162 (11.9%) end per_frame_init that
+        // way. libprojectM concatenates a block's lines into one program, so
+        // appending after an unterminated statement is a syntax error that
+        // kills the *whole* block: measured: a preset ending in `q1 = 0.5`
+        // stopped evaluating its own equations entirely once one line was
+        // appended. Exactly one leading `;` per appended block; a second one
+        // on the following lines would be noise.
+        let out = patch_preset(
+            "per_frame_init_1=a = 1\nper_frame_1=zoom = 1.01\n",
+            &[assign(1, "q1"), assign(2, "q2")],
+            MEASURED_DEFAULT_FPS,
+        );
+        assert!(out.contains("per_frame_init_2=;od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_init_3=od_p2 = 0;"), "{out}");
+        assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
+        assert!(out.contains("per_frame_3=od_g = "), "{out}");
+        assert_eq!(out.matches("=;").count(), 2, "{out}");
+    }
+
+    #[test]
+    fn never_starts_a_block_with_the_separator() {
+        // A Milkdrop program that *begins* with `;` fails to compile
+        // (measured): the separator is only ever a separator. 121 presets
+        // in the library have no per_frame block at all, and every preset
+        // that lacks `per_frame_init` hits the same case for that block.
+        let out = patch_preset("fRating=5.000\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
+        assert!(out.contains("per_frame_init_1=od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_1=od_c = fps;"), "{out}");
+        assert!(!out.contains("=;"), "{out}");
+
+        // A preset with per_frame but no per_frame_init: separator on one
+        // block, not the other.
+        let out = patch_preset("per_frame_1=zoom = 1.01\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
+        assert!(out.contains("per_frame_init_1=od_p1 = 0;"), "{out}");
+        assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
+        assert_eq!(out.matches("=;").count(), 1, "{out}");
     }
 
     #[test]

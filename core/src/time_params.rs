@@ -10,6 +10,18 @@
 //! logic; ownership of the equivalent global state belongs in a future
 //! GPU/runtime-facing crate, not here.
 
+/// Upper bound of every Time multiplier: the panel's sliders run 0-2 in
+/// steps of 0.01 (`SidebarTime.svelte`), 1 being neutral. Also the factor a
+/// `CommandId::Time*` dispatch's 0..1 value is scaled by, so a MIDI fader at
+/// half travel lands exactly on neutral.
+pub const TIME_MULT_MAX: f64 = 2.0;
+
+/// Clamps a multiplier to the panel's 0..[`TIME_MULT_MAX`] range: the same
+/// role `set_crossfader`'s own `clamp(0.0, 1.0)` plays for the crossfader.
+pub fn clamp_time_mult(v: f64) -> f64 {
+    v.clamp(0.0, TIME_MULT_MAX)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeckTimeParams {
     pub speed_mult: f64,

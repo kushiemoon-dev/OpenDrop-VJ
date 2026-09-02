@@ -12,6 +12,7 @@ use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
 use opendrop_engine::readback::FrameReadback;
+use opendrop_engine::time_patch;
 use opendrop_engine::timing::PassTimer;
 use opendrop_io::midi::MidiTriggerKey;
 use raw_window_handle::HasWindowHandle;
@@ -149,6 +150,7 @@ pub(crate) enum Panel {
     Keymap,
     Snapshot,
     Timeline,
+    Time,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -187,6 +189,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Keymap => Panel::Keymap,
             config::PanelId::Snapshot => Panel::Snapshot,
             config::PanelId::Timeline => Panel::Timeline,
+            config::PanelId::Time => Panel::Time,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -218,6 +221,7 @@ impl From<Panel> for config::PanelId {
             Panel::Keymap => config::PanelId::Keymap,
             Panel::Snapshot => config::PanelId::Snapshot,
             Panel::Timeline => config::PanelId::Timeline,
+            Panel::Time => config::PanelId::Time,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -502,6 +506,15 @@ struct AppState {
     /// re-registered per frame, which would leak a texture handle in
     /// egui_glow's painter every tick.
     deck_tex_ids: [egui::TextureId; 4],
+    /// What each deck's running preset already holds for each of the 8 Time
+    /// params: the baseline `next_time_param_to_push` diffs against. Written
+    /// at preset-load time (the values `patch_preset` baked in) and on every
+    /// push, so the side channel only ever carries real changes.
+    time_param_last_sent: [[f64; time_patch::TIME_PARAM_COUNT]; deck::DECK_COUNT],
+    /// Per-deck round-robin position for that scan, so several
+    /// simultaneously-moving Time params share the one-word-per-frame channel
+    /// instead of the lowest-numbered one monopolising it.
+    time_param_cursor: [usize; deck::DECK_COUNT],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
     /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
@@ -698,7 +711,8 @@ struct App {
 /// (keyboard navigation + playlist/beat-sync advances). Never touches a
 /// deck directly: it only marks the slot pending and hands the request off
 /// to `preflight::spawn_preflight`. `about_to_wait`'s verdict-handling drain
-/// is the only place that actually calls `Deck::load_preset`.
+/// is the only place that actually loads a preset onto a live deck (through
+/// `load_preset_onto_deck`).
 fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
     let Some(path) = should_spawn_preflight(&state.path_by_name, &mut state.pending_validations, slot, &name) else {
         return;
@@ -739,6 +753,77 @@ fn should_spawn_preflight(
         return None;
     }
     Some(path)
+}
+
+/// Loads `path` onto `deck` through the Time-patched path, and resyncs the
+/// caller's per-deck "already in the preset" baseline to the values that were
+/// just baked into it.
+///
+/// **The only way a preset reaches a deck in this app**, on purpose. Once
+/// `Deck::set_param` has been used on a deck, projectM keeps the code word in
+/// that instance's `fps` across preset loads, so an unpatched preset loaded
+/// afterwards reads a ~10^7 word as its own frame rate and its
+/// framerate-dependent physics is silently destroyed (spike report §5.2).
+/// Routing *every* load through the patched path: from the very first one at
+/// bootstrap, on every deck, whether or not Time has ever been touched: makes
+/// that invariant structural instead of a rule someone has to remember, and
+/// removes any need to track "has this deck been modulated yet" or to call
+/// `Deck::reset_param_channel`.
+///
+/// The `fps` literal substituted into the preset is
+/// [`preset_patch::MEASURED_DEFAULT_FPS`], not this app's target frame rate.
+/// 29% of the reference library divides by `fps` for framerate-independent
+/// physics, and libprojectM 4.1.6 hands them 35 today regardless of how fast
+/// the app actually runs; substituting the real target instead would speed
+/// that 29% up by up to 42% on every deck, as a side effect of a Time-panel
+/// change and even for a user who never opens the panel. Preserving what
+/// presets see today is the conservative half of that choice; switching to the
+/// real rate is a deliberate look change that belongs in its own step.
+fn load_preset_onto_deck(
+    deck: &Deck,
+    path: &Path,
+    params: &opendrop_core::time_params::DeckTimeParams,
+    last_sent: &mut [f64; time_patch::TIME_PARAM_COUNT],
+    smooth_transition: bool,
+) -> Result<(), String> {
+    deck.load_preset_patched(
+        path,
+        &time_patch::targets(params),
+        opendrop_engine::preset_patch::MEASURED_DEFAULT_FPS,
+        smooth_transition,
+    )?;
+    // `patch_preset` bakes these in as the preset's starting values, so the
+    // push loop must not re-send them.
+    *last_sent = time_patch::param_values(params);
+    Ok(())
+}
+
+/// Picks the one Time param to push into a deck's running preset this frame:
+/// the first one at or after `cursor` (wrapping) whose value has drifted from
+/// what the preset already holds, paired with its side-channel index.
+///
+/// One per deck per frame is the channel's hard capacity: it is a single
+/// `projectm_set_fps` word per projectM instance per frame (see
+/// `engine::preset_patch`). The scan starts at a rotating cursor rather than
+/// at 0 so a continuously-moving param (an LFO target, once Step 11 lands)
+/// cannot starve the others: with K params moving at once each is refreshed
+/// every K frames, instead of the lowest-numbered one taking the channel
+/// forever. A single slider dragged by hand is the common case and gets the
+/// full frame rate.
+///
+/// Params with no side-channel index are skipped (Speed: see
+/// `engine::time_patch`), so they never consume a frame's worth of bandwidth.
+fn next_time_param_to_push(
+    current: &[f64; time_patch::TIME_PARAM_COUNT],
+    last_sent: &[f64; time_patch::TIME_PARAM_COUNT],
+    cursor: usize,
+) -> Option<(usize, u16)> {
+    (0..time_patch::TIME_PARAM_COUNT)
+        .map(|offset| (cursor + offset) % time_patch::TIME_PARAM_COUNT)
+        .find_map(|param| {
+            let index = time_patch::side_channel_index(param)?;
+            (current[param] != last_sent[param]).then_some((param, index))
+        })
 }
 
 /// Whether MIDI learn mode has finished for the command being learned: the
@@ -985,6 +1070,9 @@ fn ui_root(
             Panel::Timeline => {
                 ui::timeline::show(ui, perform.show, sources.registry);
             }
+            Panel::Time => {
+                ui::time::show(ui, &mut perform.show.time_params, perform.show.selected_slot);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1131,10 +1219,10 @@ impl ApplicationHandler for App {
 
         // Non-blocking drain so results from spawn_preflight's threads
         // never back up in the channel. This is the only place that ever
-        // calls `Deck::load_preset` on a running deck (besides the
-        // untouched 4-preset bootstrap load): a preset only reaches here
-        // after its own preflight child process has already loaded it
-        // successfully in isolation.
+        // loads a preset onto a running deck (besides the 4-preset
+        // bootstrap load): a preset only reaches here after its own
+        // preflight child process has already loaded it successfully in
+        // isolation.
         while let Ok((slot, name, verdict)) = state.preflight_rx.try_recv() {
             state.pending_validations.remove(&slot);
             match verdict {
@@ -1144,7 +1232,13 @@ impl ApplicationHandler for App {
                             state.preset_errors.insert(slot, format!("GL error: {e}"));
                         } else {
                             state.decks[slot].set_soft_cut_duration(state.transition_seconds);
-                            if let Err(e) = state.decks[slot].load_preset(path, state.transition_seconds > 0.0) {
+                            if let Err(e) = load_preset_onto_deck(
+                                &state.decks[slot],
+                                path,
+                                &state.show.time_params[slot],
+                                &mut state.time_param_last_sent[slot],
+                                state.transition_seconds > 0.0,
+                            ) {
                                 state.preset_errors.insert(slot, e);
                             } else {
                                 state.preset_errors.remove(&slot);
@@ -1415,6 +1509,24 @@ impl ApplicationHandler for App {
                 // run while its context is current, same as `render_frame`.
                 if let Some((w, h)) = state.pending_mesh_size[i].take() {
                     state.decks[i].set_mesh_size(w, h);
+                }
+                // Time params (Step 8 of the Phase 8 VJ-panels plan): at most
+                // one changed value per deck per frame, written into the
+                // running preset through the side channel: no reload, so the
+                // preset's own animation state is untouched (see
+                // `engine::preset_patch`). Here, not on the setter, because
+                // the channel is a per-frame slot and because this is where
+                // this deck's context is already current, same rule
+                // `set_mesh_size` follows just above. Before `render_frame`:
+                // a word written after it would not reach the frame that was
+                // just drawn.
+                let time_values = time_patch::param_values(&state.show.time_params[i]);
+                if let Some((param, index)) =
+                    next_time_param_to_push(&time_values, &state.time_param_last_sent[i], state.time_param_cursor[i])
+                {
+                    state.decks[i].set_param(index, time_values[param]);
+                    state.time_param_last_sent[i][param] = time_values[param];
+                    state.time_param_cursor[i] = (param + 1) % time_patch::TIME_PARAM_COUNT;
                 }
                 state.decks[i].render_frame(&audio.pcm);
                 if !visible && state.invisible_mode == InvisibleMode::Eco {
@@ -1780,8 +1892,8 @@ impl ApplicationHandler for App {
             if let Some(name) = preset_load_request {
                 // Same pipeline as keyboard navigation and playlist/beat-sync
                 // advances (`take_fired_presets`, above): never a direct
-                // `Deck::load_preset` call, which would bypass the pre-flight
-                // validation Step 14 added.
+                // deck load, which would bypass the pre-flight validation
+                // Step 14 added.
                 request_preset_load(state, state.show.selected_slot, name);
             }
             if let Some(new_id) = theme_request {
@@ -2170,9 +2282,15 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
             deck::DECK_COUNT
         ));
     }
+    // Every deck starts on neutral Time params (`Show::default`), and the
+    // 4 bootstrap presets go through the same patched load path as every
+    // later one: see `load_preset_onto_deck` on why that is not optional.
+    let neutral_time_params = opendrop_core::time_params::DeckTimeParams::default();
+    let mut time_param_last_sent =
+        [time_patch::param_values(&neutral_time_params); deck::DECK_COUNT];
     for (i, dk) in decks.iter().enumerate() {
         dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
-        dk.load_preset(&presets[i], false)?;
+        load_preset_onto_deck(dk, &presets[i], &neutral_time_params, &mut time_param_last_sent[i], false)?;
         println!("[app] deck {i} preset: {}", presets[i].display());
     }
 
@@ -2415,6 +2533,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         invisible_mode: ui_config.invisible_mode,
         pending_mesh_size: [None; deck::DECK_COUNT],
+        time_param_last_sent,
+        time_param_cursor: [0; deck::DECK_COUNT],
         show,
         registry: create_default_registry(),
         // Empty `ui_config.keymap` means "no persisted remapping yet" (first
@@ -2909,6 +3029,92 @@ mod tests {
             }
             let contents: Vec<&str> = log.iter().map(|m| m.content.as_str()).collect();
             assert_eq!(contents, vec!["2", "3", "4"]);
+        }
+    }
+
+    /// Step 8: the per-frame Time push loop's scheduling half: which single
+    /// param gets the one word this deck's side channel carries this frame.
+    mod next_time_param_to_push_tests {
+        use super::*;
+
+        const N: usize = time_patch::TIME_PARAM_COUNT;
+
+        fn neutral() -> [f64; N] {
+            [1.0; N]
+        }
+
+        #[test]
+        fn nothing_to_push_when_the_preset_already_holds_every_value() {
+            assert_eq!(next_time_param_to_push(&neutral(), &neutral(), 0), None);
+        }
+
+        #[test]
+        fn pushes_a_changed_param_with_its_side_channel_index() {
+            let mut current = neutral();
+            current[2] = 0.5; // Rotation
+            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), Some((2, 3)));
+        }
+
+        #[test]
+        fn never_pushes_speed_even_when_it_changed() {
+            // Speed has no reachable Milkdrop variable (see
+            // `engine::time_patch`); sending it would burn a frame's worth of
+            // the one-word channel for nothing.
+            let mut current = neutral();
+            current[0] = 0.25;
+            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), None);
+        }
+
+        #[test]
+        fn starts_the_scan_at_the_cursor_and_wraps() {
+            let mut current = neutral();
+            current[1] = 0.5; // Zoom
+            current[6] = 0.5; // Stretch
+            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), Some((1, 2)));
+            assert_eq!(next_time_param_to_push(&current, &neutral(), 2), Some((6, 7)));
+            // Past the last dirty param, the scan wraps back to the first.
+            assert_eq!(next_time_param_to_push(&current, &neutral(), 7), Some((1, 2)));
+        }
+
+        #[test]
+        fn round_robins_between_simultaneously_moving_params() {
+            // Two params moving at once must alternate, not let the
+            // lowest-numbered one hold the channel forever.
+            let mut current = neutral();
+            current[1] = 0.5;
+            current[6] = 0.5;
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut order = Vec::new();
+            for _ in 0..4 {
+                match next_time_param_to_push(&current, &last_sent, cursor) {
+                    Some((param, _)) => {
+                        order.push(param);
+                        last_sent[param] = current[param];
+                        cursor = (param + 1) % N;
+                        // Simulate the value still moving.
+                        current[param] += 0.01;
+                    }
+                    None => break,
+                }
+            }
+            assert_eq!(order, vec![1, 6, 1, 6]);
+        }
+
+        #[test]
+        fn covers_every_sendable_param_when_all_of_them_move() {
+            let current = [0.5; N];
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut seen = Vec::new();
+            while let Some((param, index)) = next_time_param_to_push(&current, &last_sent, cursor) {
+                seen.push((param, index));
+                last_sent[param] = current[param];
+                cursor = (param + 1) % N;
+            }
+            // All 8 params moved; the 7 with a Milkdrop target each get
+            // exactly one push, in index order, and Speed gets none.
+            assert_eq!(seen, vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)]);
         }
     }
 }

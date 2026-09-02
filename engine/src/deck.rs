@@ -85,6 +85,41 @@ impl Deck {
         Ok(())
     }
 
+    /// Loads `path` with the host-to-preset side channel patched in: reads
+    /// the file, runs it through `preset_patch::patch_preset` with `targets`,
+    /// and hands the result to [`Deck::load_preset_data`]. The single
+    /// passage point for loading a preset that [`Deck::set_param`] will
+    /// modulate.
+    ///
+    /// **Why every load on a modulated deck must come through here** (spike
+    /// report §5.2): the word written by `set_param` is projectM *instance*
+    /// state that survives preset loads, so an unpatched preset loaded onto
+    /// a deck that has ever been modulated reads a ~10^7 code word as its
+    /// own `fps` and its framerate-dependent physics is destroyed, with
+    /// nothing to restore it. Routing every load through this function makes
+    /// that unrepresentable rather than merely documented.
+    ///
+    /// Preflight (Phase 4) still validates the file, unpatched, exactly as
+    /// before: see [`Deck::load_preset_data`] on why the patch step itself
+    /// is treated as trusted.
+    ///
+    /// Plenty of `.milk` files in the wild are CP1252 rather than UTF-8, so
+    /// the bytes are read and lossily decoded rather than read as a `String`:
+    /// a replacement character inside a preset comment is harmless, a hard
+    /// error on a preset the user picked is not.
+    pub fn load_preset_patched(
+        &self,
+        path: &Path,
+        targets: &[preset_patch::PatchTarget],
+        substituted_fps: i32,
+        smooth_transition: bool,
+    ) -> Result<(), String> {
+        let bytes = std::fs::read(path).map_err(|e| format!("failed to read preset {}: {e}", path.display()))?;
+        let text = String::from_utf8_lossy(&bytes);
+        let patched = preset_patch::patch_preset(&text, targets, substituted_fps);
+        self.load_preset_data(&patched, smooth_transition)
+    }
+
     /// Writes one `(index, value)` pair into this deck's running preset: the
     /// host to preset side channel Time and Qvar modulate through. Cheap
     /// enough to call every frame; see `engine::preset_patch` for why it goes

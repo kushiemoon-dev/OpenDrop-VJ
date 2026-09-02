@@ -53,6 +53,20 @@ pub trait CommandContext {
     /// wall-clock timestamp. No parameter, same shape as
     /// `switch_active_deck` above.
     fn toggle_timeline(&mut self);
+    /// The 8 per-deck Time multipliers (Step 8). One method per multiplier,
+    /// each parameterized by deck slot (0..4): same shape as
+    /// `set_composite_blend(slot, v)` above, not 32 separate methods for the
+    /// 32 `CommandId::Time*` commands. `v` is in the panel's own 0..
+    /// [`crate::time_params::TIME_MULT_MAX`] range, not 0..1: the registry
+    /// entries convert with [`time_mult`] first.
+    fn set_time_speed(&mut self, slot: usize, v: f64);
+    fn set_time_zoom(&mut self, slot: usize, v: f64);
+    fn set_time_rot(&mut self, slot: usize, v: f64);
+    fn set_time_warp(&mut self, slot: usize, v: f64);
+    fn set_time_dx(&mut self, slot: usize, v: f64);
+    fn set_time_dy(&mut self, slot: usize, v: f64);
+    fn set_time_stretch(&mut self, slot: usize, v: f64);
+    fn set_time_wave(&mut self, slot: usize, v: f64);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -379,6 +393,13 @@ fn round2(v: f64) -> f64 {
 
 fn noop(_: f64, _: &mut dyn CommandContext) {}
 
+/// Scales a dispatched 0..1 command value onto the Time panel's own 0..2
+/// slider range. Factored out rather than repeated inline in all 32
+/// `CommandId::Time*` entries below.
+fn time_mult(v01: f64) -> f64 {
+    (v01 * crate::time_params::TIME_MULT_MAX).clamp(0.0, crate::time_params::TIME_MULT_MAX)
+}
+
 pub fn create_default_registry() -> CommandRegistry {
     let mut reg = CommandRegistry::new();
     for cmd in default_commands() {
@@ -449,38 +470,38 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::RecallSnapshot5, label: "Recall Snapshot 5", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(5) },
         Command { id: CommandId::RecallSnapshot6, label: "Recall Snapshot 6", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(6) },
         Command { id: CommandId::RecallSnapshot7, label: "Recall Snapshot 7", kind: CommandKind::Trigger, run: |_, ctx| ctx.recall_snapshot(7) },
-        Command { id: CommandId::TimeSpeed0, label: "Speed 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeSpeed1, label: "Speed 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeSpeed2, label: "Speed 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeSpeed3, label: "Speed 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeZoom0, label: "Zoom 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeZoom1, label: "Zoom 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeZoom2, label: "Zoom 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeZoom3, label: "Zoom 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeRot0, label: "Rotation 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeRot1, label: "Rotation 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeRot2, label: "Rotation 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeRot3, label: "Rotation 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWarp0, label: "Wrap 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWarp1, label: "Wrap 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWarp2, label: "Wrap 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWarp3, label: "Wrap 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDx0, label: "Horizontal 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDx1, label: "Horizontal 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDx2, label: "Horizontal 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDx3, label: "Horizontal 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDy0, label: "Vertical 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDy1, label: "Vertical 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDy2, label: "Vertical 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeDy3, label: "Vertical 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeStretch0, label: "Stretch 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeStretch1, label: "Stretch 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeStretch2, label: "Stretch 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeStretch3, label: "Stretch 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWave0, label: "Wave 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWave1, label: "Wave 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWave2, label: "Wave 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::TimeWave3, label: "Wave 3", kind: CommandKind::Range, run: noop },
+        Command { id: CommandId::TimeSpeed0, label: "Speed 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_speed(0, time_mult(v)) },
+        Command { id: CommandId::TimeSpeed1, label: "Speed 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_speed(1, time_mult(v)) },
+        Command { id: CommandId::TimeSpeed2, label: "Speed 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_speed(2, time_mult(v)) },
+        Command { id: CommandId::TimeSpeed3, label: "Speed 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_speed(3, time_mult(v)) },
+        Command { id: CommandId::TimeZoom0, label: "Zoom 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_zoom(0, time_mult(v)) },
+        Command { id: CommandId::TimeZoom1, label: "Zoom 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_zoom(1, time_mult(v)) },
+        Command { id: CommandId::TimeZoom2, label: "Zoom 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_zoom(2, time_mult(v)) },
+        Command { id: CommandId::TimeZoom3, label: "Zoom 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_zoom(3, time_mult(v)) },
+        Command { id: CommandId::TimeRot0, label: "Rotation 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_rot(0, time_mult(v)) },
+        Command { id: CommandId::TimeRot1, label: "Rotation 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_rot(1, time_mult(v)) },
+        Command { id: CommandId::TimeRot2, label: "Rotation 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_rot(2, time_mult(v)) },
+        Command { id: CommandId::TimeRot3, label: "Rotation 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_rot(3, time_mult(v)) },
+        Command { id: CommandId::TimeWarp0, label: "Wrap 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_warp(0, time_mult(v)) },
+        Command { id: CommandId::TimeWarp1, label: "Wrap 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_warp(1, time_mult(v)) },
+        Command { id: CommandId::TimeWarp2, label: "Wrap 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_warp(2, time_mult(v)) },
+        Command { id: CommandId::TimeWarp3, label: "Wrap 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_warp(3, time_mult(v)) },
+        Command { id: CommandId::TimeDx0, label: "Horizontal 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dx(0, time_mult(v)) },
+        Command { id: CommandId::TimeDx1, label: "Horizontal 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dx(1, time_mult(v)) },
+        Command { id: CommandId::TimeDx2, label: "Horizontal 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dx(2, time_mult(v)) },
+        Command { id: CommandId::TimeDx3, label: "Horizontal 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dx(3, time_mult(v)) },
+        Command { id: CommandId::TimeDy0, label: "Vertical 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dy(0, time_mult(v)) },
+        Command { id: CommandId::TimeDy1, label: "Vertical 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dy(1, time_mult(v)) },
+        Command { id: CommandId::TimeDy2, label: "Vertical 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dy(2, time_mult(v)) },
+        Command { id: CommandId::TimeDy3, label: "Vertical 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_dy(3, time_mult(v)) },
+        Command { id: CommandId::TimeStretch0, label: "Stretch 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_stretch(0, time_mult(v)) },
+        Command { id: CommandId::TimeStretch1, label: "Stretch 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_stretch(1, time_mult(v)) },
+        Command { id: CommandId::TimeStretch2, label: "Stretch 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_stretch(2, time_mult(v)) },
+        Command { id: CommandId::TimeStretch3, label: "Stretch 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_stretch(3, time_mult(v)) },
+        Command { id: CommandId::TimeWave0, label: "Wave 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_wave(0, time_mult(v)) },
+        Command { id: CommandId::TimeWave1, label: "Wave 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_wave(1, time_mult(v)) },
+        Command { id: CommandId::TimeWave2, label: "Wave 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_wave(2, time_mult(v)) },
+        Command { id: CommandId::TimeWave3, label: "Wave 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_time_wave(3, time_mult(v)) },
         Command { id: CommandId::OverlayQueueNext, label: "Overlay Queue Next", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(1) },
         Command { id: CommandId::OverlayQueuePrev, label: "Overlay Queue Prev", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(-1) },
         Command { id: CommandId::TimelineToggle, label: "Timeline Play/Pause", kind: CommandKind::Trigger, run: |_, ctx| ctx.toggle_timeline() },
@@ -645,6 +666,10 @@ mod tests {
         composite_color_tol_calls: Vec<(usize, f64)>,
         recall_snapshot_calls: Vec<usize>,
         toggle_timeline_calls: u32,
+        /// `(multiplier name, slot, value)` for all 8 Time setters: one
+        /// log instead of 8 near-identical `Vec`s, so a test can assert
+        /// which multiplier a `CommandId::Time*` actually reached.
+        time_calls: Vec<(&'static str, usize, f64)>,
     }
 
     impl CommandContext for MockCtx {
@@ -731,6 +756,30 @@ mod tests {
         }
         fn toggle_timeline(&mut self) {
             self.toggle_timeline_calls += 1;
+        }
+        fn set_time_speed(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("speed", slot, v));
+        }
+        fn set_time_zoom(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("zoom", slot, v));
+        }
+        fn set_time_rot(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("rot", slot, v));
+        }
+        fn set_time_warp(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("warp", slot, v));
+        }
+        fn set_time_dx(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("dx", slot, v));
+        }
+        fn set_time_dy(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("dy", slot, v));
+        }
+        fn set_time_stretch(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("stretch", slot, v));
+        }
+        fn set_time_wave(&mut self, slot: usize, v: f64) {
+            self.time_calls.push(("wave", slot, v));
         }
     }
 
@@ -953,6 +1002,72 @@ mod tests {
             assert_eq!(ctx.composite_color_hue_calls, vec![(0, 0.2)]);
             reg.dispatch(CommandId::ColorkeyTolerance3, 0.6, &mut ctx);
             assert_eq!(ctx.composite_color_tol_calls, vec![(3, 0.6)]);
+        }
+    }
+
+    mod default_registry_time_params {
+        use super::*;
+
+        /// Every `CommandId::Time*` paired with the multiplier and slot it
+        /// must reach: the whole 8x4 matrix, since a copy-paste slip in the
+        /// registry table is exactly the failure this guards.
+        const MATRIX: [(CommandId, &str, usize); 32] = [
+            (CommandId::TimeSpeed0, "speed", 0), (CommandId::TimeSpeed1, "speed", 1),
+            (CommandId::TimeSpeed2, "speed", 2), (CommandId::TimeSpeed3, "speed", 3),
+            (CommandId::TimeZoom0, "zoom", 0), (CommandId::TimeZoom1, "zoom", 1),
+            (CommandId::TimeZoom2, "zoom", 2), (CommandId::TimeZoom3, "zoom", 3),
+            (CommandId::TimeRot0, "rot", 0), (CommandId::TimeRot1, "rot", 1),
+            (CommandId::TimeRot2, "rot", 2), (CommandId::TimeRot3, "rot", 3),
+            (CommandId::TimeWarp0, "warp", 0), (CommandId::TimeWarp1, "warp", 1),
+            (CommandId::TimeWarp2, "warp", 2), (CommandId::TimeWarp3, "warp", 3),
+            (CommandId::TimeDx0, "dx", 0), (CommandId::TimeDx1, "dx", 1),
+            (CommandId::TimeDx2, "dx", 2), (CommandId::TimeDx3, "dx", 3),
+            (CommandId::TimeDy0, "dy", 0), (CommandId::TimeDy1, "dy", 1),
+            (CommandId::TimeDy2, "dy", 2), (CommandId::TimeDy3, "dy", 3),
+            (CommandId::TimeStretch0, "stretch", 0), (CommandId::TimeStretch1, "stretch", 1),
+            (CommandId::TimeStretch2, "stretch", 2), (CommandId::TimeStretch3, "stretch", 3),
+            (CommandId::TimeWave0, "wave", 0), (CommandId::TimeWave1, "wave", 1),
+            (CommandId::TimeWave2, "wave", 2), (CommandId::TimeWave3, "wave", 3),
+        ];
+
+        #[test]
+        fn every_time_command_reaches_its_own_multiplier_and_slot() {
+            let reg = create_default_registry();
+            for (id, name, slot) in MATRIX {
+                let mut ctx = make_ctx();
+                reg.dispatch(id, 0.5, &mut ctx);
+                assert_eq!(ctx.time_calls, vec![(name, slot, 1.0)], "{id:?}");
+            }
+        }
+
+        #[test]
+        fn all_32_are_registered_as_range_commands() {
+            let reg = create_default_registry();
+            for (id, ..) in MATRIX {
+                let cmd = reg.get(id).unwrap_or_else(|| panic!("missing: {id:?}"));
+                assert_eq!(cmd.kind, CommandKind::Range, "{id:?}");
+            }
+        }
+
+        #[test]
+        fn a_dispatched_0_to_1_value_spans_the_panels_0_to_2_range() {
+            // Half travel on a MIDI fader must land exactly on neutral, or a
+            // mapped controller could never reach "no effect".
+            let reg = create_default_registry();
+            for (v01, expected) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
+                let mut ctx = make_ctx();
+                reg.dispatch(CommandId::TimeZoom1, v01, &mut ctx);
+                assert_eq!(ctx.time_calls, vec![("zoom", 1, expected)]);
+            }
+        }
+
+        #[test]
+        fn out_of_range_values_are_clamped_to_the_panel_range() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::TimeRot0, 5.0, &mut ctx);
+            reg.dispatch(CommandId::TimeRot0, -5.0, &mut ctx);
+            assert_eq!(ctx.time_calls, vec![("rot", 0, 2.0), ("rot", 0, 0.0)]);
         }
     }
 

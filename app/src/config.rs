@@ -79,6 +79,7 @@ pub(crate) enum PanelId {
     Keymap,
     Snapshot,
     Timeline,
+    Time,
     Output,
     Midi,
     NdiIn,

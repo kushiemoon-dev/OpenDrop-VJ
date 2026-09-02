@@ -153,6 +153,14 @@ pub struct Compositor {
     /// this, which is why the WebGL2 source never had one.
     empty_vao: glow::NativeVertexArray,
     composite_timer: PassTimer,
+    /// Strobe flash pass (Step 10 of the Phase 8 VJ-panels plan): its own
+    /// tiny program (solid color * alpha, no texture sampling) rather than
+    /// reusing `program`/`uniforms` above, which is shaped around sampling
+    /// a deck texture. Shares `empty_vao`: same "fullscreen triangle from
+    /// `gl_VertexID`, no vertex attributes" trick, no per-draw geometry to
+    /// own.
+    strobe_program: glow::NativeProgram,
+    strobe_uniforms: StrobeUniforms,
 }
 
 impl Compositor {
@@ -193,6 +201,12 @@ impl Compositor {
             let uniforms = locate_uniforms(gl, program);
             let empty_vao = gl.create_vertex_array().map_err(|e| format!("create_vertex_array failed: {e}"))?;
 
+            let strobe_program = build_program_from(gl, STROBE_VERTEX_SRC, STROBE_FRAGMENT_SRC)?;
+            let strobe_uniforms = StrobeUniforms {
+                u_color: gl.get_uniform_location(strobe_program, "uColor"),
+                u_intensity: gl.get_uniform_location(strobe_program, "uIntensity"),
+            };
+
             // Left enabled for the lifetime of this context: every layer
             // draw sets its own blendFuncSeparate/blendEquation before
             // drawing, same as the WebGL2 source enabling it once in its
@@ -201,7 +215,7 @@ impl Compositor {
 
             let composite_timer = PassTimer::new(gl).map_err(|e| format!("composite_timer: {e}"))?;
 
-            Ok(Self { fbo, color_tex, program, uniforms, empty_vao, composite_timer })
+            Ok(Self { fbo, color_tex, program, uniforms, empty_vao, composite_timer, strobe_program, strobe_uniforms })
         }
     }
 
@@ -271,6 +285,40 @@ impl Compositor {
         }
     }
 
+    /// Draws the BPM-synced strobe flash (Step 10 of the Phase 8 VJ-panels
+    /// plan) as a fullscreen quad, additive-blended into the composite FBO
+    /// on top of everything already drawn there this frame: call once per
+    /// frame, after the deck/NDI-in `composite_layer` calls and before
+    /// `blit_to_current_window`/the compositor readback (`FrameReadback`),
+    /// so the flash shows up in the control preview, the output window,
+    /// and NDI/v4l2 alike: all four read `color_tex` through this same
+    /// FBO. A no-op below/at 0 intensity: skip the whole draw rather than
+    /// blending in a fully transparent quad, same "opacity floor" idiom
+    /// `composite_layer` uses for a slot at 0 opacity.
+    pub fn render_strobe_flash(&self, gl: &glow::Context, color: [f32; 3], intensity: f32) {
+        if intensity <= 0.0 {
+            return;
+        }
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            gl.viewport(0, 0, COMP_W as i32, COMP_H as i32);
+            // Additive: dst += src.rgb * src.a, dst alpha left alone (ZERO
+            // src-alpha factor into the dst-alpha accumulator): the flash
+            // brightens the frame without depressing the alpha channel
+            // `composite_layer`'s own blending already built up.
+            gl.blend_func_separate(glow::SRC_ALPHA, glow::ONE, glow::ZERO, glow::ONE);
+            gl.blend_equation(glow::FUNC_ADD);
+
+            gl.use_program(Some(self.strobe_program));
+            gl.bind_vertex_array(Some(self.empty_vao));
+
+            gl.uniform_3_f32(self.strobe_uniforms.u_color.as_ref(), color[0], color[1], color[2]);
+            gl.uniform_1_f32(self.strobe_uniforms.u_intensity.as_ref(), intensity);
+
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+        }
+    }
+
     /// Blits the composite into whichever window surface's default
     /// framebuffer (FBO 0) is currently bound. Call once per window,
     /// between `make_current` and `swap_buffers`.
@@ -309,9 +357,17 @@ fn compile_shader(gl: &glow::Context, kind: u32, src: &str) -> Result<glow::Nati
 }
 
 fn build_program(gl: &glow::Context) -> Result<glow::NativeProgram, String> {
+    build_program_from(gl, VERTEX_SRC, FRAGMENT_SRC)
+}
+
+/// Compiles+links one vertex/fragment pair into a program. Factored out of
+/// `build_program` (Step 10) so the strobe pass's own tiny program can
+/// share the same compile/link/error-handling path instead of duplicating
+/// it.
+fn build_program_from(gl: &glow::Context, vertex_src: &str, fragment_src: &str) -> Result<glow::NativeProgram, String> {
     unsafe {
-        let vs = compile_shader(gl, glow::VERTEX_SHADER, VERTEX_SRC)?;
-        let fs = compile_shader(gl, glow::FRAGMENT_SHADER, FRAGMENT_SRC)?;
+        let vs = compile_shader(gl, glow::VERTEX_SHADER, vertex_src)?;
+        let fs = compile_shader(gl, glow::FRAGMENT_SHADER, fragment_src)?;
         let program = gl.create_program().map_err(|e| format!("create_program failed: {e}"))?;
         gl.attach_shader(program, vs);
         gl.attach_shader(program, fs);
@@ -324,6 +380,28 @@ fn build_program(gl: &glow::Context) -> Result<glow::NativeProgram, String> {
         }
         Ok(program)
     }
+}
+
+const STROBE_VERTEX_SRC: &str = r#"#version 300 es
+const vec2 verts[6] = vec2[6](vec2(-1.0,-1.0), vec2(1.0,-1.0), vec2(-1.0,1.0), vec2(-1.0,1.0), vec2(1.0,-1.0), vec2(1.0,1.0));
+void main() {
+	gl_Position = vec4(verts[gl_VertexID], 0.0, 1.0);
+}
+"#;
+
+const STROBE_FRAGMENT_SRC: &str = r#"#version 300 es
+precision highp float;
+uniform vec3 uColor;
+uniform float uIntensity;
+out vec4 fragColor;
+void main() {
+	fragColor = vec4(uColor, uIntensity);
+}
+"#;
+
+struct StrobeUniforms {
+    u_color: Option<glow::NativeUniformLocation>,
+    u_intensity: Option<glow::NativeUniformLocation>,
 }
 
 fn locate_uniforms(gl: &glow::Context, program: glow::NativeProgram) -> Uniforms {

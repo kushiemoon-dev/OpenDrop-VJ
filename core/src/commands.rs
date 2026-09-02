@@ -53,6 +53,11 @@ pub trait CommandContext {
     /// wall-clock timestamp. No parameter, same shape as
     /// `switch_active_deck` above.
     fn toggle_timeline(&mut self);
+    /// Toggles the strobe on/off (Step 10 of the Phase 8 VJ-panels plan).
+    /// No parameter, same shape as `toggle_timeline`/`switch_active_deck`
+    /// above: rate/intensity/color have no `CommandContext` setter, only
+    /// the toggle is in the transversal keyboard/MIDI/OSC/remote-ws list.
+    fn toggle_strobe(&mut self);
     /// The 8 per-deck Time multipliers (Step 8). One method per multiplier,
     /// each parameterized by deck slot (0..4): same shape as
     /// `set_composite_blend(slot, v)` above, not 32 separate methods for the
@@ -320,7 +325,7 @@ pub struct Command {
     pub id: CommandId,
     pub label: &'static str,
     pub kind: CommandKind,
-    /// See `CommandRegistry`'s doc comment: 202 of the 223 commands
+    /// See `CommandRegistry`'s doc comment: 201 of the 223 commands
     /// registered by `create_default_registry` share the `noop` stub here,
     /// intentionally: this is not a signature to widen casually.
     pub run: fn(f64, &mut dyn CommandContext),
@@ -329,10 +334,10 @@ pub struct Command {
 /// Dispatches by `CommandId` to a `Command`'s `run` fn.
 ///
 /// **Known, intentional debt** (whole-branch review): of the 223
-/// `CommandId` variants `create_default_registry` registers, 202: most
+/// `CommandId` variants `create_default_registry` registers, 201: most
 /// `Range` commands (color/blend/lumakey/colorkey per slot, all 32 time-param
-/// families, all 128 q-var slots) and several `Trigger` commands (strobe,
-/// LFO rate, timeline-toggle): are permanent `noop` stubs,
+/// families, all 128 q-var slots) and several `Trigger` commands (LFO rate,
+/// timeline-toggle): are permanent `noop` stubs,
 /// not placeholders forgotten mid-port. `run` only ever receives `&mut dyn
 /// CommandContext`, and `CommandContext`'s current surface (crossfader
 /// get/set, active-deck get/switch, `navigate_preset`, the playlist
@@ -452,7 +457,7 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::PlaylistToggleActive, label: "⏯ Playlist (active deck)", kind: CommandKind::Trigger, run: |_, ctx| { let d = ctx.get_active_deck(); ctx.toggle_playlist(d) } },
         Command { id: CommandId::PlaylistPrevActive, label: "⏮ Playlist (active deck)", kind: CommandKind::Trigger, run: |_, ctx| { let d = ctx.get_active_deck(); ctx.playlist_prev(d) } },
         Command { id: CommandId::PlaylistNextActive, label: "⏭ Playlist (active deck)", kind: CommandKind::Trigger, run: |_, ctx| { let d = ctx.get_active_deck(); ctx.playlist_next(d) } },
-        Command { id: CommandId::StrobeToggle, label: "Strobe ON/OFF", kind: CommandKind::Trigger, run: noop },
+        Command { id: CommandId::StrobeToggle, label: "Strobe ON/OFF", kind: CommandKind::Trigger, run: |_, ctx| ctx.toggle_strobe() },
         Command { id: CommandId::LfoRateUp, label: "LFO Rate +", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::LfoRateDown, label: "LFO Rate −", kind: CommandKind::Trigger, run: noop },
         Command { id: CommandId::ColorHueA, label: "Hue A", kind: CommandKind::Range, run: |v, ctx| ctx.set_color_hue_a(v) },
@@ -689,6 +694,7 @@ mod tests {
         composite_color_tol_calls: Vec<(usize, f64)>,
         recall_snapshot_calls: Vec<usize>,
         toggle_timeline_calls: u32,
+        toggle_strobe_calls: u32,
         /// `(multiplier name, slot, value)` for all 8 Time setters: one
         /// log instead of 8 near-identical `Vec`s, so a test can assert
         /// which multiplier a `CommandId::Time*` actually reached.
@@ -782,6 +788,9 @@ mod tests {
         }
         fn toggle_timeline(&mut self) {
             self.toggle_timeline_calls += 1;
+        }
+        fn toggle_strobe(&mut self) {
+            self.toggle_strobe_calls += 1;
         }
         fn set_time_speed(&mut self, slot: usize, v: f64) {
             self.time_calls.push(("speed", slot, v));
@@ -1144,6 +1153,26 @@ mod tests {
             let mut ctx = make_ctx();
             reg.dispatch(CommandId::TimelineToggle, 1.0, &mut ctx);
             assert_eq!(ctx.toggle_timeline_calls, 1);
+        }
+    }
+
+    mod default_registry_strobe_toggle {
+        use super::*;
+
+        #[test]
+        fn contains_strobe_toggle_as_a_trigger() {
+            let reg = create_default_registry();
+            let cmd = reg.get(CommandId::StrobeToggle);
+            assert!(cmd.is_some());
+            assert_eq!(cmd.unwrap().kind, CommandKind::Trigger);
+        }
+
+        #[test]
+        fn dispatch_calls_toggle_strobe() {
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::StrobeToggle, 1.0, &mut ctx);
+            assert_eq!(ctx.toggle_strobe_calls, 1);
         }
     }
 

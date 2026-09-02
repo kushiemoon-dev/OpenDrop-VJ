@@ -80,6 +80,7 @@ pub(crate) enum PanelId {
     Snapshot,
     Timeline,
     Time,
+    Qvar,
     Output,
     Midi,
     NdiIn,

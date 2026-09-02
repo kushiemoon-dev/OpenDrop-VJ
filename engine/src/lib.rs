@@ -4,6 +4,7 @@ pub mod ffi;
 pub mod gl_debug;
 pub mod gl_state;
 pub mod preset_patch;
+pub mod qvar_patch;
 pub mod readback;
 pub mod thumbnail;
 pub mod time_patch;

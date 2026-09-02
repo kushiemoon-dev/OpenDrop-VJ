@@ -203,6 +203,19 @@ impl Deck {
     /// `set_param`'s hijack. Required before loading an unpatched preset on a
     /// deck that has been modulated, otherwise that preset's own
     /// framerate-dependent physics reads a ~10^7 code word.
+    ///
+    /// Also required **after** loading a *patched* preset, for a different
+    /// reason: the word is instance state, so the command left in it by the
+    /// last `set_param` is still there when the new preset's demux prologue
+    /// runs, and that prologue latches it on the new preset's very first
+    /// frame: overwriting the `initial` that `patch_preset` just baked in.
+    /// Measured against real libprojectM: watch Q1 set to +2.0, then a reload
+    /// whose baked initial for Q1 was -2.0, came up at +2.0. It only shows
+    /// when the baked value differs from the last one pushed, which is
+    /// exactly what removing and re-adding a q-var does (`with_q_var_watch`
+    /// resets the value to 0). The restored frame rate is below the demux's
+    /// own guard, so the new preset starts on its baked values with nothing
+    /// pending.
     pub fn reset_param_channel(&self) {
         unsafe { ffi::projectm_set_fps(self.handle, self.default_fps) };
     }

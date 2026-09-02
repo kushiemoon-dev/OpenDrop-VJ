@@ -24,6 +24,7 @@ use crate::clock::Clock;
 use crate::commands::{CommandContext, CommandId, Deck};
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
+use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
 use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
 use crate::time_params::{clamp_time_mult, DeckTimeParams};
 use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
@@ -70,6 +71,14 @@ pub struct Show {
     /// Read by `app`'s per-frame push loop, which forwards the changed ones
     /// into each deck's running preset: `Show` itself stays engine-free.
     pub time_params: [DeckTimeParams; 4],
+    /// The 32 q-var overrides per deck slot (Step 9 of the Phase 8 plan),
+    /// written by the Qvar panel and by the 128 `CommandId::Qvar*` setters.
+    /// Read by `app` on two different cadences, both engine-free from here:
+    /// changed *values* go into the running preset through the same
+    /// one-word-per-frame side channel Time uses, while a change to the set
+    /// of `enabled` watches needs the deck's preset re-patched and reloaded
+    /// (see `engine::qvar_patch`).
+    pub q_var_params: QVarParamsTuple,
     pub preset_catalog: Vec<PresetMeta>,
     preset_index_a: usize,
     preset_index_b: usize,
@@ -157,6 +166,7 @@ impl Default for Show {
             color_params_a: DEFAULT_COLOR_PARAMS,
             color_params_b: DEFAULT_COLOR_PARAMS,
             time_params: [DeckTimeParams::default(); 4],
+            q_var_params: [default_q_var_params(); 4],
             preset_catalog: Vec::new(),
             preset_index_a: 0,
             preset_index_b: 0,
@@ -411,9 +421,10 @@ impl Show {
     /// the inverse of the `CommandContext::set_*` setters those same ids
     /// dispatch to. `None` for any `CommandId` outside
     /// `SNAPSHOT_CAPTURABLE_IDS`, whether because it has no real setter yet
-    /// or because it is deliberately excluded: the `CommandId::Time*`
-    /// family does have real setters (step 8) and still returns `None` here
-    /// on purpose; see `SNAPSHOT_CAPTURABLE_IDS` for why.
+    /// or because it is deliberately excluded: the `CommandId::Time*` and
+    /// `CommandId::Qvar*` families do have real setters (steps 8 and 9) and
+    /// still return `None` here on purpose; see `SNAPSHOT_CAPTURABLE_IDS`
+    /// for why.
     pub fn get_command_value(&self, id: CommandId) -> Option<f64> {
         match id {
             CommandId::ColorHueA => Some(self.color_params_a.hue_rotate),
@@ -524,8 +535,18 @@ impl Show {
 ///   easy to get wrong, and silently wrong if it ever is, since a snapshot
 ///   would recall to half or double what was saved.
 ///
-/// Consequence to be aware of: saving a snapshot does not capture Time, and
-/// recalling one leaves the Time params where they are.
+/// **The 128 `CommandId::Qvar*` setters (step 9) are left out for the same
+/// two reasons**, both of which apply at least as strongly: they share the
+/// very same one-value-per-deck-per-frame channel (so a captured Qvar would
+/// compete with Time *and* with the other 31 watches), and they are stored
+/// -2..2 rather than 0..1, so the same inversion of `commands::q_var_value`
+/// would have to be exact. A third reason is specific to Qvar: dispatching
+/// one *enables* the watch it addresses, so a recall would silently switch
+/// watches on, and switching a watch on re-patches and reloads the deck's
+/// preset: a recall that did that every frame would be a reload loop.
+///
+/// Consequence to be aware of: saving a snapshot captures neither Time nor
+/// Qvar, and recalling one leaves both where they are.
 const SNAPSHOT_CAPTURABLE_IDS: [CommandId; 30] = [
     CommandId::ColorHueA,
     CommandId::ColorSatA,
@@ -716,6 +737,18 @@ impl CommandContext for Show {
         self.time_params[slot].wave_mult = clamp_time_mult(v);
     }
 
+    /// Built from `q_vars`'s two ported helpers rather than indexing the
+    /// arrays directly: they already carry the out-of-range guard the TS
+    /// port grew (`slot > 3`, `n` outside 1..=32 is a no-op, not a panic),
+    /// which matters here because `n`/`slot` come from a `CommandId` table
+    /// and an OSC/remote-ws payload rather than from this crate. Order is
+    /// load-bearing: `with_q_var_watch` resets the value to 0, so enabling
+    /// has to happen *before* the value is written, not after.
+    fn set_q_var(&mut self, slot: usize, n: usize, v: f64) {
+        let enabled = with_q_var_watch(self.q_var_params, slot, n);
+        self.q_var_params = with_q_var_value(enabled, slot, n, clamp_q_var_value(v));
+    }
+
     fn set_composite_blend(&mut self, slot: usize, v: f64) {
         self.slot_composites[slot].blend = blend_mode_from_value01(v);
     }
@@ -820,6 +853,11 @@ mod tests {
         #[test]
         fn time_params_start_neutral_on_every_slot() {
             assert_eq!(Show::default().time_params, [DeckTimeParams::default(); 4]);
+        }
+
+        #[test]
+        fn q_var_params_start_unwatched_on_every_slot() {
+            assert_eq!(Show::default().q_var_params, [default_q_var_params(); 4]);
         }
 
         #[test]
@@ -1144,6 +1182,65 @@ mod tests {
             show.set_time_zoom(0, -9.0);
             assert_eq!(show.time_params[0].zoom_mult, 0.0);
         }
+
+        #[test]
+        fn set_q_var_writes_its_own_q_var_in_its_own_slot() {
+            let mut show = Show::default();
+            show.set_q_var(2, 7, 1.25);
+            show.set_q_var(0, 32, -0.5);
+            assert_eq!(show.q_var_params[2].value[6], 1.25);
+            assert_eq!(show.q_var_params[0].value[31], -0.5);
+            // Nothing else moved: one watch on each of two slots, none
+            // anywhere else.
+            assert_eq!(show.q_var_params[2].enabled.iter().filter(|&&e| e).count(), 1);
+            assert_eq!(show.q_var_params[0].enabled.iter().filter(|&&e| e).count(), 1);
+            assert_eq!(show.q_var_params[1], default_q_var_params());
+            assert_eq!(show.q_var_params[3], default_q_var_params());
+        }
+
+        #[test]
+        fn set_q_var_enables_the_watch_it_addresses() {
+            // A controller or LFO bound to a q-var has to be able to make it
+            // move without the panel being opened first.
+            let mut show = Show::default();
+            assert!(!show.q_var_params[1].enabled[4]);
+            show.set_q_var(1, 5, 0.75);
+            assert!(show.q_var_params[1].enabled[4]);
+            assert_eq!(show.q_var_params[1].value[4], 0.75);
+        }
+
+        #[test]
+        fn set_q_var_keeps_the_value_it_was_given_when_it_enables() {
+            // `with_q_var_watch` resets the value to 0, so calling it after
+            // writing the value would zero every dispatch. Pinned because
+            // the bug it guards is invisible: the watch appears, the slider
+            // just never leaves 0.
+            let mut show = Show::default();
+            show.set_q_var(0, 1, -1.5);
+            assert_eq!(show.q_var_params[0].value[0], -1.5);
+            show.set_q_var(0, 1, 1.5);
+            assert_eq!(show.q_var_params[0].value[0], 1.5);
+        }
+
+        #[test]
+        fn set_q_var_clamps_to_the_sliders_minus_2_to_2_range() {
+            let mut show = Show::default();
+            show.set_q_var(0, 1, 9.0);
+            assert_eq!(show.q_var_params[0].value[0], 2.0);
+            show.set_q_var(0, 1, -9.0);
+            assert_eq!(show.q_var_params[0].value[0], -2.0);
+        }
+
+        #[test]
+        fn set_q_var_is_a_no_op_for_an_out_of_range_slot_or_q_var() {
+            // Reaches `Show` from an OSC/remote-ws payload, so a panic here
+            // would be a remotely triggerable crash rather than a bug.
+            let mut show = Show::default();
+            show.set_q_var(4, 1, 1.0);
+            show.set_q_var(0, 0, 1.0);
+            show.set_q_var(0, 33, 1.0);
+            assert_eq!(show.q_var_params, [default_q_var_params(); 4]);
+        }
     }
 
     mod get_command_value {
@@ -1190,6 +1287,21 @@ mod tests {
                 id,
                 CommandId::TimeSpeed0 | CommandId::TimeZoom0 | CommandId::TimeRot0 | CommandId::TimeWave3
             )));
+        }
+
+        #[test]
+        fn returns_none_for_q_vars_even_though_they_have_real_setters() {
+            // Same deliberate exclusion as Time, plus one reason of its own:
+            // dispatching a q-var enables its watch, and enabling a watch
+            // reloads the deck's preset: see `SNAPSHOT_CAPTURABLE_IDS`.
+            let mut show = Show::default();
+            show.set_q_var(0, 1, 1.5);
+            assert_eq!(show.q_var_params[0].value[0], 1.5);
+            assert_eq!(show.get_command_value(CommandId::Qvar1_0), None);
+            assert!(!show
+                .capture_snapshot_values()
+                .keys()
+                .any(|id| matches!(id, CommandId::Qvar1_0 | CommandId::Qvar7_2 | CommandId::Qvar32_3)));
         }
     }
 

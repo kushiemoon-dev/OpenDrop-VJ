@@ -8,6 +8,7 @@ use glutin_winit::{ApiPreference, DisplayBuilder};
 use opendrop_core::blend::{should_force_normal_for_lowest_slot, DEFAULT_COLOR_PARAMS, DEFAULT_SLOT_COMPOSITE};
 use opendrop_core::commands::{create_default_registry, CommandContext, CommandId, CommandKind, CommandRegistry};
 use opendrop_core::show::{DeckBus, Show};
+use opendrop_core::strobe::strobe_flash_intensity;
 use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
@@ -153,6 +154,7 @@ pub(crate) enum Panel {
     Timeline,
     Time,
     Qvar,
+    Strobe,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -193,6 +195,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Timeline => Panel::Timeline,
             config::PanelId::Time => Panel::Time,
             config::PanelId::Qvar => Panel::Qvar,
+            config::PanelId::Strobe => Panel::Strobe,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -226,6 +229,7 @@ impl From<Panel> for config::PanelId {
             Panel::Timeline => config::PanelId::Timeline,
             Panel::Time => config::PanelId::Time,
             Panel::Qvar => config::PanelId::Qvar,
+            Panel::Strobe => config::PanelId::Strobe,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -1193,6 +1197,9 @@ fn ui_root(
             Panel::Qvar => {
                 ui::qvar::show(ui, &mut perform.show.q_var_params, perform.show.selected_slot);
             }
+            Panel::Strobe => {
+                ui::strobe::show(ui, perform.show, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1785,6 +1792,17 @@ impl ApplicationHandler for App {
                     state.compositor.composite_layer(&state.gl, tex, &ndi_in_input, false);
                 }
             }
+            // Strobe flash (Step 10 of the Phase 8 VJ-panels plan): drawn
+            // last, on top of every deck/NDI-in layer just composited
+            // above, and still inside the `begin_frame`/`end_frame`
+            // bracket so it lands in `color_tex` before the readback below
+            // and `blit_to_current_window` (called per-window later in
+            // this tick) both read it: the same shared FBO is what makes
+            // the flash show up in the control preview, the output window,
+            // and NDI/v4l2 alike, with no separate wiring for any of them.
+            let strobe_intensity =
+                strobe_flash_intensity(&state.show.strobe, state.show.clock.phase01(), state.show.clock.bpm(), now_ms / 1000.0);
+            state.compositor.render_strobe_flash(&state.gl, state.show.strobe.color, strobe_intensity);
             state.compositor.end_frame(&state.gl);
 
             // Step 5: GPU->CPU readback feeding the NDI / v4l2loopback
@@ -3362,6 +3380,76 @@ mod tests {
             used.sort_unstable();
             used.dedup();
             assert_eq!(used.len(), 39);
+        }
+    }
+
+    /// Step 10 (Strobe panel): headless GL smoke test for
+    /// `Compositor::render_strobe_flash`. This codebase has no automated
+    /// UI/GPU test harness (plan Convention D: manual live-app
+    /// verification is the norm), but `egl_headless` (already used by
+    /// `--preflight-check`/`--render-thumbnail`) gives a real, windowless
+    /// GL context to any test binary, which `cargo build`/`clippy` can't
+    /// substitute for: a GLSL compile/link error is a runtime-only
+    /// failure. Each test builds its own context inline rather than
+    /// through a shared helper returning just `gl`: `khronos_egl`'s
+    /// wrapper types have no `Drop` of their own, but the `DynamicInstance`
+    /// (`egl_inst`) owns the dlopen'd `libEGL.so.1` handle and drops it
+    /// (dlclose) when it goes out of scope: dropping it before `gl`'s
+    /// loaded function pointers are done being used would be undefined
+    /// behavior, so `egl_inst`/`display`/`ctx`/`pb` all stay bound for the
+    /// whole test.
+    mod compositor_strobe_flash_smoke_test {
+        use super::*;
+        use glow::HasContext;
+        use opendrop_engine::compositor::Compositor;
+
+        #[test]
+        fn compositor_builds_and_renders_the_strobe_flash_without_a_gl_error() {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+
+            let mut compositor =
+                Compositor::new(&gl).expect("Compositor::new (including the strobe shader) should build on a real driver");
+            compositor.begin_frame(&gl);
+            // Drains one pre-existing, unrelated GL error this test
+            // uncovered: `PassTimer::poll` (`engine::timing`, not touched
+            // by this step) calls `glGetQueryObjectuiv` on a query object
+            // that has never yet had a `glBeginQuery`/`glEndQuery` pair:
+            // disallowed by the GL spec: which every `PassTimer`'s very
+            // first `begin()` call hits once. Nothing before this step ran
+            // `Compositor` against a real GL context to surface it; see
+            // this step's report for the finding. Draining it here keeps
+            // this test's assertion scoped to what it actually exercises:
+            // `render_strobe_flash`, not `timing.rs`'s pre-existing bug.
+            unsafe { gl.get_error() };
+            compositor.render_strobe_flash(&gl, [1.0, 0.5, 0.25], 0.75);
+            compositor.end_frame(&gl);
+
+            let err = unsafe { gl.get_error() };
+            assert_eq!(err, glow::NO_ERROR, "GL error after render_strobe_flash: 0x{err:x}");
+        }
+
+        #[test]
+        fn zero_intensity_is_a_no_op_and_leaves_no_gl_error() {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+
+            let mut compositor = Compositor::new(&gl).expect("Compositor::new should build");
+            compositor.begin_frame(&gl);
+            // See the sibling test's comment: drains the pre-existing
+            // `PassTimer` first-use GL error, unrelated to this test.
+            unsafe { gl.get_error() };
+            compositor.render_strobe_flash(&gl, [1.0, 1.0, 1.0], 0.0);
+            compositor.end_frame(&gl);
+
+            let err = unsafe { gl.get_error() };
+            assert_eq!(err, glow::NO_ERROR, "GL error after a 0-intensity render_strobe_flash: 0x{err:x}");
         }
     }
 }

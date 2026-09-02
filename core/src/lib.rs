@@ -12,6 +12,7 @@ pub mod rng;
 pub mod share_set;
 pub mod show;
 pub mod snapshot;
+pub mod strobe;
 pub mod thumb_queue;
 pub mod time_params;
 pub mod timeline;

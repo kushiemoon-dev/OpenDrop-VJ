@@ -26,6 +26,7 @@ pub mod remote;
 pub mod shell;
 pub mod snapshot;
 pub mod streaming;
+pub mod strobe;
 pub mod time;
 pub mod timeline;
 pub mod v4l2loopback;

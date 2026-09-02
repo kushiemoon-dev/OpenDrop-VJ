@@ -26,6 +26,7 @@ use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
 use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
+use crate::strobe::StrobeState;
 use crate::time_params::{clamp_time_mult, DeckTimeParams};
 use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
 
@@ -120,6 +121,15 @@ pub struct Show {
     /// `true`, so play always restarts at the beginning of the current
     /// loop cycle rather than resuming stale progress or jumping in time.
     timeline_elapsed_sec: f64,
+    /// Strobe on/off/rate/intensity/color (Step 10 of the Phase 8 plan).
+    /// Toggled through `CommandContext::toggle_strobe` (keyboard/MIDI/OSC/
+    /// remote-ws parity); rate/intensity/color are written directly by
+    /// the panel (`app::ui::strobe`), same "direct field mutation"
+    /// convention as `slot_composites`/`color_params_a`. The per-frame
+    /// flash intensity itself is computed by `app::about_to_wait` via
+    /// `strobe::strobe_flash_intensity(&show.strobe, ...)` and handed to
+    /// the compositor: `Show` stores only the user-facing state, no GL.
+    pub strobe: StrobeState,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -187,6 +197,7 @@ impl Default for Show {
             timeline_keyframes: Vec::new(),
             timeline_playing: false,
             timeline_elapsed_sec: 0.0,
+            strobe: StrobeState::default(),
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -782,6 +793,10 @@ impl CommandContext for Show {
             self.timeline_elapsed_sec = 0.0;
         }
     }
+
+    fn toggle_strobe(&mut self) {
+        self.strobe.enabled = !self.strobe.enabled;
+    }
 }
 
 #[cfg(test)]
@@ -865,6 +880,11 @@ mod tests {
             let show = Show::default();
             assert!(!show.lock_a);
             assert!(!show.lock_b);
+        }
+
+        #[test]
+        fn strobe_starts_disabled() {
+            assert!(!Show::default().strobe.enabled);
         }
     }
 
@@ -1240,6 +1260,16 @@ mod tests {
             show.set_q_var(0, 0, 1.0);
             show.set_q_var(0, 33, 1.0);
             assert_eq!(show.q_var_params, [default_q_var_params(); 4]);
+        }
+
+        #[test]
+        fn toggle_strobe_flips_enabled() {
+            let mut show = Show::default();
+            assert!(!show.strobe.enabled);
+            show.toggle_strobe();
+            assert!(show.strobe.enabled);
+            show.toggle_strobe();
+            assert!(!show.strobe.enabled);
         }
     }
 

@@ -147,7 +147,11 @@ mod tests {
     fn every_target_index_matches_its_params_own_slot() {
         // The push loop sends `set_param(side_channel_index(p), values[p])`,
         // so a target whose index disagreed with its param's slot would latch
-        // the wrong register forever.
+        // the wrong register forever. Each param gets a *distinct* value on
+        // purpose: this resolves a target back to its param through its
+        // `initial`, which only works while no two params share a value:
+        // `DeckTimeParams::default()` (all 1.0) would make every lookup
+        // resolve to param 0 and the assertion vacuous.
         let params = DeckTimeParams {
             speed_mult: 0.1,
             zoom_mult: 0.2,
@@ -159,6 +163,10 @@ mod tests {
             wave_mult: 0.8,
         };
         let values = param_values(&params);
+        let mut distinct = values.to_vec();
+        distinct.sort_by(f64::total_cmp);
+        distinct.dedup();
+        assert_eq!(distinct.len(), TIME_PARAM_COUNT, "fixture values must stay distinct");
         for target in targets(&params) {
             let param = values
                 .iter()

@@ -2288,10 +2288,21 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let neutral_time_params = opendrop_core::time_params::DeckTimeParams::default();
     let mut time_param_last_sent =
         [time_patch::param_values(&neutral_time_params); deck::DECK_COUNT];
+    // Seeds `AppState::preset_errors` below. A bootstrap preset projectM
+    // rejects must not abort startup: that deck just comes up empty, exactly
+    // as it did before `Deck` reported load failures at all: but it must not
+    // be invisible either: without this the deck would show the idle logo for
+    // the whole session with nothing anywhere saying why.
+    let mut preset_errors: HashMap<usize, String> = HashMap::new();
     for (i, dk) in decks.iter().enumerate() {
         dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
-        load_preset_onto_deck(dk, &presets[i], &neutral_time_params, &mut time_param_last_sent[i], false)?;
-        println!("[app] deck {i} preset: {}", presets[i].display());
+        match load_preset_onto_deck(dk, &presets[i], &neutral_time_params, &mut time_param_last_sent[i], false) {
+            Ok(()) => println!("[app] deck {i} preset: {}", presets[i].display()),
+            Err(e) => {
+                eprintln!("[app] deck {i} bootstrap preset {} failed to load: {e}", presets[i].display());
+                preset_errors.insert(i, e);
+            }
+        }
     }
 
     // Full catalog scan (all presets, not just the 4 bootstrap picks above):
@@ -2555,7 +2566,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         preflight_rx,
         path_by_name,
         pending_validations: HashSet::new(),
-        preset_errors: HashMap::new(),
+        preset_errors,
         // Seeded from the 4 presets the bootstrap loop above actually
         // loaded: leaving these empty until the first UI-driven load meant
         // every deck card started blank even though a preset was running

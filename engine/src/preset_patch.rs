@@ -104,8 +104,8 @@ pub const VALUE_MIN: f64 = -VALUE_OFFSET;
 /// Highest value the side channel can carry.
 pub const VALUE_MAX: f64 = VALUE_OFFSET;
 
-/// Opens the first appended line of an equation block the preset already had
-/// lines in.
+/// Opens the first appended line of an equation block whose own lines already
+/// compile to a non-empty program.
 ///
 /// libprojectM concatenates a block's `per_frame_1..N` lines into a single
 /// Milkdrop program, and 703 of the 9795 presets in the reference library
@@ -118,8 +118,17 @@ pub const VALUE_MAX: f64 = VALUE_OFFSET;
 ///
 /// A `;` in the *middle* of a program is an inert empty statement, so it is
 /// emitted unconditionally rather than sniffed for. At the very *start* it is
-/// not: a program beginning with `;` fails to compile, also measured, so a
-/// block the preset had no lines in gets no separator.
+/// not: a program beginning with `;` fails to compile, also measured.
+///
+/// "Start of the program" is **not** the same as "the block has no numbered
+/// lines": the condition that matters is whether the preset's own lines
+/// contribute at least one real statement (see [`is_statement`]). 25 of the
+/// 9795 reference presets have a block whose every line is a comment
+/// (`per_frame_init_1=//decay = 0.94`); those compile to an empty program, so
+/// an appended `;` lands first and projectM rejects the whole preset. Gating
+/// on line *count* instead of statement content made all 25 fail to load,
+/// verified against real libprojectM: and silently, since a rejected load
+/// leaves the deck on its previous preset.
 const SEPARATOR: &str = ";";
 
 /// What `projectm_get_fps` actually returns on a fresh libprojectM 4.1.6
@@ -204,14 +213,22 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
     let mut out = String::with_capacity(text.len() + 256 + targets.len() * 96);
     let mut max_frame = 0u32;
     let mut max_init = 0u32;
+    // Whether each block contributes at least one real statement to the
+    // compiled program: NOT merely whether it has numbered lines. See
+    // `SEPARATOR`: a block whose every line is a comment compiles to an empty
+    // program, and a program that *starts* with `;` does not compile.
+    let mut frame_has_statement = false;
+    let mut init_has_statement = false;
 
     for line in text.lines() {
         match split_key(line) {
             Some((key, value)) => {
                 if let Some(n) = equation_index(key, "per_frame_init_") {
                     max_init = max_init.max(n);
+                    init_has_statement |= is_statement(value);
                 } else if let Some(n) = equation_index(key, "per_frame_") {
                     max_frame = max_frame.max(n);
+                    frame_has_statement |= is_statement(value);
                 }
                 if is_equation_block(key) {
                     out.push_str(key);
@@ -246,8 +263,8 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
         }
         n_init += 1;
         // `SEPARATOR` on the first appended line only, and only when this
-        // block already had lines to be separated from: see its own docs.
-        let sep = if seeded.is_empty() && max_init > 0 { SEPARATOR } else { "" };
+        // block already compiles to a non-empty program: see its own docs.
+        let sep = if seeded.is_empty() && init_has_statement { SEPARATOR } else { "" };
         seeded.push(i);
         out.push_str(&format!(
             "per_frame_init_{n_init}={sep}od_p{i} = {v};\n",
@@ -258,7 +275,7 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
     let mut n = max_frame;
     let mut emit = |code: String| {
         n += 1;
-        let sep = if n == max_frame + 1 && max_frame > 0 { SEPARATOR } else { "" };
+        let sep = if n == max_frame + 1 && frame_has_statement { SEPARATOR } else { "" };
         out.push_str(&format!("per_frame_{n}={sep}{code}\n"));
     };
     emit("od_c = fps;".to_string());
@@ -286,6 +303,19 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
         });
     }
     out
+}
+
+/// Whether an equation line contributes anything to the compiled program:
+/// the code before any `//` comment, trimmed, is non-empty. A line that is
+/// only a comment (`per_frame_init_1=//decay = 0.94`) contributes nothing, so
+/// a block made entirely of such lines compiles to an *empty* program: which
+/// is exactly the case where [`SEPARATOR`] must not be emitted.
+fn is_statement(value: &str) -> bool {
+    let code = match value.find("//") {
+        Some(i) => &value[..i],
+        None => value,
+    };
+    !code.trim().is_empty()
 }
 
 /// Splits `key=value`, or returns `None` for blank lines and `[section]`
@@ -695,6 +725,54 @@ mod tests {
         assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
         assert!(out.contains("per_frame_3=od_g = "), "{out}");
         assert_eq!(out.matches("=;").count(), 2, "{out}");
+    }
+
+    #[test]
+    fn treats_an_all_comment_block_as_having_no_statement() {
+        // 25 of the 9795 reference presets have a block whose every line is a
+        // comment. Those compile to an *empty* program, so an appended `;`
+        // would land first and projectM rejects the whole preset: verified
+        // against real libprojectM, and silently, since a rejected load leaves
+        // the deck on its previous preset. Gating on "has numbered lines"
+        // instead of "has a statement" is what broke them.
+        let out = patch_preset(
+            "per_frame_init_1=//decay = 0.94\nper_frame_1=zoom = 1.01;\n",
+            &[assign(1, "q1")],
+            MEASURED_DEFAULT_FPS,
+        );
+        assert!(out.contains("per_frame_init_2=od_p1 = 0;"), "{out}");
+        // The per_frame block does have a statement, so it still gets one.
+        assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
+        assert_eq!(out.matches("=;").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn treats_an_all_comment_per_frame_block_as_having_no_statement() {
+        let out = patch_preset(
+            "per_frame_init_1=k = 1;\nper_frame_1=  // nothing to see\nper_frame_2=\t//still nothing\n",
+            &[assign(1, "q1")],
+            MEASURED_DEFAULT_FPS,
+        );
+        assert!(out.contains("per_frame_3=od_c = fps;"), "{out}");
+        // The per_frame_init block does have a statement, so it still gets one.
+        assert!(out.contains("per_frame_init_2=;od_p1 = 0;"), "{out}");
+        assert_eq!(out.matches("=;").count(), 1, "{out}");
+    }
+
+    #[test]
+    fn a_single_target_is_enough_to_trigger_the_all_comment_case() {
+        // Not a line-count effect: one target already appends a first line to
+        // each block, which is all it takes.
+        let out = patch_preset("per_frame_init_1=// only a comment\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
+        assert!(!out.contains("=;"), "{out}");
+    }
+
+    #[test]
+    fn counts_code_before_a_trailing_comment_as_a_statement() {
+        // The inverse mistake: treating any line containing `//` as a comment
+        // line would drop the separator where it is genuinely required.
+        let out = patch_preset("per_frame_1=zoom = 1.01 // scale it\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);
+        assert!(out.contains("per_frame_2=;od_c = fps;"), "{out}");
     }
 
     #[test]

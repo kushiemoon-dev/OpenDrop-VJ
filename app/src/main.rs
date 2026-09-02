@@ -155,6 +155,7 @@ pub(crate) enum Panel {
     Time,
     Qvar,
     Strobe,
+    Lfo,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -196,6 +197,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Time => Panel::Time,
             config::PanelId::Qvar => Panel::Qvar,
             config::PanelId::Strobe => Panel::Strobe,
+            config::PanelId::Lfo => Panel::Lfo,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -230,6 +232,7 @@ impl From<Panel> for config::PanelId {
             Panel::Time => config::PanelId::Time,
             Panel::Qvar => config::PanelId::Qvar,
             Panel::Strobe => config::PanelId::Strobe,
+            Panel::Lfo => config::PanelId::Lfo,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -1200,6 +1203,9 @@ fn ui_root(
             Panel::Strobe => {
                 ui::strobe::show(ui, perform.show, sources.registry);
             }
+            Panel::Lfo => {
+                ui::lfo::show(ui, perform.show, sources.registry);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1611,6 +1617,19 @@ impl ApplicationHandler for App {
             // snapshot recall loop just above.
             for (id, value) in state.show.tick_timeline(dt) {
                 state.registry.dispatch(id, value, &mut state.show);
+            }
+            // LFO modulation (Step 11 of the Phase 8 VJ-panels plan). Same
+            // registry-dispatch parity as the snapshot recall/timeline
+            // loops above, but driven by beat phase rather than dt:
+            // `LfoSlot::rate` is a multiplier of beat rate (see
+            // `core::lfo`'s doc comments), not Hz, so it reads
+            // `state.show.clock.phase01()` directly instead of
+            // accumulating its own elapsed time from `dt`.
+            let lfo_outputs = state.show.lfo_engine.tick(state.show.clock.phase01());
+            for output in lfo_outputs {
+                if let Some(id) = output.target {
+                    state.registry.dispatch(id, output.value01, &mut state.show);
+                }
             }
             state.last_vu_level = opendrop_audio::analysis::vu_level(&audio.pcm);
             state.show.check_volume_peak_triggers(state.last_vu_level, now_ms);

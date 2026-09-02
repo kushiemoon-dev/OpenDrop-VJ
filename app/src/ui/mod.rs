@@ -14,6 +14,7 @@ pub mod keymap;
 // file is never parsed. See Task 18's brief and PLAN.md's Risque 5.
 #[cfg(feature = "link")]
 pub mod link;
+pub mod lfo;
 pub mod midi;
 pub mod ndi;
 pub mod osc;

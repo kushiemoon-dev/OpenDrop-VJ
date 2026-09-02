@@ -23,12 +23,24 @@
 //!
 //! Svelte `$state` reactivity is likewise dropped: `OverlayStore` fields
 //! are plain struct fields mutated through `&mut self` methods.
+//!
+//! Step 12 of the Phase 8 VJ-panels plan wired this module into `app` and
+//! added the two pieces the original port left on the other side of the
+//! I/O boundary but which are pure after all:
+//! - [`overlay_transform_at`] / [`parse_hex_color`]: the per-frame
+//!   animation math `OverlayLayer.svelte` expressed as CSS animations,
+//!   evaluated here instead so `engine::compositor` can draw the sprite.
+//! - [`OverlayStore::maybe_advance_on_beat`] /
+//!   [`OverlayStore::maybe_advance_on_volume_peak`]: the auto-cycle
+//!   queue's two trigger paths (`beat-tempo-actions.ts:71-76` and
+//!   `+page.svelte:558-562`), so `app`'s per-frame loop only has to pass
+//!   on the beat/VU signals it already computes.
 
 use std::collections::HashSet;
 
 use crate::beat_trigger::{
-    apply_beat_trigger_patch, default_beat_trigger_config, BeatTriggerConfig,
-    BeatTriggerConfigPatch,
+    apply_beat_trigger_patch, default_beat_trigger_config, default_volume_peak_state, detect_volume_peak,
+    should_trigger_on_beat, BeatTriggerConfig, BeatTriggerConfigPatch, BeatTriggerMode, VolumePeakState,
 };
 use crate::playlist::PlaylistMode;
 use crate::rng::Xorshift64;
@@ -169,6 +181,107 @@ pub fn make_overlay(id: String, name: String, patch: OverlayPatch) -> Overlay {
     apply_overlay_patch(base, patch)
 }
 
+/// Amplitude of the drift oscillation on each axis, as a fraction of the
+/// composite frame. Port of `OverlayLayer.svelte:58`'s
+/// `--drift-x: {(driftX * 60).toFixed(0)}px` (and its `--drift-y` twin),
+/// expressed here as a fraction rather than raw pixels so `core` stays
+/// resolution-agnostic: the compositor's frame is a fixed 1920x1080
+/// (`engine::compositor::COMP_W`/`COMP_H`), so 60 px is exactly 60/1920 of
+/// its width and 60/1080 of its height.
+pub const DRIFT_AMPLITUDE_X: f64 = 60.0 / 1920.0;
+pub const DRIFT_AMPLITUDE_Y: f64 = 60.0 / 1080.0;
+
+/// One overlay's animated placement for one frame: `Overlay`'s static
+/// `x`/`y`/`rotation`/`scale` after drift, spin, and the beat pulse have
+/// been folded in. Same "pure value, no I/O, no GL" shape as
+/// `strobe::strobe_flash_intensity`'s return: `app` computes this each
+/// frame and hands it to `engine::compositor`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OverlayTransform {
+    /// normalized center X, 0-1 (may drift slightly outside on purpose)
+    pub x: f64,
+    /// normalized center Y, 0-1
+    pub y: f64,
+    pub rotation_deg: f64,
+    pub scale: f64,
+}
+
+/// Port of the three CSS animations `OverlayLayer.svelte` drives per
+/// overlay (`spinStyle`, `driftStyle`, and the `beat-pulse` scale bump),
+/// evaluated for one point in time instead of handed to the browser's
+/// animation engine.
+///
+/// `elapsed_sec` is monotonic seconds since app start: the same reference
+/// every animated overlay shares, so two overlays with identical settings
+/// stay in phase with each other (as they do in the browser, where both
+/// CSS animations start when the element mounts... approximately; exact
+/// per-element start times are not reproducible here and are not worth a
+/// per-overlay birth timestamp).
+///
+/// `beat_pulse` is the shared beat flash (`beatSyncState.beat`, true for
+/// 80 ms after each beat); it only matters for a `beat_reactive` overlay.
+pub fn overlay_transform_at(overlay: &Overlay, elapsed_sec: f64, beat_pulse: bool) -> OverlayTransform {
+    let (drift_x, drift_y) = drift_offset(overlay.drift_x, overlay.drift_y, elapsed_sec);
+    OverlayTransform {
+        x: overlay.x + drift_x,
+        y: overlay.y + drift_y,
+        // The web puts `spin` on the anchor and `rotation` on the sprite;
+        // with the sprite centered on the anchor those two rotations share
+        // a pivot, so they add. (The one visible difference: the web's
+        // drift wrapper sits *inside* the spinning anchor, so its drift
+        // direction spins too. Here drift stays in screen space: a
+        // deliberate simplification, documented in the task report.)
+        rotation_deg: overlay.rotation + overlay.spin * elapsed_sec,
+        scale: if beat_pulse && overlay.beat_reactive { overlay.scale * overlay.beat_scale } else { overlay.scale },
+    }
+}
+
+/// `animation: od-drift {1/speed}s ease-in-out infinite alternate` from
+/// `translate(0,0)` to `translate(driftX*60px, driftY*60px)`, sampled at
+/// `elapsed_sec`. `alternate` makes the full cycle twice the declared
+/// duration (out, then back); CSS `ease-in-out`
+/// (`cubic-bezier(0.42,0,0.58,1)`) is approximated by the smoothstep
+/// already used elsewhere in this crate (`snapshot::smoothstep`): same
+/// endpoints, same zero derivative at both ends, visually
+/// indistinguishable for a slow ambient drift.
+fn drift_offset(drift_x: f64, drift_y: f64, elapsed_sec: f64) -> (f64, f64) {
+    if drift_x == 0.0 && drift_y == 0.0 {
+        return (0.0, 0.0);
+    }
+    let speed = drift_x.abs().max(drift_y.abs()).max(0.05);
+    let leg_sec = 1.0 / speed;
+    let phase = (elapsed_sec / leg_sec).rem_euclid(2.0);
+    let triangle = if phase < 1.0 { phase } else { 2.0 - phase };
+    let eased = triangle * triangle * (3.0 - 2.0 * triangle);
+    (drift_x * DRIFT_AMPLITUDE_X * eased, drift_y * DRIFT_AMPLITUDE_Y * eased)
+}
+
+/// `Overlay::color` (and every other color in the ported TS) is a CSS hex
+/// string, since that's what an `<input type="color">` produces. Parses
+/// `#rgb`/`#rrggbb` (with or without the `#`) into 8-bit channels;
+/// anything unparseable falls back to white, the same value `Overlay::
+/// default()` carries, rather than failing a frame's render.
+pub fn parse_hex_color(hex: &str) -> [u8; 3] {
+    let s = hex.trim().trim_start_matches('#');
+    let nibble = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    let b = s.as_bytes();
+    match b.len() {
+        3 => match (nibble(b[0]), nibble(b[1]), nibble(b[2])) {
+            (Some(r), Some(g), Some(bl)) => [r * 17, g * 17, bl * 17],
+            _ => [255, 255, 255],
+        },
+        6 => match (
+            nibble(b[0]).zip(nibble(b[1])),
+            nibble(b[2]).zip(nibble(b[3])),
+            nibble(b[4]).zip(nibble(b[5])),
+        ) {
+            (Some((r1, r0)), Some((g1, g0)), Some((b1, b0))) => [r1 * 16 + r0, g1 * 16 + g0, b1 * 16 + b0],
+            _ => [255, 255, 255],
+        },
+        _ => [255, 255, 255],
+    }
+}
+
 fn pick_queued_overlays(overlays: &[Overlay]) -> Vec<&Overlay> {
     overlays.iter().filter(|o| o.in_queue).collect()
 }
@@ -214,6 +327,12 @@ pub struct OverlayStore {
     pub queue_trigger: BeatTriggerConfig,
     pub queue_mode: PlaylistMode,
     rng: Xorshift64,
+    /// Rolling-average/cooldown state for `BeatTriggerMode::VolumePeak`
+    /// queue advances: the overlay queue's own, deliberately separate
+    /// from the two per-deck ones on `Show` (`volume_peak_state_a`/`_b`):
+    /// each consumer has its own 500 ms cooldown in the TS source too
+    /// (`+page.svelte:558-562`'s module-local `overlayQueueVolumeState`).
+    queue_volume_state: VolumePeakState,
 }
 
 impl Default for OverlayStore {
@@ -232,15 +351,15 @@ impl OverlayStore {
             queue_trigger: default_beat_trigger_config(),
             queue_mode: PlaylistMode::Sequential,
             rng: Xorshift64::default(),
+            queue_volume_state: default_volume_peak_state(),
         }
     }
 
     /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
     /// the caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment: whole-branch review Finding I4. Not
-    /// currently called by `app`: `OverlayStore` isn't wired into `app` yet
-    /// (see `share_set.rs`'s module doc comment), but this keeps it correct
-    /// for whenever that wiring lands.
+    /// `rng.rs`'s module doc comment: whole-branch review Finding I4.
+    /// Called from `Show::reseed_rng` since Step 12 of the Phase 8
+    /// VJ-panels plan wired this store into `app`.
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng.reseed(seed);
     }
@@ -308,6 +427,36 @@ impl OverlayStore {
         } else {
             retreat_queue_index(self.queue_index, queue_length)
         };
+    }
+
+    /// The beat half of the auto-cycling queue: port of
+    /// `beat-tempo-actions.ts:71-76`, the last of that function's three
+    /// `shouldTriggerOnBeat` blocks (the other two, per-deck playlist
+    /// advance, are already `Show::maybe_advance_on_beat`). Called on every
+    /// beat; `should_trigger_on_beat` itself returns `false` whenever the
+    /// trigger is in `VolumePeak` mode, so the two halves can never both
+    /// fire for the same configuration.
+    pub fn maybe_advance_on_beat(&mut self, beat_count: i64) {
+        if !self.queue_enabled || !should_trigger_on_beat(beat_count, self.queue_trigger) {
+            return;
+        }
+        self.advance_overlay_queue(1);
+    }
+
+    /// The volume-peak half of the same queue: port of
+    /// `+page.svelte:558-562`, the overlay-queue twin of
+    /// `Show::check_one_volume_peak`. `rms` is the current tick's VU level,
+    /// `now_ms` a monotonic millisecond timestamp (the 500 ms cooldown in
+    /// `detect_volume_peak` is measured against it).
+    pub fn maybe_advance_on_volume_peak(&mut self, rms: f64, now_ms: f64) {
+        if !self.queue_enabled || self.queue_trigger.mode != BeatTriggerMode::VolumePeak {
+            return;
+        }
+        let result = detect_volume_peak(rms, self.queue_volume_state, self.queue_trigger.sensitivity, now_ms);
+        self.queue_volume_state = result.next;
+        if result.triggered {
+            self.advance_overlay_queue(1);
+        }
     }
 
     /// DOM dragover handling, minus the DOM: `has_files` is the caller's
@@ -589,6 +738,207 @@ mod tests {
             let seq_1 = draws(&mut store, 1);
             let seq_2 = draws(&mut store, 2);
             assert_ne!(seq_1, seq_2);
+        }
+    }
+
+    mod overlay_queue_trigger_tests {
+        use super::*;
+
+        fn store_with_two_queued() -> OverlayStore {
+            let mut store = OverlayStore::new();
+            store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+            ];
+            store
+        }
+
+        #[test]
+        fn beat_trigger_does_nothing_while_the_queue_is_disabled() {
+            let mut store = store_with_two_queued();
+            store.maybe_advance_on_beat(0);
+            store.maybe_advance_on_beat(8);
+            assert_eq!(store.queue_index, 0);
+        }
+
+        #[test]
+        fn beat_trigger_advances_every_beats_per_change_beats() {
+            let mut store = store_with_two_queued();
+            store.queue_enabled = true;
+            // default beats_per_change is 8, offset 0
+            for beat in 0..8 {
+                store.maybe_advance_on_beat(beat);
+            }
+            // only beat 0 matched
+            assert_eq!(store.queue_index, 1);
+            store.maybe_advance_on_beat(8);
+            assert_eq!(store.queue_index, 0);
+        }
+
+        #[test]
+        fn beat_trigger_never_fires_while_the_trigger_is_in_volume_peak_mode() {
+            let mut store = store_with_two_queued();
+            store.queue_enabled = true;
+            store.update_overlay_queue_trigger(BeatTriggerConfigPatch {
+                mode: Some(BeatTriggerMode::VolumePeak),
+                ..Default::default()
+            });
+            for beat in 0..64 {
+                store.maybe_advance_on_beat(beat);
+            }
+            assert_eq!(store.queue_index, 0);
+        }
+
+        #[test]
+        fn volume_peak_trigger_does_nothing_in_beat_mode() {
+            let mut store = store_with_two_queued();
+            store.queue_enabled = true;
+            store.maybe_advance_on_volume_peak(1.0, 0.0);
+            assert_eq!(store.queue_index, 0);
+        }
+
+        /// Settles `detect_volume_peak`'s rolling average at a steady 0.3
+        /// and returns the queue index once it is there. The average
+        /// starts at 0, so the first non-silent samples of ANY signal read
+        /// as a transient (identical in the TS source): every assertion
+        /// below is made relative to where that leaves the index, not
+        /// against a hardcoded 0.
+        fn settle_at_steady_level(store: &mut OverlayStore) -> usize {
+            store.queue_enabled = true;
+            store.update_overlay_queue_trigger(BeatTriggerConfigPatch {
+                mode: Some(BeatTriggerMode::VolumePeak),
+                ..Default::default()
+            });
+            for i in 0..400 {
+                store.maybe_advance_on_volume_peak(0.3, i as f64);
+            }
+            store.queue_index
+        }
+
+        #[test]
+        fn a_steady_level_does_not_keep_advancing_the_queue() {
+            let mut store = store_with_two_queued();
+            let settled = settle_at_steady_level(&mut store);
+            // Well past the 500 ms cooldown, so a trigger here would be a
+            // real threshold crossing, not a suppressed one.
+            store.maybe_advance_on_volume_peak(0.3, 5_000.0);
+            assert_eq!(store.queue_index, settled);
+        }
+
+        #[test]
+        fn volume_peak_trigger_advances_on_a_loud_transient() {
+            let mut store = store_with_two_queued();
+            let settled = settle_at_steady_level(&mut store);
+            store.maybe_advance_on_volume_peak(3.0, 5_000.0);
+            assert_ne!(store.queue_index, settled);
+        }
+
+        #[test]
+        fn volume_peak_trigger_respects_its_own_cooldown() {
+            let mut store = store_with_two_queued();
+            settle_at_steady_level(&mut store);
+            store.maybe_advance_on_volume_peak(3.0, 5_000.0);
+            let after_peak = store.queue_index;
+            // 100 ms later, still inside the 500 ms cooldown
+            store.maybe_advance_on_volume_peak(3.0, 5_100.0);
+            assert_eq!(store.queue_index, after_peak);
+        }
+    }
+
+    mod overlay_transform_tests {
+        use super::*;
+
+        #[test]
+        fn a_static_overlay_transform_is_its_own_fields() {
+            let ov = Overlay { x: 0.25, y: 0.75, rotation: 30.0, scale: 2.0, ..Default::default() };
+            let t = overlay_transform_at(&ov, 12.34, false);
+            assert_eq!(t, OverlayTransform { x: 0.25, y: 0.75, rotation_deg: 30.0, scale: 2.0 });
+        }
+
+        #[test]
+        fn spin_adds_degrees_per_second_on_top_of_rotation() {
+            let ov = Overlay { rotation: 10.0, spin: 90.0, ..Default::default() };
+            assert_eq!(overlay_transform_at(&ov, 2.0, false).rotation_deg, 190.0);
+            assert_eq!(overlay_transform_at(&ov, -1.0, false).rotation_deg, -80.0);
+        }
+
+        #[test]
+        fn beat_pulse_only_scales_a_beat_reactive_overlay() {
+            let inert = Overlay { scale: 1.0, beat_scale: 1.25, ..Default::default() };
+            assert_eq!(overlay_transform_at(&inert, 0.0, true).scale, 1.0);
+            let reactive = Overlay { scale: 1.0, beat_scale: 1.25, beat_reactive: true, ..Default::default() };
+            assert_eq!(overlay_transform_at(&reactive, 0.0, true).scale, 1.25);
+            assert_eq!(overlay_transform_at(&reactive, 0.0, false).scale, 1.0);
+        }
+
+        #[test]
+        fn zero_drift_never_moves_the_overlay() {
+            let ov = Overlay { x: 0.5, y: 0.5, ..Default::default() };
+            for step in 0..40 {
+                let t = overlay_transform_at(&ov, step as f64 * 0.25, false);
+                assert_eq!((t.x, t.y), (0.5, 0.5));
+            }
+        }
+
+        #[test]
+        fn drift_starts_at_the_anchor_and_peaks_at_a_full_amplitude() {
+            // speed = 1 => one 0->1 leg per second, full cycle 2 s.
+            let ov = Overlay { x: 0.5, y: 0.5, drift_x: 1.0, drift_y: -1.0, ..Default::default() };
+            let at0 = overlay_transform_at(&ov, 0.0, false);
+            assert!((at0.x - 0.5).abs() < 1e-9);
+            assert!((at0.y - 0.5).abs() < 1e-9);
+            let at1 = overlay_transform_at(&ov, 1.0, false);
+            assert!((at1.x - (0.5 + DRIFT_AMPLITUDE_X)).abs() < 1e-9);
+            assert!((at1.y - (0.5 - DRIFT_AMPLITUDE_Y)).abs() < 1e-9);
+            // `alternate` brings it back to the anchor after a full cycle.
+            let at2 = overlay_transform_at(&ov, 2.0, false);
+            assert!((at2.x - 0.5).abs() < 1e-9);
+        }
+
+        #[test]
+        fn drift_stays_within_its_amplitude_envelope_forever() {
+            let ov = Overlay { x: 0.5, y: 0.5, drift_x: 0.4, drift_y: 0.9, ..Default::default() };
+            for step in 0..500 {
+                let t = overlay_transform_at(&ov, step as f64 * 0.137, false);
+                assert!((t.x - 0.5).abs() <= 0.4 * DRIFT_AMPLITUDE_X + 1e-9);
+                assert!((t.y - 0.5).abs() <= 0.9 * DRIFT_AMPLITUDE_Y + 1e-9);
+            }
+        }
+
+        #[test]
+        fn a_drift_below_the_speed_floor_still_oscillates_at_the_floor_rate() {
+            // `Math.max(..., 0.05)` in the source: a 0.01 drift still moves,
+            // just at the 20 s-per-leg floor rate rather than 100 s.
+            let ov = Overlay { x: 0.5, y: 0.5, drift_x: 0.01, ..Default::default() };
+            let peak = overlay_transform_at(&ov, 20.0, false);
+            assert!((peak.x - (0.5 + 0.01 * DRIFT_AMPLITUDE_X)).abs() < 1e-9);
+        }
+    }
+
+    mod parse_hex_color_tests {
+        use super::*;
+
+        #[test]
+        fn parses_the_six_digit_form_with_and_without_a_hash() {
+            assert_eq!(parse_hex_color("#ff2d78"), [0xff, 0x2d, 0x78]);
+            assert_eq!(parse_hex_color("00FF80"), [0x00, 0xff, 0x80]);
+        }
+
+        #[test]
+        fn expands_the_three_digit_shorthand() {
+            assert_eq!(parse_hex_color("#f0a"), [0xff, 0x00, 0xaa]);
+        }
+
+        #[test]
+        fn falls_back_to_white_on_anything_unparseable() {
+            assert_eq!(parse_hex_color(""), [255, 255, 255]);
+            assert_eq!(parse_hex_color("#gg0011"), [255, 255, 255]);
+            assert_eq!(parse_hex_color("rebeccapurple"), [255, 255, 255]);
+        }
+
+        #[test]
+        fn parses_the_overlay_default_color() {
+            assert_eq!(parse_hex_color(&Overlay::default().color), [255, 255, 255]);
         }
     }
 

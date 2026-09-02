@@ -23,6 +23,7 @@ use crate::blend::{
 use crate::clock::Clock;
 use crate::commands::{CommandContext, CommandId, Deck};
 use crate::lfo::LfoEngine;
+use crate::overlay::OverlayStore;
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
@@ -141,6 +142,21 @@ pub struct Show {
     /// an LFO route moves its target through the exact same
     /// keyboard/MIDI/OSC/remote-ws-equivalent path.
     pub lfo_engine: LfoEngine,
+    /// Sprite/text overlays and their auto-cycling queue (Step 12 of the
+    /// Phase 8 plan). `core::overlay` was ported long before it had a
+    /// consumer; this field is what finally gives it one. Written directly
+    /// by the Overlays panel (`app::ui::overlays`): same "direct field
+    /// mutation" convention as `strobe`/`lfo_engine` above: except the
+    /// queue's ◀/▶ buttons, which go through
+    /// `CommandContext::advance_overlay_queue` for keyboard/MIDI/OSC/
+    /// remote-ws parity. The queue also self-advances: `on_beat` and
+    /// `check_volume_peak_triggers` below feed it the same two signals the
+    /// per-deck playlist advance already runs on.
+    ///
+    /// No GL and no asset paths here: `Overlay` carries only the values a
+    /// zero-I/O crate can own, and `app` keeps the id→file map and the
+    /// id→GL-texture cache alongside it (see `AppState::overlay_assets`).
+    pub overlay_store: OverlayStore,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -210,6 +226,7 @@ impl Default for Show {
             timeline_elapsed_sec: 0.0,
             strobe: StrobeState::default(),
             lfo_engine: LfoEngine::new(),
+            overlay_store: OverlayStore::new(),
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -249,6 +266,10 @@ impl Show {
         // RNG consumer, no lockstep risk with the playlist engines above,
         // so it reseeds from the raw `seed` rather than an XOR'd variant.
         self.lfo_engine.reseed_rng(seed);
+        // Overlay auto-cycle queue in shuffle mode (Step 12): a third
+        // independent consumer, XOR'd like deck B's so two shuffles driven
+        // by the same beat don't advance in lockstep.
+        self.overlay_store.reseed_rng(seed ^ 0x5A5A_5A5A_5A5A_5A5A);
     }
 
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
@@ -303,6 +324,11 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
+        // Overlay auto-cycle queue (Step 12): the third `shouldTriggerOn
+        // Beat` block of `beat-tempo-actions.ts`, alongside the two
+        // per-deck ones just above. Unconditional here: the store's own
+        // guard checks `queue_enabled` and the trigger mode.
+        self.overlay_store.maybe_advance_on_beat(self.clock.beat_count() as i64);
         // Refreshes any LFO slot in `Sh` (sample & hold) shape: see
         // `LfoEngine::randomize_sh`'s doc comment ("call on each downbeat").
         self.lfo_engine.randomize_sh();
@@ -427,6 +453,11 @@ impl Show {
     pub fn check_volume_peak_triggers(&mut self, rms: f64, now_ms: f64) {
         self.check_one_volume_peak(Deck::A, rms, now_ms);
         self.check_one_volume_peak(Deck::B, rms, now_ms);
+        // Overlay auto-cycle queue (Step 12): the volume-peak half of
+        // what `on_beat` does for the beat half. Its own rolling
+        // average/cooldown state lives on the store, not here (see
+        // `OverlayStore::queue_volume_state`).
+        self.overlay_store.maybe_advance_on_volume_peak(rms, now_ms);
     }
 
     fn check_one_volume_peak(&mut self, deck: Deck, rms: f64, now_ms: f64) {
@@ -690,10 +721,15 @@ impl CommandContext for Show {
         }
     }
 
-    // The overlay queue is Phase 4/M2+ territory (see commands.rs's own
-    // header note: most CommandId variants are no-op stubs in the TS
-    // source too, wired up by later milestones).
-    fn advance_overlay_queue(&mut self, _direction: i32) {}
+    /// Step 12 of the Phase 8 VJ-panels plan: the overlay queue is real
+    /// state now (`Show::overlay_store`), so this stops being the no-op
+    /// stub it was through Phase 4/M2. `direction` is +1/-1 straight from
+    /// `CommandId::OverlayQueueNext`/`Prev`; `advance_overlay_queue`
+    /// itself treats anything that isn't +1 as "backwards", same as the
+    /// TS source's `direction === 1 ? ... : ...`.
+    fn advance_overlay_queue(&mut self, direction: i32) {
+        self.overlay_store.advance_overlay_queue(direction);
+    }
 
     fn set_color_hue_a(&mut self, v: f64) {
         self.color_params_a.hue_rotate = v.clamp(0.0, 1.0);
@@ -821,8 +857,10 @@ impl CommandContext for Show {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::beat_trigger::BeatTriggerConfigPatch;
     use crate::blend::BlendMode;
     use crate::commands::{create_default_registry, CommandId};
+    use crate::overlay::Overlay;
     use crate::snapshot::smoothstep;
 
     mod bus_gain {
@@ -1289,6 +1327,93 @@ mod tests {
             assert!(show.strobe.enabled);
             show.toggle_strobe();
             assert!(!show.strobe.enabled);
+        }
+
+        #[test]
+        fn advance_overlay_queue_moves_the_stores_queue_index() {
+            // Step 12: this setter was an empty no-op through Phase 4/M2.
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "c".to_string(), in_queue: true, ..Default::default() },
+            ];
+            assert_eq!(show.overlay_store.queue_index, 0);
+            show.advance_overlay_queue(1);
+            assert_eq!(show.overlay_store.queue_index, 1);
+            show.advance_overlay_queue(-1);
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+
+        #[test]
+        fn overlay_queue_next_prev_move_the_index_through_the_registry() {
+            // Recipe B parity: the panel's ◀/▶ buttons, a keyboard binding,
+            // a MIDI note and an OSC message all reach the store through
+            // this one path.
+            let registry = create_default_registry();
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+            ];
+            registry.dispatch(CommandId::OverlayQueueNext, 1.0, &mut show);
+            assert_eq!(show.overlay_store.queue_index, 1);
+            registry.dispatch(CommandId::OverlayQueuePrev, 1.0, &mut show);
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+    }
+
+    /// Step 12: the two auto-advance signals `Show` forwards into
+    /// `OverlayStore`: the store's own trigger logic is tested in
+    /// `core::overlay`; these assert the wiring from `Show`'s side.
+    mod overlay_queue_wiring {
+        use super::*;
+
+        fn show_with_two_queued_overlays() -> Show {
+            let mut show = Show::default();
+            show.overlay_store.overlays = vec![
+                Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
+                Overlay { id: "b".to_string(), in_queue: true, ..Default::default() },
+            ];
+            show.overlay_store.queue_enabled = true;
+            show
+        }
+
+        #[test]
+        fn on_beat_advances_the_queue_when_the_beat_trigger_matches() {
+            let mut show = show_with_two_queued_overlays();
+            // `Clock::beat_count` starts at 0, and the default trigger is
+            // every 8 beats at offset 0: so the very first beat matches.
+            show.on_beat();
+            assert_eq!(show.overlay_store.queue_index, 1);
+        }
+
+        #[test]
+        fn on_beat_leaves_a_disabled_queue_alone() {
+            let mut show = show_with_two_queued_overlays();
+            show.overlay_store.queue_enabled = false;
+            for _ in 0..32 {
+                show.on_beat();
+            }
+            assert_eq!(show.overlay_store.queue_index, 0);
+        }
+
+        #[test]
+        fn check_volume_peak_triggers_advances_the_queue_on_a_transient() {
+            let mut show = show_with_two_queued_overlays();
+            show.overlay_store.update_overlay_queue_trigger(BeatTriggerConfigPatch {
+                mode: Some(BeatTriggerMode::VolumePeak),
+                ..Default::default()
+            });
+            // Settle the rolling average at a steady level first: it
+            // starts at 0, so the first non-silent samples read as a
+            // transient (see `core::overlay`'s own tests).
+            for i in 0..400 {
+                show.check_volume_peak_triggers(0.3, i as f64);
+            }
+            let settled = show.overlay_store.queue_index;
+            show.check_volume_peak_triggers(3.0, 5_000.0);
+            assert_ne!(show.overlay_store.queue_index, settled);
         }
     }
 

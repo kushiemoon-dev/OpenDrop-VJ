@@ -134,11 +134,189 @@ struct Uniforms {
 /// One deck slot's compositing input for one frame: same `SlotComposite`/
 /// `ColorParams` `core::blend` already models, plus the opacity that in the
 /// real app comes from the crossfader (step 7).
+///
+/// Deck slots only: an overlay sprite is a different primitive with
+/// different semantics (arbitrary position/rotation/size, its own blend
+/// vocabulary) and has its own [`OverlayLayerInput`] rather than extra
+/// `Option` fields here.
 #[derive(Clone, Copy)]
 pub struct LayerInput {
     pub opacity: f32,
     pub composite: SlotComposite,
     pub color: ColorParams,
+}
+
+/// The 6 `mix-blend-mode` values an overlay can carry
+/// (`SidebarOverlays.svelte:32`'s `BLEND_MODES`). Deliberately NOT
+/// `core::blend::BlendMode` (4 values, deck-slot compositing): the two
+/// lists only partially overlap, mean different things to the user, and
+/// are set from different panels.
+///
+/// Four of these are plain fixed-function GL blend states. `Overlay` and
+/// `HardLight` are not expressible that way: they need to read the
+/// destination: and go through a backdrop copy instead; see
+/// [`Compositor::composite_overlay`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverlayBlendMode {
+    /// `Overlay::default().blend_mode`, hence the `Default` here.
+    #[default]
+    Screen,
+    Normal,
+    PlusLighter,
+    Multiply,
+    Overlay,
+    HardLight,
+}
+
+impl OverlayBlendMode {
+    /// In `SidebarOverlays.svelte`'s dropdown order, so the native panel
+    /// lists them the same way.
+    pub const ALL: [OverlayBlendMode; 6] = [
+        OverlayBlendMode::Screen,
+        OverlayBlendMode::Normal,
+        OverlayBlendMode::PlusLighter,
+        OverlayBlendMode::Multiply,
+        OverlayBlendMode::Overlay,
+        OverlayBlendMode::HardLight,
+    ];
+
+    /// The CSS keyword, which is what `core::overlay::Overlay::blend_mode`
+    /// stores (a `String`, faithful to the TS type it was ported from).
+    pub fn as_css(self) -> &'static str {
+        match self {
+            OverlayBlendMode::Screen => "screen",
+            OverlayBlendMode::Normal => "normal",
+            OverlayBlendMode::PlusLighter => "plus-lighter",
+            OverlayBlendMode::Multiply => "multiply",
+            OverlayBlendMode::Overlay => "overlay",
+            OverlayBlendMode::HardLight => "hard-light",
+        }
+    }
+
+    /// Inverse of [`Self::as_css`]. An unrecognized keyword falls back to
+    /// the default (`screen`) rather than failing a frame: the field is a
+    /// free-form `String` on the `core` side and can hold anything a
+    /// future import path puts there.
+    pub fn from_css(css: &str) -> Self {
+        Self::ALL.into_iter().find(|m| m.as_css() == css).unwrap_or_default()
+    }
+
+    /// Whether this mode's math needs the pixels already in the composite
+    /// FBO as a shader input (and therefore a copy of them: you cannot
+    /// sample the framebuffer you are drawing into).
+    fn needs_backdrop(self) -> bool {
+        matches!(self, OverlayBlendMode::Overlay | OverlayBlendMode::HardLight)
+    }
+
+    /// Value of the fragment shader's `uMode`.
+    fn shader_mode(self) -> i32 {
+        match self {
+            OverlayBlendMode::Normal => 0,
+            OverlayBlendMode::Screen => 1,
+            OverlayBlendMode::PlusLighter => 2,
+            OverlayBlendMode::Multiply => 3,
+            OverlayBlendMode::Overlay => 4,
+            OverlayBlendMode::HardLight => 5,
+        }
+    }
+
+    /// `(srcRGB, dstRGB, srcAlpha, dstAlpha)` for `glBlendFuncSeparate`.
+    ///
+    /// The fragment shader pre-shapes its RGB output per mode so these
+    /// stay plain fixed-function states: with `a` the sprite's effective
+    /// alpha (texel alpha × the overlay's opacity) and `S` its color:
+    /// - Normal: `fragColor.rgb = S*a`, `(ONE, ONE_MINUS_SRC_ALPHA)`
+    ///   → `S*a + D*(1-a)`, classic "over".
+    /// - PlusLighter: same output, `(ONE, ONE)` → `D + S*a`.
+    /// - Screen: same output, `(ONE, ONE_MINUS_SRC_COLOR)`
+    ///   → `S*a + D*(1 - S*a)`, exactly `screen` weighted by `a`.
+    /// - Multiply: `fragColor.rgb = mix(1, S, a)`, `(ZERO, SRC_COLOR)`
+    ///   → `D * mix(1, S, a)`, exactly `multiply` weighted by `a`: the
+    ///   same trick `composite_layer`'s `uMultiply` uniform uses.
+    /// - Overlay/HardLight: the shader has already produced the final
+    ///   pixel (it sampled the backdrop itself), so `(ONE, ZERO)` writes
+    ///   it through untouched.
+    ///
+    /// The alpha channel is the standard "over" accumulation
+    /// (`a + D_a*(1-a)`) for every fixed-function mode: these modes change
+    /// how colors combine, not how coverage does. Keeping it right matters
+    /// because the NDI/v4l2 readback ships this FBO's alpha downstream.
+    fn blend_state(self) -> (u32, u32, u32, u32) {
+        match self {
+            OverlayBlendMode::Normal => (glow::ONE, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA),
+            OverlayBlendMode::PlusLighter => (glow::ONE, glow::ONE, glow::ONE, glow::ONE_MINUS_SRC_ALPHA),
+            OverlayBlendMode::Screen => (glow::ONE, glow::ONE_MINUS_SRC_COLOR, glow::ONE, glow::ONE_MINUS_SRC_ALPHA),
+            OverlayBlendMode::Multiply => (glow::ZERO, glow::SRC_COLOR, glow::ONE, glow::ONE_MINUS_SRC_ALPHA),
+            OverlayBlendMode::Overlay | OverlayBlendMode::HardLight => {
+                (glow::ONE, glow::ZERO, glow::ONE, glow::ZERO)
+            }
+        }
+    }
+}
+
+/// One overlay sprite's compositing input for one frame: the native
+/// replacement for the DOM element `OverlayLayer.svelte` positioned over
+/// the visualizer.
+///
+/// Distinct from [`LayerInput`] on purpose (the plan is explicit about
+/// this): that one is a full-screen deck slot with keying and color
+/// correction, this one is a positioned, rotated, scaled quad.
+///
+/// `x`/`y` are normalized 0-1 with the CSS convention `Overlay` uses:
+/// origin top-left, `y` growing downward. `scale` multiplies the sprite's
+/// fitted natural size (see [`overlay_quad_half_size_px`]). `rotation_deg`
+/// is clockwise on screen, like CSS `rotate()`.
+///
+/// `tex_w`/`tex_h` are not in the plan's field sketch but are required:
+/// aspect-correct sizing needs the texture's own dimensions, and GLES 3.0
+/// has no `glGetTexLevelParameter` to query them back from the handle.
+/// They come free: every caller has just decoded or rasterized the image.
+#[derive(Clone, Copy)]
+pub struct OverlayLayerInput {
+    pub texture: glow::NativeTexture,
+    pub tex_w: u32,
+    pub tex_h: u32,
+    pub x: f32,
+    pub y: f32,
+    pub scale: f32,
+    pub rotation_deg: f32,
+    pub opacity: f32,
+    pub blend_mode: OverlayBlendMode,
+}
+
+/// Largest fraction of the frame an unscaled (`scale == 1`) sprite may
+/// occupy: port of `OverlayLayer.svelte`'s `max-width: 80vw;
+/// max-height: 80vh` on `.overlay-media`.
+const OVERLAY_MAX_FRACTION: f32 = 0.8;
+
+/// Half-extents, in composite pixels, of the quad an overlay sprite draws
+/// into: its intrinsic pixel size shrunk to fit inside
+/// `OVERLAY_MAX_FRACTION` of the frame (never enlarged: `max-width`
+/// only shrinks), then multiplied by the overlay's `scale`.
+///
+/// Half-extents rather than full size because the quad is centered on
+/// `x`/`y` and rotated about that center, which is exactly what the web's
+/// `transform: translate(-50%, -50%) rotate(...)` does.
+///
+/// Free function, and public, so the sizing rule is unit-testable without
+/// a GL context.
+pub fn overlay_quad_half_size_px(tex_w: u32, tex_h: u32, scale: f32) -> (f32, f32) {
+    let (w, h) = (tex_w as f32, tex_h as f32);
+    if w <= 0.0 || h <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let fit = ((COMP_W as f32 * OVERLAY_MAX_FRACTION) / w)
+        .min((COMP_H as f32 * OVERLAY_MAX_FRACTION) / h)
+        .min(1.0);
+    (w * fit * scale * 0.5, h * fit * scale * 0.5)
+}
+
+/// An overlay's normalized center, converted to composite pixels in GL's
+/// own coordinate system: origin bottom-left, y growing upward. `y` is
+/// flipped because `Overlay::y` is CSS-style top-down (it feeds
+/// `style="top: {y*100}%"` in the web).
+pub fn overlay_center_px(x: f32, y: f32) -> (f32, f32) {
+    (x * COMP_W as f32, (1.0 - y) * COMP_H as f32)
 }
 
 pub struct Compositor {
@@ -161,6 +339,20 @@ pub struct Compositor {
     /// own.
     strobe_program: glow::NativeProgram,
     strobe_uniforms: StrobeUniforms,
+    /// Overlay sprite/text pass (Step 12 of the Phase 8 VJ-panels plan):
+    /// again its own program: unlike `program` (fullscreen, no geometry
+    /// uniforms) and `strobe_program` (fullscreen, no texture), this one
+    /// builds a positioned/rotated quad in its vertex stage. Shares
+    /// `empty_vao` with both, same `gl_VertexID`-only trick.
+    overlay_program: glow::NativeProgram,
+    overlay_uniforms: OverlayUniforms,
+    /// Scratch full-frame copy of `color_tex`, for the two overlay blend
+    /// modes whose math reads the destination (`overlay`, `hard-light`).
+    /// Created on first use, not in `new`: it costs `COMP_W*COMP_H*4` =
+    /// 8 MB of VRAM, and every overlay a session ever draws may well use
+    /// one of the four fixed-function modes instead, in which case this
+    /// stays `None` for the whole run.
+    backdrop_tex: Option<glow::NativeTexture>,
 }
 
 impl Compositor {
@@ -213,9 +405,33 @@ impl Compositor {
             // constructor and never touching GL_BLEND's enable bit again.
             gl.enable(glow::BLEND);
 
+            let overlay_program = build_program_from(gl, OVERLAY_VERTEX_SRC, OVERLAY_FRAGMENT_SRC)?;
+            let overlay_uniforms = OverlayUniforms {
+                u_center_px: gl.get_uniform_location(overlay_program, "uCenterPx"),
+                u_half_px: gl.get_uniform_location(overlay_program, "uHalfPx"),
+                u_rot_rad: gl.get_uniform_location(overlay_program, "uRotRad"),
+                u_viewport_px: gl.get_uniform_location(overlay_program, "uViewportPx"),
+                u_tex: gl.get_uniform_location(overlay_program, "uTex"),
+                u_backdrop: gl.get_uniform_location(overlay_program, "uBackdrop"),
+                u_opacity: gl.get_uniform_location(overlay_program, "uOpacity"),
+                u_mode: gl.get_uniform_location(overlay_program, "uMode"),
+            };
+
             let composite_timer = PassTimer::new(gl).map_err(|e| format!("composite_timer: {e}"))?;
 
-            Ok(Self { fbo, color_tex, program, uniforms, empty_vao, composite_timer, strobe_program, strobe_uniforms })
+            Ok(Self {
+                fbo,
+                color_tex,
+                program,
+                uniforms,
+                empty_vao,
+                composite_timer,
+                strobe_program,
+                strobe_uniforms,
+                overlay_program,
+                overlay_uniforms,
+                backdrop_tex: None,
+            })
         }
     }
 
@@ -319,6 +535,157 @@ impl Compositor {
         }
     }
 
+    /// Draws one overlay sprite (an image, or a rasterized string: see
+    /// `overlay_texture`) as a positioned, rotated, scaled quad in the
+    /// composite FBO. Call once per *visible* overlay
+    /// (`core::overlay::visible_overlay_ids` decides which those are),
+    /// inside the same `begin_frame`/`end_frame` bracket as every other
+    /// pass, so the result lands in `color_tex` for the readback and for
+    /// each window's `blit_to_current_window`: the control preview, the
+    /// output window, NDI and v4l2 all read that one texture, so this pass
+    /// needs no per-consumer wiring.
+    ///
+    /// Position in the frame: after the deck/NDI-in `composite_layer`
+    /// calls (an overlay is over the visuals, never under them) and after
+    /// `render_strobe_flash`. The plan leaves the strobe/overlay order to
+    /// the implementation; strobe-first is chosen so an overlay stays
+    /// readable through a flash instead of being washed out by it: the
+    /// flash is an effect on the visuals, the overlay is content on top of
+    /// the result.
+    ///
+    /// Skipped entirely below the 0.001 opacity floor (same idiom as
+    /// `composite_layer`/`render_strobe_flash`), at a non-positive scale,
+    /// or for a degenerate texture.
+    pub fn composite_overlay(&mut self, gl: &glow::Context, input: &OverlayLayerInput) {
+        if input.tex_w == 0 || input.tex_h == 0 {
+            return;
+        }
+        if !input.opacity.is_finite() || input.opacity <= 0.001 {
+            return;
+        }
+        if !input.scale.is_finite() || input.scale <= 0.0 {
+            return;
+        }
+        let (half_w, half_h) = overlay_quad_half_size_px(input.tex_w, input.tex_h, input.scale);
+        let (center_x, center_y) = overlay_center_px(input.x, input.y);
+        // A NaN slider value (or a NaN drift/spin accumulation) would draw
+        // a degenerate quad rather than nothing; reject the whole draw.
+        if !(half_w > 0.0 && half_h > 0.0 && center_x.is_finite() && center_y.is_finite() && input.rotation_deg.is_finite())
+        {
+            return;
+        }
+
+        unsafe {
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(self.fbo));
+            gl.viewport(0, 0, COMP_W as i32, COMP_H as i32);
+        }
+
+        // Snapshot the destination first, for the two modes that need it.
+        // `copy_tex_sub_image_2d` reads the READ_FRAMEBUFFER binding,
+        // which the `bind_framebuffer(FRAMEBUFFER, ..)` above just set to
+        // our own FBO: and it writes into a texture that is NOT one of
+        // that FBO's attachments, so there is no feedback loop.
+        let mode = if input.blend_mode.needs_backdrop() {
+            match self.capture_backdrop(gl) {
+                Some(_) => input.blend_mode,
+                // Backdrop allocation failed (out of VRAM, driver
+                // refusal): degrade to `Normal` rather than dropping the
+                // overlay: a slightly wrong blend beats an invisible
+                // sprite mid-set.
+                None => OverlayBlendMode::Normal,
+            }
+        } else {
+            // No copy at all for the four fixed-function modes: this is a
+            // full 1920x1080 texture copy per call, and most overlays
+            // never need it.
+            input.blend_mode
+        };
+        let (src_rgb, dst_rgb, src_a, dst_a) = mode.blend_state();
+
+        unsafe {
+            gl.blend_func_separate(src_rgb, dst_rgb, src_a, dst_a);
+            gl.blend_equation(glow::FUNC_ADD);
+
+            gl.use_program(Some(self.overlay_program));
+            gl.bind_vertex_array(Some(self.empty_vao));
+
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(input.texture));
+            gl.uniform_1_i32(self.overlay_uniforms.u_tex.as_ref(), 0);
+            // Always bound, even for a mode that ignores it: an ES
+            // fragment shader with an unbound sampler is undefined
+            // behavior on some drivers even along a branch it never takes.
+            // Falls back to the sprite's own texture when no backdrop
+            // exists, which is harmless: nothing samples it then.
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, Some(self.backdrop_tex.unwrap_or(input.texture)));
+            gl.uniform_1_i32(self.overlay_uniforms.u_backdrop.as_ref(), 1);
+
+            gl.uniform_2_f32(self.overlay_uniforms.u_center_px.as_ref(), center_x, center_y);
+            gl.uniform_2_f32(self.overlay_uniforms.u_half_px.as_ref(), half_w, half_h);
+            // Negated: CSS `rotate(+deg)` turns clockwise on screen, and
+            // this quad is built in GL's y-up pixel space where a positive
+            // angle turns counter-clockwise.
+            gl.uniform_1_f32(self.overlay_uniforms.u_rot_rad.as_ref(), -input.rotation_deg.to_radians());
+            gl.uniform_2_f32(self.overlay_uniforms.u_viewport_px.as_ref(), COMP_W as f32, COMP_H as f32);
+            gl.uniform_1_f32(self.overlay_uniforms.u_opacity.as_ref(), input.opacity.clamp(0.0, 1.0));
+            gl.uniform_1_i32(self.overlay_uniforms.u_mode.as_ref(), mode.shader_mode());
+
+            gl.draw_arrays(glow::TRIANGLES, 0, 6);
+
+            // Leave the active texture unit where every other pass in this
+            // file (and egui_glow, and `deck`'s upload paths) assumes it:
+            // unit 0. This is the only pass that ever moves it.
+            gl.bind_texture(glow::TEXTURE_2D, None);
+            gl.active_texture(glow::TEXTURE0);
+        }
+    }
+
+    /// Copies the composite FBO's current contents into `backdrop_tex`,
+    /// allocating it on first use. `None` means the texture could not be
+    /// created: see `composite_overlay`'s fallback.
+    fn capture_backdrop(&mut self, gl: &glow::Context) -> Option<glow::NativeTexture> {
+        // Pin the unit first: everything below binds a texture, and the
+        // lazy-allocation branch would otherwise do so on whichever unit
+        // the previous pass happened to leave active.
+        unsafe { gl.active_texture(glow::TEXTURE0) };
+        let tex = match self.backdrop_tex {
+            Some(tex) => tex,
+            None => unsafe {
+                let tex = match gl.create_texture() {
+                    Ok(tex) => tex,
+                    Err(e) => {
+                        eprintln!("[engine] overlay backdrop texture creation failed: {e}");
+                        return None;
+                    }
+                };
+                gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    COMP_W as i32,
+                    COMP_H as i32,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+                gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+                self.backdrop_tex = Some(tex);
+                tex
+            },
+        };
+        unsafe {
+            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            gl.copy_tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, 0, 0, COMP_W as i32, COMP_H as i32);
+        }
+        Some(tex)
+    }
+
     /// Blits the composite into whichever window surface's default
     /// framebuffer (FBO 0) is currently bound. Call once per window,
     /// between `make_current` and `swap_buffers`.
@@ -404,6 +771,89 @@ struct StrobeUniforms {
     u_intensity: Option<glow::NativeUniformLocation>,
 }
 
+/// Overlay sprite quad. Unlike the two fullscreen passes above, this
+/// vertex stage actually places geometry: it takes a unit quad from
+/// `gl_VertexID`, scales it to the sprite's half-extents in composite
+/// pixels, rotates it about its own center, translates it to the overlay's
+/// center, and only then converts to NDC. Rotating in pixel space rather
+/// than NDC is what keeps a rotated sprite from shearing on a non-square
+/// frame (1920x1080 here).
+///
+/// `vUV` flips V (`-c.y`): row 0 of an uploaded image is its TOP row,
+/// while GL's texture origin is bottom-left. This is the mirror of the
+/// note at the top of this file about the deck shader NOT needing a flip:
+/// a deck's texture comes from a GL FBO copy (already bottom-left), an
+/// overlay's from a CPU-side decoder (top-left).
+const OVERLAY_VERTEX_SRC: &str = r#"#version 300 es
+const vec2 corners[6] = vec2[6](vec2(-1.0,-1.0), vec2(1.0,-1.0), vec2(-1.0,1.0), vec2(-1.0,1.0), vec2(1.0,-1.0), vec2(1.0,1.0));
+uniform vec2 uCenterPx;
+uniform vec2 uHalfPx;
+uniform float uRotRad;
+uniform vec2 uViewportPx;
+out vec2 vUV;
+void main() {
+	vec2 c = corners[gl_VertexID];
+	vUV = vec2(c.x, -c.y) * 0.5 + 0.5;
+	vec2 local = c * uHalfPx;
+	float s = sin(uRotRad);
+	float co = cos(uRotRad);
+	vec2 rotated = vec2(local.x * co - local.y * s, local.x * s + local.y * co);
+	gl_Position = vec4((uCenterPx + rotated) / uViewportPx * 2.0 - 1.0, 0.0, 1.0);
+}
+"#;
+
+/// Companion fragment stage. Four of the six modes only pre-shape the
+/// output for a fixed-function blend state (see
+/// `OverlayBlendMode::blend_state`); `overlay`/`hard-light` need the
+/// destination, so they sample `uBackdrop`: a copy of the composite taken
+/// just before this draw: and produce the finished pixel themselves.
+const OVERLAY_FRAGMENT_SRC: &str = r#"#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uTex;
+uniform sampler2D uBackdrop;
+uniform vec2 uViewportPx;
+uniform float uOpacity;
+uniform int uMode;
+in vec2 vUV;
+out vec4 fragColor;
+
+// W3C compositing-1 hard-light(backdrop b, source s), component-wise.
+vec3 hardLight(vec3 b, vec3 s) {
+	return mix(2.0 * b * s, 1.0 - 2.0 * (1.0 - b) * (1.0 - s), step(vec3(0.5), s));
+}
+
+void main() {
+	vec4 src = texture(uTex, vUV);
+	float a = clamp(src.a * uOpacity, 0.0, 1.0);
+	if (uMode == 3) {
+		// multiply: D * mix(1, S, a), with dstRGB = SRC_COLOR
+		fragColor = vec4(mix(vec3(1.0), src.rgb, a), a);
+	} else if (uMode == 4 || uMode == 5) {
+		vec4 bd = texture(uBackdrop, gl_FragCoord.xy / uViewportPx);
+		// overlay(b, s) == hard-light(s, b): the same function with its
+		// two arguments swapped (W3C compositing-1).
+		vec3 blended = (uMode == 5) ? hardLight(bd.rgb, src.rgb) : hardLight(src.rgb, bd.rgb);
+		fragColor = vec4(mix(bd.rgb, blended, a), a + bd.a * (1.0 - a));
+	} else {
+		// normal / screen / plus-lighter: premultiplied source, the blend
+		// state does the rest.
+		fragColor = vec4(src.rgb * a, a);
+	}
+}
+"#;
+
+struct OverlayUniforms {
+    u_center_px: Option<glow::NativeUniformLocation>,
+    u_half_px: Option<glow::NativeUniformLocation>,
+    u_rot_rad: Option<glow::NativeUniformLocation>,
+    u_viewport_px: Option<glow::NativeUniformLocation>,
+    u_tex: Option<glow::NativeUniformLocation>,
+    u_backdrop: Option<glow::NativeUniformLocation>,
+    u_opacity: Option<glow::NativeUniformLocation>,
+    u_mode: Option<glow::NativeUniformLocation>,
+}
+
 fn locate_uniforms(gl: &glow::Context, program: glow::NativeProgram) -> Uniforms {
     unsafe {
         Uniforms {
@@ -421,6 +871,139 @@ fn locate_uniforms(gl: &glow::Context, program: glow::NativeProgram) -> Uniforms
             u_brightness_mul: gl.get_uniform_location(program, "uBrightnessMul"),
             u_contrast_mul: gl.get_uniform_location(program, "uContrastMul"),
             u_invert_amount: gl.get_uniform_location(program, "uInvertAmount"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The overlay pass's geometry and blend-state math (Step 12): the
+    /// parts that decide *where* and *how* a sprite lands, testable with
+    /// no GL context. The GL calls themselves are covered by the headless
+    /// EGL tests in `app` (`compositor_overlay_gl_tests`), which is where
+    /// this workspace keeps its real-driver coverage.
+    mod overlay_geometry {
+        use super::*;
+
+        #[test]
+        fn a_small_sprite_keeps_its_intrinsic_pixel_size() {
+            // 200x100 fits well inside 80% of 1920x1080: no shrink.
+            assert_eq!(overlay_quad_half_size_px(200, 100, 1.0), (100.0, 50.0));
+        }
+
+        #[test]
+        fn scale_multiplies_the_fitted_size() {
+            assert_eq!(overlay_quad_half_size_px(200, 100, 2.0), (200.0, 100.0));
+            assert_eq!(overlay_quad_half_size_px(200, 100, 0.5), (50.0, 25.0));
+        }
+
+        #[test]
+        fn an_oversized_sprite_shrinks_to_the_80_percent_box_preserving_aspect() {
+            // 3840x2160 (2x the frame, same 16:9): height is the binding
+            // constraint at 0.8*1080 = 864, width follows to 1536.
+            let (half_w, half_h) = overlay_quad_half_size_px(3840, 2160, 1.0);
+            assert!((half_w - 768.0).abs() < 0.01, "half_w = {half_w}");
+            assert!((half_h - 432.0).abs() < 0.01, "half_h = {half_h}");
+            // aspect preserved
+            assert!(((half_w / half_h) - (3840.0 / 2160.0)).abs() < 1e-4);
+        }
+
+        #[test]
+        fn a_very_wide_sprite_is_bound_by_width_not_height() {
+            // 4000x100: 0.8*1920/4000 = 0.384 < 0.8*1080/100 = 8.64.
+            let (half_w, half_h) = overlay_quad_half_size_px(4000, 100, 1.0);
+            assert!((half_w - 768.0).abs() < 0.01, "half_w = {half_w}");
+            assert!((half_h - 19.2).abs() < 0.01, "half_h = {half_h}");
+        }
+
+        #[test]
+        fn the_fit_only_ever_shrinks_never_enlarges() {
+            // A 1x1 sprite must stay 1x1, not blow up to fill 80%.
+            assert_eq!(overlay_quad_half_size_px(1, 1, 1.0), (0.5, 0.5));
+        }
+
+        #[test]
+        fn a_zero_sized_texture_yields_a_zero_quad() {
+            assert_eq!(overlay_quad_half_size_px(0, 100, 1.0), (0.0, 0.0));
+            assert_eq!(overlay_quad_half_size_px(100, 0, 1.0), (0.0, 0.0));
+        }
+
+        #[test]
+        fn the_center_maps_normalized_coords_into_gl_pixels_with_y_flipped() {
+            assert_eq!(overlay_center_px(0.5, 0.5), (960.0, 540.0));
+            // y = 0 is the TOP in `Overlay`'s CSS convention, which is
+            // COMP_H in GL's bottom-left-origin pixel space.
+            assert_eq!(overlay_center_px(0.0, 0.0), (0.0, 1080.0));
+            assert_eq!(overlay_center_px(1.0, 1.0), (1920.0, 0.0));
+        }
+    }
+
+    mod overlay_blend_mode {
+        use super::*;
+
+        #[test]
+        fn css_round_trips_for_every_mode() {
+            for mode in OverlayBlendMode::ALL {
+                assert_eq!(OverlayBlendMode::from_css(mode.as_css()), mode);
+            }
+        }
+
+        #[test]
+        fn the_css_keywords_are_exactly_the_web_panels_list() {
+            // `SidebarOverlays.svelte:32`, same order.
+            let css: Vec<&str> = OverlayBlendMode::ALL.iter().map(|m| m.as_css()).collect();
+            assert_eq!(css, ["screen", "normal", "plus-lighter", "multiply", "overlay", "hard-light"]);
+        }
+
+        #[test]
+        fn an_unknown_keyword_falls_back_to_the_overlay_default() {
+            // `core::overlay::Overlay::default().blend_mode` is "screen".
+            assert_eq!(OverlayBlendMode::from_css("color-dodge"), OverlayBlendMode::Screen);
+            assert_eq!(OverlayBlendMode::from_css(""), OverlayBlendMode::Screen);
+            assert_eq!(OverlayBlendMode::default(), OverlayBlendMode::Screen);
+        }
+
+        #[test]
+        fn only_overlay_and_hard_light_need_a_backdrop_copy() {
+            let needing: Vec<OverlayBlendMode> =
+                OverlayBlendMode::ALL.into_iter().filter(|m| m.needs_backdrop()).collect();
+            assert_eq!(needing, [OverlayBlendMode::Overlay, OverlayBlendMode::HardLight]);
+        }
+
+        #[test]
+        fn every_mode_has_a_distinct_shader_mode_id() {
+            let mut ids: Vec<i32> = OverlayBlendMode::ALL.iter().map(|m| m.shader_mode()).collect();
+            ids.sort_unstable();
+            assert_eq!(ids, [0, 1, 2, 3, 4, 5]);
+        }
+
+        #[test]
+        fn the_fixed_function_states_match_their_documented_math() {
+            assert_eq!(
+                OverlayBlendMode::Normal.blend_state(),
+                (glow::ONE, glow::ONE_MINUS_SRC_ALPHA, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+            );
+            assert_eq!(
+                OverlayBlendMode::PlusLighter.blend_state(),
+                (glow::ONE, glow::ONE, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+            );
+            assert_eq!(
+                OverlayBlendMode::Screen.blend_state(),
+                (glow::ONE, glow::ONE_MINUS_SRC_COLOR, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+            );
+            assert_eq!(
+                OverlayBlendMode::Multiply.blend_state(),
+                (glow::ZERO, glow::SRC_COLOR, glow::ONE, glow::ONE_MINUS_SRC_ALPHA)
+            );
+        }
+
+        #[test]
+        fn the_backdrop_modes_write_their_result_through_untouched() {
+            for mode in [OverlayBlendMode::Overlay, OverlayBlendMode::HardLight] {
+                assert_eq!(mode.blend_state(), (glow::ONE, glow::ZERO, glow::ONE, glow::ZERO));
+            }
         }
     }
 }

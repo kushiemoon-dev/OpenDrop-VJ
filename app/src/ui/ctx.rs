@@ -129,6 +129,16 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,
     pub(crate) osc: &'a opendrop_io::osc::OscHandle,
     pub(crate) osc_port: &'a mut u16,
+    /// Overlays panel (Step 12 of the Phase 8 VJ-panels plan): overlay id
+    /// → the sprite file it was created from, and the id counter. The
+    /// overlay list itself lives on `Show` (`PerformCtx::show`) like every
+    /// other business object: these two are the I/O-side halves
+    /// `core::overlay` deliberately does not own (see `ui::overlays`'s
+    /// module doc comment). The GL texture cache keyed by the same ids
+    /// stays out of every context struct: `main.rs`'s render loop is its
+    /// only reader, no panel touches it.
+    pub(crate) overlay_assets: &'a mut HashMap<String, PathBuf>,
+    pub(crate) next_overlay_id: &'a mut u64,
     pub(crate) remote_ws: &'a opendrop_io::remote_ws::RemoteWsHandle,
     pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
     pub(crate) v4l2_active: &'a mut bool,

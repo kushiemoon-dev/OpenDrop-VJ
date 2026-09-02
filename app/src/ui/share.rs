@@ -122,12 +122,12 @@ mod tests {
             let mut state = Show::default();
             state.overlay_store.overlays.push(make_overlay(
                 "id-text".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch { kind: Some(opendrop_core::overlay::OverlayKind::Text), ..Default::default() },
             ));
             state.overlay_store.overlays.push(make_overlay("id-media".to_string(), "img.png".to_string(), OverlayPatch::default()));
             let names: [String; 4] = std::array::from_fn(|i| format!("Preset {i}"));
-            let mut name = "Mon set".to_string();
+            let mut name = "My set".to_string();
             show(ui, &state, &names, 1.5, &mut name);
         });
     }

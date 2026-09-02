@@ -254,7 +254,7 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     if ui.is_rect_visible(rect) {
         // Light glow: a single low-opacity accent backdrop, smaller and
         // fainter than the crossfader handle's halo (the brief calls for
-        // "un glow léger similaire", not the same intensity).
+        // "a similar light glow", not the same intensity).
         ui.painter().rect_filled(
             rect.expand(5.0),
             egui::CornerRadius::from(t.metrics.radius_md),
@@ -289,7 +289,7 @@ fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
 
 // --- Nav -------------------------------------------------------------------
 
-/// Sectioned nav: PERFORM / SOURCES / SORTIE / CONTRÔLE, About pinned at
+/// Sectioned nav: PERFORM / SOURCES / OUTPUTS / CONTROL, About pinned at
 /// the bottom outside the 4 sections (Step 10 brief).
 pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
     // Filled in by whichever `nav_item` call below is active this frame,
@@ -312,10 +312,10 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
             widgets::section(ui, "Perform");
             nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
             // `PresetBrowser` isn't named in this step's brief's PERFORM/
-            // SOURCES/SORTIE/CONTRÔLE section listing (13 entries across the 4
+            // SOURCES/OUTPUTS/CONTROL section listing (13 entries across the 4
             // sections in the default build): a gap in that listing: the
-            // brief's own manual-verification line ("les 14 panneaux sont
-            // atteignables depuis la nav sectionnée") requires every
+            // brief's own manual-verification line ("all 14 panels are
+            // reachable from the sectioned nav") requires every
             // default-build `Panel` variant reachable, and `PresetBrowser` is
             // the 14th; nothing else in the app can set `active_panel` to it
             // (the old tab row's "Presets" button is gone). Placed here since
@@ -339,14 +339,14 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
             nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);
 
             ui.add_space(12.0);
-            widgets::section(ui, "Sortie");
+            widgets::section(ui, "Outputs");
             nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Share, "Share", &mut active_rect);
 
             ui.add_space(12.0);
-            widgets::section(ui, "Contrôle");
+            widgets::section(ui, "Control");
             nav_item(ui, shell.active_panel, Panel::Quality, "Quality", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Color, "Color", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Composite, "Composite", &mut active_rect);

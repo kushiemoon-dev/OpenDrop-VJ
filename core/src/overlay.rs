@@ -373,10 +373,10 @@ impl OverlayStore {
     pub fn add_text_overlay(&mut self, id: String) -> String {
         let ov = make_overlay(
             id,
-            "Texte".to_string(),
+            "Text".to_string(),
             OverlayPatch {
                 kind: Some(OverlayKind::Text),
-                text: Some("Texte".to_string()),
+                text: Some("Text".to_string()),
                 ..Default::default()
             },
         );
@@ -519,7 +519,7 @@ mod tests {
         fn creates_a_text_overlay_with_the_correct_defaults() {
             let ov = make_overlay(
                 "id-1".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch {
                     kind: Some(OverlayKind::Text),
                     text: Some("Hello".to_string()),
@@ -537,7 +537,7 @@ mod tests {
         fn shared_fields_remain_unchanged() {
             let ov = make_overlay(
                 "id-1".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch { kind: Some(OverlayKind::Text), ..Default::default() },
             );
             assert_eq!(ov.x, 0.5);
@@ -553,7 +553,7 @@ mod tests {
         fn partial_override_replaces_only_the_provided_fields() {
             let ov = make_overlay(
                 "id-1".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch {
                     kind: Some(OverlayKind::Text),
                     font_family: Some(FontFamily::Impact),
@@ -620,7 +620,7 @@ mod tests {
             let id = store.add_text_overlay("id-1".to_string());
             store.update_overlay(&id, OverlayPatch { opacity: Some(0.4), ..Default::default() });
             assert_eq!(store.overlays[0].opacity, 0.4);
-            assert_eq!(store.overlays[0].text, "Texte");
+            assert_eq!(store.overlays[0].text, "Text");
         }
 
         #[test]

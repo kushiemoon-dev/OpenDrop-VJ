@@ -114,7 +114,7 @@ mod tests {
         fn keeps_only_text_overlays() {
             let text = make_overlay(
                 "id-1".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch {
                     kind: Some(OverlayKind::Text),
                     text: Some("Hello".to_string()),
@@ -159,7 +159,7 @@ mod tests {
         #[test]
         fn a_shared_set_aggregates_one_value_from_every_ported_module() {
             let set = SharedSet {
-                name: "Mon set de test".to_string(),
+                name: "My test set".to_string(),
                 preset_a: "preset-a-slug".to_string(),
                 preset_b: "preset-b-slug".to_string(),
                 deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off],

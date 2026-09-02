@@ -73,7 +73,7 @@ pub fn show(
 ) {
     ui.horizontal(|ui| {
         ui.heading(format!("Overlays ({})", show.overlay_store.overlays.len()));
-        if ui.button("+ Texte").clicked() {
+        if ui.button("+ Text").clicked() {
             let id = show.overlay_store.add_text_overlay(mint_id(next_id));
             set_expanded_id(ui, Some(id));
         }
@@ -83,7 +83,7 @@ pub fn show(
     });
 
     if show.overlay_store.overlays.is_empty() {
-        widgets::micro_label(ui, "Aucun overlay: « + Sprite » pour une image, « + Texte » pour du texte.");
+        widgets::micro_label(ui, "No overlays yet. Add one with \"+ Sprite\" for an image or \"+ Text\" for text.");
     }
 
     ui.separator();
@@ -151,13 +151,13 @@ fn editor(ui: &mut egui::Ui, show: &mut Show, id: &str, index: usize) {
     let mut patch = OverlayPatch::default();
 
     if overlay.kind == OverlayKind::Text {
-        widgets::micro_label(ui, "Contenu");
+        widgets::micro_label(ui, "Content");
         let mut text = overlay.text.clone();
         if ui.add(egui::TextEdit::multiline(&mut text).desired_rows(2)).changed() {
             patch.text = Some(text);
         }
 
-        widgets::micro_label(ui, "Police");
+        widgets::micro_label(ui, "Font");
         let current_font = overlay.font_family;
         let selected = FONT_FAMILIES.iter().find(|(f, _)| *f == current_font).map_or("Sans", |(_, l)| *l);
         egui::ComboBox::from_id_salt("od_overlay_font").selected_text(selected).show_ui(ui, |ui| {
@@ -172,28 +172,28 @@ fn editor(ui: &mut egui::Ui, show: &mut Show, id: &str, index: usize) {
         // five families in the ported `FontFamily` enum have no face of
         // their own to render with. Bundling a serif/display/comic face is
         // a vendoring + licensing decision, not this step's call.
-        widgets::micro_label(ui, "Serif / Impact / Comic utilisent la police Sans (aucune fonte dédiée embarquée).");
+        widgets::micro_label(ui, "Serif, Impact, and Comic all render with the Sans font (no dedicated face bundled).");
 
-        widgets::micro_label(ui, "Couleur");
+        widgets::micro_label(ui, "Color");
         let mut rgb = hex_to_rgb_f32(&overlay.color);
         if ui.color_edit_button_rgb(&mut rgb).changed() {
             patch.color = Some(rgb_f32_to_hex(rgb));
         }
 
-        widgets::micro_label(ui, "Taille (vh)");
+        widgets::micro_label(ui, "Size (vh)");
         let mut font_size = overlay.font_size;
         if ui.add(egui::Slider::new(&mut font_size, 2.0..=20.0).step_by(0.5)).changed() {
             patch.font_size = Some(font_size);
         }
     }
 
-    widgets::micro_label(ui, "Opacité");
+    widgets::micro_label(ui, "Opacity");
     let mut opacity = overlay.opacity;
     if ui.add(egui::Slider::new(&mut opacity, 0.0..=1.0).step_by(0.01)).changed() {
         patch.opacity = Some(opacity);
     }
 
-    widgets::micro_label(ui, "Échelle");
+    widgets::micro_label(ui, "Scale");
     let mut scale = overlay.scale;
     if ui.add(egui::Slider::new(&mut scale, 0.05..=4.0).step_by(0.05)).changed() {
         patch.scale = Some(scale);
@@ -255,7 +255,7 @@ fn editor(ui: &mut egui::Ui, show: &mut Show, id: &str, index: usize) {
 /// The two `.beat-trigger-row`s at the bottom of the Svelte panel: queue
 /// transport + mode, then the beat/volume trigger configuration.
 fn queue_controls(ui: &mut egui::Ui, show: &mut Show, registry: &CommandRegistry) {
-    widgets::section(ui, "File auto");
+    widgets::section(ui, "Auto Queue");
 
     ui.horizontal(|ui| {
         let label = if show.overlay_store.queue_enabled { "⏸" } else { "▶" };
@@ -326,7 +326,7 @@ fn queue_controls(ui: &mut egui::Ui, show: &mut Show, registry: &CommandRegistry
     });
 
     if trigger.mode == BeatTriggerMode::VolumePeak {
-        widgets::micro_label(ui, "Sensibilité");
+        widgets::micro_label(ui, "Sensitivity");
         let mut sensitivity = trigger.sensitivity;
         if ui.add(egui::Slider::new(&mut sensitivity, 0.0..=1.0).step_by(0.01)).changed() {
             show.overlay_store.update_overlay_queue_trigger(BeatTriggerConfigPatch {

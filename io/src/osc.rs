@@ -213,7 +213,7 @@ fn decode_packet(buf: &[u8]) -> Option<(CommandId, f64)> {
 /// the whole packet is ignored. This is a deliberate departure from the JS
 /// reference, which defaults a missing argument to `0.0` and dispatches
 /// anyway (`main.cjs:129-135`); requiring an actual float32 is stricter
-/// but matches the brief's explicit "premier argument float32" and its
+/// but matches the brief's explicit "first argument float32" and its
 /// "if the packet's first arg isn't a float, treat as malformed/ignore"
 /// framing more directly than silently substituting a default. See the
 /// task report for the full write-up of this choice.

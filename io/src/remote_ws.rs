@@ -10,9 +10,9 @@
 //! Unlike `osc`/`midi` (plain `std::thread` doing blocking I/O directly),
 //! this is the first *async* integration in this codebase: the dedicated
 //! `std::thread` spawned by `spawn()` builds its own single-threaded tokio
-//! runtime and never leaves it for the thread's whole lifetime: "chaque
-//! intégration async construit son propre runtime tokio à l'intérieur de
-//! son thread dédié", no shared runtime, no tokio type in `AppState`
+//! runtime and never leaves it for the thread's whole lifetime: "every
+//! async integration builds its own tokio runtime inside its own
+//! dedicated thread", no shared runtime, no tokio type in `AppState`
 //! (`RemoteWsHandle`'s public fields are the same `std::sync::mpsc` types
 //! `OscHandle`/`MidiHandle` use, so `app` never has to know tokio exists).
 //!

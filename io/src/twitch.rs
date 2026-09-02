@@ -3,7 +3,7 @@
 //! stream. Mirrors `main.cjs:429-457`'s `twitch:connect`/`twitch:disconnect`
 //! IPC handlers (there implemented with `tmi.js`; here with the
 //! purpose-built `twitch-irc` crate: see PHASE5-IO.PLAN's Task 17
-//! découpage note for why that crate over the generic `irc` one).
+//! breakdown note for why that crate over the generic `irc` one).
 //!
 //! Same dedicated-thread-with-its-own-`current_thread`-runtime pattern as
 //! `obs`/`remote_ws`: `spawn()` returns immediately, the thread never

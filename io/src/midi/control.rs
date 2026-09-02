@@ -32,7 +32,7 @@ pub(super) fn handle_control(ts: &mut ThreadState, ctrl: MidiControl, midi_tx: &
 }
 
 /// Initializes the MIDI backend and loads the persisted mapping from disk
-/// ("chargé une fois à la connexion" per the brief): never opens a port by
+/// ("loaded once at connect time" per the brief): never opens a port by
 /// itself, that's `SelectPort`'s job. Whole-branch review Finding M7:
 /// `ts.connected` (surfaced by the panel as "MIDI: connected") must NOT be
 /// set here: this only probes the backend and lists ports, it doesn't open

@@ -2732,8 +2732,8 @@ impl ApplicationHandler for App {
         if let Some(state) = &mut self.state {
             // Whole-branch review fix wave, finding 1 (AC-10): persist
             // `active_panel`/`stage_mode` on exit, matching Step 7's
-            // original "How" text ("écriture sur exiting ... et
-            // immédiatement à chaque changement de thème runtime"). Same
+            // original "How" text ("write on exiting ... and
+            // immediately on every runtime theme change"). Same
             // read-modify-write idiom as the runtime theme-switch handler,
             // so this never clobbers `theme` (or any other already-
             // persisted field) saved elsewhere. Also owns the 8 already-

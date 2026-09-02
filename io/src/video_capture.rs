@@ -42,7 +42,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -133,10 +133,20 @@ pub enum VideoCaptureControl {
 /// One decoded frame, published latest-wins (see the module doc comment).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VideoFrame {
-    /// Monotonic counter across the whole session (it is NOT reset by a
-    /// `Start`), so a caller that remembers the last value it uploaded can
-    /// skip re-uploading the same frame: and can never be fooled into
-    /// skipping a genuinely new one by a counter that restarted.
+    /// Strictly increasing across the whole session, and genuinely NOT
+    /// reset by a `Start`: every reader thread draws from one shared
+    /// [`AtomicU64`] (see [`read_loop`]), so the first frame of a new clip
+    /// continues from wherever the previous source left off rather than
+    /// starting over.
+    ///
+    /// That is what lets a caller remember the last value it uploaded and
+    /// skip re-uploading the same frame, with either `!=` or `>`. A
+    /// per-source counter would have been enough for the one consumer that
+    /// exists today (`app` compares with `!=` and resets its own tracking
+    /// on every source change) but would silently break the next one:
+    /// during the brief overlap while an old reader is winding down, a
+    /// restarted counter can hand out a *lower* number for a *newer* frame.
+    /// Never zero, so 0 is usable as a caller-side "nothing uploaded yet".
     pub seq: u64,
     pub width: u32,
     pub height: u32,
@@ -314,9 +324,31 @@ pub fn list_cameras() -> Vec<CameraDevice> {
 /// at a synthetic directory tree: same split (and same deterministic
 /// filename sort) as `v4l2loopback::find_device_in`.
 ///
-/// Devices whose label identifies an OpenDrop v4l2loopback *output* device
-/// are skipped: capturing our own output back into the video layer is a
-/// feedback loop, never something a user means to pick.
+/// Two entries are skipped, and every surviving label is made
+/// self-identifying:
+///
+/// - **Our own v4l2loopback sink** (label containing "OpenDrop"): capturing
+///   our own output back into the video layer is a feedback loop, never
+///   something a user means to pick.
+/// - **Secondary nodes of a multi-node device** (`index` other than `0`). A
+///   UVC webcam registers several `/dev/videoN` nodes under one physical
+///   device: typically `index 0` for capture and `index 1` for the
+///   metadata stream: and they report the *identical* `name`. Verified on
+///   two machines during review: `video0` and `video1` both read
+///   `"USB2.0 HD UVC WebCam: USB2.0 HD"`, and only `video0` can actually be
+///   captured from. Listing both gave the user two indistinguishable
+///   entries and a coin-flip chance of picking the dead one, whose only
+///   feedback is a generic "the video source stopped unexpectedly".
+///   `index == 0` is the primary-capture-node convention; a device that
+///   does not follow it simply isn't listed, and the panel's device field
+///   (always editable, never gated on this list being empty) is the escape
+///   hatch for that case.
+/// - A node with **no readable `index`** is kept rather than dropped:
+///   "can't tell" should not hide a working camera.
+///
+/// The label always carries the device node (`Integrated Camera
+/// (/dev/video0)`), so two genuinely distinct cameras that happen to share
+/// a name stay distinguishable too.
 fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
     let Ok(read_dir) = std::fs::read_dir(base) else { return Vec::new() };
     let mut entries: Vec<_> = read_dir.flatten().collect();
@@ -324,16 +356,30 @@ fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
     entries
         .into_iter()
         .filter_map(|entry| {
-            let label = std::fs::read_to_string(entry.path().join("name")).ok()?;
-            let label = label.trim();
-            if label.contains("OpenDrop") {
+            let name = std::fs::read_to_string(entry.path().join("name")).ok()?;
+            let name = name.trim();
+            if name.contains("OpenDrop") {
                 return None; // our own v4l2loopback sink: see the doc comment
             }
+            if !is_primary_capture_node(&entry.path()) {
+                return None;
+            }
             let id = Path::new("/dev").join(entry.file_name()).to_string_lossy().into_owned();
-            let label = if label.is_empty() { id.clone() } else { label.to_string() };
+            let label = if name.is_empty() { id.clone() } else { format!("{name} ({id})") };
             Some(CameraDevice { id, label })
         })
         .collect()
+}
+
+/// Whether this `/sys/class/video4linux/videoN` directory is a physical
+/// device's primary (index 0) node: see [`list_cameras_in`]'s doc comment.
+/// An unreadable or unparseable `index` counts as primary: "can't tell"
+/// must not hide a working camera.
+fn is_primary_capture_node(dir: &Path) -> bool {
+    match std::fs::read_to_string(dir.join("index")) {
+        Ok(index) => index.trim() == "0",
+        Err(_) => true,
+    }
 }
 
 // --- the subprocess --------------------------------------------------------
@@ -407,12 +453,20 @@ fn decode_rate(encoded: u32) -> f64 {
 /// read error, or the child being killed) and publishes each one, newest
 /// wins. Owns nothing but the pipe: stopping it is done by killing the
 /// child on the control thread.
+///
+/// `seq` is the session-wide counter, SHARED with the control thread and
+/// with every other reader, not a per-source copy: that is what makes
+/// [`VideoFrame::seq`]'s across-restarts guarantee real rather than
+/// aspirational. `Relaxed` is the right ordering: the only thing anyone
+/// needs from it is that each `fetch_add` hands out a distinct, larger
+/// number, which an atomic read-modify-write gives unconditionally; the
+/// frame's own visibility is carried by the `ArcSwapOption` store below.
 fn read_loop(
     mut stdout: ChildStdout,
     frame: Arc<ArcSwapOption<VideoFrame>>,
     rate: Arc<AtomicU32>,
     paced: bool,
-    mut seq: u64,
+    seq: Arc<AtomicU64>,
 ) {
     let len = frame_len(CAPTURE_W, CAPTURE_H);
     let mut next_at = Instant::now();
@@ -425,7 +479,7 @@ fn read_loop(
         if stdout.read_exact(&mut data).is_err() {
             return; // EOF (source stopped/replaced) or a read error: either way, done.
         }
-        seq += 1;
+        let seq = seq.fetch_add(1, Ordering::Relaxed) + 1;
         frame.store(Some(Arc::new(VideoFrame { seq, width: CAPTURE_W, height: CAPTURE_H, data })));
         if !paced {
             continue;
@@ -452,7 +506,7 @@ fn start_source(
     input: &VideoInput,
     frame: &Arc<ArcSwapOption<VideoFrame>>,
     rate: &Arc<AtomicU32>,
-    seq: &mut u64,
+    seq: &Arc<AtomicU64>,
     state: &Arc<ArcSwap<VideoCaptureSnapshot>>,
 ) {
     *source = None;
@@ -460,15 +514,15 @@ fn start_source(
     match VideoSource::spawn(&input_args_for(input), CAPTURE_W, CAPTURE_H, CAPTURE_FPS) {
         Ok((src, stdout)) => {
             *source = Some(src);
-            // `seq` keeps climbing across sources (see `VideoFrame::seq`);
-            // the reader gets the current high-water mark and continues it.
-            *seq += 1;
-            let start_seq = *seq;
+            // The counter is handed over by reference-counted *sharing*, not
+            // by value: a copy would restart the sequence on every `Start`
+            // and quietly break `VideoFrame::seq`'s documented guarantee.
             std::thread::spawn({
                 let frame = frame.clone();
                 let rate = rate.clone();
+                let seq = seq.clone();
                 let paced = input.is_paced();
-                move || read_loop(stdout, frame, rate, paced, start_seq)
+                move || read_loop(stdout, frame, rate, paced, seq)
             });
             publish(state, true, None);
         }
@@ -485,7 +539,7 @@ fn handle_control(
     ctrl: VideoCaptureControl,
     frame: &Arc<ArcSwapOption<VideoFrame>>,
     rate: &Arc<AtomicU32>,
-    seq: &mut u64,
+    seq: &Arc<AtomicU64>,
     state: &Arc<ArcSwap<VideoCaptureSnapshot>>,
 ) {
     match ctrl {
@@ -506,7 +560,9 @@ fn run(
 ) {
     let mut source: Option<VideoSource> = None;
     let rate = Arc::new(AtomicU32::new(encode_rate(1.0)));
-    let mut seq: u64 = 0;
+    // Session-wide frame counter, shared with every reader thread this
+    // loop ever spawns: see `VideoFrame::seq`.
+    let seq = Arc::new(AtomicU64::new(0));
     publish(&state, false, None);
 
     loop {
@@ -516,19 +572,19 @@ fn run(
             // arrives rather than spinning the 5 ms poll for nothing: same
             // idle/active split as `v4l2loopback::run`.
             match control_rx.recv() {
-                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &mut seq, &state),
+                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &seq, &state),
                 Err(_) => owner_gone = true,
             }
         } else {
             match control_rx.recv_timeout(POLL_TICK) {
-                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &mut seq, &state),
+                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &seq, &state),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => owner_gone = true,
             }
         }
         while !owner_gone {
             match control_rx.try_recv() {
-                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &mut seq, &state),
+                Ok(ctrl) => handle_control(&mut source, ctrl, &frame, &rate, &seq, &state),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => owner_gone = true,
             }
@@ -661,18 +717,33 @@ mod tests {
     mod camera_enumeration {
         use super::*;
 
+        /// Builds a synthetic `/sys/class/video4linux`-shaped tree:
+        /// `(node, name, index)`, where an `index` of `None` writes no
+        /// `index` file at all.
+        fn sysfs(tag: &str, nodes: &[(&str, &str, Option<&str>)]) -> PathBuf {
+            let dir = std::env::temp_dir().join(format!("opendrop-video-cams-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            for (node, name, index) in nodes {
+                std::fs::create_dir_all(dir.join(node)).unwrap();
+                std::fs::write(dir.join(node).join("name"), format!("{name}\n")).unwrap();
+                if let Some(index) = index {
+                    std::fs::write(dir.join(node).join("index"), format!("{index}\n")).unwrap();
+                }
+            }
+            dir
+        }
+
         #[test]
         fn a_nonexistent_sysfs_tree_yields_no_cameras() {
             assert_eq!(list_cameras_in(Path::new("/nonexistent/opendrop-video-test")), Vec::new());
         }
 
         #[test]
-        fn cameras_are_listed_in_deterministic_device_order_with_their_labels() {
-            let dir = std::env::temp_dir().join(format!("opendrop-video-cams-{}", std::process::id()));
-            for (name, label) in [("video1", "USB2.0 Camera\n"), ("video0", "Integrated Camera\n")] {
-                std::fs::create_dir_all(dir.join(name)).unwrap();
-                std::fs::write(dir.join(name).join("name"), label).unwrap();
-            }
+        fn cameras_are_listed_in_deterministic_device_order_with_their_node_in_the_label() {
+            let dir = sysfs(
+                "order",
+                &[("video2", "USB2.0 Camera", Some("0")), ("video0", "Integrated Camera", Some("0"))],
+            );
 
             let found = list_cameras_in(&dir);
             std::fs::remove_dir_all(&dir).unwrap();
@@ -680,29 +751,115 @@ mod tests {
             assert_eq!(
                 found,
                 vec![
-                    CameraDevice { id: "/dev/video0".into(), label: "Integrated Camera".into() },
-                    CameraDevice { id: "/dev/video1".into(), label: "USB2.0 Camera".into() },
+                    CameraDevice {
+                        id: "/dev/video0".into(),
+                        label: "Integrated Camera (/dev/video0)".into()
+                    },
+                    CameraDevice { id: "/dev/video2".into(), label: "USB2.0 Camera (/dev/video2)".into() },
                 ]
             );
         }
 
+        /// Review finding: the exact layout on the reviewer's machine (and
+        /// on this one): one physical UVC webcam registering two nodes
+        /// with the *same* name, only the second of which is uncapturable.
         #[test]
-        fn our_own_v4l2loopback_sink_is_never_offered_as_a_camera() {
-            let dir = std::env::temp_dir().join(format!("opendrop-video-cams-loop-{}", std::process::id()));
-            for (name, label) in [("video0", "OpenDrop Video\n"), ("video1", "Real Camera\n")] {
-                std::fs::create_dir_all(dir.join(name)).unwrap();
-                std::fs::write(dir.join(name).join("name"), label).unwrap();
-            }
+        fn a_uvc_webcams_metadata_node_is_not_offered_alongside_its_capture_node() {
+            let name = "USB2.0 HD UVC WebCam: USB2.0 HD";
+            let dir = sysfs("uvc", &[("video0", name, Some("0")), ("video1", name, Some("1"))]);
 
             let found = list_cameras_in(&dir);
             std::fs::remove_dir_all(&dir).unwrap();
 
-            assert_eq!(found, vec![CameraDevice { id: "/dev/video1".into(), label: "Real Camera".into() }]);
+            assert_eq!(
+                found,
+                vec![CameraDevice {
+                    id: "/dev/video0".into(),
+                    label: format!("{name} (/dev/video0)"),
+                }],
+                "only the index-0 capture node should be offered"
+            );
         }
 
         #[test]
-        fn list_cameras_on_this_machine_does_not_panic() {
-            let _ = list_cameras();
+        fn two_physical_cameras_each_keep_their_own_primary_node() {
+            let dir = sysfs(
+                "two-cams",
+                &[
+                    ("video0", "Cam A", Some("0")),
+                    ("video1", "Cam A", Some("1")),
+                    ("video2", "Cam B", Some("0")),
+                    ("video3", "Cam B", Some("1")),
+                ],
+            );
+
+            let found = list_cameras_in(&dir);
+            std::fs::remove_dir_all(&dir).unwrap();
+
+            assert_eq!(found.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["/dev/video0", "/dev/video2"]);
+        }
+
+        /// Two identical webcams of the same model share a `name`; the
+        /// device node in the label is what keeps them apart.
+        #[test]
+        fn identical_models_stay_distinguishable_through_their_device_node() {
+            let dir = sysfs("twins", &[("video0", "C920", Some("0")), ("video2", "C920", Some("0"))]);
+
+            let found = list_cameras_in(&dir);
+            std::fs::remove_dir_all(&dir).unwrap();
+
+            let labels: Vec<&str> = found.iter().map(|c| c.label.as_str()).collect();
+            assert_eq!(labels, ["C920 (/dev/video0)", "C920 (/dev/video2)"]);
+            assert_ne!(labels[0], labels[1], "the whole point: no unlabeled duplicates");
+        }
+
+        #[test]
+        fn a_node_with_no_index_file_is_kept_rather_than_hidden() {
+            // "Can't tell" must not hide a working camera: an older
+            // kernel, or a driver that doesn't publish `index`.
+            let dir = sysfs("no-index", &[("video0", "Odd Camera", None)]);
+
+            let found = list_cameras_in(&dir);
+            std::fs::remove_dir_all(&dir).unwrap();
+
+            assert_eq!(found, vec![CameraDevice { id: "/dev/video0".into(), label: "Odd Camera (/dev/video0)".into() }]);
+        }
+
+        #[test]
+        fn an_unparseable_index_is_treated_as_primary() {
+            let dir = std::env::temp_dir().join(format!("opendrop-video-cams-badidx-{}", std::process::id()));
+            std::fs::create_dir_all(dir.join("video0")).unwrap();
+            std::fs::write(dir.join("video0").join("index"), "not a number\n").unwrap();
+            assert!(!is_primary_capture_node(&dir.join("video0")), "a non-'0' index is not primary");
+            std::fs::write(dir.join("video0").join("index"), "0").unwrap();
+            assert!(is_primary_capture_node(&dir.join("video0")), "'0' with no trailing newline is primary");
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+
+        #[test]
+        fn our_own_v4l2loopback_sink_is_never_offered_as_a_camera() {
+            let dir = sysfs("loopback", &[("video0", "OpenDrop Video", Some("0")), ("video1", "Real Camera", Some("0"))]);
+
+            let found = list_cameras_in(&dir);
+            std::fs::remove_dir_all(&dir).unwrap();
+
+            assert_eq!(
+                found,
+                vec![CameraDevice { id: "/dev/video1".into(), label: "Real Camera (/dev/video1)".into() }]
+            );
+        }
+
+        /// Real-environment check: whatever this machine has, no two
+        /// entries may share a label: that is exactly the state the
+        /// review flagged.
+        #[test]
+        fn no_two_cameras_on_this_machine_share_a_label() {
+            let cameras = list_cameras();
+            let mut labels: Vec<&str> = cameras.iter().map(|c| c.label.as_str()).collect();
+            let total = labels.len();
+            labels.sort_unstable();
+            labels.dedup();
+            assert_eq!(labels.len(), total, "duplicate camera labels in {cameras:?}");
         }
     }
 
@@ -882,6 +1039,55 @@ mod tests {
             assert!(seen.len() >= 3, "expected at least 3 distinct frames, got {seen:?}");
             assert!(seen.windows(2).all(|w| w[1] > w[0]), "seq must strictly increase: {seen:?}");
             assert!(!running_after_stop, "Stop should take the source back to idle");
+        }
+
+        /// Review finding: `VideoFrame::seq` documents a counter that is
+        /// never reset by a `Start`. It used to be handed to each reader
+        /// thread by value, so every restart really did reset it, which is
+        /// a false promise a future consumer comparing with `>` would have
+        /// trusted.
+        ///
+        /// Deterministic on purpose: it drives two `read_loop`s directly
+        /// over two finite sources (what a clip cut produces) sharing the
+        /// counter the run loop owns, instead of racing a live restart.
+        /// A timing-based version of this test passes even against the old
+        /// by-value counter, because a reset sequence climbs back past any
+        /// fixed floor within a few hundred milliseconds; comparing the two
+        /// runs' own last values cannot be fooled that way.
+        #[test]
+        fn one_shared_counter_spans_every_reader_thread() {
+            // Finite duration, so each `read_loop` returns at EOF instead of
+            // needing to be killed; unpaced, so it runs at full speed.
+            let source_args = vec![
+                "-f".to_string(),
+                "lavfi".to_string(),
+                "-i".to_string(),
+                "testsrc=size=64x48:rate=30:duration=0.2".to_string(),
+            ];
+            let seq = Arc::new(AtomicU64::new(0));
+            let frame: Arc<ArcSwapOption<VideoFrame>> = Arc::new(ArcSwapOption::empty());
+            let rate = Arc::new(AtomicU32::new(encode_rate(1.0)));
+
+            let mut last_seq_per_run = Vec::new();
+            for run in 0..2 {
+                let Ok((source, stdout)) = VideoSource::spawn(&source_args, CAPTURE_W, CAPTURE_H, CAPTURE_FPS)
+                else {
+                    return; // no ffmpeg on PATH
+                };
+                read_loop(stdout, frame.clone(), rate.clone(), false, seq.clone());
+                drop(source);
+                let published = frame.load_full().unwrap_or_else(|| panic!("run {run} published no frame"));
+                last_seq_per_run.push(published.seq);
+            }
+
+            assert!(
+                last_seq_per_run[0] > 0,
+                "the first run should have published frames, got {last_seq_per_run:?}"
+            );
+            assert!(
+                last_seq_per_run[1] > last_seq_per_run[0],
+                "seq restarted across sources ({last_seq_per_run:?}); it must keep climbing"
+            );
         }
 
         /// The zombie check the module doc comment promises: after `Drop`,

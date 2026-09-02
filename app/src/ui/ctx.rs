@@ -91,6 +91,12 @@ pub(crate) struct PerformCtx<'a> {
     pub(crate) pending_validations: &'a HashSet<usize>,
     pub(crate) preset_errors: &'a HashMap<usize, String>,
     pub(crate) transition_seconds: &'a mut f64,
+    /// Share panel's name field (Step 13 of the Phase 8 plan): lives here
+    /// rather than a new struct because the Share panel needs the same
+    /// `show`/`deck_preset_names`/`transition_seconds` this struct already
+    /// carries (crossfade duration doubles as `SharedSet::transition_time`,
+    /// no native equivalent existed before this field).
+    pub(crate) share_set_name: &'a mut String,
     pub(crate) t0: Instant,
 }
 

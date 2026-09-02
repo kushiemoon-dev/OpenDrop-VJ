@@ -331,6 +331,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         nav_item(ui, shell.active_panel, Panel::NdiOut, "NDI Out", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Output, "Output", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::Streaming, "Streaming", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Share, "Share", &mut active_rect);
 
         ui.add_space(12.0);
         widgets::section(ui, "Contrôle");

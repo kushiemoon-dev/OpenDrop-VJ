@@ -25,6 +25,7 @@ pub mod preset_browser;
 pub mod quality;
 pub mod qvar;
 pub mod remote;
+pub mod share;
 pub mod shell;
 pub mod snapshot;
 pub mod streaming;

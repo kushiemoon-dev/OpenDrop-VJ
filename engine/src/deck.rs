@@ -133,14 +133,16 @@ impl Deck {
     /// output of `preset_patch::patch_preset`. Same context rule as
     /// `load_preset`, this deck's context must be current.
     ///
-    /// **This bypasses Phase 4's preflight validation.** `load_preset` is the
-    /// single passage point for *files*, and preflight validates a file in an
-    /// isolated child process before it can reach a live deck. Text arriving
-    /// here has been through `patch_preset` since, so what actually gets
-    /// compiled was never seen by preflight. Callers must still preflight the
-    /// pre-patch file; the patch step itself is treated as trusted because it
-    /// is this crate's own deterministic, unit-tested transform, not
-    /// user-supplied content.
+    /// **This bypasses Phase 4's preflight validation.** Preflight validates
+    /// a preset *file* in an isolated child process before it can reach a
+    /// live deck, but text arriving here has been through `patch_preset`
+    /// since it was read, so what actually gets compiled was never seen by
+    /// preflight. Callers must still preflight the pre-patch file; the patch
+    /// step itself is treated as trusted because it is this crate's own
+    /// deterministic, unit-tested transform, not user-supplied content. In
+    /// practice the only caller is [`Deck::load_preset_patched`]; the
+    /// preflight-then-load ordering itself lives one level up, in `app`
+    /// (`spawn_preflight` and its verdict handling).
     pub fn load_preset_data(&self, text: &str, smooth_transition: bool) -> Result<(), String> {
         let c_text = CString::new(text)
             .map_err(|e| format!("patched preset text is not a valid C string: {e}"))?;

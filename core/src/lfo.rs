@@ -72,9 +72,11 @@ impl LfoEngine {
 
     /// Reseeds the S&H RNG with real per-launch entropy supplied by the
     /// caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment: whole-branch review Finding I4. Not
-    /// currently called by `app`: `LfoEngine` isn't wired into `app` yet,
-    /// but this keeps it correct for whenever that wiring lands.
+    /// `rng.rs`'s module doc comment: whole-branch review Finding I4.
+    /// Wired since Step 11 of the Phase 8 VJ-panels plan: `Show::reseed_rng`
+    /// (`show.rs`) calls this alongside the two playlist engines and the
+    /// overlay/video shuffles, and `Show::on_beat` calls
+    /// [`LfoEngine::randomize_sh`] on each downbeat.
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng.reseed(seed);
     }

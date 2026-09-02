@@ -1971,8 +1971,12 @@ impl ApplicationHandler for App {
             // pairs through `state.registry`, instead of writing
             // `state.show`'s fields directly, keeps a recall on the exact
             // same command path as keyboard/MIDI/OSC/remote-ws: only
-            // `CommandId`s with a real `CommandContext` setter (Color/
-            // Composite so far) move visibly, which is expected, not a bug.
+            // `CommandId`s with a real `CommandContext` setter move visibly,
+            // which is 221 of the 223 as of Step 11 (`LfoRateUp`/
+            // `LfoRateDown` are the permanent exceptions). Note this is a
+            // separate question from what a snapshot *captures*: see
+            // `SNAPSHOT_CAPTURABLE_IDS` in `core::show` for the deliberate
+            // Time/Qvar exclusion there.
             for (id, value) in state.show.tick_recall(dt) {
                 state.registry.dispatch(id, value, &mut state.show);
             }
@@ -2286,11 +2290,11 @@ impl ApplicationHandler for App {
             // this same shared pass: `render_and_swap*` later just blits
             // the resulting `color_tex` to each window, so drawing this
             // here (not per-window) is what makes it appear in both control
-            // and output. `force_normal: false`: this layer is never the
-            // lowest/first-drawn slot (see `force_normal`'s doc comment in
-            // `compositor.rs`), so there is nothing to override:
-            // `DEFAULT_SLOT_COMPOSITE` already carries `BlendMode::Normal`,
-            // full opacity, no keying. Gated on `receive_active`, not just
+            // and output. `force_normal: false`: there is nothing to
+            // override (see `force_normal`'s doc comment in
+            // `compositor.rs`): `DEFAULT_SLOT_COMPOSITE` already carries
+            // `BlendMode::Normal`, full opacity, no keying, so coercing it
+            // would be a no-op. Gated on `receive_active`, not just
             // `ndi_in_texture.is_some()`: the texture is never deleted on
             // `StopReceive` (cheap to keep around for a fast reconnect), so
             // without this check a disconnected session would keep drawing

@@ -322,6 +322,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         nav_item(ui, shell.active_panel, Panel::Overlays, "Overlays", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::RemoteWs, "Remote", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::V4l2, "V4L2", &mut active_rect);
+        nav_item(ui, shell.active_panel, Panel::Video, "Video", &mut active_rect);
         nav_item(ui, shell.active_panel, Panel::CloudPresets, "Cloud Presets", &mut active_rect);
         #[cfg(feature = "link")]
         nav_item(ui, shell.active_panel, Panel::Link, "Link", &mut active_rect);

@@ -7,11 +7,18 @@
 //!    FBO-0 → texture copy (`deck::copy_fbo0_to_shared_texture`) is already
 //!    in GL's bottom-left convention: nothing in this pipeline flips rows.
 //!  - 14 uniforms, not 13 (PLAN.md's count; corrected in step 10).
-//!    The video layer (compositor.ts's 5th layer) is out of scope for Phase 2
-//!   : no video decode crate exists yet (see PLAN.md § Hors).
+//!
+//! compositor.ts's 5th layer, the video background, was out of scope for
+//! Phase 2 (no video decode path existed then) and arrived in Step 14 of
+//! the Phase 8 VJ-panels plan as [`Compositor::composite_video_layer`]:
+//! which reuses the deck shader above rather than adding a program of its
+//! own, exactly as the TS source does. Its frames come from a CPU-side
+//! decoder, so they *would* need the dropped row flip; that flip happens
+//! once in ffmpeg's own filter chain instead (`opendrop_io::video_capture
+//! ::output_args`), which is why nothing in this file has to know about it.
 
 use glow::HasContext;
-use opendrop_core::blend::{blend_state_for, BlendMode, ColorParams, GlBlend, SlotComposite};
+use opendrop_core::blend::{blend_state_for, BlendMode, ColorParams, GlBlend, SlotComposite, DEFAULT_SLOT_COMPOSITE};
 
 use crate::timing::PassTimer;
 
@@ -499,6 +506,48 @@ impl Compositor {
 
             gl.draw_arrays(glow::TRIANGLES, 0, 6);
         }
+    }
+
+    /// Draws the video background layer (Step 14 of the Phase 8 VJ-panels
+    /// plan): one full-screen quad sampling a decoded clip / camera /
+    /// capture frame (`opendrop_io::video_capture`), always in normal
+    /// (alpha-over) blend at its own opacity, with `color` carrying the
+    /// beat-reactive flash/hue (`core::video::VideoState::
+    /// layer_color_params`).
+    ///
+    /// **Reuses the deck shader verbatim** rather than adding a fifth
+    /// program: `compositor.ts`'s own video layer does exactly this,
+    /// driving the same `uOpacity`/`uHueRotateDeg`/`uBrightnessMul`
+    /// uniforms on the same program with keying switched off (see that
+    /// file's `videoActive` block). Everything this layer needs the deck
+    /// shader already does, so this method is a named, documented entry
+    /// point onto [`Compositor::composite_layer`]: not a copy of it. That
+    /// is also why there is no `uVideo*` anything: the "hue-rotate on the
+    /// beat" toggle is the deck shader's existing hue-rotate path, fed by
+    /// the beat detector instead of the Color panel's slider.
+    ///
+    /// **Position in the frame: on top of the 4 decks, under the NDI-in
+    /// layer, the strobe flash and the overlays**: not behind the decks.
+    /// The Phase 8 plan's step-14 sketch said "behind"; the OpenDrop-VJ
+    /// compositor this ports says the opposite, in a class header that
+    /// records *why*: drawing the video first made it disappear the moment
+    /// any deck slot reached full opacity ("confirmed live"), which is the
+    /// default state at either end of the crossfader. Behind-the-decks
+    /// would therefore ship a layer that is invisible in the app's normal
+    /// configuration. Drawing it last also keeps
+    /// `should_force_normal_for_lowest_slot` correct as-is (the reference
+    /// makes the same point in that function's own doc comment): the deck
+    /// stack still starts against a transparent framebuffer.
+    ///
+    /// Skipped below the same 0.001 opacity floor every other pass uses,
+    /// so a fully faded-out layer costs nothing.
+    pub fn composite_video_layer(&self, gl: &glow::Context, video_tex: glow::NativeTexture, opacity: f32, color: ColorParams) {
+        let input = LayerInput { opacity, composite: DEFAULT_SLOT_COMPOSITE, color };
+        // `force_normal: false`: `DEFAULT_SLOT_COMPOSITE` already carries
+        // `BlendMode::Normal`, and this layer is never the lowest/first-drawn
+        // one, so there is nothing to override (same reasoning as the
+        // NDI-in layer's own call site in `app`).
+        self.composite_layer(gl, video_tex, &input, false);
     }
 
     /// Draws the BPM-synced strobe flash (Step 10 of the Phase 8 VJ-panels

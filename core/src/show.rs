@@ -27,10 +27,12 @@ use crate::overlay::OverlayStore;
 use crate::playlist::{PlaylistEngine, PlaylistMode, PlaylistStore};
 use crate::preset_index::PresetMeta;
 use crate::q_vars::{clamp_q_var_value, default_q_var_params, with_q_var_value, with_q_var_watch, QVarParamsTuple};
+use crate::rng::Xorshift64;
 use crate::snapshot::{tick_active_recall, ActiveRecall, Snapshot};
 use crate::strobe::StrobeState;
 use crate::time_params::{clamp_time_mult, DeckTimeParams};
 use crate::timeline::{timeline_loop_duration, timeline_values_at, TimelineKeyframe};
+use crate::video::VideoState;
 
 /// Which side of the crossfader a deck slot is assigned to. `Off` means the
 /// slot never shows, regardless of crossfader position.
@@ -157,6 +159,23 @@ pub struct Show {
     /// zero-I/O crate can own, and `app` keeps the id→file map and the
     /// id→GL-texture cache alongside it (see `AppState::overlay_assets`).
     pub overlay_store: OverlayStore,
+    /// Video background layer: on/off, opacity, clip rotation, and the 4
+    /// beat/volume-reactive toggles (Step 14 of the Phase 8 plan). Written
+    /// directly by the Video panel (`app::ui::video`): same "direct field
+    /// mutation" convention as `strobe`/`lfo_engine`/`overlay_store` above.
+    ///
+    /// Same boundary as `overlay_store`: no clip file paths, no decoder
+    /// handle, no GL here. `app` owns the clip library (id → file), the
+    /// `ffmpeg` capture thread (`opendrop_io::video_capture`), and the GL
+    /// texture the decoded frames land in; this field holds only the values
+    /// a zero-I/O crate can own. The beat-driven clip cut is
+    /// [`Show::on_video_beat`], called by `app` (not from `on_beat` itself)
+    /// because it needs that app-owned clip list.
+    pub video: VideoState,
+    /// Shuffle-mode draws for `on_video_beat`: a 5th independent
+    /// `Xorshift64` consumer alongside the two playlist engines, the LFO,
+    /// and the overlay queue. See `reseed_rng`.
+    video_rng: Xorshift64,
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -227,6 +246,8 @@ impl Default for Show {
             strobe: StrobeState::default(),
             lfo_engine: LfoEngine::new(),
             overlay_store: OverlayStore::new(),
+            video: VideoState::default(),
+            video_rng: Xorshift64::default(),
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -270,6 +291,29 @@ impl Show {
         // independent consumer, XOR'd like deck B's so two shuffles driven
         // by the same beat don't advance in lockstep.
         self.overlay_store.reseed_rng(seed ^ 0x5A5A_5A5A_5A5A_5A5A);
+        // Video-loop shuffle (Step 14): a fifth independent consumer, XOR'd
+        // with its own constant for the same anti-lockstep reason as the two
+        // above: the overlay queue and the video layer are both driven by
+        // the same beat, and two shuffles drawing identical sequences would
+        // be visible.
+        self.video_rng.reseed(seed ^ 0x3C3C_3C3C_3C3C_3C3C);
+    }
+
+    /// Beat-driven video-clip cut (Step 14 of the Phase 8 plan). Returns
+    /// `true` when the current clip actually changed, so `app` knows to
+    /// point its decoder at the new file.
+    ///
+    /// Not folded into [`Show::on_beat`] like the overlay queue's own
+    /// advance, because the clip list it rotates through is `app`-owned
+    /// (files on disk: see `Show::video`'s doc comment); `app` calls this
+    /// immediately after `on_beat`, from the same two call sites.
+    ///
+    /// `ndi_active` is `NdiSnapshot::receive_active`: see
+    /// `core::video`'s module doc comment for why that isn't mirrored into
+    /// `VideoState`.
+    pub fn on_video_beat(&mut self, all_clip_keys: &[String], ndi_active: bool) -> bool {
+        let draw = self.video_rng.next_f64();
+        self.video.on_beat(all_clip_keys, ndi_active, draw)
     }
 
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
@@ -2295,6 +2339,73 @@ mod tests {
             show.check_volume_peak_triggers(0.9, 1600.0);
             assert_eq!(show.fired_preset_a.borrow().as_deref(), Some("P1"));
             assert_eq!(show.fired_preset_b.borrow().as_deref(), Some("P1"));
+        }
+    }
+
+    /// Step 14 of the Phase 8 plan: `Show`'s half of the video-clip cut.
+    /// The cut *rules* themselves are covered in `core::video`; what's
+    /// tested here is only the seam: that `Show` feeds the layer a real
+    /// draw, and that the draw is reseedable like every other RNG consumer.
+    mod on_video_beat {
+        use super::*;
+
+        fn keys(n: usize) -> Vec<String> {
+            (0..n).map(|i| format!("clip{i}")).collect()
+        }
+
+        #[test]
+        fn a_disabled_video_layer_never_cuts() {
+            let mut show = Show::default();
+            assert!(!show.video.enabled);
+            assert!(!show.on_video_beat(&keys(4), false));
+        }
+
+        #[test]
+        fn an_enabled_layer_cuts_once_per_beats_per_cut_beats() {
+            let mut show = Show::default();
+            show.video.enabled = true;
+            show.video.beats_per_cut = 2;
+            show.video.advance = crate::video::VideoAdvance::Sequential;
+            let all = keys(3);
+            assert!(!show.on_video_beat(&all, false));
+            assert!(show.on_video_beat(&all, false));
+            assert_eq!(show.video.current_clip_index, 1);
+        }
+
+        #[test]
+        fn shuffle_draws_differ_across_seeds() {
+            let draws = |seed: u64| -> Vec<usize> {
+                let mut show = Show::default();
+                show.video.enabled = true;
+                show.video.beats_per_cut = 1;
+                show.reseed_rng(seed);
+                let all = keys(16);
+                (0..12)
+                    .map(|_| {
+                        show.on_video_beat(&all, false);
+                        show.video.current_clip_index
+                    })
+                    .collect()
+            };
+            assert_ne!(draws(1), draws(2));
+        }
+
+        #[test]
+        fn the_same_seed_reproduces_the_same_shuffle_sequence() {
+            let draws = || -> Vec<usize> {
+                let mut show = Show::default();
+                show.video.enabled = true;
+                show.video.beats_per_cut = 1;
+                show.reseed_rng(99);
+                let all = keys(16);
+                (0..12)
+                    .map(|_| {
+                        show.on_video_beat(&all, false);
+                        show.video.current_clip_index
+                    })
+                    .collect()
+            };
+            assert_eq!(draws(), draws());
         }
     }
 

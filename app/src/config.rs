@@ -95,6 +95,7 @@ pub(crate) enum PanelId {
     #[cfg(feature = "link")]
     Link,
     V4l2,
+    Video,
     CloudPresets,
     About,
     #[serde(other)]
@@ -305,6 +306,7 @@ mod tests {
             PanelId::Streaming,
             PanelId::Share,
             PanelId::V4l2,
+            PanelId::Video,
             PanelId::CloudPresets,
             PanelId::About,
         ];

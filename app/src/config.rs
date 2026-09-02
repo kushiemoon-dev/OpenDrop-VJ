@@ -88,6 +88,7 @@ pub(crate) enum PanelId {
     NdiIn,
     NdiOut,
     Osc,
+    Overlays,
     RemoteWs,
     Streaming,
     #[cfg(feature = "link")]

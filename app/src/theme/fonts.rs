@@ -12,8 +12,12 @@ use egui::{FontData, FontDefinitions, FontFamily, FontId, FontTweak, TextStyle};
 
 use super::tokens::Theme;
 
-const INTER_VARIABLE: &[u8] = include_bytes!("../../assets/fonts/Inter-Variable.ttf");
-const JETBRAINS_MONO_VARIABLE: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Variable.ttf");
+// `pub(crate)` since Step 12 of the Phase 8 VJ-panels plan: overlay text
+// rasterization (`main::overlay_font_bytes` → `engine::overlay_texture::
+// rasterize_text`) needs the same two faces, and re-`include_bytes!`ing
+// them elsewhere would duplicate 1.1 MB of `.rodata`.
+pub(crate) const INTER_VARIABLE: &[u8] = include_bytes!("../../assets/fonts/Inter-Variable.ttf");
+pub(crate) const JETBRAINS_MONO_VARIABLE: &[u8] = include_bytes!("../../assets/fonts/JetBrainsMono-Variable.ttf");
 
 /// The 6 weight-alias family names registered by [`font_definitions`].
 pub const FAMILY_UI: &str = "ui";

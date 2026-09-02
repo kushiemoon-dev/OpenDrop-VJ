@@ -10,8 +10,9 @@ use opendrop_core::commands::{create_default_registry, CommandContext, CommandId
 use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::strobe::strobe_flash_intensity;
 use opendrop_core::thumb_queue::ThumbJob;
-use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
+use opendrop_engine::compositor::{Compositor, LayerInput, OverlayBlendMode, OverlayLayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::overlay_texture;
 use opendrop_engine::qvar_patch;
 use opendrop_engine::readback::FrameReadback;
 use opendrop_engine::time_patch;
@@ -59,6 +60,15 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// thread has no async runtime (Task 8).
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
+/// How long after a beat a `beat_reactive` overlay stays scaled up by its
+/// `beat_scale`: the native equivalent of `beatSyncState.beat`, which the
+/// JS reference sets true on each beat and clears with
+/// `setTimeout(..., 80)` (`beat-tempo-actions.ts:40-43`). Same "per-frame
+/// `Instant` deadline instead of an async timer" treatment as
+/// `MIDI_LED_FLASH_DURATION` above, for the same reason (no async runtime
+/// on this thread).
+const BEAT_PULSE_DURATION: Duration = Duration::from_millis(80);
+
 /// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
 /// real elapsed-time measurement, matching the TS reference's
 /// `Math.min(dt, 0.1)` (`clock.ts:53`).
@@ -98,6 +108,164 @@ fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
         };
         LayerInput { opacity: opacities[i] as f32, composite: show.slot_composites[i], color }
     })
+}
+
+/// One overlay's cached GL texture (Step 12 of the Phase 8 VJ-panels
+/// plan). `key` is a fingerprint of everything the pixels depend on: the
+/// sprite's file path, or the text's content/font/size/color: so the
+/// texture is rebuilt exactly when one of those changes, and never
+/// per-frame. `texture` is `None` for an overlay whose build failed
+/// (unreadable file, undecodable image, a string past the texture limit):
+/// the entry is still cached, under the same key, so the failure is not
+/// retried every frame until the user actually changes something.
+struct OverlayTextureEntry {
+    key: String,
+    texture: Option<(glow::NativeTexture, u32, u32)>,
+}
+
+/// The two vendored faces (`app/assets/fonts/`, Phase 7 Step 2) available
+/// to overlay text rasterization. `FontFamily` has 5 variants, ported
+/// verbatim from the web's CSS font stacks, but only Sans and Mono have a
+/// face bundled here: Serif/Impact/Comic fall back to Inter, which the
+/// panel says out loud. Bundling a serif/display/comic face is a
+/// vendoring + licensing decision, deliberately out of this step's scope.
+fn overlay_font_bytes(family: opendrop_core::overlay::FontFamily) -> &'static [u8] {
+    match family {
+        opendrop_core::overlay::FontFamily::Mono => theme::fonts::JETBRAINS_MONO_VARIABLE,
+        _ => theme::fonts::INTER_VARIABLE,
+    }
+}
+
+/// The cache key described on `OverlayTextureEntry::key`.
+fn overlay_texture_key(overlay: &opendrop_core::overlay::Overlay, asset: Option<&Path>) -> String {
+    match overlay.kind {
+        opendrop_core::overlay::OverlayKind::Media => {
+            format!("media\u{1}{}", asset.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())
+        }
+        opendrop_core::overlay::OverlayKind::Text => format!(
+            "text\u{1}{}\u{1}{:?}\u{1}{}\u{1}{}",
+            overlay.text, overlay.font_family, overlay.font_size, overlay.color
+        ),
+    }
+}
+
+/// Builds (or rebuilds) every overlay's texture whose cache key changed,
+/// and drops the textures of overlays that no longer exist. Runs once per
+/// render tick, right before the overlay composite pass, while the main
+/// context is current: `gl.delete_texture`/`upload_rgba` both require
+/// that.
+///
+/// Text is rasterized at `font_size` vh of the composite frame, which is
+/// how the web sized it (`font-size: {ov.fontSize}vh`); the sprite's
+/// on-screen size is then the compositor's business
+/// (`overlay_quad_half_size_px`), same for both kinds.
+fn sync_overlay_textures(
+    gl: &glow::Context,
+    store: &opendrop_core::overlay::OverlayStore,
+    assets: &HashMap<String, PathBuf>,
+    textures: &mut HashMap<String, OverlayTextureEntry>,
+) {
+    textures.retain(|id, entry| {
+        let still_there = store.overlays.iter().any(|o| &o.id == id);
+        if !still_there {
+            if let Some((tex, _, _)) = entry.texture {
+                unsafe { gl.delete_texture(tex) };
+            }
+        }
+        still_there
+    });
+
+    for overlay in &store.overlays {
+        let asset = assets.get(&overlay.id).map(PathBuf::as_path);
+        let key = overlay_texture_key(overlay, asset);
+        if textures.get(&overlay.id).is_some_and(|e| e.key == key) {
+            continue;
+        }
+        if let Some(old) = textures.remove(&overlay.id) {
+            if let Some((tex, _, _)) = old.texture {
+                unsafe { gl.delete_texture(tex) };
+            }
+        }
+        let texture = match build_overlay_texture(gl, overlay, asset) {
+            Ok(built) => Some(built),
+            Err(e) => {
+                eprintln!("[app] overlay '{}' ({}): {e}", overlay.name, overlay.id);
+                None
+            }
+        };
+        textures.insert(overlay.id.clone(), OverlayTextureEntry { key, texture });
+    }
+}
+
+/// Decodes/rasterizes one overlay's pixels and uploads them. Split out of
+/// `sync_overlay_textures` so the error path there is a single `match`.
+fn build_overlay_texture(
+    gl: &glow::Context,
+    overlay: &opendrop_core::overlay::Overlay,
+    asset: Option<&Path>,
+) -> Result<(glow::NativeTexture, u32, u32), String> {
+    let image = match overlay.kind {
+        opendrop_core::overlay::OverlayKind::Media => {
+            let path = asset.ok_or("no source file recorded for this sprite")?;
+            let bytes = std::fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            overlay_texture::decode_image(&bytes)?
+        }
+        opendrop_core::overlay::OverlayKind::Text => overlay_texture::rasterize_text(
+            overlay_font_bytes(overlay.font_family),
+            &overlay.text,
+            // `font_size` is in vh, exactly as the web stored it: 1 vh is
+            // 1% of the composite frame's height.
+            (overlay.font_size / 100.0 * COMP_H as f64) as f32,
+            opendrop_core::overlay::parse_hex_color(&overlay.color),
+        )?,
+    };
+    let (w, h) = (image.width, image.height);
+    let tex = overlay_texture::upload_rgba(gl, &image)?;
+    Ok((tex, w, h))
+}
+
+/// Draws every currently-visible overlay into the composite FBO. Called
+/// once per tick from `about_to_wait`, inside the compositor's
+/// `begin_frame`/`end_frame` bracket and after the strobe pass: see
+/// `Compositor::composite_overlay`'s doc comment for why that ordering.
+///
+/// "Visible" is `core::overlay::visible_overlay_ids`: every un-queued
+/// overlay, plus the single active one from the queue rotation.
+fn render_overlays(
+    gl: &glow::Context,
+    compositor: &mut Compositor,
+    store: &opendrop_core::overlay::OverlayStore,
+    textures: &HashMap<String, OverlayTextureEntry>,
+    elapsed_sec: f64,
+    beat_pulse: bool,
+) {
+    if store.overlays.is_empty() {
+        return;
+    }
+    let visible = opendrop_core::overlay::visible_overlay_ids(&store.overlays, store.queue_index);
+    for overlay in &store.overlays {
+        if !visible.contains(overlay.id.as_str()) {
+            continue;
+        }
+        let Some(&(texture, tex_w, tex_h)) = textures.get(&overlay.id).and_then(|e| e.texture.as_ref()) else {
+            continue; // not built yet, or its build failed: already logged
+        };
+        let transform = opendrop_core::overlay::overlay_transform_at(overlay, elapsed_sec, beat_pulse);
+        compositor.composite_overlay(
+            gl,
+            &OverlayLayerInput {
+                texture,
+                tex_w,
+                tex_h,
+                x: transform.x as f32,
+                y: transform.y as f32,
+                scale: transform.scale as f32,
+                rotation_deg: transform.rotation_deg as f32,
+                opacity: overlay.opacity as f32,
+                blend_mode: OverlayBlendMode::from_css(&overlay.blend_mode),
+            },
+        );
+    }
 }
 
 /// Creates a new GL texture sized/uploaded from `frame`'s own dimensions
@@ -167,6 +335,7 @@ pub(crate) enum Panel {
     NdiIn,
     NdiOut,
     Osc,
+    Overlays,
     RemoteWs,
     Streaming,
     #[cfg(feature = "link")]
@@ -203,6 +372,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::NdiIn => Panel::NdiIn,
             config::PanelId::NdiOut => Panel::NdiOut,
             config::PanelId::Osc => Panel::Osc,
+            config::PanelId::Overlays => Panel::Overlays,
             config::PanelId::RemoteWs => Panel::RemoteWs,
             config::PanelId::Streaming => Panel::Streaming,
             #[cfg(feature = "link")]
@@ -238,6 +408,7 @@ impl From<Panel> for config::PanelId {
             Panel::NdiIn => config::PanelId::NdiIn,
             Panel::NdiOut => config::PanelId::NdiOut,
             Panel::Osc => config::PanelId::Osc,
+            Panel::Overlays => config::PanelId::Overlays,
             Panel::RemoteWs => config::PanelId::RemoteWs,
             Panel::Streaming => config::PanelId::Streaming,
             #[cfg(feature = "link")]
@@ -633,6 +804,25 @@ struct AppState {
     /// back off once the deadline passes (no `std::thread::sleep`, no
     /// async timer).
     midi_led_flash_off_at: HashMap<CommandId, Instant>,
+    /// Overlay id → the sprite file it was created from (Step 12 of the
+    /// Phase 8 VJ-panels plan). The web kept the bytes themselves in
+    /// IndexedDB under the same key; here the file stays where the user
+    /// picked it and is read on demand by `sync_overlay_textures`. Written
+    /// by the Overlays panel's `+ Sprite` button, never by `core`
+    /// (`Overlay` is a pure value type with no path field, by design).
+    overlay_assets: HashMap<String, PathBuf>,
+    /// Monotonic source of overlay ids: see `ui::overlays::mint_id`.
+    next_overlay_id: u64,
+    /// Overlay id → its GL texture, rebuilt only when the overlay's
+    /// content changes (`OverlayTextureEntry::key`). Purely `main.rs`'s:
+    /// no panel reads it, and it must be evicted through
+    /// `gl.delete_texture` while the main context is current, which is
+    /// only true inside the render tick.
+    overlay_textures: HashMap<String, OverlayTextureEntry>,
+    /// When the last beat fired, driving the beat-reactive overlay pulse
+    /// (`beatSyncState.beat`, true for 80 ms after each beat in the TS
+    /// source: see `BEAT_PULSE_DURATION`). `None` until the first beat.
+    last_beat_at: Option<Instant>,
     /// Handle to the dedicated OSC UDP server thread (Task 13): `latest()`
     /// gives the current listening/port snapshot, `events` carries
     /// `(CommandId, value01)` dispatches drained in `about_to_wait` (no
@@ -1221,6 +1411,15 @@ fn ui_root(
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
             }
+            Panel::Overlays => {
+                ui::overlays::show(
+                    ui,
+                    perform.show,
+                    sources.overlay_assets,
+                    sources.next_overlay_id,
+                    sources.registry,
+                );
+            }
             Panel::RemoteWs => {
                 ui::remote::show(ui, sources.remote_ws);
             }
@@ -1581,17 +1780,27 @@ impl ApplicationHandler for App {
             // Real elapsed time, not the nominal refresh_interval (Finding
             // 3): see `compute_tick_dt`'s doc comment.
             let dt = compute_tick_dt(now, state.last_output_swap_at, state.refresh_interval, MAX_TICK_DT);
+            // `beat_fired` (Step 12) feeds the beat-reactive overlay pulse
+            // below: the native `beatSyncState.beat`. Set from the same
+            // two `on_beat()` call sites, so it reflects exactly the beats
+            // the engine acted on, not an independent re-derivation.
+            let mut beat_fired = false;
             if state.show.manual_bpm == 0.0 {
                 let r = state.show.beat_detector.process_sample(audio.energy_byte, now_ms);
                 if r.beat_triggered {
                     state.show.clock.pulse(Some(r.bpm));
                     if state.show.clock.bpm() == 0.0 {
                         state.show.on_beat();
+                        beat_fired = true;
                     }
                 }
             }
             for _ in 0..state.show.clock.step(dt) {
                 state.show.on_beat();
+                beat_fired = true;
+            }
+            if beat_fired {
+                state.last_beat_at = Some(now);
             }
             // The interval-driven half of the same playlist engines the
             // beats above drive: without this the Playlists panel's
@@ -1827,6 +2036,33 @@ impl ApplicationHandler for App {
             let strobe_intensity =
                 strobe_flash_intensity(&state.show.strobe, clock_beats_abs, state.show.clock.bpm(), now_ms / 1000.0);
             state.compositor.render_strobe_flash(&state.gl, state.show.strobe.color, strobe_intensity);
+            // Overlays (Step 12): sprites and rasterized text, drawn last
+            // of all: over the decks, over the NDI-in layer, and over the
+            // strobe flash (see `Compositor::composite_overlay`'s doc
+            // comment on that last choice): but still inside the same
+            // `begin_frame`/`end_frame` bracket, for exactly the reason
+            // the strobe pass is: everything downstream (`FrameReadback`
+            // below, `blit_to_current_window` per window later this tick)
+            // reads this one `color_tex`.
+            //
+            // The upload half runs first and separately: it decodes files
+            // and rasterizes strings, does no drawing, and only does any
+            // work at all on the frame an overlay is added or edited.
+            sync_overlay_textures(
+                &state.gl,
+                &state.show.overlay_store,
+                &state.overlay_assets,
+                &mut state.overlay_textures,
+            );
+            let beat_pulse = state.last_beat_at.is_some_and(|at| now.duration_since(at) < BEAT_PULSE_DURATION);
+            render_overlays(
+                &state.gl,
+                &mut state.compositor,
+                &state.show.overlay_store,
+                &state.overlay_textures,
+                now_ms / 1000.0,
+                beat_pulse,
+            );
             state.compositor.end_frame(&state.gl);
 
             // Step 5: GPU->CPU readback feeding the NDI / v4l2loopback
@@ -1928,6 +2164,8 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                overlay_assets,
+                next_overlay_id,
                 remote_ws,
                 obs,
                 obs_host,
@@ -2006,6 +2244,8 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                overlay_assets,
+                next_overlay_id,
                 remote_ws,
                 v4l2,
                 v4l2_active,
@@ -2703,6 +2943,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         ndi_deck_active: [false; deck::DECK_COUNT],
         ndi_in_texture: None,
         ndi_in_selected_source: None,
+        overlay_assets: HashMap::new(),
+        next_overlay_id: 0,
+        overlay_textures: HashMap::new(),
+        last_beat_at: None,
         v4l2_active: false,
         v4l2: opendrop_io::v4l2loopback::spawn(v4l2_frame_rx),
         v4l2_device: None,
@@ -3474,6 +3718,401 @@ mod tests {
 
             let err = unsafe { gl.get_error() };
             assert_eq!(err, glow::NO_ERROR, "GL error after a 0-intensity render_strobe_flash: 0x{err:x}");
+        }
+    }
+
+    /// Step 12 (Overlays panel): headless GL coverage for the overlay
+    /// compositing primitive: `overlay_texture::upload_rgba` plus
+    /// `Compositor::composite_overlay`. Unlike the strobe smoke tests
+    /// above, these read pixels back out of the composite FBO and assert
+    /// on their values: the whole point of this pass is *where* a sprite
+    /// lands and *how* it blends, neither of which a "no GL error" check
+    /// can see, and neither of which `cargo build` can see at all (the
+    /// shaders are compiled at runtime, and the geometry math only exists
+    /// once a driver has run it).
+    ///
+    /// Same context-lifetime constraint as the strobe module above: the
+    /// `DynamicInstance` owns the dlopen'd `libEGL.so.1` and dlcloses it
+    /// on drop, so it must outlive every use of `gl`'s loaded function
+    /// pointers: hence [`HeadlessGl`], whose field order makes that
+    /// ordering explicit instead of relying on each test binding four
+    /// locals in the right order.
+    mod compositor_overlay_gl_tests {
+        use super::*;
+        use glow::HasContext;
+        use khronos_egl as egl;
+        use opendrop_engine::compositor::{
+            overlay_center_px, overlay_quad_half_size_px, Compositor, OverlayBlendMode, OverlayLayerInput,
+        };
+        use opendrop_engine::overlay_texture::{self, RgbaImage};
+
+        /// A windowless GL context plus everything that must stay alive
+        /// for it to keep working. Fields drop in declaration order, so
+        /// `gl` goes before `_egl_inst` unloads `libEGL`.
+        struct HeadlessGl {
+            gl: glow::Context,
+            _pb: egl::Surface,
+            _ctx: egl::Context,
+            _display: egl::Display,
+            _egl_inst: egl_headless::Egl,
+        }
+
+        fn headless_gl() -> HeadlessGl {
+            let (egl_inst, display, config) = egl_headless::init_egl();
+            let ctx = egl_headless::create_context(&egl_inst, display, config);
+            let pb = egl_headless::create_pbuffer(&egl_inst, display, config, 64, 64);
+            egl_inst.make_current(display, Some(pb), Some(pb), Some(ctx)).expect("eglMakeCurrent failed");
+            let gl = egl_headless::make_gl(&egl_inst);
+            HeadlessGl { gl, _pb: pb, _ctx: ctx, _display: display, _egl_inst: egl_inst }
+        }
+
+        /// `begin_frame` + the one-time drain of `PassTimer::poll`'s
+        /// pre-existing first-use `GL_INVALID_OPERATION` (documented by
+        /// Step 10's own tests, in `engine::timing`, untouched here).
+        fn begin_clean_frame(gl: &glow::Context, compositor: &mut Compositor) {
+            compositor.begin_frame(gl);
+            unsafe { gl.get_error() };
+        }
+
+        /// One RGBA pixel of the composite FBO, in GL's own coordinates
+        /// (origin bottom-left).
+        fn read_composite_pixel(gl: &glow::Context, compositor: &Compositor, x: i32, y: i32) -> [u8; 4] {
+            let mut px = [0u8; 4];
+            unsafe {
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(compositor.fbo));
+                gl.read_pixels(
+                    x,
+                    y,
+                    1,
+                    1,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut px)),
+                );
+            }
+            px
+        }
+
+        fn solid_rgba(width: u32, height: u32, rgba: [u8; 4]) -> RgbaImage {
+            RgbaImage {
+                width,
+                height,
+                pixels: rgba.iter().copied().cycle().take(width as usize * height as usize * 4).collect(),
+            }
+        }
+
+        fn input(texture: glow::NativeTexture, tex_w: u32, tex_h: u32) -> OverlayLayerInput {
+            OverlayLayerInput {
+                texture,
+                tex_w,
+                tex_h,
+                x: 0.5,
+                y: 0.5,
+                scale: 1.0,
+                rotation_deg: 0.0,
+                opacity: 1.0,
+                blend_mode: OverlayBlendMode::Normal,
+            }
+        }
+
+        fn assert_channel_near(actual: [u8; 4], expected_rgb: [u8; 3], mode: OverlayBlendMode) {
+            for (i, expected) in expected_rgb.iter().enumerate() {
+                let delta = actual[i] as i32 - *expected as i32;
+                assert!(
+                    delta.abs() <= 3,
+                    "{:?}: channel {i} was {}, expected ~{expected} (whole pixel {actual:?})",
+                    mode,
+                    actual[i]
+                );
+            }
+        }
+
+        /// Fills the whole composite with an opaque flat color, by drawing
+        /// a 1x1 sprite blown up well past the frame: the simplest way to
+        /// establish a known backdrop for the blend-mode assertions,
+        /// through the very pass under test (so a bug in it would be
+        /// caught by the "backdrop is what we asked for" check below
+        /// rather than silently skewing every expectation).
+        fn fill_composite(gl: &glow::Context, compositor: &mut Compositor, rgb: [u8; 3]) {
+            let img = solid_rgba(1, 1, [rgb[0], rgb[1], rgb[2], 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("1x1 upload should work");
+            let mut layer = input(tex, 1, 1);
+            layer.scale = 4000.0;
+            compositor.composite_overlay(gl, &layer);
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn an_opaque_sprite_lands_at_its_normalized_position_and_nowhere_else() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build every program");
+            begin_clean_frame(gl, &mut compositor);
+
+            // 64x64 white sprite at (0.25, 0.25): upper-LEFT quadrant in
+            // `Overlay`'s CSS convention, which is high y in GL's.
+            let img = solid_rgba(64, 64, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 64, 64);
+            layer.x = 0.25;
+            layer.y = 0.25;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            let (cx, cy) = overlay_center_px(0.25, 0.25);
+            assert_eq!((cx, cy), (480.0, 810.0));
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32, cy as i32), [255, 255, 255, 255]);
+            // Just inside the 32 px half-extent, and just outside it.
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32 + 30, cy as i32), [255, 255, 255, 255]);
+            assert_eq!(read_composite_pixel(gl, &compositor, cx as i32 + 40, cy as i32), [0, 0, 0, 0]);
+            // The mirror position (0.75, 0.75) must be untouched: this is
+            // what catches a y-flip or an x/y swap.
+            assert_eq!(read_composite_pixel(gl, &compositor, 1440, 270), [0, 0, 0, 0]);
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn uploaded_pixels_reach_the_composite_in_the_right_orientation() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            // 2x2, row 0 = TOP: red top-left, green top-right,
+            // blue bottom-left, white bottom-right.
+            let img = RgbaImage {
+                width: 2,
+                height: 2,
+                pixels: vec![
+                    255, 0, 0, 255, // (0,0) top-left
+                    0, 255, 0, 255, // (1,0) top-right
+                    0, 0, 255, 255, // (0,1) bottom-left
+                    255, 255, 255, 255, // (1,1) bottom-right
+                ],
+            };
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 2, 2);
+            // half-extent = tex_w * scale * 0.5 = scale for a 2x2, so
+            // scale 400 gives an 800x800 quad centered on the frame:
+            // x in [560, 1360], y in [140, 940].
+            layer.scale = 400.0;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            assert_eq!(overlay_quad_half_size_px(2, 2, 400.0), (400.0, 400.0));
+            // Sampled 10% in from each corner: with a 2x2 texture,
+            // CLAMP_TO_EDGE + LINEAR make anything outside the texel
+            // centers (uv 0.25/0.75) exactly that corner texel.
+            // GL reads bottom-up, so high y is the image's TOP row.
+            assert_eq!(read_composite_pixel(gl, &compositor, 640, 860), [255, 0, 0, 255], "top-left should be red");
+            assert_eq!(read_composite_pixel(gl, &compositor, 1280, 860), [0, 255, 0, 255], "top-right should be green");
+            assert_eq!(read_composite_pixel(gl, &compositor, 640, 220), [0, 0, 255, 255], "bottom-left should be blue");
+            assert_eq!(
+                read_composite_pixel(gl, &compositor, 1280, 220),
+                [255, 255, 255, 255],
+                "bottom-right should be white"
+            );
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn rotation_turns_the_quad_about_its_own_center() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            // 64x8 sprite: 64 px wide, 8 px tall, centered. Unrotated it
+            // covers (960±32, 540±4); at 90 degrees it covers
+            // (960±4, 540±32).
+            let img = solid_rgba(64, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            begin_clean_frame(gl, &mut compositor);
+            compositor.composite_overlay(gl, &input(tex, 64, 8));
+            compositor.end_frame(gl);
+            assert_eq!(read_composite_pixel(gl, &compositor, 985, 540)[3], 255, "unrotated: wide");
+            assert_eq!(read_composite_pixel(gl, &compositor, 960, 565)[3], 0, "unrotated: not tall");
+
+            begin_clean_frame(gl, &mut compositor);
+            let mut rotated = input(tex, 64, 8);
+            rotated.rotation_deg = 90.0;
+            compositor.composite_overlay(gl, &rotated);
+            compositor.end_frame(gl);
+            assert_eq!(read_composite_pixel(gl, &compositor, 985, 540)[3], 0, "rotated: no longer wide");
+            assert_eq!(read_composite_pixel(gl, &compositor, 960, 565)[3], 255, "rotated: now tall");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn every_blend_mode_produces_its_documented_result_over_a_known_backdrop() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+
+            // Backdrop 64/255 = 0.25098, sprite 192/255 = 0.75294:
+            // deliberately asymmetric so `overlay` and `hard-light`
+            // (which are the same function with its arguments swapped)
+            // land on visibly different values.
+            let img = solid_rgba(8, 8, [192, 192, 192, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            // b = 0.25098, s = 0.75294:
+            //   normal      = s                        -> 192
+            //   screen      = s + b*(1-s)              -> 208
+            //   plus-lighter= b + s (clamped)          -> 255
+            //   multiply    = b*s                      -> 48
+            //   hard-light  = 1 - 2*(1-b)*(1-s)        -> 161
+            //   overlay     = 2*s*b   (b<=0.5 branch,
+            //                          arguments swapped) ->  96
+            let expected: [(OverlayBlendMode, [u8; 3]); 6] = [
+                (OverlayBlendMode::Normal, [192, 192, 192]),
+                (OverlayBlendMode::Screen, [208, 208, 208]),
+                (OverlayBlendMode::PlusLighter, [255, 255, 255]),
+                (OverlayBlendMode::Multiply, [48, 48, 48]),
+                (OverlayBlendMode::HardLight, [161, 161, 161]),
+                (OverlayBlendMode::Overlay, [96, 96, 96]),
+            ];
+
+            for (mode, want) in expected {
+                begin_clean_frame(gl, &mut compositor);
+                fill_composite(gl, &mut compositor, [64, 64, 64]);
+                // The backdrop itself must be what we asked for, or every
+                // expectation below is measured against the wrong base.
+                assert_eq!(
+                    read_composite_pixel(gl, &compositor, 960, 540),
+                    [64, 64, 64, 255],
+                    "backdrop fill went wrong before testing {mode:?}"
+                );
+
+                let mut layer = input(tex, 8, 8);
+                layer.blend_mode = mode;
+                compositor.composite_overlay(gl, &layer);
+                compositor.end_frame(gl);
+
+                assert_channel_near(read_composite_pixel(gl, &compositor, 960, 540), want, mode);
+                assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR, "GL error after {mode:?}");
+            }
+
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn opacity_scales_a_normal_blend_toward_the_backdrop() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+            fill_composite(gl, &mut compositor, [0, 0, 0]);
+
+            let img = solid_rgba(8, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 8, 8);
+            layer.opacity = 0.5;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            // 1.0*0.5 + 0.0*0.5 = 0.5 -> 128
+            assert_channel_near(read_composite_pixel(gl, &compositor, 960, 540), [128, 128, 128], layer.blend_mode);
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn a_sub_floor_opacity_or_a_zero_scale_draws_nothing_at_all() {
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            let img = solid_rgba(64, 64, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+
+            for mutate in [
+                (|l: &mut OverlayLayerInput| l.opacity = 0.0) as fn(&mut OverlayLayerInput),
+                |l: &mut OverlayLayerInput| l.opacity = 0.0005,
+                |l: &mut OverlayLayerInput| l.scale = 0.0,
+                |l: &mut OverlayLayerInput| l.scale = f32::NAN,
+                |l: &mut OverlayLayerInput| l.x = f32::NAN,
+                |l: &mut OverlayLayerInput| l.rotation_deg = f32::NAN,
+                |l: &mut OverlayLayerInput| l.tex_w = 0,
+            ] {
+                begin_clean_frame(gl, &mut compositor);
+                let mut layer = input(tex, 64, 64);
+                mutate(&mut layer);
+                compositor.composite_overlay(gl, &layer);
+                compositor.end_frame(gl);
+                assert_eq!(read_composite_pixel(gl, &compositor, 960, 540), [0, 0, 0, 0]);
+                assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+            }
+
+            unsafe { gl.delete_texture(tex) };
+        }
+
+        #[test]
+        fn the_pass_leaves_texture_unit_0_active_for_whatever_draws_next() {
+            // GL state hygiene: this is the only pass in the compositor
+            // that ever touches `glActiveTexture`, and everything after it
+            // in the frame (`egui_glow`'s own draw, the deck upload paths,
+            // the next frame's `composite_layer`) assumes unit 0.
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let img = solid_rgba(8, 8, [255, 255, 255, 255]);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            let mut layer = input(tex, 8, 8);
+            // The backdrop path binds unit 1, so exercise that one.
+            layer.blend_mode = OverlayBlendMode::HardLight;
+            compositor.composite_overlay(gl, &layer);
+            compositor.end_frame(gl);
+
+            let active = unsafe { gl.get_parameter_i32(glow::ACTIVE_TEXTURE) };
+            assert_eq!(active as u32, glow::TEXTURE0, "composite_overlay left texture unit {active:#x} active");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        }
+
+        #[test]
+        fn a_rasterized_string_composites_as_a_sprite() {
+            // End-to-end for the text half: rasterize -> upload ->
+            // composite, and assert ink actually reached the composite.
+            // No pixel-exact expectation (that would pin the shape of a
+            // specific font's glyphs), just that the pipeline carries the
+            // requested color through.
+            let h = headless_gl();
+            let gl = &h.gl;
+            let mut compositor = Compositor::new(gl).expect("Compositor::new should build");
+            begin_clean_frame(gl, &mut compositor);
+
+            let img = overlay_texture::rasterize_text(theme::fonts::INTER_VARIABLE, "OD", 200.0, [255, 0, 128])
+                .expect("rasterizing should work");
+            let (w, h_px) = (img.width, img.height);
+            let tex = overlay_texture::upload_rgba(gl, &img).expect("upload should work");
+            compositor.composite_overlay(gl, &input(tex, w, h_px));
+            compositor.end_frame(gl);
+
+            let (half_w, half_h) = overlay_quad_half_size_px(w, h_px, 1.0);
+            let (cx, cy) = overlay_center_px(0.5, 0.5);
+            let mut inked = 0;
+            for dy in -(half_h as i32)..(half_h as i32) {
+                for dx in -(half_w as i32)..(half_w as i32) {
+                    let px = read_composite_pixel(gl, &compositor, cx as i32 + dx, cy as i32 + dy);
+                    if px[3] > 200 {
+                        inked += 1;
+                        assert!(px[0] > 200 && px[1] < 60 && px[2] > 100, "unexpected ink color {px:?}");
+                    }
+                }
+            }
+            assert!(inked > 100, "'OD' at 200px should leave far more than {inked} solid pixels");
+
+            unsafe { gl.delete_texture(tex) };
+            assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
         }
     }
 }

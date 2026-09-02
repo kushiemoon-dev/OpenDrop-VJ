@@ -18,6 +18,7 @@ pub mod lfo;
 pub mod midi;
 pub mod ndi;
 pub mod osc;
+pub mod overlays;
 pub mod output;
 pub mod playlists;
 pub mod preset_browser;

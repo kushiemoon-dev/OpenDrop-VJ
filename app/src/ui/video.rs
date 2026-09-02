@@ -164,8 +164,14 @@ fn toggle_pill(ui: &mut egui::Ui, label: &str, value: &mut bool, enabled: bool, 
 }
 
 /// Live camera: a dropdown of detected devices where the platform can
-/// enumerate them (Linux: see `video_capture::list_cameras`), a free-text
-/// device field everywhere else, and the on/off toggle.
+/// enumerate them (Linux: see `video_capture::list_cameras`), the device
+/// field itself, and the on/off toggle.
+///
+/// The field is shown **always**, not only when the dropdown is empty
+/// (review finding): `list_cameras` filters to each physical device's
+/// primary capture node, so a device that doesn't follow that convention
+/// would otherwise be both absent from the list and unreachable. The
+/// dropdown, when there is one, just writes into the same field.
 fn camera_row(
     ui: &mut egui::Ui,
     show: &mut Show,
@@ -179,19 +185,13 @@ fn camera_row(
     ui.horizontal(|ui| {
         widgets::micro_label(ui, "Camera");
         ui.add_enabled_ui(!camera_on, |ui| {
-            if cameras.is_empty() {
-                ui.add(
-                    egui::TextEdit::singleline(camera_device)
-                        .desired_width(200.0)
-                        .hint_text("device (e.g. /dev/video0)"),
-                );
-            } else {
+            if !cameras.is_empty() {
                 let selected = cameras
                     .iter()
                     .find(|c| &c.id == camera_device)
                     .map(|c| c.label.as_str())
-                    .unwrap_or("select a camera");
-                egui::ComboBox::from_id_salt("od_video_camera").selected_text(selected).width(200.0).show_ui(
+                    .unwrap_or("(custom device)");
+                egui::ComboBox::from_id_salt("od_video_camera").selected_text(selected).width(240.0).show_ui(
                     ui,
                     |ui| {
                         for camera in cameras {
@@ -202,6 +202,11 @@ fn camera_row(
                     },
                 );
             }
+            ui.add(
+                egui::TextEdit::singleline(camera_device)
+                    .desired_width(180.0)
+                    .hint_text("device (e.g. /dev/video0)"),
+            );
         });
 
         let label = if camera_on { format!("📷 {}", show.video.live_label) } else { "📷 Use camera".to_string() };
@@ -222,11 +227,16 @@ fn camera_row(
             }
         }
     });
-    if cameras.is_empty() && !camera_on {
+    if !camera_on {
         widgets::micro_label(
             ui,
-            "No camera detected automatically on this platform: type the ffmpeg device \
-             (a DirectShow device name on Windows, an AVFoundation index like 0 on macOS).",
+            if cameras.is_empty() {
+                "No camera detected automatically on this platform: type the ffmpeg device \
+                 (a DirectShow device name on Windows, an AVFoundation index like 0 on macOS)."
+            } else {
+                "Only each device's primary capture node is listed. If your camera isn't there, \
+                 type its device path."
+            },
         );
     }
 }

@@ -67,6 +67,19 @@ pub trait CommandContext {
     fn set_time_dy(&mut self, slot: usize, v: f64);
     fn set_time_stretch(&mut self, slot: usize, v: f64);
     fn set_time_wave(&mut self, slot: usize, v: f64);
+    /// One q-var override (Step 9), for the 128 `CommandId::Qvar{n}_{slot}`
+    /// commands: `n` is the 1-indexed q-var (1..=32, matching
+    /// `q_vars::with_q_var_value`'s own convention), `slot` the deck (0..4).
+    /// A single method rather than Time's one-per-multiplier shape because
+    /// the 32 q-vars are a uniform indexed family, not 32 named fields.
+    ///
+    /// Setting an override also *enables* the watch: a controller or an LFO
+    /// bound to `Qvar7_0` must be able to make Q7 move without the user first
+    /// adding it in the panel, which is the same "the setter is the whole
+    /// control surface" rule the other families follow. `v` is in the panel's
+    /// own [`crate::q_vars::Q_VAR_MIN`]..[`crate::q_vars::Q_VAR_MAX`] range,
+    /// not 0..1: the registry entries convert with [`q_var_value`] first.
+    fn set_q_var(&mut self, slot: usize, n: usize, v: f64);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -400,6 +413,16 @@ fn time_mult(v01: f64) -> f64 {
     (v01 * crate::time_params::TIME_MULT_MAX).clamp(0.0, crate::time_params::TIME_MULT_MAX)
 }
 
+/// Scales a dispatched 0..1 command value onto the Qvar panel's own -2..2
+/// slider range, so half travel on a MIDI fader lands exactly on 0. Factored
+/// out rather than repeated inline in all 128 `CommandId::Qvar*` entries
+/// below, the same way [`time_mult`] is.
+fn q_var_value(v01: f64) -> f64 {
+    crate::q_vars::clamp_q_var_value(
+        crate::q_vars::Q_VAR_MIN + v01 * (crate::q_vars::Q_VAR_MAX - crate::q_vars::Q_VAR_MIN),
+    )
+}
+
 pub fn create_default_registry() -> CommandRegistry {
     let mut reg = CommandRegistry::new();
     for cmd in default_commands() {
@@ -505,134 +528,134 @@ fn default_commands() -> Vec<Command> {
         Command { id: CommandId::OverlayQueueNext, label: "Overlay Queue Next", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(1) },
         Command { id: CommandId::OverlayQueuePrev, label: "Overlay Queue Prev", kind: CommandKind::Trigger, run: |_, ctx| ctx.advance_overlay_queue(-1) },
         Command { id: CommandId::TimelineToggle, label: "Timeline Play/Pause", kind: CommandKind::Trigger, run: |_, ctx| ctx.toggle_timeline() },
-        Command { id: CommandId::Qvar1_0, label: "Q1: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar1_1, label: "Q1: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar1_2, label: "Q1: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar1_3, label: "Q1: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar2_0, label: "Q2: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar2_1, label: "Q2: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar2_2, label: "Q2: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar2_3, label: "Q2: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar3_0, label: "Q3: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar3_1, label: "Q3: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar3_2, label: "Q3: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar3_3, label: "Q3: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar4_0, label: "Q4: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar4_1, label: "Q4: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar4_2, label: "Q4: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar4_3, label: "Q4: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar5_0, label: "Q5: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar5_1, label: "Q5: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar5_2, label: "Q5: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar5_3, label: "Q5: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar6_0, label: "Q6: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar6_1, label: "Q6: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar6_2, label: "Q6: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar6_3, label: "Q6: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar7_0, label: "Q7: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar7_1, label: "Q7: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar7_2, label: "Q7: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar7_3, label: "Q7: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar8_0, label: "Q8: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar8_1, label: "Q8: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar8_2, label: "Q8: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar8_3, label: "Q8: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar9_0, label: "Q9: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar9_1, label: "Q9: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar9_2, label: "Q9: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar9_3, label: "Q9: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar10_0, label: "Q10: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar10_1, label: "Q10: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar10_2, label: "Q10: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar10_3, label: "Q10: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar11_0, label: "Q11: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar11_1, label: "Q11: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar11_2, label: "Q11: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar11_3, label: "Q11: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar12_0, label: "Q12: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar12_1, label: "Q12: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar12_2, label: "Q12: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar12_3, label: "Q12: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar13_0, label: "Q13: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar13_1, label: "Q13: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar13_2, label: "Q13: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar13_3, label: "Q13: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar14_0, label: "Q14: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar14_1, label: "Q14: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar14_2, label: "Q14: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar14_3, label: "Q14: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar15_0, label: "Q15: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar15_1, label: "Q15: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar15_2, label: "Q15: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar15_3, label: "Q15: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar16_0, label: "Q16: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar16_1, label: "Q16: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar16_2, label: "Q16: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar16_3, label: "Q16: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar17_0, label: "Q17: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar17_1, label: "Q17: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar17_2, label: "Q17: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar17_3, label: "Q17: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar18_0, label: "Q18: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar18_1, label: "Q18: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar18_2, label: "Q18: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar18_3, label: "Q18: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar19_0, label: "Q19: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar19_1, label: "Q19: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar19_2, label: "Q19: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar19_3, label: "Q19: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar20_0, label: "Q20: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar20_1, label: "Q20: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar20_2, label: "Q20: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar20_3, label: "Q20: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar21_0, label: "Q21: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar21_1, label: "Q21: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar21_2, label: "Q21: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar21_3, label: "Q21: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar22_0, label: "Q22: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar22_1, label: "Q22: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar22_2, label: "Q22: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar22_3, label: "Q22: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar23_0, label: "Q23: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar23_1, label: "Q23: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar23_2, label: "Q23: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar23_3, label: "Q23: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar24_0, label: "Q24: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar24_1, label: "Q24: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar24_2, label: "Q24: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar24_3, label: "Q24: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar25_0, label: "Q25: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar25_1, label: "Q25: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar25_2, label: "Q25: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar25_3, label: "Q25: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar26_0, label: "Q26: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar26_1, label: "Q26: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar26_2, label: "Q26: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar26_3, label: "Q26: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar27_0, label: "Q27: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar27_1, label: "Q27: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar27_2, label: "Q27: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar27_3, label: "Q27: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar28_0, label: "Q28: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar28_1, label: "Q28: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar28_2, label: "Q28: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar28_3, label: "Q28: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar29_0, label: "Q29: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar29_1, label: "Q29: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar29_2, label: "Q29: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar29_3, label: "Q29: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar30_0, label: "Q30: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar30_1, label: "Q30: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar30_2, label: "Q30: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar30_3, label: "Q30: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar31_0, label: "Q31: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar31_1, label: "Q31: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar31_2, label: "Q31: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar31_3, label: "Q31: Deck 3", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar32_0, label: "Q32: Deck 0", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar32_1, label: "Q32: Deck 1", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar32_2, label: "Q32: Deck 2", kind: CommandKind::Range, run: noop },
-        Command { id: CommandId::Qvar32_3, label: "Q32: Deck 3", kind: CommandKind::Range, run: noop },
+        Command { id: CommandId::Qvar1_0, label: "Q1: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 1, q_var_value(v)) },
+        Command { id: CommandId::Qvar1_1, label: "Q1: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 1, q_var_value(v)) },
+        Command { id: CommandId::Qvar1_2, label: "Q1: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 1, q_var_value(v)) },
+        Command { id: CommandId::Qvar1_3, label: "Q1: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 1, q_var_value(v)) },
+        Command { id: CommandId::Qvar2_0, label: "Q2: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 2, q_var_value(v)) },
+        Command { id: CommandId::Qvar2_1, label: "Q2: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 2, q_var_value(v)) },
+        Command { id: CommandId::Qvar2_2, label: "Q2: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 2, q_var_value(v)) },
+        Command { id: CommandId::Qvar2_3, label: "Q2: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 2, q_var_value(v)) },
+        Command { id: CommandId::Qvar3_0, label: "Q3: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 3, q_var_value(v)) },
+        Command { id: CommandId::Qvar3_1, label: "Q3: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 3, q_var_value(v)) },
+        Command { id: CommandId::Qvar3_2, label: "Q3: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 3, q_var_value(v)) },
+        Command { id: CommandId::Qvar3_3, label: "Q3: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 3, q_var_value(v)) },
+        Command { id: CommandId::Qvar4_0, label: "Q4: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 4, q_var_value(v)) },
+        Command { id: CommandId::Qvar4_1, label: "Q4: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 4, q_var_value(v)) },
+        Command { id: CommandId::Qvar4_2, label: "Q4: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 4, q_var_value(v)) },
+        Command { id: CommandId::Qvar4_3, label: "Q4: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 4, q_var_value(v)) },
+        Command { id: CommandId::Qvar5_0, label: "Q5: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 5, q_var_value(v)) },
+        Command { id: CommandId::Qvar5_1, label: "Q5: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 5, q_var_value(v)) },
+        Command { id: CommandId::Qvar5_2, label: "Q5: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 5, q_var_value(v)) },
+        Command { id: CommandId::Qvar5_3, label: "Q5: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 5, q_var_value(v)) },
+        Command { id: CommandId::Qvar6_0, label: "Q6: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 6, q_var_value(v)) },
+        Command { id: CommandId::Qvar6_1, label: "Q6: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 6, q_var_value(v)) },
+        Command { id: CommandId::Qvar6_2, label: "Q6: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 6, q_var_value(v)) },
+        Command { id: CommandId::Qvar6_3, label: "Q6: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 6, q_var_value(v)) },
+        Command { id: CommandId::Qvar7_0, label: "Q7: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 7, q_var_value(v)) },
+        Command { id: CommandId::Qvar7_1, label: "Q7: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 7, q_var_value(v)) },
+        Command { id: CommandId::Qvar7_2, label: "Q7: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 7, q_var_value(v)) },
+        Command { id: CommandId::Qvar7_3, label: "Q7: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 7, q_var_value(v)) },
+        Command { id: CommandId::Qvar8_0, label: "Q8: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 8, q_var_value(v)) },
+        Command { id: CommandId::Qvar8_1, label: "Q8: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 8, q_var_value(v)) },
+        Command { id: CommandId::Qvar8_2, label: "Q8: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 8, q_var_value(v)) },
+        Command { id: CommandId::Qvar8_3, label: "Q8: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 8, q_var_value(v)) },
+        Command { id: CommandId::Qvar9_0, label: "Q9: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 9, q_var_value(v)) },
+        Command { id: CommandId::Qvar9_1, label: "Q9: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 9, q_var_value(v)) },
+        Command { id: CommandId::Qvar9_2, label: "Q9: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 9, q_var_value(v)) },
+        Command { id: CommandId::Qvar9_3, label: "Q9: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 9, q_var_value(v)) },
+        Command { id: CommandId::Qvar10_0, label: "Q10: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 10, q_var_value(v)) },
+        Command { id: CommandId::Qvar10_1, label: "Q10: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 10, q_var_value(v)) },
+        Command { id: CommandId::Qvar10_2, label: "Q10: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 10, q_var_value(v)) },
+        Command { id: CommandId::Qvar10_3, label: "Q10: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 10, q_var_value(v)) },
+        Command { id: CommandId::Qvar11_0, label: "Q11: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 11, q_var_value(v)) },
+        Command { id: CommandId::Qvar11_1, label: "Q11: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 11, q_var_value(v)) },
+        Command { id: CommandId::Qvar11_2, label: "Q11: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 11, q_var_value(v)) },
+        Command { id: CommandId::Qvar11_3, label: "Q11: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 11, q_var_value(v)) },
+        Command { id: CommandId::Qvar12_0, label: "Q12: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 12, q_var_value(v)) },
+        Command { id: CommandId::Qvar12_1, label: "Q12: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 12, q_var_value(v)) },
+        Command { id: CommandId::Qvar12_2, label: "Q12: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 12, q_var_value(v)) },
+        Command { id: CommandId::Qvar12_3, label: "Q12: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 12, q_var_value(v)) },
+        Command { id: CommandId::Qvar13_0, label: "Q13: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 13, q_var_value(v)) },
+        Command { id: CommandId::Qvar13_1, label: "Q13: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 13, q_var_value(v)) },
+        Command { id: CommandId::Qvar13_2, label: "Q13: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 13, q_var_value(v)) },
+        Command { id: CommandId::Qvar13_3, label: "Q13: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 13, q_var_value(v)) },
+        Command { id: CommandId::Qvar14_0, label: "Q14: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 14, q_var_value(v)) },
+        Command { id: CommandId::Qvar14_1, label: "Q14: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 14, q_var_value(v)) },
+        Command { id: CommandId::Qvar14_2, label: "Q14: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 14, q_var_value(v)) },
+        Command { id: CommandId::Qvar14_3, label: "Q14: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 14, q_var_value(v)) },
+        Command { id: CommandId::Qvar15_0, label: "Q15: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 15, q_var_value(v)) },
+        Command { id: CommandId::Qvar15_1, label: "Q15: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 15, q_var_value(v)) },
+        Command { id: CommandId::Qvar15_2, label: "Q15: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 15, q_var_value(v)) },
+        Command { id: CommandId::Qvar15_3, label: "Q15: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 15, q_var_value(v)) },
+        Command { id: CommandId::Qvar16_0, label: "Q16: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 16, q_var_value(v)) },
+        Command { id: CommandId::Qvar16_1, label: "Q16: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 16, q_var_value(v)) },
+        Command { id: CommandId::Qvar16_2, label: "Q16: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 16, q_var_value(v)) },
+        Command { id: CommandId::Qvar16_3, label: "Q16: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 16, q_var_value(v)) },
+        Command { id: CommandId::Qvar17_0, label: "Q17: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 17, q_var_value(v)) },
+        Command { id: CommandId::Qvar17_1, label: "Q17: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 17, q_var_value(v)) },
+        Command { id: CommandId::Qvar17_2, label: "Q17: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 17, q_var_value(v)) },
+        Command { id: CommandId::Qvar17_3, label: "Q17: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 17, q_var_value(v)) },
+        Command { id: CommandId::Qvar18_0, label: "Q18: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 18, q_var_value(v)) },
+        Command { id: CommandId::Qvar18_1, label: "Q18: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 18, q_var_value(v)) },
+        Command { id: CommandId::Qvar18_2, label: "Q18: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 18, q_var_value(v)) },
+        Command { id: CommandId::Qvar18_3, label: "Q18: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 18, q_var_value(v)) },
+        Command { id: CommandId::Qvar19_0, label: "Q19: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 19, q_var_value(v)) },
+        Command { id: CommandId::Qvar19_1, label: "Q19: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 19, q_var_value(v)) },
+        Command { id: CommandId::Qvar19_2, label: "Q19: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 19, q_var_value(v)) },
+        Command { id: CommandId::Qvar19_3, label: "Q19: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 19, q_var_value(v)) },
+        Command { id: CommandId::Qvar20_0, label: "Q20: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 20, q_var_value(v)) },
+        Command { id: CommandId::Qvar20_1, label: "Q20: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 20, q_var_value(v)) },
+        Command { id: CommandId::Qvar20_2, label: "Q20: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 20, q_var_value(v)) },
+        Command { id: CommandId::Qvar20_3, label: "Q20: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 20, q_var_value(v)) },
+        Command { id: CommandId::Qvar21_0, label: "Q21: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 21, q_var_value(v)) },
+        Command { id: CommandId::Qvar21_1, label: "Q21: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 21, q_var_value(v)) },
+        Command { id: CommandId::Qvar21_2, label: "Q21: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 21, q_var_value(v)) },
+        Command { id: CommandId::Qvar21_3, label: "Q21: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 21, q_var_value(v)) },
+        Command { id: CommandId::Qvar22_0, label: "Q22: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 22, q_var_value(v)) },
+        Command { id: CommandId::Qvar22_1, label: "Q22: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 22, q_var_value(v)) },
+        Command { id: CommandId::Qvar22_2, label: "Q22: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 22, q_var_value(v)) },
+        Command { id: CommandId::Qvar22_3, label: "Q22: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 22, q_var_value(v)) },
+        Command { id: CommandId::Qvar23_0, label: "Q23: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 23, q_var_value(v)) },
+        Command { id: CommandId::Qvar23_1, label: "Q23: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 23, q_var_value(v)) },
+        Command { id: CommandId::Qvar23_2, label: "Q23: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 23, q_var_value(v)) },
+        Command { id: CommandId::Qvar23_3, label: "Q23: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 23, q_var_value(v)) },
+        Command { id: CommandId::Qvar24_0, label: "Q24: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 24, q_var_value(v)) },
+        Command { id: CommandId::Qvar24_1, label: "Q24: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 24, q_var_value(v)) },
+        Command { id: CommandId::Qvar24_2, label: "Q24: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 24, q_var_value(v)) },
+        Command { id: CommandId::Qvar24_3, label: "Q24: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 24, q_var_value(v)) },
+        Command { id: CommandId::Qvar25_0, label: "Q25: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 25, q_var_value(v)) },
+        Command { id: CommandId::Qvar25_1, label: "Q25: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 25, q_var_value(v)) },
+        Command { id: CommandId::Qvar25_2, label: "Q25: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 25, q_var_value(v)) },
+        Command { id: CommandId::Qvar25_3, label: "Q25: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 25, q_var_value(v)) },
+        Command { id: CommandId::Qvar26_0, label: "Q26: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 26, q_var_value(v)) },
+        Command { id: CommandId::Qvar26_1, label: "Q26: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 26, q_var_value(v)) },
+        Command { id: CommandId::Qvar26_2, label: "Q26: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 26, q_var_value(v)) },
+        Command { id: CommandId::Qvar26_3, label: "Q26: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 26, q_var_value(v)) },
+        Command { id: CommandId::Qvar27_0, label: "Q27: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 27, q_var_value(v)) },
+        Command { id: CommandId::Qvar27_1, label: "Q27: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 27, q_var_value(v)) },
+        Command { id: CommandId::Qvar27_2, label: "Q27: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 27, q_var_value(v)) },
+        Command { id: CommandId::Qvar27_3, label: "Q27: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 27, q_var_value(v)) },
+        Command { id: CommandId::Qvar28_0, label: "Q28: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 28, q_var_value(v)) },
+        Command { id: CommandId::Qvar28_1, label: "Q28: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 28, q_var_value(v)) },
+        Command { id: CommandId::Qvar28_2, label: "Q28: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 28, q_var_value(v)) },
+        Command { id: CommandId::Qvar28_3, label: "Q28: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 28, q_var_value(v)) },
+        Command { id: CommandId::Qvar29_0, label: "Q29: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 29, q_var_value(v)) },
+        Command { id: CommandId::Qvar29_1, label: "Q29: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 29, q_var_value(v)) },
+        Command { id: CommandId::Qvar29_2, label: "Q29: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 29, q_var_value(v)) },
+        Command { id: CommandId::Qvar29_3, label: "Q29: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 29, q_var_value(v)) },
+        Command { id: CommandId::Qvar30_0, label: "Q30: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 30, q_var_value(v)) },
+        Command { id: CommandId::Qvar30_1, label: "Q30: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 30, q_var_value(v)) },
+        Command { id: CommandId::Qvar30_2, label: "Q30: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 30, q_var_value(v)) },
+        Command { id: CommandId::Qvar30_3, label: "Q30: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 30, q_var_value(v)) },
+        Command { id: CommandId::Qvar31_0, label: "Q31: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 31, q_var_value(v)) },
+        Command { id: CommandId::Qvar31_1, label: "Q31: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 31, q_var_value(v)) },
+        Command { id: CommandId::Qvar31_2, label: "Q31: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 31, q_var_value(v)) },
+        Command { id: CommandId::Qvar31_3, label: "Q31: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 31, q_var_value(v)) },
+        Command { id: CommandId::Qvar32_0, label: "Q32: Deck 0", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(0, 32, q_var_value(v)) },
+        Command { id: CommandId::Qvar32_1, label: "Q32: Deck 1", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(1, 32, q_var_value(v)) },
+        Command { id: CommandId::Qvar32_2, label: "Q32: Deck 2", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(2, 32, q_var_value(v)) },
+        Command { id: CommandId::Qvar32_3, label: "Q32: Deck 3", kind: CommandKind::Range, run: |v, ctx| ctx.set_q_var(3, 32, q_var_value(v)) },
     ]
 }
 
@@ -670,6 +693,9 @@ mod tests {
         /// log instead of 8 near-identical `Vec`s, so a test can assert
         /// which multiplier a `CommandId::Time*` actually reached.
         time_calls: Vec<(&'static str, usize, f64)>,
+        /// `(slot, n, value)` for `set_q_var`, so a test can assert which of
+        /// the 128 `CommandId::Qvar*` reached which (deck, q-var) pair.
+        q_var_calls: Vec<(usize, usize, f64)>,
     }
 
     impl CommandContext for MockCtx {
@@ -780,6 +806,9 @@ mod tests {
         }
         fn set_time_wave(&mut self, slot: usize, v: f64) {
             self.time_calls.push(("wave", slot, v));
+        }
+        fn set_q_var(&mut self, slot: usize, n: usize, v: f64) {
+            self.q_var_calls.push((slot, n, v));
         }
     }
 
@@ -1241,48 +1270,94 @@ mod tests {
     mod default_registry_qvar_live_editing {
         use super::*;
 
+        /// The 128 `CommandId::Qvar*` in declaration order: q-var 1..=32
+        /// major, deck slot 0..=3 minor. Position `j` therefore *is* the
+        /// (slot, n) pair the command must reach: `n = j / 4 + 1`,
+        /// `slot = j % 4`: which is what
+        /// `every_qvar_command_reaches_its_own_q_var_and_slot` checks, the
+        /// same copy-paste guard `default_registry_time_params::MATRIX` is
+        /// for Time.
+        const QVAR_IDS: [CommandId; 128] = [
+            CommandId::Qvar1_0, CommandId::Qvar1_1, CommandId::Qvar1_2, CommandId::Qvar1_3,
+            CommandId::Qvar2_0, CommandId::Qvar2_1, CommandId::Qvar2_2, CommandId::Qvar2_3,
+            CommandId::Qvar3_0, CommandId::Qvar3_1, CommandId::Qvar3_2, CommandId::Qvar3_3,
+            CommandId::Qvar4_0, CommandId::Qvar4_1, CommandId::Qvar4_2, CommandId::Qvar4_3,
+            CommandId::Qvar5_0, CommandId::Qvar5_1, CommandId::Qvar5_2, CommandId::Qvar5_3,
+            CommandId::Qvar6_0, CommandId::Qvar6_1, CommandId::Qvar6_2, CommandId::Qvar6_3,
+            CommandId::Qvar7_0, CommandId::Qvar7_1, CommandId::Qvar7_2, CommandId::Qvar7_3,
+            CommandId::Qvar8_0, CommandId::Qvar8_1, CommandId::Qvar8_2, CommandId::Qvar8_3,
+            CommandId::Qvar9_0, CommandId::Qvar9_1, CommandId::Qvar9_2, CommandId::Qvar9_3,
+            CommandId::Qvar10_0, CommandId::Qvar10_1, CommandId::Qvar10_2, CommandId::Qvar10_3,
+            CommandId::Qvar11_0, CommandId::Qvar11_1, CommandId::Qvar11_2, CommandId::Qvar11_3,
+            CommandId::Qvar12_0, CommandId::Qvar12_1, CommandId::Qvar12_2, CommandId::Qvar12_3,
+            CommandId::Qvar13_0, CommandId::Qvar13_1, CommandId::Qvar13_2, CommandId::Qvar13_3,
+            CommandId::Qvar14_0, CommandId::Qvar14_1, CommandId::Qvar14_2, CommandId::Qvar14_3,
+            CommandId::Qvar15_0, CommandId::Qvar15_1, CommandId::Qvar15_2, CommandId::Qvar15_3,
+            CommandId::Qvar16_0, CommandId::Qvar16_1, CommandId::Qvar16_2, CommandId::Qvar16_3,
+            CommandId::Qvar17_0, CommandId::Qvar17_1, CommandId::Qvar17_2, CommandId::Qvar17_3,
+            CommandId::Qvar18_0, CommandId::Qvar18_1, CommandId::Qvar18_2, CommandId::Qvar18_3,
+            CommandId::Qvar19_0, CommandId::Qvar19_1, CommandId::Qvar19_2, CommandId::Qvar19_3,
+            CommandId::Qvar20_0, CommandId::Qvar20_1, CommandId::Qvar20_2, CommandId::Qvar20_3,
+            CommandId::Qvar21_0, CommandId::Qvar21_1, CommandId::Qvar21_2, CommandId::Qvar21_3,
+            CommandId::Qvar22_0, CommandId::Qvar22_1, CommandId::Qvar22_2, CommandId::Qvar22_3,
+            CommandId::Qvar23_0, CommandId::Qvar23_1, CommandId::Qvar23_2, CommandId::Qvar23_3,
+            CommandId::Qvar24_0, CommandId::Qvar24_1, CommandId::Qvar24_2, CommandId::Qvar24_3,
+            CommandId::Qvar25_0, CommandId::Qvar25_1, CommandId::Qvar25_2, CommandId::Qvar25_3,
+            CommandId::Qvar26_0, CommandId::Qvar26_1, CommandId::Qvar26_2, CommandId::Qvar26_3,
+            CommandId::Qvar27_0, CommandId::Qvar27_1, CommandId::Qvar27_2, CommandId::Qvar27_3,
+            CommandId::Qvar28_0, CommandId::Qvar28_1, CommandId::Qvar28_2, CommandId::Qvar28_3,
+            CommandId::Qvar29_0, CommandId::Qvar29_1, CommandId::Qvar29_2, CommandId::Qvar29_3,
+            CommandId::Qvar30_0, CommandId::Qvar30_1, CommandId::Qvar30_2, CommandId::Qvar30_3,
+            CommandId::Qvar31_0, CommandId::Qvar31_1, CommandId::Qvar31_2, CommandId::Qvar31_3,
+            CommandId::Qvar32_0, CommandId::Qvar32_1, CommandId::Qvar32_2, CommandId::Qvar32_3,
+        ];
+
         #[test]
         fn contains_the_128_qvar_n_slot_commands() {
             let reg = create_default_registry();
-            let ids: [CommandId; 128] = [
-                CommandId::Qvar1_0, CommandId::Qvar1_1, CommandId::Qvar1_2, CommandId::Qvar1_3,
-                CommandId::Qvar2_0, CommandId::Qvar2_1, CommandId::Qvar2_2, CommandId::Qvar2_3,
-                CommandId::Qvar3_0, CommandId::Qvar3_1, CommandId::Qvar3_2, CommandId::Qvar3_3,
-                CommandId::Qvar4_0, CommandId::Qvar4_1, CommandId::Qvar4_2, CommandId::Qvar4_3,
-                CommandId::Qvar5_0, CommandId::Qvar5_1, CommandId::Qvar5_2, CommandId::Qvar5_3,
-                CommandId::Qvar6_0, CommandId::Qvar6_1, CommandId::Qvar6_2, CommandId::Qvar6_3,
-                CommandId::Qvar7_0, CommandId::Qvar7_1, CommandId::Qvar7_2, CommandId::Qvar7_3,
-                CommandId::Qvar8_0, CommandId::Qvar8_1, CommandId::Qvar8_2, CommandId::Qvar8_3,
-                CommandId::Qvar9_0, CommandId::Qvar9_1, CommandId::Qvar9_2, CommandId::Qvar9_3,
-                CommandId::Qvar10_0, CommandId::Qvar10_1, CommandId::Qvar10_2, CommandId::Qvar10_3,
-                CommandId::Qvar11_0, CommandId::Qvar11_1, CommandId::Qvar11_2, CommandId::Qvar11_3,
-                CommandId::Qvar12_0, CommandId::Qvar12_1, CommandId::Qvar12_2, CommandId::Qvar12_3,
-                CommandId::Qvar13_0, CommandId::Qvar13_1, CommandId::Qvar13_2, CommandId::Qvar13_3,
-                CommandId::Qvar14_0, CommandId::Qvar14_1, CommandId::Qvar14_2, CommandId::Qvar14_3,
-                CommandId::Qvar15_0, CommandId::Qvar15_1, CommandId::Qvar15_2, CommandId::Qvar15_3,
-                CommandId::Qvar16_0, CommandId::Qvar16_1, CommandId::Qvar16_2, CommandId::Qvar16_3,
-                CommandId::Qvar17_0, CommandId::Qvar17_1, CommandId::Qvar17_2, CommandId::Qvar17_3,
-                CommandId::Qvar18_0, CommandId::Qvar18_1, CommandId::Qvar18_2, CommandId::Qvar18_3,
-                CommandId::Qvar19_0, CommandId::Qvar19_1, CommandId::Qvar19_2, CommandId::Qvar19_3,
-                CommandId::Qvar20_0, CommandId::Qvar20_1, CommandId::Qvar20_2, CommandId::Qvar20_3,
-                CommandId::Qvar21_0, CommandId::Qvar21_1, CommandId::Qvar21_2, CommandId::Qvar21_3,
-                CommandId::Qvar22_0, CommandId::Qvar22_1, CommandId::Qvar22_2, CommandId::Qvar22_3,
-                CommandId::Qvar23_0, CommandId::Qvar23_1, CommandId::Qvar23_2, CommandId::Qvar23_3,
-                CommandId::Qvar24_0, CommandId::Qvar24_1, CommandId::Qvar24_2, CommandId::Qvar24_3,
-                CommandId::Qvar25_0, CommandId::Qvar25_1, CommandId::Qvar25_2, CommandId::Qvar25_3,
-                CommandId::Qvar26_0, CommandId::Qvar26_1, CommandId::Qvar26_2, CommandId::Qvar26_3,
-                CommandId::Qvar27_0, CommandId::Qvar27_1, CommandId::Qvar27_2, CommandId::Qvar27_3,
-                CommandId::Qvar28_0, CommandId::Qvar28_1, CommandId::Qvar28_2, CommandId::Qvar28_3,
-                CommandId::Qvar29_0, CommandId::Qvar29_1, CommandId::Qvar29_2, CommandId::Qvar29_3,
-                CommandId::Qvar30_0, CommandId::Qvar30_1, CommandId::Qvar30_2, CommandId::Qvar30_3,
-                CommandId::Qvar31_0, CommandId::Qvar31_1, CommandId::Qvar31_2, CommandId::Qvar31_3,
-                CommandId::Qvar32_0, CommandId::Qvar32_1, CommandId::Qvar32_2, CommandId::Qvar32_3,
-            ];
-            for id in ids {
+            for id in QVAR_IDS {
                 let cmd = reg.get(id);
                 assert!(cmd.is_some(), "missing: {id:?}");
                 assert_eq!(cmd.unwrap().kind, CommandKind::Range, "wrong kind: {id:?}");
             }
+        }
+
+        #[test]
+        fn every_qvar_command_reaches_its_own_q_var_and_slot() {
+            // 128 near-identical registry lines is exactly where a
+            // copy-pasted slot or q-var number hides, and a wrong one is
+            // silent: the knob still moves something.
+            let reg = create_default_registry();
+            for (j, id) in QVAR_IDS.into_iter().enumerate() {
+                let mut ctx = make_ctx();
+                reg.dispatch(id, 0.5, &mut ctx);
+                assert_eq!(ctx.q_var_calls, vec![(j % 4, j / 4 + 1, 0.0)], "{id:?}");
+            }
+        }
+
+        #[test]
+        fn a_dispatched_0_to_1_value_spans_the_panels_minus_2_to_2_range() {
+            // Half travel on a MIDI fader must land exactly on 0, or a
+            // mapped controller could never reach the q-var's own neutral.
+            let reg = create_default_registry();
+            for (v01, expected) in [(0.0, -2.0), (0.25, -1.0), (0.5, 0.0), (1.0, 2.0)] {
+                let mut ctx = make_ctx();
+                reg.dispatch(CommandId::Qvar7_2, v01, &mut ctx);
+                assert_eq!(ctx.q_var_calls, vec![(2, 7, expected)]);
+            }
+        }
+
+        #[test]
+        fn an_out_of_range_dispatch_value_is_clamped_to_the_sliders_range() {
+            // `dispatch`'s contract is 0..1, but OSC and remote-ws are
+            // outside inputs: a q-var beyond -2..2 would silently overflow
+            // the side channel's own range (`engine::preset_patch`), which
+            // clamps too but has no way to report it.
+            let reg = create_default_registry();
+            let mut ctx = make_ctx();
+            reg.dispatch(CommandId::Qvar1_0, 9.0, &mut ctx);
+            reg.dispatch(CommandId::Qvar1_0, -9.0, &mut ctx);
+            assert_eq!(ctx.q_var_calls, vec![(0, 1, 2.0), (0, 1, -2.0)]);
         }
     }
 }

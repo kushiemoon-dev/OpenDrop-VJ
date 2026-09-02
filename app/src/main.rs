@@ -11,6 +11,7 @@ use opendrop_core::show::{DeckBus, Show};
 use opendrop_core::thumb_queue::ThumbJob;
 use opendrop_engine::compositor::{Compositor, LayerInput, COMP_H, COMP_W};
 use opendrop_engine::deck::{self, Deck};
+use opendrop_engine::qvar_patch;
 use opendrop_engine::readback::FrameReadback;
 use opendrop_engine::time_patch;
 use opendrop_engine::timing::PassTimer;
@@ -151,6 +152,7 @@ pub(crate) enum Panel {
     Snapshot,
     Timeline,
     Time,
+    Qvar,
     Output,
     Midi,
     // Step 9: split from a single `Ndi` variant. `ndi.rs`'s `show` itself
@@ -190,6 +192,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Snapshot => Panel::Snapshot,
             config::PanelId::Timeline => Panel::Timeline,
             config::PanelId::Time => Panel::Time,
+            config::PanelId::Qvar => Panel::Qvar,
             config::PanelId::Output => Panel::Output,
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
@@ -222,6 +225,7 @@ impl From<Panel> for config::PanelId {
             Panel::Snapshot => config::PanelId::Snapshot,
             Panel::Timeline => config::PanelId::Timeline,
             Panel::Time => config::PanelId::Time,
+            Panel::Qvar => config::PanelId::Qvar,
             Panel::Output => config::PanelId::Output,
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
@@ -506,15 +510,24 @@ struct AppState {
     /// re-registered per frame, which would leak a texture handle in
     /// egui_glow's painter every tick.
     deck_tex_ids: [egui::TextureId; 4],
-    /// What each deck's running preset already holds for each of the 8 Time
-    /// params: the baseline `next_time_param_to_push` diffs against. Written
-    /// at preset-load time (the values `patch_preset` baked in) and on every
-    /// push, so the side channel only ever carries real changes.
-    time_param_last_sent: [[f64; time_patch::TIME_PARAM_COUNT]; deck::DECK_COUNT],
+    /// What each deck's running preset already holds for each of the
+    /// [`CHANNEL_PARAM_COUNT`] side-channel parameters: the baseline
+    /// `next_param_to_push` diffs against. Written at preset-load time (the
+    /// values `patch_preset` baked in) and on every push, so the side channel
+    /// only ever carries real changes.
+    param_last_sent: [[f64; CHANNEL_PARAM_COUNT]; deck::DECK_COUNT],
     /// Per-deck round-robin position for that scan, so several
-    /// simultaneously-moving Time params share the one-word-per-frame channel
-    /// instead of the lowest-numbered one monopolising it.
-    time_param_cursor: [usize; deck::DECK_COUNT],
+    /// simultaneously-moving parameters share the one-word-per-frame channel
+    /// instead of the lowest-numbered one monopolising it. One cursor for
+    /// Time *and* Qvar together: they compete for the same word, so two
+    /// cursors would just be two families taking turns starving each other.
+    param_cursor: [usize; deck::DECK_COUNT],
+    /// Which q-var watches are baked into each deck's *currently loaded*
+    /// preset. Unlike a watched value, the set of watches is compiled into
+    /// the preset text at load time, so this is what `show.q_var_params` is
+    /// compared against each frame to decide whether that deck needs its
+    /// preset re-patched and reloaded (`resync_deck_q_var_watches`).
+    deck_q_var_watches: [[bool; opendrop_core::q_vars::Q_VAR_COUNT]; deck::DECK_COUNT],
     /// Which panel the control window currently shows: see `Panel`.
     active_panel: Panel,
     /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
@@ -755,9 +768,16 @@ fn should_spawn_preflight(
     Some(path)
 }
 
-/// Loads `path` onto `deck` through the Time-patched path, and resyncs the
-/// caller's per-deck "already in the preset" baseline to the values that were
-/// just baked into it.
+/// Every parameter that competes for one deck's side channel: the 8 Time
+/// multipliers first (`engine::time_patch`), then the 32 Qvar watches
+/// (`engine::qvar_patch`). One flat space on purpose: the channel carries a
+/// single word per deck per frame for *both* families, so they have to be
+/// scheduled against each other rather than each against itself.
+const CHANNEL_PARAM_COUNT: usize = time_patch::TIME_PARAM_COUNT + qvar_patch::QVAR_WATCH_COUNT;
+
+/// Loads `path` onto `deck` through the patched path, and resyncs the
+/// caller's per-deck "already in the preset" baselines to what was just
+/// baked into it.
 ///
 /// **The only way a preset reaches a deck in this app**, on purpose. Once
 /// `Deck::set_param` has been used on a deck, projectM keeps the code word in
@@ -782,48 +802,145 @@ fn should_spawn_preflight(
 fn load_preset_onto_deck(
     deck: &Deck,
     path: &Path,
-    params: &opendrop_core::time_params::DeckTimeParams,
-    last_sent: &mut [f64; time_patch::TIME_PARAM_COUNT],
+    time: &opendrop_core::time_params::DeckTimeParams,
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+    last_sent: &mut [f64; CHANNEL_PARAM_COUNT],
+    baked_watches: &mut [bool; opendrop_core::q_vars::Q_VAR_COUNT],
     smooth_transition: bool,
 ) -> Result<(), String> {
+    let mut targets = time_patch::targets(time);
+    targets.extend(qvar_patch::targets(q_vars));
+    // Recorded before the load can fail, and unlike `last_sent` below:
+    // this is "what this deck was last *asked* to hold", and its only
+    // reader (`resync_deck_q_var_watches`) reloads whenever it disagrees
+    // with `Show`. Updating it only on success would turn a preset projectM
+    // rejects into a fresh reload attempt on every single frame.
+    *baked_watches = q_vars.enabled;
     deck.load_preset_patched(
         path,
-        &time_patch::targets(params),
+        &targets,
         opendrop_engine::preset_patch::MEASURED_DEFAULT_FPS,
         smooth_transition,
     )?;
+    // Not optional, and not the same call `Deck::reset_param_channel`'s first
+    // paragraph is about: the word left in the channel by the last
+    // `set_param` outlives this load, and the new preset's prologue latches
+    // it on its first frame, over the `initial` just baked in. Found end to
+    // end against real libprojectM by removing and re-adding a q-var, which
+    // is the case where the two disagree (`with_q_var_watch` zeroes the
+    // value): the preset came back up holding the pre-removal value while
+    // the panel read 0.00, and no push could fix it because the value the
+    // push loop compares against was already correct.
+    deck.reset_param_channel();
     // `patch_preset` bakes these in as the preset's starting values, so the
-    // push loop must not re-send them.
-    *last_sent = time_patch::param_values(params);
+    // push loop must not re-send them. Only on success: a rejected load
+    // leaves the deck on its previous preset, which still holds the previous
+    // baseline.
+    *last_sent = channel_values(time, q_vars);
     Ok(())
 }
 
-/// Picks the one Time param to push into a deck's running preset this frame:
-/// the first one at or after `cursor` (wrapping) whose value has drifted from
-/// what the preset already holds, paired with its side-channel index.
+/// The current value of each of the [`CHANNEL_PARAM_COUNT`] side-channel
+/// parameters, in the flat order `next_param_to_push` and
+/// `AppState::param_last_sent` both index by.
+fn channel_values(
+    time: &opendrop_core::time_params::DeckTimeParams,
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+) -> [f64; CHANNEL_PARAM_COUNT] {
+    let time_values = time_patch::param_values(time);
+    std::array::from_fn(|p| match p.checked_sub(time_patch::TIME_PARAM_COUNT) {
+        None => time_values[p],
+        Some(watch) => q_vars.value[watch],
+    })
+}
+
+/// Where each of those parameters writes on the side channel this frame, or
+/// `None` for one that cannot be pushed at all right now.
+///
+/// Two reasons a parameter is unpushable, and both must skip rather than
+/// consume the frame's one word: Time's Speed has no reachable Milkdrop
+/// variable (`engine::time_patch`), and a q-var that is not currently watched
+/// has no register in the loaded preset to latch into (`engine::qvar_patch`).
+fn channel_indices(
+    q_vars: &opendrop_core::q_vars::DeckQVarParams,
+) -> [Option<u16>; CHANNEL_PARAM_COUNT] {
+    std::array::from_fn(|p| match p.checked_sub(time_patch::TIME_PARAM_COUNT) {
+        None => time_patch::side_channel_index(p),
+        Some(watch) => qvar_patch::side_channel_index(watch).filter(|_| q_vars.enabled[watch]),
+    })
+}
+
+/// Picks the one parameter to push into a deck's running preset this frame:
+/// the first one at or after `cursor` (wrapping) that is pushable at all and
+/// whose value has drifted from what the preset already holds, paired with
+/// its side-channel index.
 ///
 /// One per deck per frame is the channel's hard capacity: it is a single
 /// `projectm_set_fps` word per projectM instance per frame (see
-/// `engine::preset_patch`). The scan starts at a rotating cursor rather than
-/// at 0 so a continuously-moving param (an LFO target, once Step 11 lands)
-/// cannot starve the others: with K params moving at once each is refreshed
-/// every K frames, instead of the lowest-numbered one taking the channel
-/// forever. A single slider dragged by hand is the common case and gets the
-/// full frame rate.
-///
-/// Params with no side-channel index are skipped (Speed: see
-/// `engine::time_patch`), so they never consume a frame's worth of bandwidth.
-fn next_time_param_to_push(
-    current: &[f64; time_patch::TIME_PARAM_COUNT],
-    last_sent: &[f64; time_patch::TIME_PARAM_COUNT],
+/// `engine::preset_patch`): and Time and Qvar share it, which is why this
+/// scans one flat list instead of one list each. The scan starts at a
+/// rotating cursor rather than at 0 so a continuously-moving param (an LFO
+/// target, once Step 11 lands) cannot starve the others: with K params moving
+/// at once each is refreshed every K frames, instead of the lowest-numbered
+/// one taking the channel forever. A single slider dragged by hand is the
+/// common case and gets the full frame rate.
+fn next_param_to_push(
+    current: &[f64; CHANNEL_PARAM_COUNT],
+    indices: &[Option<u16>; CHANNEL_PARAM_COUNT],
+    last_sent: &[f64; CHANNEL_PARAM_COUNT],
     cursor: usize,
 ) -> Option<(usize, u16)> {
-    (0..time_patch::TIME_PARAM_COUNT)
-        .map(|offset| (cursor + offset) % time_patch::TIME_PARAM_COUNT)
+    (0..CHANNEL_PARAM_COUNT)
+        .map(|offset| (cursor + offset) % CHANNEL_PARAM_COUNT)
         .find_map(|param| {
-            let index = time_patch::side_channel_index(param)?;
+            let index = indices[param]?;
             (current[param] != last_sent[param]).then_some((param, index))
         })
+}
+
+/// Re-patches and reloads deck `i`'s current preset when the set of q-vars it
+/// overrides no longer matches `Show`: the one thing about Qvar that the
+/// per-frame side channel cannot carry.
+///
+/// A watched *value* is a register the patched preset already has; the *set*
+/// of watches decides which registers and which `q{n} = od_p{i};` lines exist
+/// at all, and those are compiled in when the preset text is loaded. So
+/// adding or removing a watch costs a reload, which re-runs the preset's
+/// `per_frame_init` and restarts its own animation exactly as switching
+/// preset does. That is the accepted cost of an explicit, occasional click;
+/// see `engine::qvar_patch` for the alternative that was weighed against it.
+///
+/// Must be called with deck `i`'s GL context current. Loads hard-cut
+/// (`smooth_transition: false`): the target is the preset already on the
+/// deck, and cross-fading a preset with itself would only smear the
+/// animation restart over a second instead of hiding it.
+fn resync_deck_q_var_watches(state: &mut AppState, i: usize) {
+    // Cloned rather than borrowed so the `&mut` fields below stay reachable;
+    // this runs on a watch add/remove, not per frame.
+    let Some(path) = state.path_by_name.get(&state.deck_preset_names[i]).cloned() else {
+        // No known file for what this deck is showing (a preset that has
+        // left the catalog since it was loaded). Record the watches as baked
+        // anyway so this does not retry every frame; they take effect at the
+        // deck's next real preset load.
+        state.deck_q_var_watches[i] = state.show.q_var_params[i].enabled;
+        return;
+    };
+    match load_preset_onto_deck(
+        &state.decks[i],
+        &path,
+        &state.show.time_params[i],
+        &state.show.q_var_params[i],
+        &mut state.param_last_sent[i],
+        &mut state.deck_q_var_watches[i],
+        false,
+    ) {
+        Ok(()) => {
+            state.preset_errors.remove(&i);
+        }
+        Err(e) => {
+            state.preset_errors.insert(i, e);
+        }
+    }
 }
 
 /// Whether MIDI learn mode has finished for the command being learned: the
@@ -1073,6 +1190,9 @@ fn ui_root(
             Panel::Time => {
                 ui::time::show(ui, &mut perform.show.time_params, perform.show.selected_slot);
             }
+            Panel::Qvar => {
+                ui::qvar::show(ui, &mut perform.show.q_var_params, perform.show.selected_slot);
+            }
             Panel::Output => {
                 ui::output::show(ui, output.event_loop, output.output_window, output.selected_output_monitor);
             }
@@ -1236,7 +1356,9 @@ impl ApplicationHandler for App {
                                 &state.decks[slot],
                                 path,
                                 &state.show.time_params[slot],
-                                &mut state.time_param_last_sent[slot],
+                                &state.show.q_var_params[slot],
+                                &mut state.param_last_sent[slot],
+                                &mut state.deck_q_var_watches[slot],
                                 state.transition_seconds > 0.0,
                             ) {
                                 state.preset_errors.insert(slot, e);
@@ -1510,23 +1632,33 @@ impl ApplicationHandler for App {
                 if let Some((w, h)) = state.pending_mesh_size[i].take() {
                     state.decks[i].set_mesh_size(w, h);
                 }
-                // Time params (Step 8 of the Phase 8 VJ-panels plan): at most
-                // one changed value per deck per frame, written into the
+                // Qvar watch set (Step 9): the only Time/Qvar change the
+                // side channel below cannot carry, because which q-vars a
+                // preset overrides is compiled into its text. Before the
+                // push, so a watch added this frame is already in the preset
+                // when its value is sent.
+                if state.show.q_var_params[i].enabled != state.deck_q_var_watches[i] {
+                    resync_deck_q_var_watches(state, i);
+                }
+                // Time and Qvar values (Steps 8 and 9 of the Phase 8
+                // VJ-panels plan): at most one changed value per deck per
+                // frame, shared between the two families, written into the
                 // running preset through the side channel: no reload, so the
                 // preset's own animation state is untouched (see
-                // `engine::preset_patch`). Here, not on the setter, because
+                // `engine::preset_patch`). Here, not on the setters, because
                 // the channel is a per-frame slot and because this is where
                 // this deck's context is already current, same rule
                 // `set_mesh_size` follows just above. Before `render_frame`:
                 // a word written after it would not reach the frame that was
                 // just drawn.
-                let time_values = time_patch::param_values(&state.show.time_params[i]);
+                let values = channel_values(&state.show.time_params[i], &state.show.q_var_params[i]);
+                let indices = channel_indices(&state.show.q_var_params[i]);
                 if let Some((param, index)) =
-                    next_time_param_to_push(&time_values, &state.time_param_last_sent[i], state.time_param_cursor[i])
+                    next_param_to_push(&values, &indices, &state.param_last_sent[i], state.param_cursor[i])
                 {
-                    state.decks[i].set_param(index, time_values[param]);
-                    state.time_param_last_sent[i][param] = time_values[param];
-                    state.time_param_cursor[i] = (param + 1) % time_patch::TIME_PARAM_COUNT;
+                    state.decks[i].set_param(index, values[param]);
+                    state.param_last_sent[i][param] = values[param];
+                    state.param_cursor[i] = (param + 1) % CHANNEL_PARAM_COUNT;
                 }
                 state.decks[i].render_frame(&audio.pcm);
                 if !visible && state.invisible_mode == InvisibleMode::Eco {
@@ -2282,12 +2414,14 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
             deck::DECK_COUNT
         ));
     }
-    // Every deck starts on neutral Time params (`Show::default`), and the
-    // 4 bootstrap presets go through the same patched load path as every
-    // later one: see `load_preset_onto_deck` on why that is not optional.
+    // Every deck starts on neutral Time params and no q-var watches
+    // (`Show::default`), and the 4 bootstrap presets go through the same
+    // patched load path as every later one: see `load_preset_onto_deck` on
+    // why that is not optional.
     let neutral_time_params = opendrop_core::time_params::DeckTimeParams::default();
-    let mut time_param_last_sent =
-        [time_patch::param_values(&neutral_time_params); deck::DECK_COUNT];
+    let unwatched_q_vars = opendrop_core::q_vars::default_q_var_params();
+    let mut param_last_sent = [channel_values(&neutral_time_params, &unwatched_q_vars); deck::DECK_COUNT];
+    let mut deck_q_var_watches = [unwatched_q_vars.enabled; deck::DECK_COUNT];
     // Seeds `AppState::preset_errors` below. A bootstrap preset projectM
     // rejects must not abort startup: that deck just comes up empty, exactly
     // as it did before `Deck` reported load failures at all: but it must not
@@ -2296,7 +2430,15 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let mut preset_errors: HashMap<usize, String> = HashMap::new();
     for (i, dk) in decks.iter().enumerate() {
         dk.context.make_current(&dk.surface).map_err(|e| format!("make_current(deck {i}) failed: {e}"))?;
-        match load_preset_onto_deck(dk, &presets[i], &neutral_time_params, &mut time_param_last_sent[i], false) {
+        match load_preset_onto_deck(
+            dk,
+            &presets[i],
+            &neutral_time_params,
+            &unwatched_q_vars,
+            &mut param_last_sent[i],
+            &mut deck_q_var_watches[i],
+            false,
+        ) {
             Ok(()) => println!("[app] deck {i} preset: {}", presets[i].display()),
             Err(e) => {
                 eprintln!("[app] deck {i} bootstrap preset {} failed to load: {e}", presets[i].display());
@@ -2544,8 +2686,9 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         invisible_mode: ui_config.invisible_mode,
         pending_mesh_size: [None; deck::DECK_COUNT],
-        time_param_last_sent,
-        time_param_cursor: [0; deck::DECK_COUNT],
+        param_last_sent,
+        param_cursor: [0; deck::DECK_COUNT],
+        deck_q_var_watches,
         show,
         registry: create_default_registry(),
         // Empty `ui_config.keymap` means "no persisted remapping yet" (first
@@ -3043,27 +3186,66 @@ mod tests {
         }
     }
 
-    /// Step 8: the per-frame Time push loop's scheduling half: which single
-    /// param gets the one word this deck's side channel carries this frame.
-    mod next_time_param_to_push_tests {
+    /// Steps 8 and 9: the per-frame push loop's scheduling half: which
+    /// single parameter gets the one word this deck's side channel carries
+    /// this frame, across the Time multipliers and the Qvar watches that
+    /// share it.
+    mod next_param_to_push_tests {
         use super::*;
+        use opendrop_core::q_vars::default_q_var_params;
 
-        const N: usize = time_patch::TIME_PARAM_COUNT;
+        const N: usize = CHANNEL_PARAM_COUNT;
+        /// Where the Qvar half of the flat parameter space starts.
+        const Q: usize = time_patch::TIME_PARAM_COUNT;
 
+        /// Every parameter at its neutral value: 1.0 for the 8 Time
+        /// multipliers, 0.0 for the 32 q-var overrides.
         fn neutral() -> [f64; N] {
-            [1.0; N]
+            channel_values(&Default::default(), &default_q_var_params())
+        }
+
+        /// Side-channel indices with `watches` (0-based q-vars) enabled.
+        fn indices(watches: &[usize]) -> [Option<u16>; N] {
+            let mut q_vars = default_q_var_params();
+            for &w in watches {
+                q_vars.enabled[w] = true;
+            }
+            channel_indices(&q_vars)
+        }
+
+        #[test]
+        fn the_flat_space_is_the_8_time_params_then_the_32_watches() {
+            assert_eq!(N, 40);
+            assert_eq!(Q, 8);
+            let values = channel_values(
+                &opendrop_core::time_params::DeckTimeParams { zoom_mult: 0.5, ..Default::default() },
+                &{
+                    let mut q = default_q_var_params();
+                    q.value[31] = -1.5;
+                    q
+                },
+            );
+            assert_eq!(values[1], 0.5);
+            assert_eq!(values[Q + 31], -1.5);
         }
 
         #[test]
         fn nothing_to_push_when_the_preset_already_holds_every_value() {
-            assert_eq!(next_time_param_to_push(&neutral(), &neutral(), 0), None);
+            assert_eq!(next_param_to_push(&neutral(), &indices(&[0, 5]), &neutral(), 0), None);
         }
 
         #[test]
-        fn pushes_a_changed_param_with_its_side_channel_index() {
+        fn pushes_a_changed_time_param_with_its_side_channel_index() {
             let mut current = neutral();
             current[2] = 0.5; // Rotation
-            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), Some((2, 3)));
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), Some((2, 3)));
+        }
+
+        #[test]
+        fn pushes_a_changed_q_var_with_its_side_channel_index() {
+            let mut current = neutral();
+            current[Q + 6] = 1.25; // Q7
+            assert_eq!(next_param_to_push(&current, &indices(&[6]), &neutral(), 0), Some((Q + 6, 15)));
         }
 
         #[test]
@@ -3073,7 +3255,18 @@ mod tests {
             // the one-word channel for nothing.
             let mut current = neutral();
             current[0] = 0.25;
-            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), None);
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), None);
+        }
+
+        #[test]
+        fn never_pushes_an_unwatched_q_var_even_when_it_changed() {
+            // An unwatched q-var has no register in the loaded preset (see
+            // `engine::qvar_patch`), so the word would latch nothing.
+            let mut current = neutral();
+            current[Q + 6] = 1.25;
+            assert_eq!(next_param_to_push(&current, &indices(&[]), &neutral(), 0), None);
+            // ...and is pushed as soon as it *is* watched.
+            assert_eq!(next_param_to_push(&current, &indices(&[6]), &neutral(), 0), Some((Q + 6, 15)));
         }
 
         #[test]
@@ -3081,10 +3274,11 @@ mod tests {
             let mut current = neutral();
             current[1] = 0.5; // Zoom
             current[6] = 0.5; // Stretch
-            assert_eq!(next_time_param_to_push(&current, &neutral(), 0), Some((1, 2)));
-            assert_eq!(next_time_param_to_push(&current, &neutral(), 2), Some((6, 7)));
+            let ix = indices(&[]);
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 0), Some((1, 2)));
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 2), Some((6, 7)));
             // Past the last dirty param, the scan wraps back to the first.
-            assert_eq!(next_time_param_to_push(&current, &neutral(), 7), Some((1, 2)));
+            assert_eq!(next_param_to_push(&current, &ix, &neutral(), 7), Some((1, 2)));
         }
 
         #[test]
@@ -3094,11 +3288,12 @@ mod tests {
             let mut current = neutral();
             current[1] = 0.5;
             current[6] = 0.5;
+            let ix = indices(&[]);
             let mut last_sent = neutral();
             let mut cursor = 0;
             let mut order = Vec::new();
             for _ in 0..4 {
-                match next_time_param_to_push(&current, &last_sent, cursor) {
+                match next_param_to_push(&current, &ix, &last_sent, cursor) {
                     Some((param, _)) => {
                         order.push(param);
                         last_sent[param] = current[param];
@@ -3113,19 +3308,60 @@ mod tests {
         }
 
         #[test]
+        fn a_moving_time_param_and_a_moving_q_var_take_turns() {
+            // The point of one shared cursor: neither family may monopolise
+            // the deck's single word while the other one is also moving.
+            let mut current = neutral();
+            current[1] = 0.5; // Zoom
+            current[Q] = 1.0; // Q1
+            let ix = indices(&[0]);
+            let mut last_sent = neutral();
+            let mut cursor = 0;
+            let mut order = Vec::new();
+            for _ in 0..4 {
+                let Some((param, _)) = next_param_to_push(&current, &ix, &last_sent, cursor) else {
+                    break;
+                };
+                order.push(param);
+                last_sent[param] = current[param];
+                cursor = (param + 1) % N;
+                current[param] += 0.01;
+            }
+            assert_eq!(order, vec![1, Q, 1, Q]);
+        }
+
+        #[test]
         fn covers_every_sendable_param_when_all_of_them_move() {
             let current = [0.5; N];
+            let ix = indices(&(0..qvar_patch::QVAR_WATCH_COUNT).collect::<Vec<_>>());
             let mut last_sent = neutral();
             let mut cursor = 0;
             let mut seen = Vec::new();
-            while let Some((param, index)) = next_time_param_to_push(&current, &last_sent, cursor) {
+            while let Some((param, index)) = next_param_to_push(&current, &ix, &last_sent, cursor) {
                 seen.push((param, index));
                 last_sent[param] = current[param];
                 cursor = (param + 1) % N;
             }
-            // All 8 params moved; the 7 with a Milkdrop target each get
-            // exactly one push, in index order, and Speed gets none.
-            assert_eq!(seen, vec![(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 8)]);
+            // Every param moved; the 7 Time ones with a Milkdrop target and
+            // all 32 watches each get exactly one push, in index order, and
+            // Speed gets none.
+            let expected: Vec<(usize, u16)> = (1..=7)
+                .map(|p| (p, p as u16 + 1))
+                .chain((0..qvar_patch::QVAR_WATCH_COUNT).map(|w| (Q + w, 9 + w as u16)))
+                .collect();
+            assert_eq!(seen, expected);
+        }
+
+        #[test]
+        fn every_index_the_scheduler_can_emit_is_unique() {
+            // Time and Qvar share one channel: two params mapping to the
+            // same index would make one silently drive the other.
+            let all = indices(&(0..qvar_patch::QVAR_WATCH_COUNT).collect::<Vec<_>>());
+            let mut used: Vec<u16> = all.into_iter().flatten().collect();
+            assert_eq!(used.len(), 39, "7 Time params + 32 watches");
+            used.sort_unstable();
+            used.dedup();
+            assert_eq!(used.len(), 39);
         }
     }
 }

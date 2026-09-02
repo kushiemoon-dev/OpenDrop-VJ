@@ -21,6 +21,7 @@ pub mod output;
 pub mod playlists;
 pub mod preset_browser;
 pub mod quality;
+pub mod qvar;
 pub mod remote;
 pub mod shell;
 pub mod snapshot;

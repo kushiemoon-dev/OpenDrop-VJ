@@ -23,8 +23,11 @@
 //! | 7 | Stretch | `sx` and `sy` (both, scaled around 1) |
 //! | 8 | Wave | `wave_a` |
 //!
-//! Slots 9..=40 are left free for Qvar's 32 watches (Step 9), keeping the
-//! whole Time+Qvar allocation inside the 40 slots the spike sized for.
+//! Slots 9..=40 belong to Qvar's 32 watches ([`crate::qvar_patch`], Step 9),
+//! keeping the whole Time+Qvar allocation inside the 40 slots the spike
+//! sized for. Both families compete for the same one word per deck per
+//! frame; `app` schedules them together in one round-robin rather than one
+//! each.
 //!
 //! # Why Speed has no Milkdrop target
 //!

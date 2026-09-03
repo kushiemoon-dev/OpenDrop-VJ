@@ -6,7 +6,7 @@
 //! a number into a preset that is already rendering, continuously: a slider
 //! dragged live, or the LFO engine ticking every frame. libprojectM 4.1.6
 //! exports 47 C functions and not one of them addresses a preset-internal
-//! variable (see `TIME-QVAR-SPIKE.md` at the repo root for the full audit).
+//! variable (see `.planning/TIME-QVAR-SPIKE.md` for the full audit).
 //! The obvious fallback (patch the preset text and call
 //! `projectm_load_preset_data` every time the value changes) was measured and
 //! rejected: a reload costs 3.5-9.2 ms (3-10x a whole rendered frame) and, far

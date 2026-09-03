@@ -1,4 +1,4 @@
-//! Native port of OpenDrop-VJ `src/lib/engine/keymap.ts:5-16` (`DEFAULT_KEYMAP`),
+//! Native port of the web app's `src/lib/engine/keymap.ts:5-16` (`DEFAULT_KEYMAP`),
 //! plus runtime remapping + persistence (Step 3 of the Phase 8 VJ-panels plan,
 //! transposing the MIDI-learn pattern, `AppState::midi_learning`/`ui::midi`,
 //! to the keyboard: see `main.rs`'s `WindowEvent::KeyboardInput` handler for

@@ -124,7 +124,7 @@ pub(crate) struct UiConfig {
     pub(crate) target_fps: u32,
     pub(crate) favorite_presets: HashSet<String>,
     /// Base URL of the CloudPresets backend Worker (`workers/presets-
-    /// cloud/` in the sibling `OpenDrop-VJ` repo). `None`/empty means the
+    /// cloud/` in the web app's repo, see the `legacy-web` branch). `None`/empty means the
     /// feature is disabled, same convention as the web app's
     /// `PUBLIC_CLOUD_PRESETS_API=` (empty in `.env.example`), see Step 6's
     /// Override 4: no production URL is committed anywhere yet, the user

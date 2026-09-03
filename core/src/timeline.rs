@@ -1,4 +1,4 @@
-//! Port of OpenDrop-VJ `src/lib/engine/timeline.ts`: sequences the app's
+//! Port of the web app's `src/lib/engine/timeline.ts`: sequences the app's
 //! existing 8 snapshot slots across a wall-clock loop.
 //!
 //! Only `timelineLoopDuration`/`timelineValuesAt` are ported: they're the

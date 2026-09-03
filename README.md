@@ -1,4 +1,10 @@
-# OpenDrop-VJ
+<div align="center">
+
+<img src="docs/readme-assets/banner.png" alt="OpenDrop VJ" width="600">
+
+# OpenDrop VJ
+
+</div>
 
 A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC/Ableton Link control, NDI in/out, and a phone remote control, packaged as a native Rust/egui desktop app.
 

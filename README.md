@@ -1,97 +1,74 @@
-# OpenDrop-Native
+# OpenDrop-VJ
 
-Native Rust rewrite of OpenDrop-VJ (see `REQUIREMENTS.md`/`PLAN.md`).
+A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC/Ableton Link control, NDI in/out, and a phone remote control, packaged as a native Rust/egui desktop app.
 
-## Prérequis de build : NDI SDK
+This is the native rewrite. The previous Electron/SvelteKit web app lives on the `legacy-web` branch.
 
-Compiler ce workspace (`cargo build --workspace`, y compris juste `io` ou
-`app`, qui dépend de `io`) nécessite le NDI SDK (headers + libs) présent au
-moment du build, pas seulement à l'exécution : `grafton-ndi` (Task 9)
-utilise `bindgen` dans son `build.rs`, ce qui en fait une dépendance de
-build à part entière, pas un simple `dlopen` runtime comme envisagé au
-départ.
+## Features
 
-Deux fichiers versionnés font le pont avec le packaging Arch de cette
-machine : `ndi-sdk-shim/` (symlinks `include`/`lib/x86_64-linux-gnu` vers
-les emplacements système du paquet pacman `ndi-sdk`) et `.cargo/config.toml`
-(positionne `NDI_SDK_DIR` vers `ndi-sdk-shim` quand le shell ne l'exporte
-pas déjà lui-même). Voir le commentaire en tête de `.cargo/config.toml`
-pour le détail du contournement.
+- 4 decks with crossfader, playlists, snapshots, and a preset browser backed by libprojectM
+- Beat detection, per-slot LFO, and beat-triggered modulation
+- Live Time/Q-var parameter injection into the running preset
+- Compositor: blend modes, luma/color keying, text and sprite overlays, strobe
+- Control surfaces: MIDI (learn-based mapping), OSC, a phone remote control served over WebSocket, and optional Ableton Link
+- Output: NDI in/out, v4l2loopback, OBS WebSocket scene control, Twitch/Kick chat
+- Cloud presets and shareable set links
+- Local video clip playback and camera capture via `ffmpeg`
 
-Sur une autre machine ou avec un autre layout SDK (installeur NewTek
-standard, autre distro) : soit exporter son propre `NDI_SDK_DIR` avant de
-builder, soit remplacer/supprimer `ndi-sdk-shim/` et l'entrée `[env]` de
-`.cargo/config.toml` en conséquence. Le SDK lui-même se télécharge sur
-ndi.video.
+## Building
 
-## Limitation connue : découverte NDI
+```sh
+cargo build --workspace
+```
 
-La découverte réseau NDI (énumération des sources NDI publiées sur le réseau
-local dans l'interface utilisateur) dépend d'un daemon Avahi actif sur la
-machine hôte. L'AppImage distribué ne peut pas embarquer un daemon système ;
-cette limitation est donc acceptée et documentée en Phase 6 plutôt que
-corrigée. L'application fonctionnera normalement en son absence, mais
-l'énumération automatique des sources NDI ne sera pas disponible; l'accès
-direct par URL ou adresse IP restera opérationnel.
+### NDI SDK (build-time dependency)
 
-*Note :* le prérequis NDI SDK + `libprojectm` dev (décrit ci-dessus) s'applique
-à **toute machine de build**, y compris Windows (voir Step 12-13 du plan pour
-les instructions spécifiques à chaque plateforme).
+Building this workspace, including just the `io` or `app` crate (`app` depends on `io`), needs the NDI SDK (headers + libs) present at build time, not only at runtime: `grafton-ndi` uses `bindgen` in its `build.rs`, which makes it a real build dependency rather than a runtime `dlopen`.
 
-## Ableton Link (optionnel, GPL)
+Two versioned files bridge this machine's Arch packaging: `ndi-sdk-shim/` (symlinks under `include`/`lib/x86_64-linux-gnu` to the pacman `ndi-sdk` package's system locations) and `.cargo/config.toml` (points `NDI_SDK_DIR` at `ndi-sdk-shim` when the shell doesn't already export it). See the comment at the top of `.cargo/config.toml` for the full workaround.
 
-Le support Ableton Link (`io::link` / panneau Link) est désactivé par
-défaut : il n'est ni compilé, ni lié dans le binaire produit par un
-`cargo build` standard.
+On another machine or SDK layout (the standard NewTek installer, a different distro): either export your own `NDI_SDK_DIR` before building, or replace/remove `ndi-sdk-shim/` and the `[env]` entry in `.cargo/config.toml` accordingly. The SDK itself is available from ndi.video.
 
-Raison : ce support repose sur `rusty_link`, un binding Rust vers la
-bibliothèque C++ officielle d'Ableton Link, distribuée sous
-**GPL-2.0-or-later**. Contrairement à la LGPL, la GPL n'a pas de clause
-de lien dynamique permissive: lier `rusty_link`, statique ou dynamique,
-oblige (lecture FSF classique) l'ensemble du binaire résultant à devenir
-GPL-2.0-or-later. Voir `PLAN.md`, Risque 5, pour l'analyse complète.
+This requirement (NDI SDK plus a `libprojectm` dev package) applies to every build machine, Windows included; see `packaging/windows/README.md` for the platform-specific setup there.
 
-Pour l'activer explicitement :
+### Known limitation: NDI discovery
+
+NDI network discovery (enumerating NDI sources published on the local network in the UI) depends on an Avahi daemon running on the host. The distributed AppImage can't bundle a system daemon, so this limitation is accepted rather than worked around. The app runs normally without it; automatic NDI source discovery just won't be available, while direct access by URL or IP address still works.
+
+### Ableton Link (optional, GPL)
+
+Ableton Link support (`io::link` / the Link panel) is disabled by default: it's neither compiled nor linked into the binary produced by a standard `cargo build`.
+
+Reason: this support is built on `rusty_link`, a Rust binding to Ableton's official C++ Link library, distributed under **GPL-2.0-or-later**. Unlike LGPL, GPL has no permissive dynamic-linking clause, so linking `rusty_link`, static or dynamic, puts the whole resulting binary under GPL-2.0-or-later.
+
+To enable it explicitly:
 
 ```sh
 cargo build --features opendrop-app/link
 ```
 
-(`opendrop-app` est le nom du paquet du crate binaire, déclaré dans
-`app/Cargo.toml`: pas le nom de son répertoire `app/`.)
+(`opendrop-app` is the binary crate's package name, declared in `app/Cargo.toml`, not its directory name `app/`.)
 
-Un binaire compilé avec cette feature doit être traité comme
-**GPL-2.0-or-later dans son ensemble**, et non plus comme le projet
-principal (licence par défaut à préciser séparément). En conséquence, il
-doit rester **absent de tout binaire empaqueté ou distribué par défaut**
-(voir la Phase 6 du plan): la feature `link` n'est destinée qu'à des
-builds locaux/optionnels assumant explicitement cette contamination de
-licence.
+A binary built with this feature must be treated as **GPL-2.0-or-later as a whole**, not under this project's default license. It must stay out of any binary packaged or distributed by default; the `link` feature is for local/optional builds that knowingly accept that license contamination.
 
-## `ffmpeg` (dépendance runtime)
+### `ffmpeg` (runtime dependency)
 
-Deux fonctionnalités passent par un sous-processus `ffmpeg`, qui doit donc
-être présent dans le `PATH` à l'exécution (rien n'est lié au build) :
+Two features shell out to `ffmpeg`, which must be on `PATH` at runtime (nothing links against it at build time):
 
-- **sortie v4l2loopback** (`io::v4l2loopback`): le compositeur écrit ses
-  frames RGBA dans un device v4l2loopback ;
-- **panneau Video** (`io::video_capture`): décodage des clips locaux et
-  capture caméra, dans l'autre sens : `ffmpeg` écrit des frames RGBA brutes
-  sur son stdout, l'application les téléverse en texture GL.
+- **v4l2loopback output** (`io::v4l2loopback`): the compositor writes its RGBA frames into a v4l2loopback device.
+- **Video panel** (`io::video_capture`): local clip decoding and camera capture, in the other direction: `ffmpeg` writes raw RGBA frames to its stdout, and the app uploads them as a GL texture.
 
-En l'absence de `ffmpeg`, ces deux panneaux affichent une erreur et le
-reste de l'application fonctionne normalement. Les clips vidéo eux-mêmes
-ne sont pas fournis : voir `app/assets/video-loops/README.md`.
+Without `ffmpeg`, both panels show an error and the rest of the app runs normally. Video clips themselves aren't bundled; see `app/assets/video-loops/README.md`.
 
-## Sélecteur de fichier natif (`rfd`)
+### Native file dialog (`rfd`)
 
-Les panneaux CloudPresets (`ui::cloud_presets`, bouton Upload) et Video
-(`ui::video`, bouton « + Video ») utilisent `rfd` pour ouvrir un sélecteur
-de fichier natif. Sur Linux, le backend par défaut
-de `rfd` (features `xdg-portal` + `async-std`, pas `gtk3`) passe par
-xdg-desktop-portal via D-Bus (`ashpd`): aucune bibliothèque GTK3 requise au
-build ni au lien. À l'exécution, ce backend a en revanche besoin d'un
-service `xdg-desktop-portal` (+ son implémentation de portail, ex.
-`xdg-desktop-portal-gtk`/`-kde`/`-hyprland`) actif sur la session ; en son
-absence, le bouton Upload échoue silencieusement à ouvrir un sélecteur
-plutôt que de faire échouer le build.
+The CloudPresets (`ui::cloud_presets`, Upload button) and Video (`ui::video`, "+ Video" button) panels use `rfd` for a native file picker. On Linux, `rfd`'s default backend (features `xdg-portal` + `async-std`, not `gtk3`) goes through xdg-desktop-portal via D-Bus (`ashpd`), so no GTK3 library is needed at build or link time. At runtime, this backend does need an `xdg-desktop-portal` service (plus a portal implementation, e.g. `xdg-desktop-portal-gtk`/`-kde`/`-hyprland`) running in the session; without it, the Upload button silently fails to open a picker rather than failing the build.
+
+## Packaging
+
+- Linux: AppImage, via `packaging/appimage/build-appimage.sh`.
+- Windows: portable zip, via `packaging/windows/build-portable.ps1`. See `packaging/windows/README.md` for the vcpkg/projectM setup this depends on.
+
+## License
+
+MIT, except the optional `link` feature above, which is GPL-2.0-or-later when enabled.

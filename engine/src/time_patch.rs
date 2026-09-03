@@ -53,7 +53,7 @@
 //! keyboard/MIDI/OSC/remote-ws/LFO like the other seven, it just has no
 //! visual effect on the projectM decks. Index 1 stays reserved for it so the
 //! param-to-slot mapping is a plain 1:1 and a future engine change has its
-//! slot waiting. See `TIME-QVAR-SPIKE.md` for the mechanism this builds on.
+//! slot waiting. See `.planning/TIME-QVAR-SPIKE.md` for the mechanism this builds on.
 
 use crate::preset_patch::{Apply, PatchTarget};
 use opendrop_core::time_params::DeckTimeParams;

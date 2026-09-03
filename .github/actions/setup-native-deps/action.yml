@@ -1,0 +1,91 @@
+name: Set up native build dependencies
+description: >
+  Installs Mesa/EGL headers, builds libprojectM 4.1.6 from source (cached),
+  and downloads the NDI SDK (cached). Exports NDI_SDK_DIR, PKG_CONFIG_PATH,
+  and LD_LIBRARY_PATH for the rest of the job. Linux/x86_64 only, matches
+  what app/io need to link (see engine/build.rs and io/Cargo.toml).
+
+inputs:
+  projectm-version:
+    description: libprojectM version to build (must match the headers this workspace binds against)
+    default: "4.1.6"
+  ndi-sdk-major:
+    description: NDI SDK major version to download
+    default: "6"
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          cmake ninja-build pkg-config clang libclang-dev \
+          libglm-dev \
+          libgles2-mesa-dev libegl1-mesa-dev libgl1-mesa-dev libglvnd-dev libopengl-dev \
+          libgl1-mesa-dri libglx-mesa0 libegl1 libegl-mesa0 libgles2 \
+          libavahi-client-dev libpipewire-0.3-dev libasound2-dev libudev-dev
+
+    - name: Cache libprojectM
+      id: cache-projectm
+      uses: actions/cache@v4
+      with:
+        path: /opt/projectm
+        key: projectm-${{ inputs.projectm-version }}-${{ runner.os }}
+
+    - name: Build libprojectM from source
+      if: steps.cache-projectm.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fsSL -o /tmp/projectm.tar.gz \
+          "https://github.com/projectM-visualizer/projectm/releases/download/v${{ inputs.projectm-version }}/libprojectM-${{ inputs.projectm-version }}.tar.gz"
+        tar xzf /tmp/projectm.tar.gz -C /tmp
+        cmake -S "/tmp/libprojectM-${{ inputs.projectm-version }}" -B /tmp/projectm-build -GNinja \
+          -DENABLE_SYSTEM_GLM=ON -DENABLE_GLES=ON \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/projectm
+        cmake --build /tmp/projectm-build --parallel
+        cmake --install /tmp/projectm-build
+
+    - name: Cache NDI SDK
+      id: cache-ndi
+      uses: actions/cache@v4
+      with:
+        path: /opt/ndi-sdk
+        key: ndi-sdk-${{ inputs.ndi-sdk-major }}-${{ runner.os }}
+
+    - name: Download NDI SDK
+      if: steps.cache-ndi.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The public installer tarball wraps a self-extracting .sh whose real
+        # payload starts after a `__NDI_ARCHIVE_BEGIN__` marker line (same
+        # extraction the Arch ndi-sdk AUR package's PKGBUILD does). No EULA
+        # gate on this URL, verified against that PKGBUILD's `source=`.
+        curl -fsSL -o /tmp/ndi-installer.tar.gz \
+          "https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v${{ inputs.ndi-sdk-major }}_Linux.tar.gz"
+        mkdir -p /tmp/ndi-extract
+        tar xzf /tmp/ndi-installer.tar.gz -C /tmp/ndi-extract
+        installer_sh=$(find /tmp/ndi-extract -maxdepth 1 -name '*.sh')
+        marker_line=$(sed -n '/^__NDI_ARCHIVE_BEGIN__$/=' "$installer_sh")
+        tail -n +$((marker_line + 1)) "$installer_sh" | tar -zxf - -C /tmp/ndi-extract
+        mv "/tmp/ndi-extract/NDI SDK for Linux" /opt/ndi-sdk
+
+        # The raw tarball ships only the fully-versioned libndi.so.X.Y.Z, no
+        # SONAME or dev symlink (a distro package normally creates both).
+        # -lndi (what grafton-ndi's build.rs links against) needs libndi.so.
+        cd /opt/ndi-sdk/lib/x86_64-linux-gnu
+        versioned=$(ls libndi.so.*.*.*)
+        soname=$(echo "$versioned" | sed -E 's/(\.so\.[0-9]+)\..*/\1/')
+        ln -sf "$versioned" "$soname"
+        ln -sf "$soname" libndi.so
+
+    - name: Export env for the rest of the job
+      shell: bash
+      run: |
+        echo "NDI_SDK_DIR=/opt/ndi-sdk" >> "$GITHUB_ENV"
+        echo "PKG_CONFIG_PATH=/opt/projectm/lib/pkgconfig:/opt/projectm/lib64/pkgconfig" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=/opt/projectm/lib:/opt/ndi-sdk/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+        echo "EGL_PLATFORM=surfaceless" >> "$GITHUB_ENV"

@@ -267,7 +267,7 @@ mod tests {
         #[test]
         fn every_inked_pixel_carries_the_requested_color() {
             let img = rasterize_text(TEST_FONT, "Hello", 32.0, [255, 0, 128]).expect("rasterizing should work");
-            let inked: Vec<&[u8]> = img.pixels.chunks_exact(4).filter(|p| p[3] > 0).collect();
+            let inked: Vec<&[u8; 4]> = img.pixels.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).collect();
             assert!(!inked.is_empty(), "'Hello' at 32px must produce ink");
             for p in inked {
                 assert_eq!(&p[0..3], &[255, 0, 128]);

@@ -34,8 +34,9 @@ APPDIR="$SCRIPT_DIR/AppDir"
 CACHE_DIR="$SCRIPT_DIR/.cache"
 APPIMAGETOOL="$CACHE_DIR/appimagetool"
 # Real directory on this build machine holding the 9795-file preset pack.
-# Not part of the repo; there is no other source for it to read from.
-PRESETS_SRC="/srv/http/opendrop-presets"
+# Not part of the repo. Overridable via the environment (CI points this at a
+# freshly cloned public pack instead); defaults to this machine's local one.
+PRESETS_SRC="${PRESETS_SRC:-/srv/http/opendrop-presets}"
 CARGO_TOML="$REPO_ROOT/app/Cargo.toml"
 
 if [[ ! -x "$BINARY" ]]; then

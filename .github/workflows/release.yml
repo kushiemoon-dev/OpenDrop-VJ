@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  linux-appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-native-deps
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release
+        run: cargo build --release --workspace
+
+      - name: Cache preset pack
+        id: cache-presets
+        uses: actions/cache@v4
+        with:
+          path: /tmp/opendrop-presets
+          key: presets-cream-of-the-crop
+
+      - name: Fetch preset pack
+        if: steps.cache-presets.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop /tmp/opendrop-presets
+
+      - name: Build AppImage
+        env:
+          PRESETS_SRC: /tmp/opendrop-presets
+        run: packaging/appimage/build-appimage.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" ./*.AppImage --title "$TAG" --generate-notes

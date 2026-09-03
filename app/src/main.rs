@@ -933,7 +933,7 @@ struct AppState {
     /// The OSC panel's own port field, read by `Start` at click time, not
     /// `OscSnapshot::port`, which only reflects the port actually bound
     /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
-    /// matching OpenDrop-VJ's `electron-features-store.svelte.ts` default.
+    /// matching the web app's `electron-features-store.svelte.ts` default.
     osc_port: u16,
     /// Handle to the dedicated remote-WS thread (Task 14), first async
     /// integration in this codebase (its own tokio runtime lives entirely
@@ -951,7 +951,7 @@ struct AppState {
     obs: opendrop_io::obs::ObsHandle,
     /// The Streaming panel's own OBS host/port fields, read by `Connect` at
     /// click time, not part of `ObsSnapshot`, same reasoning as `osc_port`
-    /// (see `ui::osc`'s doc comment). Defaults match OpenDrop-VJ's
+    /// (see `ui::osc`'s doc comment). Defaults match the web app's
     /// `obs-link-store.svelte.ts` (`localhost`/`4455`).
     obs_host: String,
     obs_port: u16,
@@ -2255,7 +2255,7 @@ impl ApplicationHandler for App {
             // the NDI-in layer below. **On top of the decks, not behind
             // them**; see `Compositor::composite_video_layer`'s doc
             // comment for why that deviates from the plan's step-14
-            // sketch (short version: the OpenDrop-VJ compositor this ports
+            // sketch (short version: the web app's compositor this ports
             // records, in its own class header, that drawing it first made
             // it vanish whenever a deck reached full opacity, which is the
             // default at either end of the crossfader).

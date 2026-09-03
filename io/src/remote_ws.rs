@@ -1,5 +1,5 @@
 //! The remote-WS I/O thread: a single axum HTTP server that serves the
-//! phone-remote-control SPA (`OpenDrop-VJ/src/routes/remote/+page.svelte`,
+//! phone-remote-control SPA (the web app's `src/routes/remote/+page.svelte`,
 //! ported once as static assets under `io/assets/remote/`, not touched
 //! here) AND accepts the WebSocket command channel that page opens, both on
 //! the same OS-assigned port. Mirrors `main.cjs:182-247`'s

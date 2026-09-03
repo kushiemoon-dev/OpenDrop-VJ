@@ -1,6 +1,6 @@
 //! CloudPresets: a REST client for the CloudPresets backend Worker
-//! (`workers/presets-cloud/` in the sibling `OpenDrop-VJ` repo,
-//! `src/index.ts`+`src/handlers.ts`, already deployed) plus the dedicated
+//! (`workers/presets-cloud/` in the web app's repo, see the `legacy-web`
+//! branch, `src/index.ts`+`src/handlers.ts`, already deployed) plus the dedicated
 //! background thread that drives it from the UI panel
 //! (`app::ui::cloud_presets`) without blocking egui's render loop.
 //!

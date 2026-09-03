@@ -11,7 +11,7 @@
 //!
 //! No "Load onto deck" here, unlike `SidebarCloudPresets.svelte`'s
 //! `onLoadPreset`: cloud presets are Butterchurn JSON (the web engine's
-//! own format), not this native app's `.milk`/projectM format: this
+//! own format), not this native app's `.milk`/projectM format. This
 //! app's loader only reaches projectM through
 //! `projectm_load_preset_file`/`projectm_load_preset_data` (both `.milk`
 //! text), and no Butterchurn->`.milk` converter exists or is scoped
@@ -26,13 +26,13 @@
 //! No `window.confirm()` equivalent on Delete, unlike
 //! `SidebarCloudPresets.svelte`'s `handleDelete`: this codebase has no
 //! confirmation-dialog convention anywhere else either (`ui::streaming`'s
-//! `clear_secret_button` deletes a stored secret immediately on click):
+//! `clear_secret_button` deletes a stored secret immediately on click),
 //! matching that existing convention rather than introducing a new one.
 //!
 //! Secret input fields (the "link device" token paste) use
 //! `egui::TextEdit::password(true)` and are cleared right after
 //! submitting, same "never redisplay in cleartext" convention as
-//! `ui::streaming`'s `save_secret_field`: this panel's own stored token
+//! `ui::streaming`'s `save_secret_field`; this panel's own stored token
 //! is never displayed either, only ever copied straight to the clipboard
 //! via `Context::copy_text`.
 
@@ -54,7 +54,7 @@ pub fn show(
     });
 
     if api_url.trim().is_empty() {
-        ui.label("Cloud Presets is disabled: set an API URL above to enable it.");
+        ui.label("Cloud Presets is disabled. Set an API URL above to enable it.");
         return;
     }
 
@@ -109,7 +109,7 @@ pub fn show(
     });
 
     // Makes the format gap visible in the UI itself, not just in dev-facing
-    // doc comments: same `warn_banner` convention `ui::streaming` uses for
+    // doc comments; same `warn_banner` convention `ui::streaming` uses for
     // Kick's "unofficial protocol" disclaimer: a real, non-error caveat the
     // user needs up front, before they click Download expecting a preset
     // to show up on a deck.
@@ -117,7 +117,7 @@ pub fn show(
         ui,
         "Cloud presets are Butterchurn JSON (the retired web app's format). This app's preset \
          engine (projectM) only loads .milk files, so Download saves the raw JSON to a local \
-         cache file for backup/inspection: it can't be loaded onto a deck here.",
+         cache file for backup/inspection. It can't be loaded onto a deck here.",
     );
 
     if let Some(path) = snapshot.last_downloaded.as_ref() {
@@ -162,12 +162,12 @@ pub fn show(
 }
 
 /// Opens a native "pick a JSON file" dialog (blocks this thread while
-/// open, standard immediate-mode-GUI tradeoff: no async file-dialog
+/// open, standard immediate-mode-GUI tradeoff, no async file-dialog
 /// convention exists anywhere else in this app either) and, if a file was
 /// picked, reads it and queues an `Upload`. The upload name is derived
 /// from the picked file's name (`.json` extension stripped), mirroring
 /// `cloud-presets-store.svelte.ts`'s `onCloudPresetFilePick`
-/// (`file.name.replace(/\.json$/i, '')`): not typed by the user.
+/// (`file.name.replace(/\.json$/i, '')`). Not typed by the user.
 fn upload_via_file_dialog(cloud_presets: &CloudPresetsHandle, api_url: &str, local_error: &mut Option<String>) {
     let Some(path) = rfd::FileDialog::new().add_filter("JSON", &["json"]).pick_file() else {
         return; // dialog cancelled

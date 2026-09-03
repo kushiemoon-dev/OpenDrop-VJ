@@ -46,7 +46,7 @@
 //!   upwards), so there is no free slot ahead of the preset's own equations.
 //!
 //! Reaching `time` would mean renumbering every preset's own `per_frame_N`
-//! lines to open room at the front: a rewrite of every one of the 9795
+//! lines to open room at the front, a rewrite of every one of the 9795
 //! presets in the reference library on every load, for one slider, changing
 //! the placement the spike verified end to end. Out of proportion, so Speed
 //! stays host-side state: it is stored, persisted, and fully addressable by
@@ -62,7 +62,7 @@ use opendrop_core::time_params::DeckTimeParams;
 pub const TIME_PARAM_COUNT: usize = 8;
 
 /// Side-channel index of Time param `param` (0-based, in the order of
-/// [`param_values`]), or `None` for a param with no Milkdrop target: see
+/// [`param_values`]), or `None` for a param with no Milkdrop target. See
 /// the module docs on Speed.
 pub fn side_channel_index(param: usize) -> Option<u16> {
     match param {
@@ -110,7 +110,7 @@ pub fn targets(params: &DeckTimeParams) -> Vec<PatchTarget> {
         mult(4, params.warp_mult, "warp"),
         mult(5, params.dx_mult, "dx"),
         mult(6, params.dy_mult, "dy"),
-        // One slider, two variables: see `preset_patch`'s shared-index
+        // One slider, two variables. See `preset_patch`'s shared-index
         // handling.
         scale(7, params.stretch_mult, "sx"),
         scale(7, params.stretch_mult, "sy"),
@@ -152,7 +152,7 @@ mod tests {
         // so a target whose index disagreed with its param's slot would latch
         // the wrong register forever. Each param gets a *distinct* value on
         // purpose: this resolves a target back to its param through its
-        // `initial`, which only works while no two params share a value:
+        // `initial`, which only works while no two params share a value;
         // `DeckTimeParams::default()` (all 1.0) would make every lookup
         // resolve to param 0 and the assertion vacuous.
         let params = DeckTimeParams {

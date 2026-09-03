@@ -3,7 +3,7 @@
 //! stream. Mirrors `main.cjs:429-457`'s `twitch:connect`/`twitch:disconnect`
 //! IPC handlers (there implemented with `tmi.js`; here with the
 //! purpose-built `twitch-irc` crate: see PHASE5-IO.PLAN's Task 17
-//! découpage note for why that crate over the generic `irc` one).
+//! breakdown note for why that crate over the generic `irc` one).
 //!
 //! Same dedicated-thread-with-its-own-`current_thread`-runtime pattern as
 //! `obs`/`remote_ws`: `spawn()` returns immediately, the thread never
@@ -51,7 +51,7 @@ use crate::secrets;
 pub struct TwitchSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (no OAuth token registered, or a
-    /// keyring lookup failure): whole-branch review Finding 1 (AC-12):
+    /// keyring lookup failure). Whole-branch review Finding 1 (AC-12):
     /// this used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.

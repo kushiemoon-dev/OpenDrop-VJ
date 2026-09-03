@@ -10,7 +10,7 @@
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::osc`, `ui::midi`). `link_tempo_input` is the
 //! panel's own editable field (`AppState::link_tempo_input`), not
-//! `LinkSnapshot::tempo`: same reasoning as `ui::osc`'s `osc_port`: the
+//! `LinkSnapshot::tempo`; same reasoning as `ui::osc`'s `osc_port`: the
 //! snapshot's `tempo` reflects the Link session's live tempo, while this
 //! field is what the user is currently typing, sent via `SetTempo` only
 //! when they click the button.

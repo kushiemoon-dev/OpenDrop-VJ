@@ -1,11 +1,11 @@
 //! Per-context `GL_TIME_ELAPSED` query pools.
 //!
 //! A query's result usually isn't ready the instant you ask: GPU work is
-//! asynchronous: so blocking on `glGetQueryObjectuiv(..., GL_QUERY_RESULT)`
+//! asynchronous, so blocking on `glGetQueryObjectuiv(..., GL_QUERY_RESULT)`
 //! right after `glEndQuery` would stall the pipeline waiting for the very
 //! frame you just submitted. `PassTimer` avoids that by keeping a ring of 3
 //! queries per pass: `begin()` starts this frame's query in the next ring
-//! slot, and: before doing that: non-blockingly polls whatever query
+//! slot, and, before doing that, non-blockingly polls whatever query
 //! previously occupied that slot (from up to `RING_LEN` frames ago, which
 //! on any real driver has long since resolved) via
 //! `GL_QUERY_RESULT_AVAILABLE`. That poll happens inline, in whichever
@@ -66,7 +66,7 @@ impl PassTimer {
     /// ever targeted, so `GL_QUERY_RESULT_AVAILABLE` raises
     /// `GL_INVALID_OPERATION` (a name is only a query *object* once first
     /// bound). Harmless: the readback is skipped, `last_ms` stays `None`,
-    /// and it self-corrects once `write_idx` has wrapped: but it does dirty
+    /// and it self-corrects once `write_idx` has wrapped, but it does dirty
     /// the GL error queue at startup, which can mislead anything else
     /// calling `glGetError`. Fix would be to track how many slots have been
     /// written and skip `poll` until the ring is full.

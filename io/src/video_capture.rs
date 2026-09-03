@@ -261,7 +261,7 @@ pub fn camera_input_args(device: &str) -> Vec<String> {
 /// *deck* shader unchanged. Every decoder hands out row 0 = the image's TOP
 /// row, while a GL texture's origin is bottom-left; the deck shader
 /// deliberately does not flip V (its inputs are FBO copies, already
-/// bottom-left: see `engine::compositor`'s header). Flipping in ffmpeg's
+/// bottom-left, see `engine::compositor`'s header). Flipping in ffmpeg's
 /// own filter chain, which is already scaling the frame anyway, costs
 /// nothing measurable and keeps the flip out of both the upload path (a
 /// 3.5 MB row-reversal per frame) and the shader (a second sampling
@@ -332,8 +332,8 @@ pub fn list_cameras() -> Vec<CameraDevice> {
 ///   something a user means to pick.
 /// - **Secondary nodes of a multi-node device** (`index` other than `0`). A
 ///   UVC webcam registers several `/dev/videoN` nodes under one physical
-///   device: typically `index 0` for capture and `index 1` for the
-///   metadata stream: and they report the *identical* `name`. Verified on
+///   device (typically `index 0` for capture and `index 1` for the
+///   metadata stream), and they report the *identical* `name`. Verified on
 ///   two machines during review: `video0` and `video1` both read
 ///   `"USB2.0 HD UVC WebCam: USB2.0 HD"`, and only `video0` can actually be
 ///   captured from. Listing both gave the user two indistinguishable
@@ -386,7 +386,7 @@ fn is_primary_capture_node(dir: &Path) -> bool {
 
 /// The running ffmpeg subprocess. The reading counterpart of
 /// `v4l2loopback::FfmpegPipe`: `stdout` is piped (and handed straight to a
-/// reader thread: see the module doc comment), `stdin`/`stderr` are both
+/// reader thread, see the module doc comment), `stdin`/`stderr` are both
 /// discarded, for the same reason `FfmpegPipe` discards its own: capturing
 /// stderr would need yet another thread draining it or a full pipe would
 /// eventually stall ffmpeg, and `Drop` guarantees the process never
@@ -472,12 +472,12 @@ fn read_loop(
     let mut next_at = Instant::now();
     loop {
         // A fresh buffer per frame, read into and then moved into the
-        // published `VideoFrame`: rather than one reused buffer cloned on
+        // published `VideoFrame`, rather than one reused buffer cloned on
         // every publish, which would double this thread's memory traffic
         // (3.5 MB per frame, 30 times a second).
         let mut data = vec![0u8; len];
         if stdout.read_exact(&mut data).is_err() {
-            return; // EOF (source stopped/replaced) or a read error: either way, done.
+            return; // EOF (source stopped/replaced) or a read error; either way, done.
         }
         let seq = seq.fetch_add(1, Ordering::Relaxed) + 1;
         frame.store(Some(Arc::new(VideoFrame { seq, width: CAPTURE_W, height: CAPTURE_H, data })));
@@ -889,7 +889,7 @@ mod tests {
             // ffmpeg is spawned successfully but exits immediately (it
             // can't open the file); either the spawn failed outright (no
             // ffmpeg on PATH) or the liveness poll notices the exit. Both
-            // land on `running == false` with an error: poll briefly
+            // land on `running == false` with an error. Poll briefly
             // rather than sleeping a fixed amount.
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
@@ -905,7 +905,7 @@ mod tests {
 
     /// Real-subprocess tests. Every one of them degrades to a silent pass
     /// when `ffmpeg` isn't on PATH (same "structural check only" convention
-    /// as `v4l2loopback`'s own spawn test): but on a machine that has it
+    /// as `v4l2loopback`'s own spawn test), but on a machine that has it
     /// (every machine this app can actually run the v4l2 output on), they
     /// exercise the parts no amount of `cargo build` can: that the argument
     /// set really produces frames of exactly the size we claim, and that
@@ -925,7 +925,7 @@ mod tests {
             if let Ok((mut src, _stdout)) = VideoSource::spawn(&bogus, 64, 48, 30) {
                 let _ = src.is_alive();
             }
-            // else: ffmpeg not on PATH here: also not a panic.
+            // else: ffmpeg not on PATH here, also not a panic.
         }
 
         #[test]
@@ -980,7 +980,7 @@ mod tests {
 
             assert!(read.is_ok(), "reading the 1x2 frame back failed: {read:?}");
             // After the flip, the first bytes out are the source's BOTTOM
-            // row (blue): which is exactly what GL wants at v = 0.
+            // row (blue), which is exactly what GL wants at v = 0.
             assert_eq!(&buf[0..4], &[0, 0, 255, 255], "first emitted row should be the source's bottom row");
             assert_eq!(&buf[4..8], &[255, 0, 0, 255], "last emitted row should be the source's top row");
         }

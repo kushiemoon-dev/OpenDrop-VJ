@@ -4,7 +4,7 @@
 //! Port of `SidebarTime.svelte` (Step 8 of the Phase 8 VJ-panels plan).
 //!
 //! Takes the whole `[DeckTimeParams; 4]` plus the already-selected index
-//! (`Show::selected_slot`) and only renders/mutates that one slot's group:
+//! (`Show::selected_slot`) and only renders/mutates that one slot's group;
 //! same shape as `ui::composite`, and for the same reason: the web reference
 //! only ever shows the slot named by `mixerSelectedSlot`. All 8 sliders are
 //! plain 0-2 in steps of 0.01 with 1 as neutral, exactly the web app's own

@@ -24,7 +24,7 @@ static METRICS: Metrics = Metrics {
     spacing_dense: vec2(6.0, 2.0),
     thumb_size: vec2(160.0, 90.0),
     // 4:3 (mockup's `.od-tile-thumb`), not the engine's own 16:9 thumbnail
-    // render aspect ratio: see `ui::preset_browser::tile`'s doc comment.
+    // render aspect ratio; see `ui::preset_browser::tile`'s doc comment.
     tile_size: vec2(96.0, 72.0),
     tile_content_w: 110.0,
     mini_thumb_size: vec2(48.0, 27.0),

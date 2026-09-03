@@ -36,7 +36,7 @@ impl BeatDetector {
     }
 
     /// One low-frequency energy sample + a monotonic timestamp (ms, caller's
-    /// choice of origin: `core` owns no timer). Direct port of
+    /// choice of origin; `core` owns no timer). Direct port of
     /// bpm.ts:41-78 (`_tick`).
     pub fn process_sample(&mut self, energy: f64, now_ms: f64) -> BeatDetectionResult {
         self.energy_history[self.history_write_idx] = energy;

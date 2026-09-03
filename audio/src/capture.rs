@@ -19,13 +19,13 @@ fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -
         Ok(stream) => {
             use cpal::traits::StreamTrait;
             if let Err(e) = stream.play() {
-                eprintln!("[audio] failed to start capture stream: {e}: visuals will not react to system audio");
+                eprintln!("[audio] failed to start capture stream: {e}, visuals will not react to system audio");
                 return None;
             }
             Some(stream)
         }
         Err(e) => {
-            eprintln!("[audio] failed to open input device: {e}: visuals will not react to system audio");
+            eprintln!("[audio] failed to open input device: {e}, visuals will not react to system audio");
             None
         }
     }
@@ -34,13 +34,13 @@ fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -
 /// Listens on `rx` for device-selection requests (see `AudioHandle::
 /// set_device`) and reopens the stream on the named device each time one
 /// arrives, without restarting this thread. Exits when `rx` closes (the
-/// `AudioHandle`: and its `device_tx`: was dropped).
+/// `AudioHandle`, and its `device_tx`, was dropped).
 fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>) {
     let host = cpal::default_host();
     let mut current_stream = match crate::device::select_input_device(&host) {
         Some(device) => open_and_play(&device, snapshot.clone()),
         None => {
-            eprintln!("[audio] no input device available: visuals will not react to system audio");
+            eprintln!("[audio] no input device available, visuals will not react to system audio");
             None
         }
     };
@@ -61,7 +61,7 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
             snapshot.store(std::sync::Arc::new(crate::silent_snapshot()));
         }
     }
-    // rx.recv() returned Err: sender (AudioHandle) dropped: process shutting down.
+    // rx.recv() returned Err: sender (AudioHandle) dropped, process shutting down.
 }
 
 fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Result<cpal::Stream, String> {

@@ -111,7 +111,7 @@ pub const VALUE_MAX: f64 = VALUE_OFFSET;
 /// Milkdrop program, and 703 of the 9795 presets in the reference library
 /// (7.2%, and 1162 = 11.9% for `per_frame_init`) end their last statement
 /// **without** a `;`. That is legal as the final statement of the original
-/// program, and a syntax error the moment anything is appended after it:
+/// program, and a syntax error the moment anything is appended after it,
 /// which takes down the *whole* block, not just the appended lines: measured
 /// against real libprojectM, a preset ending in `q1 = 0.5` stopped evaluating
 /// its own equations entirely once one line was appended.
@@ -127,7 +127,7 @@ pub const VALUE_MAX: f64 = VALUE_OFFSET;
 /// (`per_frame_init_1=//decay = 0.94`); those compile to an empty program, so
 /// an appended `;` lands first and projectM rejects the whole preset. Gating
 /// on line *count* instead of statement content made all 25 fail to load,
-/// verified against real libprojectM: and silently, since a rejected load
+/// verified against real libprojectM, and silently, since a rejected load
 /// leaves the deck on its previous preset.
 const SEPARATOR: &str = ";";
 
@@ -263,7 +263,7 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
         }
         n_init += 1;
         // `SEPARATOR` on the first appended line only, and only when this
-        // block already compiles to a non-empty program: see its own docs.
+        // block already compiles to a non-empty program. See its own docs.
         let sep = if seeded.is_empty() && init_has_statement { SEPARATOR } else { "" };
         seeded.push(i);
         out.push_str(&format!(
@@ -308,7 +308,7 @@ pub fn patch_preset(text: &str, targets: &[PatchTarget], substituted_fps: i32) -
 /// Whether an equation line contributes anything to the compiled program:
 /// the code before any `//` comment, trimmed, is non-empty. A line that is
 /// only a comment (`per_frame_init_1=//decay = 0.94`) contributes nothing, so
-/// a block made entirely of such lines compiles to an *empty* program: which
+/// a block made entirely of such lines compiles to an *empty* program, which
 /// is exactly the case where [`SEPARATOR`] must not be emitted.
 fn is_statement(value: &str) -> bool {
     let code = match value.find("//") {
@@ -711,7 +711,7 @@ mod tests {
         // program without a `;`, and 1162 (11.9%) end per_frame_init that
         // way. libprojectM concatenates a block's lines into one program, so
         // appending after an unterminated statement is a syntax error that
-        // kills the *whole* block: measured: a preset ending in `q1 = 0.5`
+        // kills the *whole* block. Measured: a preset ending in `q1 = 0.5`
         // stopped evaluating its own equations entirely once one line was
         // appended. Exactly one leading `;` per appended block; a second one
         // on the following lines would be noise.
@@ -731,7 +731,7 @@ mod tests {
     fn treats_an_all_comment_block_as_having_no_statement() {
         // 25 of the 9795 reference presets have a block whose every line is a
         // comment. Those compile to an *empty* program, so an appended `;`
-        // would land first and projectM rejects the whole preset: verified
+        // would land first and projectM rejects the whole preset, verified
         // against real libprojectM, and silently, since a rejected load leaves
         // the deck on its previous preset. Gating on "has numbered lines"
         // instead of "has a statement" is what broke them.
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn never_starts_a_block_with_the_separator() {
         // A Milkdrop program that *begins* with `;` fails to compile
-        // (measured): the separator is only ever a separator. 121 presets
+        // (measured). The separator is only ever a separator. 121 presets
         // in the library have no per_frame block at all, and every preset
         // that lacks `per_frame_init` hits the same case for that block.
         let out = patch_preset("fRating=5.000\n", &[assign(1, "q1")], MEASURED_DEFAULT_FPS);

@@ -2,7 +2,7 @@
 //! across a wall-clock-free playback loop, plus play/pause. Backed by
 //! `Show::timeline_keyframes`/`timeline_playing` and the pure
 //! `core::timeline::{timeline_loop_duration, timeline_values_at}`
-//! (already ported+tested, zero prior usage before this panel: Step 5 of
+//! (already ported+tested, zero prior usage before this panel, Step 5 of
 //! the Phase 8 VJ-panels plan). Port of `SidebarTimeline.svelte` +
 //! `timeline-store.svelte.ts`.
 //!
@@ -10,7 +10,7 @@
 //! directly (same "direct field mutation" convention as
 //! `ui::quality`/`ui::color`/`ui::composite`), re-sorting by `time_sec`
 //! after a time edit settles (`timeline_values_at`'s own doc comment: "callers
-//! are responsible for keeping keyframes sorted by time_sec": sorting on
+//! are responsible for keeping keyframes sorted by time_sec"; sorting on
 //! `drag_stopped`/`lost_focus` rather than on every `changed()` frame avoids
 //! reordering the list out from under an in-progress drag). Play/pause is
 //! the one exception: it goes through
@@ -22,7 +22,7 @@
 //!
 //! "+ Point" appends a new keyframe defaulting to the first non-empty
 //! snapshot slot (or slot 0 if none are filled) at `last_time + 5` seconds
-//! (`0` if the list is empty): a direct port of `addTimelineKeyframe` in
+//! (`0` if the list is empty), a direct port of `addTimelineKeyframe` in
 //! `timeline-store.svelte.ts`, not a "current playback time" capture:
 //! `Show` has no wall clock of its own (see `Show::tick_recall`'s doc
 //! comment), so there is no such value to capture, playing or not. The new

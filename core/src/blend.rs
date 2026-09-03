@@ -156,15 +156,15 @@ pub const DEFAULT_SLOT_COMPOSITE: SlotComposite = SlotComposite {
     color_tol: 0.0,
 };
 
-/// Port of OpenDrop-VJ `compositor.ts:140` `shouldForceNormalForLowestSlot`
-///: whole-branch review Finding I5. Whether the lowest active deck slot
+/// Port of OpenDrop-VJ `compositor.ts:140` `shouldForceNormalForLowestSlot`,
+/// whole-branch review Finding I5. Whether the lowest active deck slot
 /// should be forced to `BlendMode::Normal`: multiply/screen/additive against
 /// a still-transparent framebuffer reads wrong (e.g. multiply -> black).
 /// Independent of any video/NDI-in layer, which draws last, on top of the
 /// deck stack, not underneath it.
 ///
 /// `lowest_active` is `None` when no slot is active at all (every slot at or
-/// below the compositor's 0.001 opacity floor): the idiomatic Rust
+/// below the compositor's 0.001 opacity floor), the idiomatic Rust
 /// equivalent of the TS caller's `lowestActive: number` sentinel, and the
 /// same `Option<usize>` shape `app`'s own `(0..DECK_COUNT).find(...)` call
 /// site already produces.

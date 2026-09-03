@@ -24,7 +24,7 @@ fn main() {
 fn probe_projectm() -> Vec<PathBuf> {
     // Arch's projectM-4.pc emits a broken `Libs: -l:projectM-4` (missing the `lib`
     // prefix the actual `libprojectM-4.so` needs), so don't trust its cargo_metadata
-    // link directives: probe cflags/libdirs only and link manually below.
+    // link directives; probe cflags/libdirs only and link manually below.
     let projectm = pkg_config::Config::new()
         .cargo_metadata(false)
         .probe("projectM-4")

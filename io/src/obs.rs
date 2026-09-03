@@ -21,9 +21,9 @@
 //! async_rx.recv().await { ... }` handling one control message to
 //! completion at a time: no `select!` needed.
 //!
-//! Never panics on a connect/RPC error: logged once. Any such error:
-//! whether the initial connect, the post-connect `GetSceneList`, or a
-//! later `SetCurrentProgramScene`: drops the held `obws::Client` (if any)
+//! Never panics on a connect/RPC error: logged once. Any such error
+//! (whether the initial connect, the post-connect `GetSceneList`, or a
+//! later `SetCurrentProgramScene`) drops the held `obws::Client` (if any)
 //! and publishes an idle snapshot (`connected: false`), matching `osc::
 //! run`'s "a real recv error drops the socket and reports not-listening"
 //! convention: an RPC error on an established connection is treated the
@@ -47,7 +47,7 @@ pub struct ObsSnapshot {
     /// Empty while not connected.
     pub scenes: Vec<String>,
     /// Set when the OBS password keyring lookup fails during `Connect`
-    /// (whole-branch review Finding 1: AC-12: this used to be an
+    /// (whole-branch review Finding 1 (AC-12): this used to be an
     /// `eprintln!` only, invisible to a GUI user). Rendered in the
     /// Streaming panel. Cleared by a subsequent successful `Connect` or by
     /// `Disconnect`; carried through this same `Connect` attempt's outcome
@@ -206,7 +206,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                 publish_idle(&state, None);
             }
             ObsControl::SetScene(name) => {
-                // `None`: not connected: no-op, mirrors OscControl::Stop while idle.
+                // `None`: not connected, no-op, mirrors OscControl::Stop while idle.
                 if let Some(c) = client.as_ref() {
                     if let Err(e) = c.scenes().set_current_program_scene(name.as_str()).await {
                         eprintln!("opendrop-io: obs SetCurrentProgramScene failed: {e}");
@@ -221,7 +221,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
 
 /// Maps a `secrets::get_secret` result to the password `obws::Client::
 /// connect` is called with. `Ok(None)` (no password stored) and `Err`
-/// (a keyring lookup failure: e.g. no Secret Service daemon running,
+/// (a keyring lookup failure, e.g. no Secret Service daemon running,
 /// which `secrets`'s module doc comment flags as a real possibility on
 /// this project's minimal Hyprland dev session) are both mapped to `None`,
 /// matching the JS reference's lenient `secretsStore.getSecret('obs-

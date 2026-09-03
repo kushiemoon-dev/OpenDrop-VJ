@@ -3,7 +3,7 @@
 //! control. Port of `MixerLayout.svelte` (Step 16 of the plan). The
 //! crossfader that used to sit here moved into the header's hand-painted
 //! mini-transport (Step 10 of the Phase 7 UI redesign plan, `ui::shell::
-//! header`): always visible now, not just while this panel is active.
+//! header`), always visible now, not just while this panel is active.
 //!
 //! Reskinned per `decks-v2.html` (Step 13 of the plan): `widgets::card`
 //! instead of `Frame::group`, `widgets::pill` bus badges, and a hand-painted
@@ -42,7 +42,7 @@ use crate::ui::widgets::{self, theme};
 /// `pub(crate)` (Step 11 of the Phase 7 UI redesign plan): the Stage
 /// bottom bar's own deck vignettes (`ui::shell::status_bar_stage`) draw
 /// the same live textures at a smaller size and need this exact flip too
-///: reused, not redefined, so the two never drift.
+/// too, reused, not redefined, so the two never drift.
 pub(crate) const FLIPPED_V_UV: egui::Rect = egui::Rect { min: egui::pos2(0.0, 1.0), max: egui::pos2(1.0, 0.0) };
 
 #[allow(clippy::too_many_arguments)]
@@ -85,8 +85,8 @@ fn deck_card(
 
     ui.push_id(i, |ui| {
         let card = widgets::card(ui, |ui| {
-            // `card`'s content_ui inherits its layout from the caller:
-            // here, the enclosing `ui.horizontal` deck row: so without an
+            // `card`'s content_ui inherits its layout from the caller,
+            // here, the enclosing `ui.horizontal` deck row, so without an
             // explicit `ui.vertical` wrapper, `block` and `bus` below would
             // lay out side by side instead of stacked (also found live: the
             // bus badge rendered as an oversized vertical bar next to the
@@ -118,7 +118,7 @@ fn deck_card(
 
                 // Bus A = `accent`, bus B = `ok`, off = `dim` (the mapping
                 // `Metrics`' own doc comment establishes for this step, already
-                // reused as-is by the header's own bus A/B pills: `ui::shell::
+                // reused as-is by the header's own bus A/B pills, `ui::shell::
                 // status_bar_stage`).
                 let (bus_text, bus_color) = match show.deck_bus[i] {
                     DeckBus::A => ("● Bus A", t.palette.accent),
@@ -140,7 +140,7 @@ fn deck_card(
         // un-lifted `Response::rect` from the layout above: only
         // `hover_glow`'s decorative overlay rect is ever translated, so
         // the animated lift can never desync from the cursor mid-
-        // transition: the "card dodges the cursor" bug this step's brief
+        // transition, the "card dodges the cursor" bug this step's brief
         // explicitly warns about.
         let d = t.durations.fast.max(4.0 * ui.ctx().input(|input| input.stable_dt));
         let hover_t = ui.ctx().animate_bool_with_time_and_easing(ui.id().with("hover"), card.response.hovered(), d, ease_out_kushie);
@@ -194,7 +194,7 @@ fn thumbnail_overlay(ui: &egui::Ui, rect: egui::Rect, is_active: bool) {
 /// last_wall_ms`) is a single global number, not per-deck. Rather than
 /// fabricate numbers a live VJ performer could mistake for real telemetry,
 /// this renders the row's layout/typography only, both sides a placeholder
-/// dash: the same "no data" convention the mockup itself uses for an empty
+/// dash, the same "no data" convention the mockup itself uses for an empty
 /// slot's meta row. Wiring real per-deck figures is follow-up work, not
 /// this step's (a static visual reskin).
 fn meta_line(ui: &mut egui::Ui) {
@@ -212,7 +212,7 @@ fn meta_line(ui: &mut egui::Ui) {
 /// unchanged, are exactly that resting state: `0 0 0 1px accent, 0 4px
 /// 16px accent@18%`) and its 50% peak: a continuous ~2.4s sine oscillation
 /// of the halo layers' alpha, driven directly by `ui.ctx().input(|i|
-/// i.time)`: deliberately NOT an `animate_*` call, since there is no
+/// i.time)`, deliberately NOT an `animate_*` call, since there is no
 /// bool/value state transition here, just the elapsed clock. Never the
 /// rect itself, only intensity oscillates. `focus_ring`'s crisp 1px ring
 /// (the mockup's separate `0 0 0 1px accent` shadow layer) stays constant,
@@ -223,7 +223,7 @@ fn active_glow(ui: &egui::Ui, rect: egui::Rect) {
 
     // `sin(pi * phase)` is 0 at `phase` 0.0 and 1.0 (the keyframe's 0%/100%
     // resting endpoints) and 1.0 at `phase` 0.5 (the keyframe's 50% peak),
-    // never negative across `phase`'s [0, 1) range: the "breathe out,
+    // never negative across `phase`'s [0, 1) range, the "breathe out,
     // breathe in" shape of a CSS `breathe` keyframe.
     const PERIOD_SECS: f64 = 2.4;
     let phase = (ui.ctx().input(|i| i.time) / PERIOD_SECS).rem_euclid(1.0);
@@ -261,11 +261,11 @@ fn hover_glow(ui: &egui::Ui, rect: egui::Rect, hover_t: f32) {
 /// `ink`-filled rail with an accent-tinted fill and border. Not the same
 /// widget: this reads a duration (`0.0..=5.0` seconds), not an A/B mix
 /// fraction, and its fill is one flat tint rather than the crossfader's own
-/// 2-triangle gradient mesh: simpler, because this is a summary row, not
+/// 2-triangle gradient mesh, simpler, because this is a summary row, not
 /// the header's always-visible live mini-transport. Still a real drag/click
 /// control (dragging or clicking the rail sets `transition_seconds`
 /// directly): "static" in this step's brief means no *animation* (Step 22's
-/// job), not no interactivity: the plain `egui::Slider` it replaces was
+/// job), not no interactivity; the plain `egui::Slider` it replaces was
 /// draggable too.
 fn transition_row(ui: &mut egui::Ui, transition_seconds: &mut f64) {
     let t = theme(ui);
@@ -334,7 +334,7 @@ mod tests {
     use crate::ui::widgets::themed_test_ui;
 
     // `state`, never `show` (that identifier is this module's own `show`
-    // function, imported into scope by `use super::*` above: a same-named
+    // function, imported into scope by `use super::*` above; a same-named
     // local binding would shadow it and break every bare `show(...)` call
     // below).
     fn sample_state() -> Show {

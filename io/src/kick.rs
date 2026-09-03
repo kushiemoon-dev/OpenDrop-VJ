@@ -15,8 +15,8 @@
 //!
 //! 1. Fetches `https://kick.com/api/v2/channels/{channel}` (`kickApi.ts`,
 //!    `index.cjs:55-60`) to resolve the channel name to a chatroom ID
-//!    (`channelInfo.chatroom.id`). **Ported here as a plain `reqwest` GET**
-//!   : the JS reference instead drives a headless Puppeteer browser (with
+//!    (`channelInfo.chatroom.id`). **Ported here as a plain `reqwest` GET**:
+//!    the JS reference instead drives a headless Puppeteer browser (with
 //!    a stealth plugin) at this URL specifically because the endpoint sits
 //!    behind Cloudflare bot-protection (`index.cjs:61-65`: `if (response
 //!    ?.status() === 403) throw new Error('Request blocked by Cloudflare
@@ -58,7 +58,7 @@
 //! `initialize()` path. They are still required and validated here, both
 //! to match the JS reference's refusal behavior byte-for-byte and because
 //! a real Kick account's credentials are exactly what `checkAuth()` guards
-//! (a future authenticated write path: sending messages, banning: would
+//! (a future authenticated write path, sending messages, banning, would
 //! need them for real; none of that is implemented here, mirroring
 //! `obs`'s app->OBS-only, no-write-path scope note).
 //!
@@ -78,7 +78,7 @@
 //! of going through an unclosable third-party client object, so that
 //! problem doesn't exist here: the WS-reading loop runs in its own
 //! `tokio::spawn`ed task, and its `JoinHandle` is stored so `Disconnect`
-//! (or a `Connect` superseding an existing one) can `.abort()` it: which
+//! (or a `Connect` superseding an existing one) can `.abort()` it, which
 //! drops the `WebSocketStream` (and with it the underlying TCP/TLS socket)
 //! immediately. A generation counter would only add complexity for a
 //! problem that doesn't exist on this side of the port: real
@@ -112,7 +112,7 @@ const DISCOVERY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ap
 pub struct KickSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (missing bearer/xsrf/cookies, or a
-    /// keyring lookup failure): whole-branch review Finding 1 (AC-12):
+    /// keyring lookup failure). Whole-branch review Finding 1 (AC-12):
     /// this used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.

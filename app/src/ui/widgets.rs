@@ -36,7 +36,7 @@ pub fn theme(ui: &egui::Ui) -> &'static Theme {
 
 /// Density scope: for the duration of `add_contents`, `Ui::item_spacing`
 /// switches from `Metrics::spacing_airy` to `Metrics::spacing_dense`. The
-/// only aéré→dense switch mechanism in the app; no user-facing toggle
+/// only airy→dense switch mechanism in the app; no user-facing toggle
 /// exists anywhere else.
 pub fn dense<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let t = theme(ui);

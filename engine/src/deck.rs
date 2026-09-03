@@ -32,7 +32,7 @@ pub const DECK_COUNT: usize = 4;
 
 /// One deck: its own GL context (sharing the main context's object
 /// namespace), pbuffer surface, `glow::Context`, shared output texture, and
-/// projectM instance: all created together, all belonging to this one
+/// projectM instance, all created together, all belonging to this one
 /// context.
 pub struct Deck {
     pub context: PossiblyCurrentContext,
@@ -58,7 +58,7 @@ pub struct Deck {
     ///
     /// Without this, a load that projectM *rejects* is invisible: the FFI
     /// call returns nothing, and `core.h` specifies that when a preset can't
-    /// be loaded "no switch takes place": so the deck silently keeps
+    /// be loaded "no switch takes place", so the deck silently keeps
     /// rendering its previous preset while the app believes the new one is
     /// up. That failure mode matters more since every load goes through
     /// `load_preset_patched`, which can be rejected where the original file
@@ -73,7 +73,7 @@ pub struct Deck {
 ///
 /// # Safety
 /// Called by libprojectM with a NUL-terminated `message` (or null), and the
-/// `user_data` pointer registered in `create_one_deck_context`: which points
+/// `user_data` pointer registered in `create_one_deck_context`, which points
 /// at a `RefCell<Option<String>>` owned by a live `Deck`, since the callback
 /// is unregistered by `projectm_destroy` before that cell is dropped.
 unsafe extern "C" fn on_preset_load_failed(_filename: *const c_char, message: *const c_char, user_data: *mut c_void) {
@@ -166,7 +166,7 @@ impl Deck {
     /// that unrepresentable rather than merely documented.
     ///
     /// Preflight (Phase 4) still validates the file, unpatched, exactly as
-    /// before: see [`Deck::load_preset_data`] on why the patch step itself
+    /// before. See [`Deck::load_preset_data`] on why the patch step itself
     /// is treated as trusted.
     ///
     /// Plenty of `.milk` files in the wild are CP1252 rather than UTF-8, so
@@ -236,12 +236,12 @@ impl Deck {
     /// saved/restored in absolute terms around the opaque render call (see
     /// `gl_state`, and the plan's step-1 review: without this, the
     /// subsequent copy can read garbage left behind by whatever the preset
-    /// did to blend/framebuffer/viewport state): then copies the result
+    /// did to blend/framebuffer/viewport state), then copies the result
     /// into this deck's shared texture. Must be called while this deck's
     /// context is current.
     ///
     /// Render and copy are timed as two sequential `GL_TIME_ELAPSED`
-    /// queries (never nested: see `timing::PassTimer`), each read back
+    /// queries (never nested; see `timing::PassTimer`), each read back
     /// non-blockingly and inline, so timing this costs nothing beyond the
     /// query calls themselves: no extra context switch.
     pub fn render_frame(&mut self, pcm: &[f32]) {
@@ -306,15 +306,15 @@ pub fn create_decks(display: &Display, config: &Config, anchor: &PossiblyCurrent
 
 /// Builds one GL context sharing `anchor`'s object namespace, made current
 /// against the given (already-created) pbuffer `surface`, with its own
-/// `glow::Context` and projectM instance: the extracted per-deck body of
+/// `glow::Context` and projectM instance, the extracted per-deck body of
 /// `create_decks`.
 ///
 /// `w`/`h` are parameters rather than `DECK_W`/`DECK_H` because a second
 /// caller used to build a smaller, 6th context here for preset thumbnails.
 /// That renderer now runs in a separate process (`app::thumbnail_child`),
 /// so `create_decks` is the only caller left; the sizes stay explicit
-/// because everything downstream of them: the shared texture's
-/// allocation, `copy_fbo0_to_shared_texture`'s copy region: has to agree
+/// because everything downstream of them, the shared texture's
+/// allocation and `copy_fbo0_to_shared_texture`'s copy region, has to agree
 /// with the surface actually created, not with a module constant.
 ///
 /// Note: this used to be split across 3 loops in `create_decks` so that all
@@ -333,8 +333,8 @@ pub fn create_one_deck_context(
     // `Gles(None)` lets glutin/ANGLE negotiate down to GLES 3.0, which is
     // below projectM's GladLoader minimum (patched to 3.1 to match this
     // vendored ANGLE build's ceiling on its D3D11 backend, see
-    // packaging/windows/overlay-ports/projectm/gles31-min-version.patch):
-    // ask for exactly what's needed instead of leaving it to negotiation.
+    // packaging/windows/overlay-ports/projectm/gles31-min-version.patch).
+    // Ask for exactly what's needed instead of leaving it to negotiation.
     #[cfg(target_os = "windows")]
     let context_api = ContextApi::Gles(Some(Version::new(3, 1)));
     #[cfg(not(target_os = "windows"))]
@@ -410,7 +410,7 @@ pub fn create_one_deck_context(
 /// shared deck texture. The exclusive `glCopyTexSubImage2D` in this whole
 /// pipeline: GPU-to-GPU, no `glReadPixels` anywhere near the render path.
 ///
-/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`: see
+/// `w`/`h` are the caller's real surface size, not `DECK_W`/`DECK_H`. See
 /// `create_one_deck_context` on why that distinction is kept even now that
 /// every live caller passes the deck constants.
 pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture, w: i32, h: i32) {
@@ -421,7 +421,7 @@ pub fn copy_fbo0_to_shared_texture(gl: &glow::Context, tex: glow::NativeTexture,
     }
 }
 
-/// Allocates the context's shared output texture at its own `w` x `h`: see
+/// Allocates the context's shared output texture at its own `w` x `h`. See
 /// `copy_fbo0_to_shared_texture` on why this is not `DECK_W`/`DECK_H`.
 fn create_shared_deck_texture(gl: &glow::Context, w: u32, h: u32) -> glow::NativeTexture {
     unsafe {

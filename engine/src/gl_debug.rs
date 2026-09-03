@@ -2,7 +2,7 @@ use glow::HasContext;
 
 /// Installs a synchronous `GL_DEBUG_OUTPUT` callback that prints to stderr,
 /// tagged with `label` so multi-context logs stay distinguishable. Call only
-/// while `gl`'s underlying context is current on this thread: the callback
+/// while `gl`'s underlying context is current on this thread. The callback
 /// is registered against whichever context is bound at this call.
 pub fn install(gl: &mut glow::Context, label: &'static str) {
     unsafe {

@@ -87,7 +87,7 @@ fn filter_sources(sources: Vec<NdiSource>, source_filter: Option<&str>) -> Vec<N
 /// would stall output frame draining for just as long.
 ///
 /// Returns `Err` (the SDK's error, stringified) rather than logging and
-/// falling back to an empty list itself: whole-branch review Finding 4:
+/// falling back to an empty list itself. Whole-branch review Finding 4:
 /// this is polled every ~5ms by [`super::out::run`]'s loop, and a
 /// persistently failing `Finder` (e.g. no NDI SDK installed) used to
 /// `eprintln!` on every single call, roughly 200 lines/second indefinitely.
@@ -104,7 +104,7 @@ pub(super) fn open_finder(ndi: &NDI) -> Option<Finder> {
     match Finder::new(ndi, &FinderOptions::default()) {
         Ok(finder) => Some(finder),
         Err(e) => {
-            eprintln!("[ndi] failed to start source discovery: {e}: NDI input unavailable");
+            eprintln!("[ndi] failed to start source discovery: {e}. NDI input unavailable.");
             None
         }
     }
@@ -135,8 +135,8 @@ pub(super) struct ActiveReceive {
 
 impl ActiveReceive {
     /// RGBA (`ReceiverColorFormat::RGBX_RGBA`, the Rust equivalent of the
-    /// reference's `COLOR_FORMAT_RGBX_RGBA`) at `ReceiverBandwidth::Lowest`
-    ///: the same `BANDWIDTH_LOWEST` default the reference used
+    /// reference's `COLOR_FORMAT_RGBX_RGBA`) at `ReceiverBandwidth::Lowest`:
+    /// the same `BANDWIDTH_LOWEST` default the reference used
     /// (`electron/main.cjs:687-689`). That reason (keeping an Electron
     /// IPC/relay path affordable) doesn't apply to this native app, but
     /// nothing argues for a different default either, so it's kept as-is.

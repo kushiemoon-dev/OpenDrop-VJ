@@ -16,7 +16,7 @@
 #     - libprojectM-4.so.4   (projectM has no distro package)
 #     - libavahi-client.so.3 (avahi is opt-in on a standard Hyprland setup)
 #     - libavahi-common.so.3 (same as above)
-#   Never bundled: libGLESv2.so.2, libGLdispatch.so.0: these are part of
+#   Never bundled: libGLESv2.so.2, libGLdispatch.so.0. These are part of
 #   the GPU driver stack (libglvnd/Mesa dispatch), not portable software.
 #   Bundling a driver-linked .so ties the AppImage to the exact driver of
 #   the build machine and breaks rendering on any other GPU driver. This

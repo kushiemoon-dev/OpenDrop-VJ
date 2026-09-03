@@ -75,7 +75,7 @@ const WARP_SMOOTHING: f64 = 0.15;
 /// a browser-quota one.
 pub const MAX_CLIP_BYTES: u64 = 50 * 1024 * 1024;
 
-/// User-facing video-layer state (Video panel: `app::ui::video`).
+/// User-facing video-layer state (Video panel, `app::ui::video`).
 /// Defaults are `videoState`'s own initial values, field for field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoState {

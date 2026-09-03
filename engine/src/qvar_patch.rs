@@ -31,7 +31,7 @@
 //!
 //! That is a deliberate departure from the web reference, whose
 //! `core::q_vars::inject_q_var_params` emits all 32 guard lines
-//! unconditionally and re-reads `enabled` from a JS object every frame: a
+//! unconditionally and re-reads `enabled` from a JS object every frame, a
 //! host-owned object a Milkdrop preset has no way to see. The equivalent
 //! here would be a second index range carrying 32 enable flags plus a gated
 //! application line per q-var, i.e. ~160 extra equation lines appended to
@@ -50,7 +50,7 @@
 //! element that does not exist here. The application lines land at the end
 //! of `per_frame`, so an override wins over whatever the preset computed for
 //! that q-var that frame, and loses to a `per_pixel` block that recomputes
-//! it: the same caveat the web port carries.
+//! it. The same caveat the web port carries.
 
 use crate::preset_patch::{Apply, PatchTarget};
 use opendrop_core::q_vars::{DeckQVarParams, Q_VAR_COUNT};

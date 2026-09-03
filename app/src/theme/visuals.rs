@@ -96,8 +96,8 @@ mod tests {
 
     const ALL_THEME_IDS: [ThemeId; 3] = [ThemeId::Kushie, ThemeId::OpenDropClassic, ThemeId::Cyan];
 
-    // --- Direct token ports (one assert per field, per brief's "un test
-    // par token" requirement) ------------------------------------------
+    // --- Direct token ports (one assert per field, per brief's "one test
+    // per token" requirement) ------------------------------------------
 
     #[test]
     fn panel_fill_matches_surface_token() {

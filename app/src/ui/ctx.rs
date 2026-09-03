@@ -12,20 +12,20 @@
 //! the keyboard remap table),
 //! `OutputCtx` (NDI-out, the Output panel's monitor picker, the Quality
 //! panel), `StreamCtx` (OBS/Twitch/Kick), `ControlCtx` (Ableton Link, `#[cfg(
-//! feature = "link")]`-gated per field, never on the struct itself: see
+//! feature = "link")]`-gated per field, never on the struct itself; see
 //! that struct's own doc comment).
 //!
 //! Two borrow-check points worth calling out explicitly (both already
 //! resolved by construction, not something a caller needs to work around):
 //! - `show` (the `Show` business object) lives in `PerformCtx` only, never
-//!   duplicated into another struct. `ui::preset_browser::show`: the one
+//!   duplicated into another struct. `ui::preset_browser::show`, the one
 //!   panel that needs both a `Show` borrow and the browser's own local
-//!   state: takes `(&mut PerformCtx, &mut LibraryCtx)` as two distinct
+//!   state, takes `(&mut PerformCtx, &mut LibraryCtx)` as two distinct
 //!   `&mut` parameters rather than one combined borrow, and reborrows
 //!   `perform.show` to `&Show` only for the instruction that calls
 //!   `SearchCache::resolve` (see that call site's own comment).
 //! - `ndi_in_selected_source` lives in `SourcesCtx` while the NDI-out
-//!   handle/toggles live in `OutputCtx`: required both to avoid a double
+//!   handle/toggles live in `OutputCtx`, required both to avoid a double
 //!   borrow of one NDI-shaped bundle and because `Panel::NdiIn`/`NdiOut`
 //!   (this same step) will eventually want the in/out panels reading from
 //!   different structs.
@@ -50,7 +50,7 @@ use crate::{InvisibleMode, Panel};
 /// bar's frame-timing readout (Step 10). The mini-transport (crossfader,
 /// BPM, tap) named alongside these in Step 9's own reviewer note stays out
 /// of this struct on purpose: it lives on `Show` (`PerformCtx::show`, the
-/// single owner of that business object: see this module's doc comment),
+/// single owner of that business object; see this module's doc comment),
 /// so `ui::shell::header` takes `(&mut ShellCtx, &mut PerformCtx)` as two
 /// distinct parameters instead, same two-struct idiom as
 /// `ui::preset_browser::show`. `theme_request` is deliberately NOT a field
@@ -61,7 +61,7 @@ use crate::{InvisibleMode, Panel};
 pub(crate) struct ShellCtx<'a> {
     pub(crate) active_panel: &'a mut Panel,
     /// Header's Stage toggle (`⛶`, `ghost_button`) and the `F11` keyboard
-    /// toggle in `main.rs`'s `window_event`: drives `ui_root`'s choice
+    /// toggle in `main.rs`'s `window_event`, drives `ui_root`'s choice
     /// between the Normal and Stage variants of the header/nav/status
     /// bar (Step 11 of the Phase 7 UI redesign plan).
     pub(crate) stage_mode: &'a mut bool,
@@ -74,7 +74,7 @@ pub(crate) struct ShellCtx<'a> {
     /// needs to mutate it from inside `ui_root`.
     pub(crate) last_wall_ms: Option<f64>,
     /// Whether the Stage bottom bar's preset drawer (`Panel::bottom("od_
-    /// presets_drawer").show_collapsible`) is open: Stage-mode-only UI
+    /// presets_drawer").show_collapsible`) is open, Stage-mode-only UI
     /// state (Step 11), toggled by a `ghost_button` in `status_bar_stage`,
     /// not by `stage_mode` itself.
     pub(crate) presets_drawer_open: &'a mut bool,
@@ -82,7 +82,7 @@ pub(crate) struct ShellCtx<'a> {
 
 /// Live performance state: the `Show` business object plus per-deck UI
 /// state, shared by the Decks, Playlists, and Preset Browser panels (the
-/// browser also needs `LibraryCtx`: see this module's doc comment on the
+/// browser also needs `LibraryCtx`; see this module's doc comment on the
 /// two-struct split).
 pub(crate) struct PerformCtx<'a> {
     pub(crate) show: &'a mut Show,
@@ -91,7 +91,7 @@ pub(crate) struct PerformCtx<'a> {
     pub(crate) pending_validations: &'a HashSet<usize>,
     pub(crate) preset_errors: &'a HashMap<usize, String>,
     pub(crate) transition_seconds: &'a mut f64,
-    /// Share panel's name field (Step 13 of the Phase 8 plan): lives here
+    /// Share panel's name field (Step 13 of the Phase 8 plan), lives here
     /// rather than a new struct because the Share panel needs the same
     /// `show`/`deck_preset_names`/`transition_seconds` this struct already
     /// carries (crossfade duration doubles as `SharedSet::transition_time`,
@@ -103,7 +103,7 @@ pub(crate) struct PerformCtx<'a> {
 /// Preset Browser panel state: search box, cached results, thumbnail
 /// pipeline. `search_cache` is named to match `SearchCache::resolve`'s call
 /// site exactly (`library.search_cache.resolve(&*perform.show, query)`,
-/// inside `ui::preset_browser::show`: a shared reborrow of a `PerformCtx`
+/// inside `ui::preset_browser::show`, a shared reborrow of a `PerformCtx`
 /// field, scoped to that one call, never stored). `load_request` is the
 /// browser's click-to-load out-param, same idiom as the pre-existing
 /// `preset_load_request` local in `main.rs`'s `run()` closure.
@@ -120,7 +120,7 @@ pub(crate) struct LibraryCtx<'a> {
 
 /// External control/device surfaces: Audio input, MIDI, OSC, remote WS,
 /// V4L2loopback, CloudPresets, and the NDI-in panel's own selected-source
-/// state (the NDI handle and its composite/deck toggles are output-side:
+/// state (the NDI handle and its composite/deck toggles are output-side;
 /// see `OutputCtx`).
 pub(crate) struct SourcesCtx<'a> {
     pub(crate) audio: &'a opendrop_audio::AudioHandle,
@@ -164,7 +164,7 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) video_local_error: &'a mut Option<String>,
     pub(crate) video_capture: &'a opendrop_io::video_capture::VideoCaptureSnapshot,
     /// The Video panel's one outbound NDI intent for this frame, applied
-    /// by `main.rs` right after `ui_root` returns: same out-param idiom
+    /// by `main.rs` right after `ui_root` returns, same out-param idiom
     /// as `LibraryCtx::load_request`, and for the same reason: the NDI
     /// handle is borrowed by `OutputCtx` for the whole closure, so the
     /// panel records what it wants instead of sending it itself.
@@ -176,7 +176,7 @@ pub(crate) struct SourcesCtx<'a> {
     /// cloud_presets_secret_error`'s doc comment.
     pub(crate) cloud_presets_secret_error: &'a mut Option<String>,
     /// Id + edit buffer of the entry currently being renamed inline, if
-    /// any: mirrors `SidebarCloudPresets.svelte`'s `renamingId`/
+    /// any, mirrors `SidebarCloudPresets.svelte`'s `renamingId`/
     /// `renameValue` local state, promoted to `AppState` since this panel
     /// (like every other one) takes individual fields, not a place to
     /// stash cross-frame widget state of its own (see `ui::quality`'s
@@ -217,12 +217,12 @@ pub(crate) struct StreamCtx<'a> {
 
 /// Ableton Link panel state. `#[cfg(feature = "link")]` is on the two
 /// fields individually, never on the struct itself, so `ControlCtx` exists
-/// (and `ui_root`'s arity stays 8 params) in both build configurations:
+/// (and `ui_root`'s arity stays 8 params) in both build configurations;
 /// see the plan's explicit vigilance note on this struct. With the `link`
 /// feature off (the default), both real fields disappear and `_marker` is
 /// the struct's only field: a zero-sized `PhantomData` purely so the `'a`
 /// lifetime parameter stays used (an empty struct with a declared-but-
-/// unused lifetime is a hard compile error, `E0392`): not business state,
+/// unused lifetime is a hard compile error, `E0392`), not business state,
 /// never read.
 pub(crate) struct ControlCtx<'a> {
     #[cfg(feature = "link")]

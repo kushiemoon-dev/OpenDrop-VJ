@@ -2,14 +2,14 @@
 //! full-screen flash rendered by the compositor
 //! (`engine::compositor::Compositor::render_strobe_flash`, timed by
 //! `core::strobe::strobe_flash_intensity`). Port of `SidebarStrobe.svelte`
-//! (Step 10 of the Phase 8 VJ-panels plan): there was no prior engine
+//! (Step 10 of the Phase 8 VJ-panels plan). There was no prior engine
 //! behavior to port beyond the command name (`CommandId::StrobeToggle`).
 //!
 //! Only the toggle goes through `CommandRegistry::dispatch` (Recipe B:
 //! keyboard/MIDI/OSC/remote-ws parity, same precedent as `ui::timeline`'s
 //! Play/Pause button). Rate/intensity/color mutate `Show::strobe` directly,
 //! same "direct field mutation" convention as every other panel
-//! (`ui::quality`/`ui::color`/`ui::composite`): the plan's transversal
+//! (`ui::quality`/`ui::color`/`ui::composite`). The plan's transversal
 //! command list only names the toggle.
 
 use opendrop_core::commands::{CommandId, CommandRegistry};
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn toggle_button_dispatches_through_the_registry() {
         // Recipe B parity: pressing the button must go through
-        // `CommandContext::toggle_strobe`, not a direct field write:
+        // `CommandContext::toggle_strobe`, not a direct field write;
         // asserted here on the underlying setter, since a real click needs
         // `egui::Context::run` + `Ui::interact`, out of scope for this
         // render-only harness (same limitation `ui::timeline`'s tests

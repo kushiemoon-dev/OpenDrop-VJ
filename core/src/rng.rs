@@ -28,7 +28,7 @@ pub struct Xorshift64 {
 
 /// Warm-up rounds run once at construction so a low-entropy seed (small
 /// integers like 1 or 2, adjacent seeds, etc.) has fully diffused into the
-/// high bits `next_f64` reads before the first value is ever produced:
+/// high bits `next_f64` reads before the first value is ever produced;
 /// without this, two seeds differing only in a low bit can produce
 /// indistinguishable output for several calls. Real callers (`app`,
 /// deriving a seed from `SystemTime::now()`) won't hit this in practice, but

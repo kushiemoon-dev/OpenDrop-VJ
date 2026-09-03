@@ -15,13 +15,13 @@
 //!
 //! `SharedSet::preset_a`/`preset_b` have no direct `Show` equivalent (only
 //! `Show::preset_catalog` + the private per-bus browsing cursor exist, and
-//! those track catalog *browsing*, not what's actually loaded): resolved
+//! those track catalog *browsing*, not what's actually loaded), resolved
 //! here from `deck_preset_names` (the name actually loaded on each
 //! physical slot, already threaded through `PerformCtx` for the Decks
 //! panel) via `show.deck_bus`: the first slot routed to that bus, empty
 //! string if none is. `SharedSet::transition_time` mirrors
 //! `AppState::transition_seconds` (`PerformCtx`'s existing field, the
-//! soft-cut duration `ui::decks`' transition rail already controls): the
+//! soft-cut duration `ui::decks`' transition rail already controls), the
 //! same concept, TS-named differently.
 
 use opendrop_core::share_set::{filter_shareable_overlays, SharedSet};
@@ -46,7 +46,7 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
         );
     }
 
-    if ui.button("Copier le lien").clicked() {
+    if ui.button("Copy Link").clicked() {
         let preset_a = preset_name_for_bus(show, deck_preset_names, DeckBus::A);
         let preset_b = preset_name_for_bus(show, deck_preset_names, DeckBus::B);
 
@@ -82,7 +82,7 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
 }
 
 /// Name currently loaded on the first physical slot routed to `bus`, or
-/// empty if no slot is: see this module's doc comment on why `Show` alone
+/// empty if no slot is; see this module's doc comment on why `Show` alone
 /// can't answer this.
 fn preset_name_for_bus(show: &Show, deck_preset_names: &[String; 4], bus: DeckBus) -> String {
     show.deck_bus.iter().position(|&b| b == bus).map(|i| deck_preset_names[i].clone()).unwrap_or_default()
@@ -122,12 +122,12 @@ mod tests {
             let mut state = Show::default();
             state.overlay_store.overlays.push(make_overlay(
                 "id-text".to_string(),
-                "Texte".to_string(),
+                "Text".to_string(),
                 OverlayPatch { kind: Some(opendrop_core::overlay::OverlayKind::Text), ..Default::default() },
             ));
             state.overlay_store.overlays.push(make_overlay("id-media".to_string(), "img.png".to_string(), OverlayPatch::default()));
             let names: [String; 4] = std::array::from_fn(|i| format!("Preset {i}"));
-            let mut name = "Mon set".to_string();
+            let mut name = "My set".to_string();
             show(ui, &state, &names, 1.5, &mut name);
         });
     }

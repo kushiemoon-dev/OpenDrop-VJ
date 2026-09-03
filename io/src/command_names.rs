@@ -7,7 +7,7 @@
 //! and section grouping); no naming divergence was found: every TS string literal is
 //! in fact the mechanical kebab-case conversion of the corresponding Rust variant name.
 //!
-//! Pure, no I/O: consumed by OSC (Étape 11) and remote WS (Étape 12).
+//! Pure, no I/O: consumed by OSC (Step 11) and remote WS (Step 12).
 
 use opendrop_core::commands::CommandId;
 
@@ -476,7 +476,7 @@ mod tests {
     use super::*;
 
     /// All 223 `CommandId` variants, listed by hand (no `strum` dependency in this
-    /// workspace: see `core/Cargo.toml`). Order mirrors the enum declaration in
+    /// workspace, see `core/Cargo.toml`). Order mirrors the enum declaration in
     /// `core/src/commands.rs`.
     const ALL: &[CommandId] = &[
         CommandId::Crossfader,

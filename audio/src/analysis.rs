@@ -20,14 +20,14 @@ impl Default for AnalyserConfig {
 
 /// Port of the magnitude→byte mapping of `getByteFrequencyData` (Web Audio
 /// spec): dB = 20*log10(magnitude), clamped to [min_decibels, max_decibels],
-/// scaled to 0-255. `log10(0.0) == -inf` in Rust (no panic, no NaN): the
+/// scaled to 0-255. `log10(0.0) == -inf` in Rust (no panic, no NaN); the
 /// clamp right after absorbs it, no separate epsilon guard needed.
 pub fn magnitude_to_byte(magnitude: f64, cfg: &AnalyserConfig) -> u8 {
     let db = (20.0 * magnitude.log10()).clamp(cfg.min_decibels, cfg.max_decibels);
     (255.0 / (cfg.max_decibels - cfg.min_decibels) * (db - cfg.min_decibels)) as u8
 }
 
-/// sqrt(mean(byte^2)) over the bins given: the caller already passes the
+/// sqrt(mean(byte^2)) over the bins given; the caller already passes the
 /// bass_end-sized sub-slice (bpm.ts:48-51).
 pub fn bass_energy(bass_bins: &[u8]) -> f64 {
     let sum_sq: f64 = bass_bins.iter().map(|&b| (b as f64).powi(2)).sum();
@@ -68,7 +68,7 @@ impl Analyser {
     }
 
     /// Advances the rolling window with freshly captured `mono_samples` (one
-    /// call per captured cpal block: see AC-5), runs one FFT + one
+    /// call per captured cpal block, see AC-5), runs one FFT + one
     /// smoothing pass, and returns this block's low-frequency energy.
     /// `mono_samples.len()` can be anything (the negotiated cpal block size,
     /// independent of FFT_SIZE).

@@ -5,11 +5,11 @@
 //! contamination: the documented, wiki-endorsed usage for LGPL as a
 //! closed/permissively-licensed app's shared-library dependency. The
 //! license's condition in return is that this attribution exist: the
-//! project's name, a link to it, and (per projectM's own licensing wiki:
+//! project's name, a link to it, and (per projectM's own licensing wiki,
 //! a generic GitHub link isn't sufficient) a link to the *exact* source
 //! release actually linked against.
 //!
-//! Takes no fields: this panel has no mutable state, unlike every other
+//! Takes no fields. This panel has no mutable state, unlike every other
 //! panel in this app.
 
 pub fn show(ui: &mut egui::Ui) {

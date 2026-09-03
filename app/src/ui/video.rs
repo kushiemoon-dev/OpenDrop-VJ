@@ -37,7 +37,7 @@ use crate::ui::widgets::{self, theme};
 use crate::video_clips::{self, VideoClip, VIDEO_EXTENSIONS};
 
 /// This panel's one outbound intent toward the already-ported NDI-in
-/// subsystem: translated into an `NdiControl` message by `main.rs`, which
+/// subsystem, translated into an `NdiControl` message by `main.rs`, which
 /// owns the handle. Selecting an NDI source here drives the exact same
 /// receiver `ui::ndi::show_in` drives; nothing about NDI is re-ported.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub fn show(
 
     if show.video.enabled {
         ui.separator();
-        opacity_row(ui, &mut show.video.opacity, external_feed);
+        opacity_row(ui, &mut show.video.opacity, ndi_active);
         advance_row(ui, show, external_feed);
         reactive_row(ui, show, external_feed);
     }
@@ -101,16 +101,17 @@ pub fn show(
 /// The α crossfader: the layer's own opacity, independent of the deck
 /// crossfader (`SidebarVideo.svelte`'s `.crossfader-row`).
 ///
-/// Disabled while an external feed drives the layer, for the same reason
-/// `advance_row`/`reactive_row` are but arrived at differently: this slider
-/// is not merely inapplicable then, it is *inert*. With NDI receiving,
-/// `desired_video_input` returns `None`, so `composite_video_layer` never
-/// runs and never reads `show.video.opacity`; the NDI-in layer is composited
-/// separately in `main.rs` at a hardcoded `opacity: 1.0`. Leaving it enabled
-/// offered a control that silently did nothing (whole-branch review Finding
-/// M1).
-fn opacity_row(ui: &mut egui::Ui, opacity: &mut f64, external_feed: bool) {
-    ui.add_enabled_ui(!external_feed, |ui| {
+/// Disabled while NDI is receiving, not merely inapplicable then, but
+/// *inert*: with NDI receiving, `desired_video_input` returns `None`, so
+/// `composite_video_layer` never runs and never reads `show.video.opacity`;
+/// the NDI-in layer is composited separately in `main.rs` at a hardcoded
+/// `opacity: 1.0`. Leaving it enabled offered a control that silently did
+/// nothing (whole-branch review Finding M1). Unlike `advance_row`/
+/// `reactive_row`, this must NOT also gate on a live camera feed: under a
+/// camera, `desired_video_input` returns `Camera` and `opacity` is still a
+/// real, live control.
+fn opacity_row(ui: &mut egui::Ui, opacity: &mut f64, ndi_active: bool) {
+    ui.add_enabled_ui(!ndi_active, |ui| {
         ui.horizontal(|ui| {
             widgets::micro_label(ui, "α");
             ui.add(egui::Slider::new(opacity, 0.0..=1.0).step_by(0.01).show_value(false));
@@ -175,7 +176,7 @@ fn toggle_pill(ui: &mut egui::Ui, label: &str, value: &mut bool, enabled: bool, 
 }
 
 /// Live camera: a dropdown of detected devices where the platform can
-/// enumerate them (Linux: see `video_capture::list_cameras`), the device
+/// enumerate them (Linux, see `video_capture::list_cameras`), the device
 /// field itself, and the on/off toggle.
 ///
 /// The field is shown **always**, not only when the dropdown is empty
@@ -242,7 +243,7 @@ fn camera_row(
         widgets::micro_label(
             ui,
             if cameras.is_empty() {
-                "No camera detected automatically on this platform: type the ffmpeg device \
+                "No camera detected automatically on this platform. Type the ffmpeg device \
                  (a DirectShow device name on Windows, an AVFoundation index like 0 on macOS)."
             } else {
                 "Only each device's primary capture node is listed. If your camera isn't there, \
@@ -382,7 +383,7 @@ fn delete_clip_at(show: &mut Show, clips: &mut Vec<VideoClip>, index: usize, loc
 /// and copies each pick into the user clip folder.
 ///
 /// Mirrors `onVideoFilePick`: multiple files at once, imported in order,
-/// and: when 2 or more land: added straight to the auto-cut rotation,
+/// and, when 2 or more land, added straight to the auto-cut rotation,
 /// since importing a batch *is* the "prepare a playlist" case.
 fn import_via_file_dialog(show: &mut Show, clips: &mut Vec<VideoClip>, local_error: &mut Option<String>) {
     let Some(paths) = rfd::FileDialog::new().add_filter("Video", &VIDEO_EXTENSIONS).pick_files() else {

@@ -1,7 +1,7 @@
 //! Color panel: 5 per-deck (A/B) sliders (hue, saturation, brightness,
 //! contrast, invert) plus a reset button, backed by `Show::color_params_a/
 //! b` (`ColorParams`, already ported+tested in `core::blend`, already
-//! consumed by the GPU compositor every frame: zero engine change here).
+//! consumed by the GPU compositor every frame, zero engine change here).
 //! Port of `SidebarColor.svelte` (Step 1 of the Phase 8 VJ-panels plan).
 //!
 //! `ColorParams`'s fields are all stored 0..1 (see that struct's own field
@@ -10,7 +10,7 @@
 //! converts to/from those human-facing ranges around each `egui::Slider`
 //! so the displayed units (degrees, percent) match the web app, then
 //! writes the normalized 0..1 value into the field. Same "direct field
-//! mutation, no `CommandRegistry::dispatch`" convention as `ui::quality`:
+//! mutation, no `CommandRegistry::dispatch`" convention as `ui::quality`;
 //! real setters for keyboard/MIDI/OSC/LFO parity live on `CommandContext`
 //! instead (see `core::commands`/`core::show`).
 

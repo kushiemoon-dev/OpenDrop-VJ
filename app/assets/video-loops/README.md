@@ -7,7 +7,7 @@ app).
 This directory ships **empty on purpose**. The OpenDrop-VJ web app served
 ~46 `.webm` loops from a public CDN (`cdn-video-loops/` + its
 `manifest.json`); relocating those files into this repository is an asset
-task, not a code task, and is deliberately left as a manual step: the same
+task, not a code task, and is deliberately left as a manual step, the same
 treatment the "megapack Ansorre" preset pack gets (Phase 8 plan, Override
 5). An empty or missing folder is a normal, supported state: the Video
 panel simply shows only the user's own clips.
@@ -36,7 +36,7 @@ its filename without the extension.
 Either:
 
 - copy files next to the built binary, under `assets/video-loops/`, to have
-  them appear as bundled clips: this is the path a packaging script should
+  them appear as bundled clips; this is the path a packaging script should
   populate, alongside the fonts it already copies (see
   `packaging/appimage/build-appimage.sh`); or
 - use the Video panel's **+ Video** button, which copies whatever you pick
@@ -47,7 +47,7 @@ Either:
 
 `.webm`, `.mp4`, `.mov`, `.mkv`, `.avi`, `.m4v`, `.ogv`, `.mpg`.
 
-The extension list is only a filter for the folder scan: decoding is done
+The extension list is only a filter for the folder scan; decoding is done
 by `ffmpeg`, so anything your `ffmpeg` build can open will play. **`ffmpeg`
 must be on `PATH`**: it is the same runtime dependency the v4l2loopback
 output path already has.

@@ -7,14 +7,14 @@
 //! simpler: MIDI capture happens asynchronously on a separate IO thread, so
 //! `ui::midi` only sets `midi_learning` here and a later `about_to_wait`
 //! diff (`midi_learn_completed`) detects the commit. Keyboard events are
-//! already synchronous on the main thread, so there's nothing to diff:
-//! clicking Learn just sets `AppState::keymap_learning`; the very next
+//! already synchronous on the main thread, so there's nothing to diff.
+//! Clicking Learn just sets `AppState::keymap_learning`; the very next
 //! accepted key press commits the binding directly inside `main.rs`'s
 //! `WindowEvent::KeyboardInput` handler (intercepted ahead of normal
 //! dispatch) and clears `keymap_learning` there. This panel never inserts
 //! into `keymap` itself.
 //!
-//! No `CommandRegistry::dispatch` for the buttons themselves: same
+//! No `CommandRegistry::dispatch` for the buttons themselves; same
 //! "direct field mutation" convention as `ui::quality`/`ui::color`/
 //! `ui::composite`: Learn only sets `keymap_learning`, Clear/reset mutate
 //! `keymap` directly.

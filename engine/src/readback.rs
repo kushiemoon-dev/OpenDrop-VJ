@@ -3,7 +3,7 @@
 //! Structural mirror of `engine::timing::PassTimer`: a small ring of GPU
 //! resources, a `write_idx` that advances one slot per frame, and a
 //! non-blocking `poll()` that only returns data once the GPU side has
-//! actually finished: never by waiting for it. Here the ring holds 2
+//! actually finished. Never by waiting for it. Here the ring holds 2
 //! Pixel Buffer Objects instead of `GL_TIME_ELAPSED` queries, and what's
 //! polled is a `glReadPixels` DMA into a PBO instead of a timer result.
 //!
@@ -18,7 +18,7 @@
 //! with `GL_MAP_UNSYNCHRONIZED_BIT` an explicit `GL_INVALID_OPERATION`
 //! (NULL return); that flag is a write-side streaming tool only. So
 //! completion here is tracked the same way `PassTimer` tracks its
-//! queries: a real non-blocking availability check: just with a fence
+//! queries, a real non-blocking availability check, just with a fence
 //! sync object standing in for `GL_QUERY_RESULT_AVAILABLE`:
 //! `glFenceSync` right after `glReadPixels`, then `glClientWaitSync` with
 //! a 0ns timeout, which by spec returns immediately
@@ -34,7 +34,7 @@ const RING_LEN: usize = 2;
 
 pub struct FrameReadback {
     /// Attaches `texture` (passed to `new`) as its sole color attachment,
-    /// once, at construction: never reattached afterward.
+    /// once, at construction. Never reattached afterward.
     read_fbo: glow::NativeFramebuffer,
     pbos: [glow::NativeBuffer; RING_LEN],
     /// One fence per slot: `Some` while that slot's `glReadPixels` DMA is
@@ -64,7 +64,7 @@ impl FrameReadback {
             }
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
-            let size = (w * h * 4) as i32; // RGBA8, native format: no BGRA swizzle
+            let size = (w * h * 4) as i32; // RGBA8, native format, no BGRA swizzle
             let mut pbos = Vec::with_capacity(RING_LEN);
             for i in 0..RING_LEN {
                 let pbo = gl.create_buffer().map_err(|e| format!("create_buffer (pbo{i}) failed: {e}"))?;
@@ -100,7 +100,7 @@ impl FrameReadback {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
 
             // If this slot's previous fence was never consumed by `poll`
-            // (a frame got dropped), delete it now: otherwise it leaks,
+            // (a frame got dropped), delete it now; otherwise it leaks,
             // since a fresh one is about to replace it below.
             if let Some(old) = self.fences[slot].take() {
                 gl.delete_sync(old);
@@ -112,7 +112,7 @@ impl FrameReadback {
 
     /// Non-blocking: returns the RGBA8 bytes from whichever slot's
     /// `glReadPixels` has actually landed (checked via a 0ns
-    /// `glClientWaitSync`, which by spec returns immediately either way:
+    /// `glClientWaitSync`, which by spec returns immediately either way;
     /// see the module doc for why that replaces `GL_MAP_UNSYNCHRONIZED_BIT`
     /// here), or `None` if neither slot is ready yet. Mirrors
     /// `PassTimer::poll` (`engine/src/timing.rs:61-68`): same

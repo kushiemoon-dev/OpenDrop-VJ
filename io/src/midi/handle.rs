@@ -14,7 +14,7 @@
 //! WebMIDI auto-connects to *every* input port; this thread connects to at
 //! most one input port at a time, selected explicitly via
 //! `MidiControl::SelectPort` (mirroring the dropdown Task 8's brief
-//! describes: "liste déroulante port in"). `midir` also has no hotplug
+//! describes: "port-in dropdown"). `midir` also has no hotplug
 //! *callback* (unlike WebMIDI's `onstatechange`): output-port reconnection
 //! is detected by polling, not a callback; see `check_hotplug` below and
 //! the task report for why this isn't a `BLOCKED`.

@@ -33,6 +33,6 @@ serde_json = "1.0.151"
 # Ableton Link support (`ui::link` panel + `AppState`'s Link wiring). OFF
 # by default: activates `opendrop-io`'s own `link` feature, which pulls
 # in the GPL-2.0-or-later `rusty_link` crate. See the root README's
-# "Ableton Link (optionnel, GPL)" section before enabling this in any
+# "Ableton Link (optional, GPL)" section before enabling this in any
 # binary you package/distribute.
 link = ["opendrop-io/link"]

@@ -5,7 +5,7 @@
 //! Port of `SidebarQvar.svelte` (Step 9 of the Phase 8 VJ-panels plan).
 //!
 //! Takes the whole `[DeckQVarParams; 4]` plus the already-selected index
-//! (`Show::selected_slot`) and only renders/mutates that one slot's group:
+//! (`Show::selected_slot`) and only renders/mutates that one slot's group;
 //! same shape as `ui::composite`/`ui::time`, and for the same reason: the
 //! web reference only ever shows the slot named by `mixerSelectedSlot`. The
 //! sliders are -2..2 in steps of 0.01, exactly the web app's own range, so
@@ -24,7 +24,7 @@
 //! preset*. Values ride the one-word-per-deck-per-frame side channel shared
 //! with the Time panel (`main.rs`'s `next_param_to_push`); adding or
 //! removing a watch instead re-patches and reloads that deck's preset, which
-//! restarts its animation: see `engine::qvar_patch` for why that asymmetry
+//! restarts its animation. See `engine::qvar_patch` for why that asymmetry
 //! exists and `TIME-QVAR-SPIKE.md` for the channel itself.
 
 use crate::ui::widgets;

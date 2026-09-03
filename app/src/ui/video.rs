@@ -37,7 +37,7 @@ use crate::ui::widgets::{self, theme};
 use crate::video_clips::{self, VideoClip, VIDEO_EXTENSIONS};
 
 /// This panel's one outbound intent toward the already-ported NDI-in
-/// subsystem: translated into an `NdiControl` message by `main.rs`, which
+/// subsystem, translated into an `NdiControl` message by `main.rs`, which
 /// owns the handle. Selecting an NDI source here drives the exact same
 /// receiver `ui::ndi::show_in` drives; nothing about NDI is re-ported.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +101,7 @@ pub fn show(
 /// The α crossfader: the layer's own opacity, independent of the deck
 /// crossfader (`SidebarVideo.svelte`'s `.crossfader-row`).
 ///
-/// Disabled while NDI is receiving: not merely inapplicable then, but
+/// Disabled while NDI is receiving, not merely inapplicable then, but
 /// *inert*: with NDI receiving, `desired_video_input` returns `None`, so
 /// `composite_video_layer` never runs and never reads `show.video.opacity`;
 /// the NDI-in layer is composited separately in `main.rs` at a hardcoded
@@ -176,7 +176,7 @@ fn toggle_pill(ui: &mut egui::Ui, label: &str, value: &mut bool, enabled: bool, 
 }
 
 /// Live camera: a dropdown of detected devices where the platform can
-/// enumerate them (Linux: see `video_capture::list_cameras`), the device
+/// enumerate them (Linux, see `video_capture::list_cameras`), the device
 /// field itself, and the on/off toggle.
 ///
 /// The field is shown **always**, not only when the dropdown is empty
@@ -243,7 +243,7 @@ fn camera_row(
         widgets::micro_label(
             ui,
             if cameras.is_empty() {
-                "No camera detected automatically on this platform: type the ffmpeg device \
+                "No camera detected automatically on this platform. Type the ffmpeg device \
                  (a DirectShow device name on Windows, an AVFoundation index like 0 on macOS)."
             } else {
                 "Only each device's primary capture node is listed. If your camera isn't there, \
@@ -383,7 +383,7 @@ fn delete_clip_at(show: &mut Show, clips: &mut Vec<VideoClip>, index: usize, loc
 /// and copies each pick into the user clip folder.
 ///
 /// Mirrors `onVideoFilePick`: multiple files at once, imported in order,
-/// and: when 2 or more land: added straight to the auto-cut rotation,
+/// and, when 2 or more land, added straight to the auto-cut rotation,
 /// since importing a batch *is* the "prepare a playlist" case.
 fn import_via_file_dialog(show: &mut Show, clips: &mut Vec<VideoClip>, local_error: &mut Option<String>) {
     let Some(paths) = rfd::FileDialog::new().add_filter("Video", &VIDEO_EXTENSIONS).pick_files() else {

@@ -16,7 +16,7 @@ opendrop-core = { path = "../core" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 # Overlay text rasterization (same step). Already resolved transitively via
 # egui/epaint's own text rendering; declared directly here because
-# `overlay_texture::rasterize_text` uses it: a transitive resolution is not
+# `overlay_texture::rasterize_text` uses it; a transitive resolution is not
 # a dependency contract.
 ab_glyph = "0.2.32"
 

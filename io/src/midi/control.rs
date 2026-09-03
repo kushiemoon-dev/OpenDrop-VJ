@@ -68,7 +68,7 @@ fn handle_disconnect(ts: &mut ThreadState) {
 }
 
 /// Closes any previously-open input/output connection and opens the named
-/// input port (by *name*: the same string shown in `device_names`), plus
+/// input port (by *name*, the same string shown in `device_names`), plus
 /// its name-matched output port for LED feedback if one exists. Never
 /// panics: an unplugged/renamed port, or any `midir` connect failure, is
 /// logged and leaves the thread in a neutral "nothing selected" state.

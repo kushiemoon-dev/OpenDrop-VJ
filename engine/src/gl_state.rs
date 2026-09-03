@@ -7,7 +7,7 @@
 //! reads from the *read* framebuffer, so without resetting both to an
 //! absolute known state first, the copy silently grabs projectM's
 //! intermediate buffer instead of the frame actually rendered to this
-//! context's own pbuffer (FBO 0): measured on 6 real presets in the Phase
+//! context's own pbuffer (FBO 0). Measured on 6 real presets in the Phase
 //! 0 spike: up to 100% of pixels different, sometimes a different image
 //! entirely.
 //!
@@ -17,7 +17,7 @@
 
 use glow::HasContext;
 
-/// Absolute reset (not a restore-to-previous): call this immediately
+/// Absolute reset (not a restore-to-previous). Call this immediately
 /// before every `glCopyTexSubImage2D` that reads from a deck's own pbuffer.
 ///
 /// The `glReadBuffer(GL_BACK)` also works around a Mesa quirk: on a
@@ -33,7 +33,7 @@ pub fn reset_read_framebuffer_to_fbo0(gl: &glow::Context) {
 }
 
 /// The full GL state `render_frame` (step 5 on) saves and restores around
-/// `projectm_opengl_render_frame`: a superset of what libprojectM 4.1.6
+/// `projectm_opengl_render_frame`, a superset of what libprojectM 4.1.6
 /// actually touches, since that varies per preset. Restoring in *absolute*
 /// terms (back to exactly this snapshot), not incrementally.
 pub struct GlState {

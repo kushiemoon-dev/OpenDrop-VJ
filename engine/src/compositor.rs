@@ -5,12 +5,12 @@
 //!  - the vertex shader's `vUV.y = 1.0 - vUV.y` is dropped: it only existed
 //!    to cancel a `<canvas>` upload's top-left origin, and projectM's
 //!    FBO-0 → texture copy (`deck::copy_fbo0_to_shared_texture`) is already
-//!    in GL's bottom-left convention: nothing in this pipeline flips rows.
+//!    in GL's bottom-left convention. Nothing in this pipeline flips rows.
 //!  - 14 uniforms, not 13 (PLAN.md's count; corrected in step 10).
 //!
 //! compositor.ts's 5th layer, the video background, was out of scope for
 //! Phase 2 (no video decode path existed then) and arrived in Step 14 of
-//! the Phase 8 VJ-panels plan as [`Compositor::composite_video_layer`]:
+//! the Phase 8 VJ-panels plan as [`Compositor::composite_video_layer`],
 //! which reuses the deck shader above rather than adding a program of its
 //! own, exactly as the TS source does. Its frames come from a CPU-side
 //! decoder, so they *would* need the dropped row flip; that flip happens
@@ -161,7 +161,7 @@ pub struct LayerInput {
 ///
 /// Four of these are plain fixed-function GL blend states. `Overlay` and
 /// `HardLight` are not expressible that way: they need to read the
-/// destination: and go through a backdrop copy instead; see
+/// destination, and go through a backdrop copy instead; see
 /// [`Compositor::composite_overlay`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OverlayBlendMode {
@@ -230,7 +230,7 @@ impl OverlayBlendMode {
     /// `(srcRGB, dstRGB, srcAlpha, dstAlpha)` for `glBlendFuncSeparate`.
     ///
     /// The fragment shader pre-shapes its RGB output per mode so these
-    /// stay plain fixed-function states: with `a` the sprite's effective
+    /// stay plain fixed-function states, with `a` the sprite's effective
     /// alpha (texel alpha × the overlay's opacity) and `S` its color:
     /// - Normal: `fragColor.rgb = S*a`, `(ONE, ONE_MINUS_SRC_ALPHA)`
     ///   → `S*a + D*(1-a)`, classic "over".
@@ -238,7 +238,7 @@ impl OverlayBlendMode {
     /// - Screen: same output, `(ONE, ONE_MINUS_SRC_COLOR)`
     ///   → `S*a + D*(1 - S*a)`, exactly `screen` weighted by `a`.
     /// - Multiply: `fragColor.rgb = mix(1, S, a)`, `(ZERO, SRC_COLOR)`
-    ///   → `D * mix(1, S, a)`, exactly `multiply` weighted by `a`: the
+    ///   → `D * mix(1, S, a)`, exactly `multiply` weighted by `a`, the
     ///   same trick `composite_layer`'s `uMultiply` uniform uses.
     /// - Overlay/HardLight: the shader has already produced the final
     ///   pixel (it sampled the backdrop itself), so `(ONE, ZERO)` writes
@@ -277,7 +277,7 @@ impl OverlayBlendMode {
 /// `tex_w`/`tex_h` are not in the plan's field sketch but are required:
 /// aspect-correct sizing needs the texture's own dimensions, and GLES 3.0
 /// has no `glGetTexLevelParameter` to query them back from the handle.
-/// They come free: every caller has just decoded or rasterized the image.
+/// They come free. Every caller has just decoded or rasterized the image.
 #[derive(Clone, Copy)]
 pub struct OverlayLayerInput {
     pub texture: glow::NativeTexture,
@@ -346,7 +346,7 @@ pub struct Compositor {
     /// own.
     strobe_program: glow::NativeProgram,
     strobe_uniforms: StrobeUniforms,
-    /// Overlay sprite/text pass (Step 12 of the Phase 8 VJ-panels plan):
+    /// Overlay sprite/text pass (Step 12 of the Phase 8 VJ-panels plan),
     /// again its own program: unlike `program` (fullscreen, no geometry
     /// uniforms) and `strobe_program` (fullscreen, no texture), this one
     /// builds a positioned/rotated quad in its vertex stage. Shares
@@ -455,7 +455,7 @@ impl Compositor {
         }
     }
 
-    /// Ends the "composite" pass's timer: call once per frame, after the
+    /// Ends the "composite" pass's timer. Call once per frame, after the
     /// last `composite_layer` call.
     pub fn end_frame(&mut self, gl: &glow::Context) {
         self.composite_timer.end(gl);
@@ -497,7 +497,7 @@ impl Compositor {
             gl.uniform_1_f32(self.uniforms.u_key_hue.as_ref(), input.composite.color_hue as f32);
             gl.uniform_1_f32(self.uniforms.u_key_tol.as_ref(), input.composite.color_tol as f32);
             // ColorParams fields are 0..1 with 0.5 = neutral (100%) for
-            // sat/bright/contrast: same mapping color_params_to_filter uses.
+            // sat/bright/contrast, same mapping color_params_to_filter uses.
             gl.uniform_1_f32(self.uniforms.u_hue_rotate_deg.as_ref(), (input.color.hue_rotate * 360.0) as f32);
             gl.uniform_1_f32(self.uniforms.u_saturate_mul.as_ref(), (input.color.saturate * 2.0) as f32);
             gl.uniform_1_f32(self.uniforms.u_brightness_mul.as_ref(), (input.color.brightness * 2.0) as f32);
@@ -521,13 +521,13 @@ impl Compositor {
     /// uniforms on the same program with keying switched off (see that
     /// file's `videoActive` block). Everything this layer needs the deck
     /// shader already does, so this method is a named, documented entry
-    /// point onto [`Compositor::composite_layer`]: not a copy of it. That
+    /// point onto [`Compositor::composite_layer`], not a copy of it. That
     /// is also why there is no `uVideo*` anything: the "hue-rotate on the
     /// beat" toggle is the deck shader's existing hue-rotate path, fed by
     /// the beat detector instead of the Color panel's slider.
     ///
     /// **Position in the frame: on top of the 4 decks, under the NDI-in
-    /// layer, the strobe flash and the overlays**: not behind the decks.
+    /// layer, the strobe flash and the overlays**, not behind the decks.
     /// The Phase 8 plan's step-14 sketch said "behind"; the OpenDrop-VJ
     /// compositor this ports says the opposite, in a class header that
     /// records *why*: drawing the video first made it disappear the moment
@@ -543,7 +543,7 @@ impl Compositor {
     /// so a fully faded-out layer costs nothing.
     pub fn composite_video_layer(&self, gl: &glow::Context, video_tex: glow::NativeTexture, opacity: f32, color: ColorParams) {
         let input = LayerInput { opacity, composite: DEFAULT_SLOT_COMPOSITE, color };
-        // `force_normal: false`: there is nothing to override:
+        // `force_normal: false`. There is nothing to override:
         // `DEFAULT_SLOT_COMPOSITE` already carries `BlendMode::Normal`, which
         // is what `force_normal` would coerce it to anyway (same reasoning as
         // the NDI-in layer's own call site in `app`).
@@ -552,7 +552,7 @@ impl Compositor {
 
     /// Draws the BPM-synced strobe flash (Step 10 of the Phase 8 VJ-panels
     /// plan) as a fullscreen quad, additive-blended into the composite FBO
-    /// on top of everything already drawn there this frame: call once per
+    /// on top of everything already drawn there this frame. Call once per
     /// frame, after the deck, video ([`Compositor::composite_video_layer`],
     /// Step 14) and NDI-in `composite_layer` calls and before
     /// `blit_to_current_window`/the compositor readback (`FrameReadback`),
@@ -585,7 +585,7 @@ impl Compositor {
         }
     }
 
-    /// Draws one overlay sprite (an image, or a rasterized string: see
+    /// Draws one overlay sprite (an image, or a rasterized string; see
     /// `overlay_texture`) as a positioned, rotated, scaled quad in the
     /// composite FBO. Call once per *visible* overlay
     /// (`core::overlay::visible_overlay_ids` decides which those are),
@@ -633,7 +633,7 @@ impl Compositor {
         // Snapshot the destination first, for the two modes that need it.
         // `copy_tex_sub_image_2d` reads the READ_FRAMEBUFFER binding,
         // which the `bind_framebuffer(FRAMEBUFFER, ..)` above just set to
-        // our own FBO: and it writes into a texture that is NOT one of
+        // our own FBO, and it writes into a texture that is NOT one of
         // that FBO's attachments, so there is no feedback loop.
         let mode = if input.blend_mode.needs_backdrop() {
             match self.capture_backdrop(gl) {
@@ -666,7 +666,7 @@ impl Compositor {
             // fragment shader with an unbound sampler is undefined
             // behavior on some drivers even along a branch it never takes.
             // Falls back to the sprite's own texture when no backdrop
-            // exists, which is harmless: nothing samples it then.
+            // exists, which is harmless. Nothing samples it then.
             gl.active_texture(glow::TEXTURE1);
             gl.bind_texture(glow::TEXTURE_2D, Some(self.backdrop_tex.unwrap_or(input.texture)));
             gl.uniform_1_i32(self.overlay_uniforms.u_backdrop.as_ref(), 1);
@@ -693,7 +693,7 @@ impl Compositor {
 
     /// Copies the composite FBO's current contents into `backdrop_tex`,
     /// allocating it on first use. `None` means the texture could not be
-    /// created: see `composite_overlay`'s fallback.
+    /// created. See `composite_overlay`'s fallback.
     fn capture_backdrop(&mut self, gl: &glow::Context) -> Option<glow::NativeTexture> {
         // Pin the unit first: everything below binds a texture, and the
         // lazy-allocation branch would otherwise do so on whichever unit
@@ -855,8 +855,8 @@ void main() {
 /// Companion fragment stage. Four of the six modes only pre-shape the
 /// output for a fixed-function blend state (see
 /// `OverlayBlendMode::blend_state`); `overlay`/`hard-light` need the
-/// destination, so they sample `uBackdrop`: a copy of the composite taken
-/// just before this draw: and produce the finished pixel themselves.
+/// destination, so they sample `uBackdrop`, a copy of the composite taken
+/// just before this draw, and produce the finished pixel themselves.
 const OVERLAY_FRAGMENT_SRC: &str = r#"#version 300 es
 precision highp float;
 precision highp sampler2D;
@@ -881,7 +881,7 @@ void main() {
 		fragColor = vec4(mix(vec3(1.0), src.rgb, a), a);
 	} else if (uMode == 4 || uMode == 5) {
 		vec4 bd = texture(uBackdrop, gl_FragCoord.xy / uViewportPx);
-		// overlay(b, s) == hard-light(s, b): the same function with its
+		// overlay(b, s) == hard-light(s, b), the same function with its
 		// two arguments swapped (W3C compositing-1).
 		vec3 blended = (uMode == 5) ? hardLight(bd.rgb, src.rgb) : hardLight(src.rgb, bd.rgb);
 		fragColor = vec4(mix(bd.rgb, blended, a), a + bd.a * (1.0 - a));
@@ -939,7 +939,7 @@ mod tests {
 
         #[test]
         fn a_small_sprite_keeps_its_intrinsic_pixel_size() {
-            // 200x100 fits well inside 80% of 1920x1080: no shrink.
+            // 200x100 fits well inside 80% of 1920x1080, no shrink.
             assert_eq!(overlay_quad_half_size_px(200, 100, 1.0), (100.0, 50.0));
         }
 

@@ -1,7 +1,7 @@
 //! Overlays panel: sprite/text overlays drawn on top of the composited
 //! decks, plus the auto-cycling queue that rotates through the ones marked
 //! for it. Port of `SidebarOverlays.svelte` (Step 12 of the Phase 8
-//! VJ-panels plan): the richest of the ported sidebars, and the one whose
+//! VJ-panels plan). The richest of the ported sidebars, and the one whose
 //! engine half (`core::overlay`, ported long ago and unused until now) this
 //! step finally gives a consumer.
 //!
@@ -340,7 +340,7 @@ fn queue_controls(ui: &mut egui::Ui, show: &mut Show, registry: &CommandRegistry
 /// Monotonic per-session overlay id. The web's `crypto.randomUUID()` had
 /// to be globally unique because overlays were persisted into IndexedDB
 /// across sessions; nothing here outlives the process, so a counter is
-/// enough: and it makes `assets`/`overlay_textures` lookups trivially
+/// enough, and it makes `assets`/`overlay_textures` lookups trivially
 /// debuggable.
 fn mint_id(next_id: &mut u64) -> String {
     *next_id += 1;

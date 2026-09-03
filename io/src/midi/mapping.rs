@@ -48,20 +48,20 @@ pub(crate) fn load_mapping(path: &Path) -> MidiMapping {
         Ok(json) => mapping_from_json(&json),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => MidiMapping::new(),
         Err(e) => {
-            eprintln!("[midi] failed to read mapping file {}: {e}: starting with an empty mapping", path.display());
+            eprintln!("[midi] failed to read mapping file {}: {e}. Starting with an empty mapping.", path.display());
             MidiMapping::new()
         }
     }
 }
 
 /// Writes `mapping` to `path` as JSON, creating the parent directory if
-/// needed. Best-effort: a write failure is logged, never a panic: losing
+/// needed. Best-effort: a write failure is logged, never a panic; losing
 /// the ability to persist a mapping shouldn't take down MIDI I/O.
 pub(crate) fn save_mapping(path: Option<&Path>, mapping: &MidiMapping) {
     let Some(path) = path else { return };
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("[midi] failed to create config dir {}: {e}: mapping not saved", parent.display());
+            eprintln!("[midi] failed to create config dir {}: {e}. Mapping not saved.", parent.display());
             return;
         }
     }

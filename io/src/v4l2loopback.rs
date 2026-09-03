@@ -389,6 +389,6 @@ mod tests {
         if let Ok(mut pipe) = result {
             let _ = pipe.is_alive();
         }
-        // else: ffmpeg not found on PATH in this environment: also not a panic.
+        // else: ffmpeg not found on PATH in this environment, also not a panic.
     }
 }

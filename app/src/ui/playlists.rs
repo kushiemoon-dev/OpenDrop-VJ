@@ -4,7 +4,7 @@
 //! display, Tap Tempo/Clear, beats-per-change selector, and auto-crossfade
 //! toggle that used to sit here moved into the header's hand-painted
 //! mini-transport (Step 10 of the Phase 7 UI redesign plan, `ui::shell::
-//! header`): this panel no longer renders them.
+//! header`). This panel no longer renders them.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as
 //! `ui::decks`/`ui::preset_browser`: the call site (`main.rs`'s
@@ -22,7 +22,7 @@
 //!
 //! Reskinned (Step 15 of the Phase 7 UI redesign plan): the whole panel is
 //! one of the plan's 3 permanently-dense zones (with the presets grid, Step
-//! 14, and the MIDI learn rows, Step 17): `widgets::dense` wraps the
+//! 14, and the MIDI learn rows, Step 17). `widgets::dense` wraps the
 //! entire body below, no user-facing toggle. `🔒` is replaced by a plain
 //! "LOCK" text label: no emoji in displayed text, even though Step 5's
 //! widened fallback chain would still render it. `⇄` (auto-crossfade) is
@@ -31,9 +31,9 @@
 //! renders as the raw glyph in `ui::shell::header` today, out of this
 //! step's scope. Every `ui.selectable_label` pair (mode, beat-sync, trigger
 //! mode) is replaced with `widgets::pill`, colored `accent` when selected
-//! and `dim` otherwise, clicked via `Response::interact(Sense::click())`:
-//! the exact pattern `ui::decks::deck_card` already established for its own
-//! 3-state bus badge: rather than `widgets::chip_row`: `chip_row` takes
+//! and `dim` otherwise, clicked via `Response::interact(Sense::click())`
+//! (the exact pattern `ui::decks::deck_card` already established for its own
+//! 3-state bus badge) rather than `widgets::chip_row`: `chip_row` takes
 //! `&[&str]` and returns one aggregate `Response` for the whole row, with
 //! no way to learn which chip was clicked or to color one differently from
 //! the rest, so it can't preserve the per-option click + selected-highlight
@@ -43,7 +43,7 @@
 //! Item-row mini-thumbnails (found live post-Phase-7: the plain text list
 //! read as less "finished" than Decks/Presets' thumbnail-driven look) reuse
 //! `LibraryCtx`'s thumbnail pipeline exactly as `ui::preset_browser::tile`
-//! does: same cache lookup, same `thumb_queue` enqueue-on-miss: so a
+//! does: same cache lookup, same `thumb_queue` enqueue-on-miss, so a
 //! preset already thumbnailed anywhere in the app (browsed, or already on a
 //! deck) shows up here too, and one not yet rendered gets queued rather
 //! than staying a permanent placeholder. `Metrics::mini_thumb_size` (48x27)

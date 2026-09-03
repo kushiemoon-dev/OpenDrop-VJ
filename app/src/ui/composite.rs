@@ -2,12 +2,12 @@
 //! the currently selected deck slot, backed by `Show::slot_composites`
 //! (`SlotComposite`, already ported+tested in `core::blend`, already
 //! consumed by the GPU compositor every frame via `blend_state_for`/
-//! `LayerInput.composite`: zero engine change here).
+//! `LayerInput.composite`, zero engine change here).
 //! Port of `SidebarComposite.svelte` (Step 2 of the Phase 8 VJ-panels plan).
 //!
 //! Unlike Color (one group of controls per deck, both shown side by side),
 //! the web reference only ever shows the one slot named by
-//! `mixerSelectedSlot`: slot selection itself lives elsewhere in the UI
+//! `mixerSelectedSlot`; slot selection itself lives elsewhere in the UI
 //! (the deck cards), so this panel takes the whole `[SlotComposite; 4]`
 //! array plus the already-selected index (`Show::selected_slot`) and only
 //! renders/mutates that one slot's group. `luma_black`/`luma_white`/
@@ -15,7 +15,7 @@
 //! unit conversion: matches the web reference's raw `min=0 max=1` sliders
 //! (unlike Color's hue/percent conversion, which exists there to match the
 //! web app's degree/percent-labeled sliders). Same "direct field mutation,
-//! no `CommandRegistry::dispatch`" convention as `ui::quality`/`ui::color`:
+//! no `CommandRegistry::dispatch`" convention as `ui::quality`/`ui::color`;
 //! real setters for keyboard/MIDI/OSC/LFO parity live on `CommandContext`
 //! instead (see `core::commands`/`core::show`).
 

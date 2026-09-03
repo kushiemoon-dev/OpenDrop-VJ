@@ -8,7 +8,7 @@
 //! Same "direct field mutation, no `CommandRegistry::dispatch`" convention
 //! as every other panel for the panel's *own* controls (enable/shape/
 //! target/rate/amount write straight into `Show::lfo_engine.slots[i]`,
-//! same shape as `ui::strobe`'s rate/intensity/color): only the
+//! same shape as `ui::strobe`'s rate/intensity/color); only the
 //! modulation the engine *produces* goes through the registry, in
 //! `app::about_to_wait`'s per-frame `LfoEngine::tick` loop. The target
 //! dropdown is built from `CommandRegistry::all()` filtered to

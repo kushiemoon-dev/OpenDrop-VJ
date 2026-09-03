@@ -11,10 +11,10 @@
 //!   `Clock::step` in `clock.rs`.
 //! - Shuffle mode used `Math.random()`. A zero-I/O crate has no entropy
 //!   source, so it uses a small deterministic xorshift64 PRNG instead. No
-//!   ported test asserts on actual randomness: only "never repeats the
-//!   current index": so determinism costs nothing here.
+//!   ported test asserts on actual randomness, only "never repeats the
+//!   current index", so determinism costs nothing here.
 //! - `exportPlaylists`/`importPlaylists` are Blob/File/DOM download-and-read
-//!   operations: file I/O, not in-memory list management: so they're
+//!   operations: file I/O, not in-memory list management, so they're
 //!   dropped rather than ported.
 //!
 //! Svelte `$state` reactivity is likewise dropped: `PlaylistStore` fields
@@ -61,7 +61,7 @@ impl PlaylistEngine {
 
     /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
     /// the caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment: whole-branch review Finding I4.
+    /// `rng.rs`'s module doc comment, whole-branch review Finding I4.
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng.reseed(seed);
     }
@@ -157,7 +157,7 @@ impl PlaylistEngine {
         // shrinks `elapsed_ms` below `interval_ms` and the loop below spins
         // forever. `!(self.interval_ms > 0.0)` alone would reject 0/negative/
         // NaN but let `f64::INFINITY` through (used deliberately elsewhere
-        // as "no automatic advance" for a beat-synced deck: see
+        // as "no automatic advance" for a beat-synced deck, see
         // `set_beat_sync_interval`), so `is_finite()` stays as a separate,
         // additional guard.
         if !self.playing || !self.interval_ms.is_finite() || self.interval_ms.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {

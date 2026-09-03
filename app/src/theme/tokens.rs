@@ -10,7 +10,7 @@ use super::registry::ThemeId;
 
 /// Per-theme colors. Shared field names are reused as-is by `widgets.rs`
 /// (Step 8) and by Decks (Step 13: bus A = `accent`, bus B = `ok`, off =
-/// `dim`): `ok`/`warn`/`error` are the same hex across all 3 themes
+/// `dim`); `ok`/`warn`/`error` are the same hex across all 3 themes
 /// (semantic status colors, not part of a theme's visual identity), only
 /// `accent` and the backgrounds differ per theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +88,7 @@ pub struct TypeScale {
 }
 
 /// One theme: a per-theme `Palette` plus the 3 token groups shared by every
-/// theme in the registry (`&'static`, same allocation for all 3: see
+/// theme in the registry (`&'static`, same allocation for all 3, see
 /// `Metrics`'s doc comment for why).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {

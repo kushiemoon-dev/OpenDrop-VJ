@@ -51,7 +51,7 @@ use crate::secrets;
 pub struct TwitchSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (no OAuth token registered, or a
-    /// keyring lookup failure): whole-branch review Finding 1 (AC-12):
+    /// keyring lookup failure). Whole-branch review Finding 1 (AC-12):
     /// this used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.

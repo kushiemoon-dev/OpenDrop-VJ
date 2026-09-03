@@ -16,7 +16,7 @@
 //! keeps the 31-frame render and its blocking `glReadPixels` off the
 //! event-loop thread. At most one child is outstanding at a time: a fast
 //! scroll through a ~9800-tile grid must not turn into dozens of concurrent
-//! subprocesses: and the pump does at most one unit of work per tick, as it
+//! subprocesses, and the pump does at most one unit of work per tick, as it
 //! always has.
 
 use opendrop_core::thumb_queue::{dequeue_job, ThumbJob};
@@ -128,7 +128,7 @@ fn poll_render(in_flight: &mut InFlightThumb) -> RenderPoll {
             // `spawn_preflight` follows kill() with a blocking wait() here,
             // which is correct there because it runs on its own thread. This
             // runs on the event-loop thread, where wait() would be a stall
-            // of unbounded length: and a child that has already been
+            // of unbounded length, and a child that has already been
             // unresponsive for RENDER_TIMEOUT is the likeliest of all to be
             // stuck in an uninterruptible kernel wait (a wedged GPU ioctl, a
             // slow network-mounted cache directory) where even SIGKILL does
@@ -166,7 +166,7 @@ pub fn reap_killed(killed: &mut Vec<Child>) {
 /// since. `order` and `textures` are kept in lockstep: a key is pushed to
 /// `order` only the first time it's inserted, since `pump_thumbnail_queue`
 /// never overwrites an already-resident key (see its `textures.contains_key`
-/// check): an overwrite would otherwise grow `order` past `textures`' size.
+/// check); an overwrite would otherwise grow `order` past `textures`' size.
 fn insert_bounded(textures: &mut HashMap<String, egui::TextureHandle>, order: &mut VecDeque<String>, key: String, tex: egui::TextureHandle) {
     if textures.insert(key.clone(), tex).is_none() {
         order.push_back(key);
@@ -189,8 +189,8 @@ fn insert_bounded(textures: &mut HashMap<String, egui::TextureHandle>, order: &m
 /// activity, or once a job without a resolvable path is skipped, are not
 /// errors.
 ///
-/// A preset whose render fails: non-zero exit, death by signal, timeout,
-/// or a missing/wrong-size output file: is recorded in `failed` and never
+/// A preset whose render fails, whether that's a non-zero exit, death by
+/// signal, timeout, or a missing/wrong-size output file, is recorded in `failed` and never
 /// retried: the tile that asked for it is still on screen and still has no
 /// texture, so it would re-enqueue the same job on the very next tick,
 /// turning one failure into an endless respawn loop. `ui::preset_browser`
@@ -352,7 +352,7 @@ mod tests {
 
     /// Whole-branch review Finding 4: the bounded thumbnail-texture cache.
     /// `egui::TextureHandle` needs no GL context to construct: its
-    /// texture manager is CPU-side bookkeeping only: so this is a real
+    /// texture manager is CPU-side bookkeeping only, so this is a real
     /// unit test of the eviction logic, not just a description of it.
     mod insert_bounded_tests {
         use super::*;

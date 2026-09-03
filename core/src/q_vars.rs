@@ -1,7 +1,7 @@
-//! Port of OpenDrop-VJ `src/lib/engine/q-vars.ts`: Q-var live editing (Track 2):
+//! Port of OpenDrop-VJ `src/lib/engine/q-vars.ts`, Q-var live editing (Track 2):
 //! generic q1-q32 overrides per deck, matching NestDrop's "Q Var" knobs. Presets
 //! define/use these internally with no universal meaning (unlike Time's
-//! documented speed/zoom/etc: see time_params.rs), so there is no neutral
+//! documented speed/zoom/etc, see time_params.rs), so there is no neutral
 //! numeric default. The override is opt-in per slot via `enabled`, checked live
 //! every frame by the compiled preset code rather than baked in at compile
 //! time: this is what lets toggling a q-var on/off take effect without
@@ -21,9 +21,9 @@
 use std::collections::HashMap;
 
 /// How many q-vars a preset exposes (`q1`..`q32`), and so the width of both
-/// [`DeckQVarParams`] arrays. Named for the callers that iterate them: the
+/// [`DeckQVarParams`] arrays. Named for the callers that iterate them, the
 /// engine's side-channel index allocation (`engine::qvar_patch`) and the Qvar
-/// panel: rather than repeating `32` at each of them.
+/// panel, rather than repeating `32` at each of them.
 pub const Q_VAR_COUNT: usize = 32;
 
 /// Lowest value a q-var override can take: `SidebarQvar.svelte`'s sliders run
@@ -64,7 +64,7 @@ pub type QVarParamsTuple = [DeckQVarParams; 4];
 /// touching `enabled`. Pure: returns a new tuple. Whole-branch review
 /// Finding M5: an out-of-range `slot` (>3) or `n` (0, or >32) used to panic
 /// via array indexing; both are now a no-op (the input tuple comes back
-/// unchanged) instead: the least invasive fix that doesn't change this
+/// unchanged) instead, the least invasive fix that doesn't change this
 /// function's `QVarParamsTuple -> QVarParamsTuple` contract into a
 /// `Result`/`Option`.
 pub fn with_q_var_value(

@@ -163,7 +163,7 @@ fn run(state: Arc<ArcSwap<LinkSnapshot>>, control_rx: Receiver<LinkControl>) {
 
     loop {
         if !enabled {
-            // Idle: nothing to poll: block on the control channel
+            // Idle: nothing to poll, block on the control channel
             // instead of busy-polling, same as `osc::run`'s idle branch.
             match control_rx.recv() {
                 Ok(LinkControl::Start) => {

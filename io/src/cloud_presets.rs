@@ -15,8 +15,8 @@
 //! async_rx.recv().await { ... }`, same as `obs::async_run`.
 //!
 //! Identity: one anonymous token per device (`secrets::CLOUD_PRESETS_TOKEN`
-//! in the OS keyring), generated lazily on first use if none is stored yet
-//!: ports `cloud-presets.ts`'s `getOrCreateCloudToken()` (`crypto.
+//! in the OS keyring), generated lazily on first use if none is stored yet.
+//! It ports `cloud-presets.ts`'s `getOrCreateCloudToken()` (`crypto.
 //! randomUUID()` + `localStorage`), except the random value itself is 16
 //! hex-encoded random bytes via `rand` (mirrors `remote_ws::
 //! generate_token`'s technique) rather than an actual RFC 4122 UUID: no
@@ -32,7 +32,7 @@
 //!
 //! Preset format: cloud presets are Butterchurn JSON (`cloud-presets.ts`'s
 //! `parsePresetFile` doc comment: "the uploaded file must already be in
-//! Butterchurn format"), the web engine's own preset format: not this
+//! Butterchurn format"), the web engine's own preset format, not this
 //! native app's `.milk`/projectM format. This app's loader only reaches
 //! projectM through `projectm_load_preset_file`/`projectm_load_preset_data`
 //! (both take `.milk` text), and no Butterchurn->`.milk` converter exists
@@ -444,8 +444,8 @@ async fn download_with_token(base_url: String, id: String) -> Result<PathBuf, St
     download_and_cache(base_url, token, id, cloud_presets_cache_dir()).await
 }
 
-/// Downloads preset `id`'s raw JSON and writes it to `<cache_dir>/<id>.json`
-///: split out from `download_with_token` so tests can exercise this
+/// Downloads preset `id`'s raw JSON and writes it to `<cache_dir>/<id>.json`,
+/// split out from `download_with_token` so tests can exercise this
 /// against a real mock server with a fixed token and a scratch directory,
 /// without touching the real OS keyring (`ensure_token`) or the real cache
 /// dir (`cloud_presets_cache_dir`).
@@ -645,7 +645,7 @@ mod tests {
     }
 
     /// Binds the mock router to an OS-assigned localhost port and spawns
-    /// it on the calling runtime (`tokio::spawn`, not a new thread: a
+    /// it on the calling runtime (`tokio::spawn`, not a new thread, a
     /// `new_current_thread` runtime still runs spawned tasks
     /// cooperatively alongside whatever awaits the caller does next).
     /// Returns the `http://127.0.0.1:{port}` base URL.
@@ -795,8 +795,8 @@ mod tests {
     /// Ignored by default: `ensure_token()` touches the real OS keyring,
     /// which may be unavailable in this repo's minimal Hyprland dev
     /// session (see `secrets.rs`'s own
-    /// `round_trip_secret_when_keyring_available` for the same caveat):
-    /// run explicitly with `cargo test -- --ignored` on a machine with a
+    /// `round_trip_secret_when_keyring_available` for the same caveat).
+    /// Run explicitly with `cargo test -- --ignored` on a machine with a
     /// working keyring backend.
     #[test]
     #[ignore = "requires a real OS keyring/Secret Service backend"]

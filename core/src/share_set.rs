@@ -7,7 +7,7 @@
 //! Adaptations for a zero-I/O, fully unit-testable `core`:
 //! - `encodeSharedSet`/`decodeSharedSet` (gzip + base64url via
 //!   `CompressionStream`/`Blob`/`Response`, `JSON.stringify`/`parse`) are
-//!   real browser-platform I/O, not pure logic: same rationale as the
+//!   real browser-platform I/O, not pure logic, the same rationale as the
 //!   IndexedDB asset I/O dropped from `overlay.rs`. Reproducing gzip without
 //!   a compression crate (none is a dependency of this crate) would mean
 //!   hand-rolling DEFLATE, wildly disproportionate to "pure data shaping";
@@ -15,12 +15,12 @@
 //!   crate. `bytesToBase64Url`/`base64UrlToBytes`, only used by that
 //!   boundary, go with it.
 //! - The TS `version: 1` field only ever mattered to `decodeSharedSet`'s
-//!   runtime check against hand-forged/legacy links: with no decode
+//!   runtime check against hand-forged/legacy links; with no decode
 //!   boundary here it would be a field that can only ever hold one value
 //!   and nothing ever reads it, so it's dropped too.
-//! - `decodeSharedSet`'s other runtime shape guards: rejecting a
+//! - `decodeSharedSet`'s other runtime shape guards, rejecting a
 //!   `timeParams`/`qVarParams`/`slotComposites`/`snapshots` array of the
-//!   wrong length after `JSON.parse`: have no equivalent either: with no
+//!   wrong length after `JSON.parse`, have no equivalent either: with no
 //!   deserialization boundary, a `SharedSet` value can only ever be built
 //!   already well-typed. Fixed-size arrays (reusing `TimeParamsTuple` and
 //!   `QVarParamsTuple` from `time_params.rs`/`q_vars.rs`, plus local
@@ -79,7 +79,7 @@ pub struct SharedSet {
 }
 
 /// Overlays referencing a local IndexedDB asset (image/video) can never fit
-/// in a URL: only text overlays are shareable.
+/// in a URL; only text overlays are shareable.
 pub fn filter_shareable_overlays(overlays: &[Overlay]) -> Vec<&Overlay> {
     overlays.iter().filter(|o| o.kind == OverlayKind::Text).collect()
 }

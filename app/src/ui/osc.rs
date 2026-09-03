@@ -4,7 +4,7 @@
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::midi`, `ui::ndi`, `ui::output`). `osc_port` is the
 //! panel's own editable field (`AppState::osc_port`), not
-//! `OscSnapshot::port`: same reasoning as `ui::ndi`'s `selected_source`:
+//! `OscSnapshot::port`; same reasoning as `ui::ndi`'s `selected_source`:
 //! the snapshot's `port` reflects the port the thread actually bound
 //! (only meaningful once `listening` is true), while this field is what
 //! the user is currently typing, which Start reads at click time.

@@ -209,7 +209,7 @@ mod tests {
     // render those glyphs today via those chains. Measured, not assumed:
     // neither glyph is fully covered by egui's builtin fonts as of egui
     // 0.36.1 (`⇄` isn't in any of them; `🔒` is only in `Monospace`'s
-    // chain, via `Hack`): a pre-existing gap Step 15 owns, not one this
+    // chain, via `Hack`); a pre-existing gap Step 15 owns, not one this
     // step introduces or is responsible for closing.
 
     #[test]

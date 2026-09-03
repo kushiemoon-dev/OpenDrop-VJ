@@ -83,7 +83,7 @@ fn main() {
     println!(
         "[phase0] preset source: {} ({})",
         preset_dir.display(),
-        if first_preset.is_some() { "found" } else { "EMPTY: decks will idle on the default preset" }
+        if first_preset.is_some() { "found" } else { "EMPTY, decks will idle on the default preset" }
     );
 
     let mut pm_handles = Vec::with_capacity(DECK_COUNT);
@@ -206,7 +206,7 @@ fn main() {
     // --- Preset compatibility sweep, one subprocess per preset: a genuinely
     // broken preset can segfault the process (confirmed below), not just raise
     // the catchable std::exception projectM normally reports through the
-    // failure callback: isolation is required for an honest compat count.
+    // failure callback; isolation is required for an honest compat count.
     run_compat_sweep(&preset_dir);
 
     for h in pm_handles {
@@ -589,7 +589,7 @@ fn run_compat_sweep(preset_dir: &Path) {
     }
     println!(
         "\n[phase0] preset compat sweep: {} candidates, {} sampled, subprocess-isolated:\n  \
-         {pass} pass, {reported_fail} reported failure (caught), {crashed} crashed (killed by signal): {:.1}% usable",
+         {pass} pass, {reported_fail} reported failure (caught), {crashed} crashed (killed by signal), {:.1}% usable",
         all.len(),
         sample.len(),
         100.0 * pass as f64 / sample.len().max(1) as f64

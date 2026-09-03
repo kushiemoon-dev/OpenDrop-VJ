@@ -9,7 +9,7 @@
 //! parameters rather than folding the crossfader/BPM fields into
 //! `ShellCtx`: `Show` (the business object both read and write) lives in
 //! `PerformCtx` only, never duplicated into another struct (see `ui::ctx`'s
-//! module doc comment): same two-struct idiom `ui::preset_browser::show`
+//! module doc comment); the same two-struct idiom `ui::preset_browser::show`
 //! already established. `status_bar` extends that idiom further: it reads
 //! a little from nearly every context struct (connection status, audio,
 //! loading activity), so it takes all of them rather than growing a long
@@ -20,7 +20,7 @@
 //! instead of `header`/`status_bar` while `stage_mode` is on (see that
 //! call site's own comment). Both reuse `header`'s hand-painted pieces:
 //! `crossfader` directly, and the BPM readout via the `bpm_readout` helper
-//! `bpm_tap` was split around: rather than repainting the drag/glow logic
+//! `bpm_tap` was split around, rather than repainting the drag/glow logic
 //! a second time.
 
 use std::time::Instant;
@@ -43,7 +43,7 @@ use crate::Panel;
 pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx, theme_request: &mut Option<ThemeId>) {
     // `dense` (Step 8's density-scope helper): the header packs a lot into
     // 48px: wordmark, crossfader, the whole BPM/tap row, and the
-    // right-aligned Stage/theme group: so this tightens `item_spacing`
+    // right-aligned Stage/theme group, so this tightens `item_spacing`
     // between all of them (Step 10 fix-round-1: the airy default measured
     // ~830px of wanted content against a real ~622-800px window at the
     // app's default/untouched size, overflowing the right-aligned group to
@@ -60,7 +60,7 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx,
             bpm_tap(ui, perform.show, perform.t0);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Rightmost: the theme picker (Step 12: now interactive:
+                // Rightmost: the theme picker (Step 12: now interactive;
                 // see `theme_combo`'s own doc comment).
                 theme_combo(ui, theme_request);
                 if widgets::ghost_button(ui, "⛶").clicked() {
@@ -107,12 +107,12 @@ fn wordmark(ui: &mut egui::Ui) {
     ui.label(job);
 }
 
-/// Hand-painted crossfader (Step 10 brief, moved from `ui::decks`: was
+/// Hand-painted crossfader (Step 10 brief, moved from `ui::decks`, was
 /// `decks.rs:47-51`, a plain `egui::Slider`): 1px `dim` ticks, a rail
 /// filled with an accent-transparent -> accent@22% gradient (a real
 /// GPU-interpolated 2-triangle `Mesh`, not an approximation), a 4px handle
 /// with a ~12px glow halo (simulated as several `rect_filled` calls at
-/// decreasing opacity/growing radius: the brief's explicitly-allowed
+/// decreasing opacity/growing radius, the brief's explicitly-allowed
 /// technique), and mono `A · NN%` / `NN% · B` labels either side. Still a
 /// real drag control, not a static readout: dragging or clicking anywhere
 /// along the rail sets `show.crossfader` directly, same end effect as the
@@ -128,7 +128,7 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 
     // Step 10 fix-round-1: narrowed from 200 to fit the default/untouched
     // window width (see `header`'s own doc comment) without dropping any
-    // control: still a full-width drag-anywhere-on-rail target, just more
+    // control; still a full-width drag-anywhere-on-rail target, just more
     // compact.
     let rail_width = 64.0;
     let rail_height = 6.0;
@@ -187,7 +187,7 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 }
 
 /// BPM + Tap Tempo/Clear/beats-per-change/auto-crossfade row, moved
-/// verbatim (business logic unchanged) from `ui::playlists`: was
+/// verbatim (business logic unchanged) from `ui::playlists`, was
 /// `playlists.rs:44-75`, already a single self-contained `ui.horizontal`
 /// row there, which is why the whole block (not just the BPM readout)
 /// fits the header cleanly. Only the BPM readout itself gets the header's
@@ -199,7 +199,7 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
         bpm_readout(ui, show);
 
         // "Tap" (Step 10 fix-round-1: shortened from "Tap Tempo" to help
-        // the header row fit the app's default/untouched window width:
+        // the header row fit the app's default/untouched window width;
         // see `header`'s own doc comment).
         if ui.button("Tap").clicked() {
             show.tap_tempo(t0.elapsed().as_secs_f64() * 1000.0);
@@ -212,7 +212,7 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
         // set as the TS reference's `<select>` (`SidebarPlaylist.svelte:118`).
         // `.width(40.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults
         // to a 100px minimum width (`Spacing::combo_width`) regardless of
-        // content: way oversized for a 1-2 digit value, and a real
+        // content, way oversized for a 1-2 digit value, and a real
         // contributor to the header overflow.
         egui::ComboBox::from_id_salt("od_beats_per_change")
             .width(40.0)
@@ -246,7 +246,7 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     // Bare number, no "BPM" unit suffix (Step 10 fix-round-1): sitting
     // directly next to "Tap"/"Clear" already makes it unambiguous, and
     // dropping the 3-letter suffix was part of closing the header
-    // overflow found in review: see `header`'s own doc comment.
+    // overflow found in review; see `header`'s own doc comment.
     let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
     let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
     let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
@@ -265,7 +265,7 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
 }
 
 /// Theme picker (Step 12): shows the current theme via a real `ComboBox`,
-/// now interactive: selecting a different entry writes it to the
+/// now interactive, selecting a different entry writes it to the
 /// `theme_request` out-param (posed at Step 9) instead of switching
 /// anything directly. `ui_root` can't apply a theme change itself (that
 /// needs the live `egui::Context`, not available here), so this mirrors
@@ -275,7 +275,7 @@ fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
     let t = theme(ui);
     // `.width(48.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults to
     // a 100px minimum width regardless of content, a real contributor to
-    // the header overflow found in review: this is only a floor, so
+    // the header overflow found in review; this is only a floor, so
     // `OpenDropClassic` (the longest name) still renders in full, just
     // without padding every other, shorter name out to 100px too.
     egui::ComboBox::from_id_salt("od_theme_combo").width(48.0).selected_text(format!("{:?}", t.id)).show_ui(ui, |ui| {
@@ -303,7 +303,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         // stays reachable past a fixed-height panel. Found live-testing
         // this phase's nav, which nearly doubled item count from 14 to 27:
         // with no scroll mechanism at all, every item past the panel's
-        // fixed height: including "About" below this block: was simply
+        // fixed height, including "About" below this block, was simply
         // unreachable. Default `auto_shrink` (not forced false) matters:
         // it lets the area shrink below `available_height` when the list
         // fits, which is what leaves room for "About" to still pin at the
@@ -313,7 +313,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
             nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
             // `PresetBrowser` isn't named in this step's brief's PERFORM/
             // SOURCES/OUTPUTS/CONTROL section listing (13 entries across the 4
-            // sections in the default build): a gap in that listing: the
+            // sections in the default build), a gap in that listing: the
             // brief's own manual-verification line ("all 14 panels are
             // reachable from the sectioned nav") requires every
             // default-build `Panel` variant reachable, and `PresetBrowser` is
@@ -362,7 +362,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         // About: pinned to the bottom of the nav column, outside the 4
         // sections above (Step 10 brief). A `bottom_up` child layout
         // placed last in the outer `vertical` claims the rest of the
-        // panel's height and bottom-anchors its one item inside it:
+        // panel's height and bottom-anchors its one item inside it,
         // standard egui idiom for a sidebar's pinned-bottom item. Only
         // reachable because the `ScrollArea` above shrinks to its content
         // height instead of always claiming the full available height.
@@ -377,7 +377,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
     // fresh static one at each active item's position every frame (Step
     // 10's original behavior). Fixed `Id`: `nav` has exactly one call site
     // (`main.rs`'s `ui_root`), called once per frame, so a literal key is
-    // stable by construction: not a scroll/filter-shifting one.
+    // stable by construction, not a scroll/filter-shifting one.
     if let Some(rect) = active_rect {
         let t = theme(ui);
         let d = t.durations.base.max(4.0 * ui.ctx().input(|i| i.stable_dt));
@@ -388,9 +388,9 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
 }
 
 /// One nav row: a `selectable_label`. When active, records its rect into
-/// `active_rect` (Step 22) so `nav`'s own accent rail: now a single,
-/// animated rail slid between active items via `animate_value_with_time`
-///: knows where to slide toward, instead of this function hand-painting a
+/// `active_rect` (Step 22) so `nav`'s own accent rail, now a single
+/// animated rail slid between active items via `animate_value_with_time`,
+/// knows where to slide toward, instead of this function hand-painting a
 /// fresh static rail at each active item's position every frame (Step 10's
 /// original behavior).
 fn nav_item(ui: &mut egui::Ui, active_panel: &mut Panel, panel: Panel, label: &str, active_rect: &mut Option<egui::Rect>) {
@@ -444,7 +444,7 @@ pub fn status_bar(
             let device = sources.selected_input_device.as_deref().unwrap_or("(default)");
             widgets::micro_label(ui, device);
             // `vu_meter` sizes itself to `ui.available_width()`, meant for
-            // its full-width Audio-panel usage: wrapped in a fixed-size
+            // its full-width Audio-panel usage, wrapped in a fixed-size
             // child region here so it doesn't swallow the rest of this
             // dense row (Step 10 judgment call, documented in the task
             // report).
@@ -547,7 +547,7 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
                 bpm_readout(ui, perform.show);
                 // Whole-branch review fix wave, finding 4: Stage mode (the
                 // live-performance mode) had no way to tap or clear the
-                // manual BPM at all: `bpm_tap` (the only caller of
+                // manual BPM at all; `bpm_tap` (the only caller of
                 // `Show::tap_tempo`/`clear_manual_bpm`) lives in `header`
                 // only, never reached while Stage mode replaces it with
                 // `header_stage`. Same controls, same labels as `bpm_tap`,
@@ -578,7 +578,7 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
 /// A `micro_label`ed 5px dot: `ok` (green) + a soft glow when `active`,
 /// `dim` with no glow otherwise (whole-branch review fix wave, finding 5:
 /// was `warn`, which made a freshly-launched app's status bar read as a
-/// row of warnings for a merely-offline state: `dim` matches `widgets::
+/// row of warnings for a merely-offline state; `dim` matches `widgets::
 /// connection_row`'s established convention for the same conceptual
 /// state).
 fn status_dot(ui: &mut egui::Ui, label: &str, active: bool) {

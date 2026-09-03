@@ -231,7 +231,7 @@ async fn serve_until_stopped(
             msg = control_rx.recv() => {
                 publish_idle(state);
                 // No receivers subscribed yet (nobody ever connected) is a
-                // normal, harmless `Err` here: ignored, same as every
+                // normal, harmless `Err` here, ignored, same as every
                 // other outward "best effort" send in this codebase.
                 let _ = shutdown_tx.send(());
                 match msg {
@@ -298,8 +298,8 @@ struct WsState {
 /// `new WebSocket(\`ws://${host}:${port}\`)` exactly: that page is never
 /// rewritten (REQUIREMENTS.md), so the server side has to meet it where it
 /// is. A plain (non-upgrade) GET to `/` gets axum's standard
-/// `WebSocketUpgrade` rejection response instead of the SPA's `index.html`
-///: acceptable here: the phone is always given a `/remote?host=&port=&
+/// `WebSocketUpgrade` rejection response instead of the SPA's `index.html`.
+/// Acceptable here: the phone is always given a `/remote?host=&port=&
 /// token=` URL, never a bare `/`, and everything other than the exact `/`
 /// path (including `/remote` and `/_app/...`) falls through to the
 /// `fallback_service` below.
@@ -327,7 +327,7 @@ async fn handle_socket(mut socket: WebSocket, state: WsState) {
                         let _ = state.events_tx.send(dispatch);
                     }
                 }
-                // Binary/Ping/Pong/Close frames: nothing to do: mirrors the
+                // Binary/Ping/Pong/Close frames: nothing to do, mirrors the
                 // JS reference, which only ever handles `ws.on('message', ...)`
                 // (text/JSON) and lets the `ws` library's own automatic
                 // ping/pong and close handling take care of the rest.
@@ -346,8 +346,8 @@ struct RemoteMessage {
 
 /// Pure JSON/token/command logic, factored out of `handle_socket` so it's
 /// unit-testable without a real socket (mirrors `osc::dispatch_from_message`).
-/// Returns `None`: silently ignored, no error response, so a probing
-/// client learns nothing from a mismatch: for: malformed JSON, a
+/// Returns `None` (silently ignored, no error response, so a probing
+/// client learns nothing from a mismatch) for malformed JSON, a
 /// `token` that doesn't match `expected_token`, or an unrecognized `cmd`
 /// (via `parse_command_id`, same kebab-case table OSC uses). `value` is
 /// clamped 0..1, defaulting to 0.0 when the field is absent from the JSON
@@ -514,8 +514,8 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "connection was not closed after Stop");
         }
 
-        // A message sent on the now-closed connection must never dispatch
-        //: proves the stale token really did stop being usable, not just
+        // A message sent on the now-closed connection must never dispatch.
+        // This proves the stale token really did stop being usable, not just
         // that the socket eventually noticed a close on its own.
         let stale_payload = format!(r#"{{"token":"{}","cmd":"crossfader","value":0.9}}"#, snapshot.token);
         let _ = socket.send(tungstenite::Message::Text(stale_payload.into())); // expected to fail; ignored either way

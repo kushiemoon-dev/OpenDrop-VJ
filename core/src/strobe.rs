@@ -6,7 +6,7 @@
 //! here, following the same colocated-test convention as
 //! `snapshot.rs`/`timeline.rs`/`q_vars.rs`/`lfo.rs`.
 
-/// User-facing strobe state (Strobe panel: `app::ui::strobe`). `rate` is a
+/// User-facing strobe state (Strobe panel, `app::ui::strobe`). `rate` is a
 /// multiplier of beat rate, same convention as `lfo::LfoSlot::rate`: 1 =
 /// once per beat, 2 = twice per beat, 0.5 = once every 2 beats. The panel's
 /// rate buttons only ever assign one of {0.25, 0.5, 1, 2, 4}, but nothing
@@ -28,7 +28,7 @@ impl Default for StrobeState {
     }
 }
 
-/// How long a single flash takes to decay from peak to 0, in seconds:
+/// How long a single flash takes to decay from peak to 0, in seconds,
 /// capped (see `strobe_flash_intensity`) to half the current sub-beat
 /// period so a fast rate/high-bpm combination never holds one flash into
 /// the start of the next.
@@ -43,7 +43,7 @@ const FLASH_DECAY_SEC: f64 = 0.08;
 /// `rate` in `clock_beats_abs`, the ABSOLUTE number of beats elapsed since
 /// the clock started (`Clock::beat_count() as f64 + Clock::phase01()`, not
 /// `phase01()` alone). `phase01` alone is only the fractional position
-/// *within* the current beat, always in `[0, 1)`: for `rate < 1` that is
+/// *within* the current beat, always in `[0, 1)`; for `rate < 1` that is
 /// not enough information: a `rate == 0.25` flash (once every 4 beats)
 /// needs to know *which* beat this is, not just where in it we are, or
 /// every `rate` below 1 collapses to "once per beat" (the bug a code
@@ -57,7 +57,7 @@ const FLASH_DECAY_SEC: f64 = 0.08;
 /// / the audio beat detector all drive it, see `Show::clock`), independent
 /// of this process's own uptime.
 ///
-/// **No tempo** (`clock_bpm <= 0`, e.g. nothing detected/set yet: see
+/// **No tempo** (`clock_bpm <= 0`, e.g. nothing detected/set yet, see
 /// `Show::current_bpm`): `Clock::phase01`/`beat_count` are frozen
 /// (`Clock::step` never advances either at bpm 0), so there is no beat to
 /// sync a flash to. Falls back to a free-running pulse at `rate` Hz,

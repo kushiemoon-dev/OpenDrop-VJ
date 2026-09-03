@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 
 /// Extensions offered in the import dialog and recognised by the scan.
-/// Nothing is decoded here: ffmpeg is what will actually open the file:
+/// Nothing is decoded here: ffmpeg is what will actually open the file,
 /// so this list only needs to keep obviously-wrong files out of the
 /// library, not to be exhaustive.
 pub(crate) const VIDEO_EXTENSIONS: [&str; 8] = ["webm", "mp4", "mov", "mkv", "avi", "m4v", "ogv", "mpg"];
@@ -95,7 +95,7 @@ fn clip_from_path(path: PathBuf, builtin: bool) -> VideoClip {
 
 /// Copies `source` into the user clip folder and returns the resulting
 /// entry. Port of `addVideoFromFile`, including its size cap
-/// (`core::video::MAX_CLIP_BYTES`): the web wrote the blob into IndexedDB,
+/// (`core::video::MAX_CLIP_BYTES`); the web wrote the blob into IndexedDB,
 /// this writes a file.
 ///
 /// A name collision gets a ` (2)`, ` (3)`, … suffix rather than
@@ -106,7 +106,7 @@ pub(crate) fn import_clip(source: &Path) -> Result<VideoClip, String> {
     let size = std::fs::metadata(source).map_err(|e| format!("reading {}: {e}", source.display()))?.len();
     if size > opendrop_core::video::MAX_CLIP_BYTES {
         return Err(format!(
-            "{} is {} MB: over the {} MB limit",
+            "{} is {} MB, exceeding the {} MB limit",
             source.display(),
             size / (1024 * 1024),
             opendrop_core::video::MAX_CLIP_BYTES / (1024 * 1024)
@@ -139,7 +139,7 @@ fn free_target_path(dir: &Path, source: &Path) -> PathBuf {
 }
 
 /// Deletes a user clip's file. Bundled clips are never deletable (the
-/// panel doesn't offer the button, and this refuses anyway): they aren't
+/// panel doesn't offer the button, and this refuses anyway); they aren't
 /// the user's to remove from inside the app.
 pub(crate) fn delete_clip(clip: &VideoClip) -> Result<(), String> {
     if clip.builtin {
@@ -248,7 +248,7 @@ mod tests {
         let err = import_clip(&source).unwrap_err();
         std::fs::remove_dir_all(&dir).unwrap();
 
-        assert!(err.contains("over the"), "unexpected message: {err}");
+        assert!(err.contains("exceeding the"), "unexpected message: {err}");
     }
 
     #[test]

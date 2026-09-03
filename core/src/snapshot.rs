@@ -45,7 +45,7 @@ pub fn interpolate_snapshot(
 /// State for a snapshot recall in progress, advanced by `Show::tick_recall`
 /// (via `tick_active_recall`). `elapsed_sec` accumulates from
 /// caller-supplied `dt`, the same convention as `Show::tick_playlists`'s
-/// `dt_ms`, rather than an absolute wall-clock timestamp: `Show` has no
+/// `dt_ms`, rather than an absolute wall-clock timestamp; `Show` has no
 /// wall clock of its own (see `Show::reseed_rng`'s doc comment).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ActiveRecall {

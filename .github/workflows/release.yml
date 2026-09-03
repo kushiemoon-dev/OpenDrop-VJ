@@ -43,3 +43,60 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: gh release create "$TAG" ./*.AppImage --title "$TAG" --generate-notes
+
+  windows-portable:
+    name: Windows Portable
+    runs-on: windows-latest
+    needs: linux-appimage
+    env:
+      VCPKG_ROOT: C:\vcpkg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache preset pack
+        id: cache-presets
+        uses: actions/cache@v4
+        with:
+          path: C:\opendrop-presets
+          key: windows-presets-cream-of-the-crop
+
+      - name: Fetch preset pack
+        if: steps.cache-presets.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop C:\opendrop-presets
+
+      - name: Cache vcpkg projectM install
+        id: cache-vcpkg-projectm
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-projectm-4.1.6-windows
+
+      - name: Install pinned projectM via vcpkg overlay port
+        if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
+        run: vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+
+      - name: Cache NDI SDK
+        id: cache-ndi
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\NDI
+          key: windows-ndi-sdk-6
+
+      - name: Download and extract NDI SDK
+        if: steps.cache-ndi.outputs.cache-hit != 'true'
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\ndi-sdk-installer.exe" "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20SDK.exe"
+          New-Item -ItemType Directory -Force -Path "C:\Program Files\NDI" | Out-Null
+          & "C:\Program Files\7-Zip\7z.exe" x "$env:RUNNER_TEMP\ndi-sdk-installer.exe" -o"C:\Program Files\NDI" -y
+
+      - name: Build Windows portable zip
+        run: packaging\windows\build-portable.ps1
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$env:TAG" (Get-ChildItem "OpenDrop-Native-*-windows-x64.zip").FullName

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenDrop&middot;VJ</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  .op-root { background:#000; color:#f2f0f5; font-family:'JetBrains Mono',monospace; margin:-24px; position:relative; }
+
+  .op-grain { position:absolute; inset:0; z-index:4; pointer-events:none; opacity:0.05;
+    background-image: repeating-linear-gradient(0deg, #fff 0px, transparent 1px, transparent 2px);
+  }
+
+  .op-topbar { display:flex; justify-content:space-between; align-items:center; padding:20px 32px; position:relative; z-index:3; }
+  .op-word { font-family:'Big Shoulders Display',sans-serif; font-weight:800; font-size:18px; letter-spacing:0.5px; }
+  .op-word b { color:#ff2ec4; font-weight:900; }
+  .op-dl { display:flex; gap:10px; }
+  .op-btn { font-family:'JetBrains Mono',monospace; font-size:12px; padding:9px 16px; border-radius:3px; text-decoration:none; transition:filter .15s, transform .15s; display:inline-block; }
+  .op-btn:hover { filter:brightness(1.25); transform:translateY(-1px); }
+  .op-btn.a { background:#f2f0f5; color:#050505; font-weight:600; }
+  .op-btn.b { border:1px solid #3a3a42; color:#c8c8d2; }
+
+  .op-hero { position:relative; min-height:480px; display:flex; align-items:center; padding:0 32px; overflow:hidden; cursor:crosshair; }
+  #op-canvas { position:absolute; inset:0; z-index:0; width:100%; height:100%; }
+  .op-scrim { position:absolute; inset:0; z-index:1; background:linear-gradient(90deg, #000 0%, #000 26%, rgba(0,0,0,0.5) 46%, transparent 66%); pointer-events:none; }
+  .op-content { position:relative; z-index:2; max-width:600px; pointer-events:none; }
+  .op-h1 { font-family:'Big Shoulders Display',sans-serif; font-weight:900; font-size:84px; line-height:0.9; margin:0 0 20px; letter-spacing:-1px; }
+  .op-h1 .l2 { color:#ff2ec4; text-shadow:0 0 40px rgba(255,46,196,0.5); }
+  .op-sub { font-size:13px; color:#b0b0bc; line-height:1.7; margin:0 0 28px; max-width:420px; }
+  .op-sub code { color:#e0e0e8; }
+  .op-hint { position:absolute; z-index:2; right:32px; bottom:20px; font-size:10px; color:#5a5a64; letter-spacing:0.3px; }
+
+  .op-meters { position:sticky; top:0; z-index:5; display:grid; grid-template-columns:repeat(4,1fr) 2fr; border-top:1px solid #2a2a32; border-bottom:1px solid #2a2a32; background:rgba(6,4,9,0.88); backdrop-filter:blur(10px); }
+  .op-deck { padding:16px 18px; border-right:1px solid #2a2a32; opacity:0; animation: boot 0.4s ease-out forwards; animation-delay: var(--bd); }
+  @keyframes boot { 0%{opacity:0; transform:scale(0.9)} 60%{opacity:1; box-shadow:0 0 24px var(--dc)} 100%{opacity:1; transform:scale(1); box-shadow:none} }
+  .op-deck .lbl { display:flex; justify-content:space-between; font-size:11px; color:#9a9aa8; margin-bottom:8px; }
+  .op-deck .lbl b { color: var(--dc); }
+  .op-bars { display:flex; align-items:flex-end; gap:3px; height:28px; }
+  .op-bars i { flex:1; background:var(--dc); opacity:0.95; box-shadow:0 0 8px var(--dc); animation: bar 1s ease-in-out infinite alternate; animation-delay: var(--d); border-radius:1px 1px 0 0; }
+  @keyframes bar { from{height:15%} to{height:var(--h,90%)} }
+  .op-deck.a { --dc:#ff2ec4; --bd:0.1s; } .op-deck.b { --dc:#2ee8ff; --bd:0.35s; } .op-deck.c { --dc:#ffcf2e; --bd:0.6s; } .op-deck.d { --dc:#7a4bff; --bd:0.85s; }
+  .op-feat { padding:20px 24px; display:flex; align-items:center; font-size:11px; color:#9a9aa8; opacity:0; animation: fadein 0.5s ease-out forwards; animation-delay: 1.1s; }
+  @keyframes fadein { to { opacity:1 } }
+  .op-feat span { margin-right:18px; }
+  .op-feat span:before { content:'·'; color:#4a4a52; margin-right:18px; }
+  .op-feat span:first-child:before { content:''; margin-right:0; }
+
+  .op-section { max-width:920px; margin:0 auto; padding:90px 32px; position:relative; z-index:2; }
+  .op-section.glow-a::before, .op-section.glow-b::before {
+    content:''; position:absolute; top:-10%; width:70%; height:60%; z-index:-1;
+    filter:blur(90px); opacity:0.22; pointer-events:none;
+  }
+  .op-section.glow-a::before { background:#2ee8ff; left:-10%; }
+  .op-section.glow-b::before { background:#7a4bff; right:-10%; }
+
+  .op-eyebrow { display:flex; align-items:center; gap:10px; margin:0 0 36px; }
+  .op-eyebrow .sq { width:12px; height:12px; background:var(--ac); box-shadow:0 0 16px var(--ac); }
+  .op-intro { font-family:'Big Shoulders Display',sans-serif; font-weight:700; font-size:30px; margin:0; color:#f8f8fb; }
+
+  .op-gallery { display:grid; grid-template-columns:1.6fr 1fr; gap:16px; }
+  .op-frame { background:#0c0a10; border:1px solid var(--fc); border-radius:6px; position:relative; overflow:hidden; box-shadow:0 0 40px -12px var(--fc); transition:transform .2s, box-shadow .2s; }
+  .op-frame:hover { transform:translateY(-3px); box-shadow:0 8px 40px -8px var(--fc); }
+  .op-frame .chrome { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid #26222c; }
+  .op-frame .dot { width:8px; height:8px; border-radius:50%; background:var(--fc); opacity:0.6; }
+  .op-frame .dot.rec { animation:blink 1.6s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+  .op-frame .body { aspect-ratio:16/10; background:
+      repeating-linear-gradient(45deg, #14101a 0 12px, #0c0a10 12px 24px);
+      display:flex; align-items:center; justify-content:center; }
+  .op-frame.tall .body { aspect-ratio:16/6.2; }
+  .op-frame .pending { font-size:10px; color:var(--fc); letter-spacing:0.3px; opacity:0.85; }
+  .op-gallery .stack { display:flex; flex-direction:column; gap:16px; }
+
+  .op-specs { border-top:1px solid #26222c; }
+  .op-spec-row { display:grid; grid-template-columns:240px 1fr; gap:24px; padding:24px 0; border-bottom:1px solid #26222c; align-items:baseline; transition:background .15s; }
+  .op-spec-row:hover { background:rgba(255,255,255,0.02); }
+  .op-spec-row:hover .desc { color:#c8c8d2; }
+  .op-spec-row .tick { display:inline-block; width:10px; height:10px; margin-right:12px; background:var(--dc); border-radius:1px; box-shadow:0 0 14px var(--dc); animation:pulse 2.4s ease-in-out infinite; animation-delay:var(--pd); }
+  @keyframes pulse { 0%,100%{opacity:0.6; transform:scale(1)} 50%{opacity:1; transform:scale(1.25)} }
+  .op-spec-row .name { font-size:14px; color:#f2f0f5; }
+  .op-spec-row .desc { font-size:13px; color:#a0a0ac; line-height:1.6; font-family:-apple-system,sans-serif; transition:color .15s; }
+
+  .op-footer { border-top:1px solid #2a2a32; padding:32px; display:flex; justify-content:space-between; align-items:center; background:linear-gradient(180deg, transparent, rgba(255,46,196,0.04)); }
+  .op-badges { display:flex; gap:16px; font-size:11px; color:#8a8a96; align-items:center; }
+  .op-badges b { color:#e8e8ee; }
+  .op-repo { font-size:12px; color:#c8c8d2; text-decoration:none; transition:color .15s; }
+  .op-repo:hover { color:#ff2ec4; }
+</style>
+</head>
+<body>
+<div class="op-root">
+  <div class="op-grain"></div>
+  <div class="op-topbar">
+    <div class="op-word">Open<b>Drop</b>&middot;VJ</div>
+    <div class="op-dl">
+      <a class="op-btn a" href="https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest">Download &middot; Linux</a>
+      <a class="op-btn b" href="https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest">Download &middot; Windows</a>
+    </div>
+  </div>
+
+  <div class="op-hero" id="op-hero">
+    <canvas id="op-canvas"></canvas>
+    <div class="op-scrim"></div>
+    <div class="op-content">
+      <h1 class="op-h1">A 4-deck<br><span class="l2">Milkdrop VJ</span><br>instrument.</h1>
+      <p class="op-sub">GPU compositor. <code>MIDI</code> &middot; <code>OSC</code> &middot; <code>Ableton&nbsp;Link</code>. NDI in/out. Native desktop &mdash; Linux &amp; Windows.</p>
+    </div>
+    <div class="op-hint">move &middot; click</div>
+  </div>
+
+  <div class="op-meters">
+    <div class="op-deck a"><div class="lbl">DECK <b>A</b><span>LIVE</span></div>
+      <div class="op-bars"><i style="--h:80%;--d:0s"></i><i style="--h:60%;--d:.1s"></i><i style="--h:95%;--d:.2s"></i><i style="--h:70%;--d:.3s"></i><i style="--h:85%;--d:.15s"></i></div></div>
+    <div class="op-deck b"><div class="lbl">DECK <b>B</b><span>LIVE</span></div>
+      <div class="op-bars"><i style="--h:65%;--d:.05s"></i><i style="--h:90%;--d:.25s"></i><i style="--h:55%;--d:.1s"></i><i style="--h:80%;--d:.3s"></i><i style="--h:70%;--d:.2s"></i></div></div>
+    <div class="op-deck c"><div class="lbl">DECK <b>C</b><span>IDLE</span></div>
+      <div class="op-bars"><i style="--h:30%;--d:.1s"></i><i style="--h:40%;--d:.2s"></i><i style="--h:25%;--d:0s"></i><i style="--h:35%;--d:.3s"></i><i style="--h:28%;--d:.15s"></i></div></div>
+    <div class="op-deck d"><div class="lbl">DECK <b>D</b><span>IDLE</span></div>
+      <div class="op-bars"><i style="--h:20%;--d:.2s"></i><i style="--h:32%;--d:0s"></i><i style="--h:22%;--d:.3s"></i><i style="--h:38%;--d:.1s"></i><i style="--h:24%;--d:.25s"></i></div></div>
+    <div class="op-feat"><span>128 BPM</span><span>Ableton Link synced</span><span>NDI out &middot; 2 sinks</span></div>
+  </div>
+
+  <div class="op-section glow-a">
+    <div class="op-eyebrow" style="--ac:#2ee8ff"><span class="sq"></span></div>
+    <p class="op-intro">See it running.</p>
+    <div style="height:36px"></div>
+    <div class="op-gallery">
+      <div class="op-frame" style="--fc:#ff2ec4">
+        <div class="chrome"><div class="dot rec"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="body"><span class="pending">main window &mdash; capture pending</span></div>
+      </div>
+      <div class="stack">
+        <div class="op-frame" style="--fc:#2ee8ff">
+          <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+          <div class="body"><span class="pending">deck strip</span></div>
+        </div>
+        <div class="op-frame" style="--fc:#ffcf2e">
+          <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+          <div class="body"><span class="pending">NDI / share panel</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="op-section glow-b">
+    <div class="op-eyebrow" style="--ac:#7a4bff"><span class="sq"></span></div>
+    <p class="op-intro">What's inside.</p>
+    <div style="height:36px"></div>
+    <div class="op-specs">
+      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#ff2ec4;--pd:0s"></span>GPU compositor</div><div class="desc">Four decks composited in real time on the GPU. Blend modes, opacity, and crossfade curves, all live.</div></div>
+      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#2ee8ff;--pd:.4s"></span>MIDI / OSC / Ableton Link</div><div class="desc">Map any controller. Sync tempo across your rig without touching a cable.</div></div>
+      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#ffcf2e;--pd:.8s"></span>NDI in / out</div><div class="desc">Send and receive video over the network. Drops straight into OBS or a second machine.</div></div>
+      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#7a4bff;--pd:1.2s"></span>Native, cross-platform</div><div class="desc">One binary for Linux and Windows. No Electron, no browser, no install step beyond unzip.</div></div>
+    </div>
+  </div>
+
+  <div class="op-footer">
+    <div class="op-badges">
+      <b>MIT</b><span>&middot;</span>
+      <img src="https://img.shields.io/github/stars/kushiemoon-dev/OpenDrop-VJ?style=flat-square&color=ff2ec4&labelColor=0c0a10" alt="GitHub stars" height="16">
+      <span>&middot;</span>
+      <img src="https://img.shields.io/github/actions/workflow/status/kushiemoon-dev/OpenDrop-VJ/ci.yml?branch=main&style=flat-square&label=CI&color=2ee8ff&labelColor=0c0a10" alt="CI status" height="16">
+    </div>
+    <a class="op-repo" href="https://github.com/kushiemoon-dev/OpenDrop-VJ">github.com/kushiemoon-dev/OpenDrop-VJ &rarr;</a>
+  </div>
+</div>
+
+<script>
+(function(){
+  var canvas = document.getElementById('op-canvas');
+  var hero = document.getElementById('op-hero');
+  var ctx = canvas.getContext('2d');
+  var colors = ['#ff2ec4', '#2ee8ff', '#ffcf2e', '#7a4bff'];
+  var arms = 7;
+  var t = 0;
+  var target = null;
+  var cur = null;
+  var ripples = [];
+
+  function resize(){
+    canvas.width = hero.clientWidth * devicePixelRatio;
+    canvas.height = hero.clientHeight * devicePixelRatio;
+    canvas.style.width = hero.clientWidth + 'px';
+    canvas.style.height = hero.clientHeight + 'px';
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+    var w = hero.clientWidth, h = hero.clientHeight;
+    if(!cur){ cur = {x:w*0.72, y:h*0.5}; }
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  hero.addEventListener('mousemove', function(e){
+    var r = hero.getBoundingClientRect();
+    target = { x: e.clientX - r.left, y: e.clientY - r.top };
+  });
+  hero.addEventListener('mouseleave', function(){ target = null; });
+  hero.addEventListener('click', function(e){
+    var r = hero.getBoundingClientRect();
+    ripples.push({ x: e.clientX - r.left, y: e.clientY - r.top, rad:0, alpha:1 });
+  });
+
+  function frame(){
+    var w = hero.clientWidth, h = hero.clientHeight;
+    var defTarget = { x: w*0.72, y: h*0.5 };
+    var tgt = target || defTarget;
+    cur.x += (tgt.x - cur.x) * 0.05;
+    cur.y += (tgt.y - cur.y) * 0.05;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.07)';
+    ctx.fillRect(0,0,w,h);
+
+    ctx.save();
+    ctx.translate(cur.x,cur.y);
+    ctx.rotate(t*0.05);
+    for(var a=0; a<arms; a++){
+      ctx.save();
+      ctx.rotate((Math.PI*2/arms)*a);
+      for(var i=0;i<3;i++){
+        var phase = t*0.6 + i*2.1 + a*0.3;
+        var rad = 60 + Math.sin(phase*0.7)*40 + i*70;
+        var x = Math.cos(phase) * rad;
+        var y = Math.sin(phase*1.3) * rad * 0.6;
+        var size = 10 + Math.sin(phase*2)*6;
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2,size), 0, Math.PI*2);
+        ctx.fillStyle = colors[(a+i) % colors.length];
+        ctx.globalAlpha = 0.55;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    for(var i2=ripples.length-1;i2>=0;i2--){
+      var rp = ripples[i2];
+      rp.rad += 9;
+      rp.alpha -= 0.02;
+      if(rp.alpha<=0){ ripples.splice(i2,1); continue; }
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rp.rad, 0, Math.PI*2);
+      ctx.strokeStyle = colors[i2 % colors.length];
+      ctx.globalAlpha = rp.alpha;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    t += 0.016;
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
+</body>
+</html>

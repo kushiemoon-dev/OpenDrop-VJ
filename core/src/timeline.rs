@@ -4,7 +4,7 @@
 //! Only `timelineLoopDuration`/`timelineValuesAt` are ported: they're the
 //! pure, unit-tested half of the source file. `TimelineEngine`, the
 //! `requestAnimationFrame`-owning class, is explicitly documented in the TS
-//! source as verified in a real browser rather than unit tested: same
+//! source as verified in a real browser rather than unit tested, the same
 //! precedent as `SnapshotEngine` in `snapshot.rs`, which was dropped for the
 //! same reason. A caller-driven replacement belongs in a later, I/O-aware
 //! crate once there's an actual behavior to drive it with.
@@ -38,7 +38,7 @@ pub fn timeline_loop_duration(keyframes: &[TimelineKeyframe]) -> f64 {
 /// Edge cases (decided):
 ///  - Fewer than 2 keyframes → empty map (nothing to drive).
 ///  - A keyframe referencing an empty snapshot slot is treated as empty for
-///    that endpoint: same absent-key semantics as `interpolate_snapshot`
+///    that endpoint, the same absent-key semantics as `interpolate_snapshot`
 ///    itself (a missing key never invents a jump).
 ///  - `t_sec` before the first keyframe's `time_sec` → progress goes
 ///    negative, `smoothstep` clamps it to 0, so the first keyframe's value is

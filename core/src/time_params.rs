@@ -97,7 +97,7 @@ pub fn with_time_params(
 /// Takes the preset's existing `frame_eqs_str` directly rather than a whole
 /// preset object: `q_vars.rs`'s `Preset` (the crate's only `Preset` type so
 /// far) is explicitly a minimal stand-in scoped to `inject_q_var_params`'s
-/// own `frame_eqs_str`-only patching, not a general preset representation:
+/// own `frame_eqs_str`-only patching, not a general preset representation,
 /// so splicing this back into a real preset stays whichever future
 /// milestone's concern assembles one, not this pure string transform's.
 pub fn inject_time_params(frame_eqs_str: &str, slot: usize) -> String {

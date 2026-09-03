@@ -20,7 +20,7 @@
 use ab_glyph::{point, Font, FontRef, Glyph, GlyphId, Point, PxScale, ScaleFont};
 use glow::HasContext;
 
-/// Straight (NOT premultiplied) 8-bit RGBA, row 0 = top row: the layout
+/// Straight (NOT premultiplied) 8-bit RGBA, row 0 = top row, the layout
 /// both `image`'s decoders and [`rasterize_text`] produce natively, and the
 /// one the overlay fragment shader expects (it flips V at the vertex stage,
 /// see `compositor::OVERLAY_VERTEX_SRC`).
@@ -66,7 +66,7 @@ pub fn decode_image(bytes: &[u8]) -> Result<RgbaImage, String> {
 /// `\n` starts a new line; lines are laid out left-aligned one
 /// `ascent - descent + line_gap` apart, with horizontal kerning applied.
 /// A string that rasterizes to nothing (empty, or all whitespace) yields a
-/// 1x1 fully transparent image rather than an error: that is a legitimate
+/// 1x1 fully transparent image rather than an error. That is a legitimate
 /// state for a text overlay whose content box the user just cleared.
 pub fn rasterize_text(font_bytes: &[u8], text: &str, px_size: f32, color: [u8; 3]) -> Result<RgbaImage, String> {
     if !(px_size.is_finite() && px_size > 0.0) {
@@ -78,7 +78,7 @@ pub fn rasterize_text(font_bytes: &[u8], text: &str, px_size: f32, color: [u8; 3
     let glyphs = layout_glyphs(&scaled, text, px_size);
     let outlined: Vec<_> = glyphs.into_iter().filter_map(|g| font.outline_glyph(g)).collect();
 
-    // Union of every glyph's rasterized extent: tighter than the font's
+    // Union of every glyph's rasterized extent, tighter than the font's
     // nominal line box, and the reason the quad the compositor builds is
     // exactly the visible ink rather than ink plus slack.
     let mut min = point(f32::MAX, f32::MAX);
@@ -98,7 +98,7 @@ pub fn rasterize_text(font_bytes: &[u8], text: &str, px_size: f32, color: [u8; 3
     let height = (max.y - min.y).ceil() as u32;
     if width > MAX_TEXTURE_DIM || height > MAX_TEXTURE_DIM {
         return Err(format!(
-            "text rasterizes to {width}x{height}, larger than the {MAX_TEXTURE_DIM} px limit: shorten it or lower the size"
+            "text rasterizes to {width}x{height}, larger than the {MAX_TEXTURE_DIM} px limit; shorten it or lower the size"
         ));
     }
 
@@ -160,7 +160,7 @@ where
 }
 
 /// Uploads an [`RgbaImage`] as a fresh `GL_TEXTURE_2D`, clamped and
-/// linearly filtered: the same parameters `deck::create_shared_deck_texture`
+/// linearly filtered, the same parameters `deck::create_shared_deck_texture`
 /// sets, except that this one actually ships pixel data (that one allocates
 /// an empty target for projectM to copy into).
 ///
@@ -170,8 +170,8 @@ where
 ///
 /// # Safety-adjacent note
 /// Sets `GL_UNPACK_ALIGNMENT` to 1 and leaves it there: rows are `width*4`
-/// bytes, always 4-byte aligned, so the default of 4 would work for RGBA:
-/// but a `width` that made a row unaligned would silently skew the image,
+/// bytes, always 4-byte aligned, so the default of 4 would work for RGBA.
+/// But a `width` that made a row unaligned would silently skew the image,
 /// and every other upload path in this app (egui_glow's own included) sets
 /// this itself before uploading.
 pub fn upload_rgba(gl: &glow::Context, img: &RgbaImage) -> Result<glow::NativeTexture, String> {

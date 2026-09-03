@@ -6,9 +6,9 @@
 //! into view, and a preset that crashes projectM while its thumbnail is
 //! rendering would take the whole app down with it, live decks included.
 //! `app::thumbnail_child` renders one thumbnail inside a
-//! `--render-thumbnail` child process instead: same isolation the
-//! pre-flight check (`app::preflight`) already gives live deck loads: and
-//! `app::thumbnails` drives those children from the parent.
+//! `--render-thumbnail` child process instead, giving it the same isolation
+//! the pre-flight check (`app::preflight`) already gives live deck loads,
+//! and `app::thumbnails` drives those children from the parent.
 //!
 //! What has to stay shared is the wire format between the two: the fixed
 //! output size, the warmup frame count, the synthetic PCM fed to
@@ -35,7 +35,7 @@ pub const WARMUP_FRAMES: usize = 30; // thumbnailer.svelte.ts:25
 /// every machine and every run, so a cache entry written by one run is
 /// exactly what the next run would have produced.
 pub fn synthetic_pcm() -> Vec<f32> {
-    // xorshift64, same pattern as core/src/playlist.rs's next_random: no
+    // xorshift64, same pattern as core/src/playlist.rs's next_random. No
     // rand dependency needed for this.
     let mut noise_state: u64 = 0x9E3779B97F4A7C15;
     let mut next_noise = move || {

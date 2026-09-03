@@ -8,7 +8,7 @@
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::osc`, `ui::remote`). `obs_host`/`obs_port`/
 //! `twitch_channel`/`kick_channel` are the panel's own editable fields
-//! (`AppState`'s), read by `Connect` at click time: same reasoning as
+//! (`AppState`'s), read by `Connect` at click time; same reasoning as
 //! `ui::osc`'s `osc_port`: none of `ObsSnapshot`/`TwitchSnapshot`/
 //! `KickSnapshot` has a "what the user is currently typing" concept, only
 //! `connected` (+ OBS's `scenes`).
@@ -16,14 +16,14 @@
 //! Scene switching is one button per scene name (not a dropdown+Go): each
 //! click dispatches `ObsControl::SetScene` immediately, and `ObsSnapshot`
 //! carries no "current scene" field to highlight a selection against
-//! (Override: `CurrentProgramSceneChanged`, OBS->app, isn't ported: see
+//! (Override: `CurrentProgramSceneChanged`, OBS->app, isn't ported, see
 //! `opendrop_io::obs`'s module doc comment), so there's nothing for a
 //! dropdown's "selected" state to reflect anyway.
 //!
 //! Secret input fields (Twitch OAuth token; Kick bearer/xsrf/cookies) use
 //! `egui::TextEdit::password(true)` so the value is masked while typing,
 //! write through `io::secrets::set_secret` when the field loses focus
-//! (`response.lost_focus()`: in egui this fires both on clicking away AND
+//! (`response.lost_focus()`, in egui this fires both on clicking away AND
 //! on pressing Enter in a singleline field, i.e. exactly "blur or submit"
 //! in one check), and are cleared back to empty right after: so the typed
 //! value is never redisplayed in cleartext once entered, mirroring a
@@ -215,14 +215,14 @@ fn service_connect_row(ui: &mut egui::Ui, label: &str, connected: bool, on_conne
 
 /// One masked (`password(true)`) text field that writes `input`'s value to
 /// the OS keyring under `key` on blur/submit and clears `input` right
-/// after: see this module's doc comment for the full UX rationale. Shared
+/// after. See this module's doc comment for the full UX rationale. Shared
 /// by the Twitch OAuth-token field and the 3 Kick credential fields, the
 /// only difference between them being the label and the keyring key.
 /// `error` is `show`'s shared panel-local save-error field (whole-branch
-/// review Finding 1: AC-12): a `set_secret` failure used to be an
+/// review Finding 1, AC-12): a `set_secret` failure used to be an
 /// `eprintln!` only; it's now also written there (and rendered by `show`),
 /// and cleared on the next successful save. Also renders a `Clear` button
-/// (whole-branch review Finding M8): see `clear_secret_button`.
+/// (whole-branch review Finding M8). See `clear_secret_button`.
 fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &str, error: &mut Option<String>) {
     ui.horizontal(|ui| {
         ui.label(label);

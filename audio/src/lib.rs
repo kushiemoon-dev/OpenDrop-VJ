@@ -19,7 +19,7 @@ pub struct AudioSnapshot {
 const SILENT_PLACEHOLDER_FRAMES: usize = 480;
 /// `pub(crate)`, not private: also published by `capture::run` on a failed
 /// device hot-swap (whole-branch review Finding 5), not just here at
-/// bootstrap: see that call site's doc comment.
+/// bootstrap, see that call site's doc comment.
 pub(crate) fn silent_snapshot() -> AudioSnapshot {
     AudioSnapshot { pcm: vec![0.0; SILENT_PLACEHOLDER_FRAMES * 2], energy_byte: 0.0 }
 }
@@ -46,7 +46,7 @@ impl AudioHandle {
 /// Spawns the dedicated capture thread and returns immediately. Infallible
 /// by construction: any failure (no device, open refused) is logged once
 /// internally and leaves `AudioHandle::latest()` returning silence
-/// indefinitely: never a panic, never a `Result` for the caller to handle
+/// indefinitely, never a panic, never a `Result` for the caller to handle
 /// (AC-4).
 pub fn spawn_capture() -> AudioHandle {
     let snapshot = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(silent_snapshot()));

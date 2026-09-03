@@ -5,7 +5,7 @@
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::decks`, `ui::audio`, `ui::output`). Display only:
 //! soft-takeover, LED flash/persistent state, clock sync, and hotplug LED
-//! replay all live in `main.rs`'s `about_to_wait` (Ruling A of the task):
+//! replay all live in `main.rs`'s `about_to_wait` (Ruling A of the task);
 //! this panel just reads `MidiHandle::latest()` and sends control messages.
 //!
 //! No "currently selected port" is tracked on `AppState`: `MidiSnapshot`
@@ -85,7 +85,7 @@ pub fn show(
 
     // `registry.all()` now comes back in the curated `DEFAULT_COMMANDS`
     // grouping (deck controls -> active-deck shortcuts -> ... -> q-vars),
-    // matching the 3 reference UI panels: no longer needs the alphabetical
+    // matching the 3 reference UI panels; no longer needs the alphabetical
     // `.sort_by_key(|cmd| cmd.label)` workaround this panel used to carry
     // for the registry's old nondeterministic HashMap order (whole-branch
     // review Finding I2).
@@ -109,7 +109,7 @@ pub fn show(
                         *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
                     }
                     // Whole-branch review Finding M10: before this, the only
-                    // way out of learn mode was a real MIDI message arriving:
+                    // way out of learn mode was a real MIDI message arriving;
                     // no way to back out of a Learn clicked by mistake.
                     if is_learning && ui.button("Cancel").clicked() {
                         let _ = midi.control_tx.send(MidiControl::StopLearn);

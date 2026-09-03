@@ -25,8 +25,8 @@ use rosc::{OscPacket, OscType};
 
 use crate::command_names::parse_command_id;
 
-/// Every dispatched OSC command address is `/opendrop/<kebab-case-name>`
-///: mirrors `main.cjs:157`'s `address.startsWith('/opendrop/')` check
+/// Every dispatched OSC command address is `/opendrop/<kebab-case-name>`:
+/// mirrors `main.cjs:157`'s `address.startsWith('/opendrop/')` check
 /// exactly.
 const ADDRESS_PREFIX: &str = "/opendrop/";
 
@@ -143,7 +143,7 @@ fn run(state: Arc<ArcSwap<OscSnapshot>>, events_tx: Sender<(CommandId, f64)>, co
 
     loop {
         let Some(sock) = &socket else {
-            // Idle: no socket bound, nothing to receive: block on the
+            // Idle: no socket bound, nothing to receive, block on the
             // control channel instead of busy-polling.
             match control_rx.recv() {
                 Ok(OscControl::Start(port)) => bind(&mut socket, port, &state),
@@ -333,8 +333,8 @@ mod tests {
         assert!(state.load().listening);
         assert_eq!(state.load().port, port);
 
-        // Rebind on the exact same port while `socket` is still `Some(..)`
-        //: this is what would hit `EADDRINUSE` without the fix.
+        // Rebind on the exact same port while `socket` is still `Some(..)`:
+        // this is what would hit `EADDRINUSE` without the fix.
         bind(&mut socket, port, &state);
         assert!(socket.is_some(), "rebind on the same port {port} should also succeed");
         assert!(state.load().listening);

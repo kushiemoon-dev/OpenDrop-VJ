@@ -4,7 +4,7 @@
 //! ported here: `core` has zero I/O, and driving a frame loop belongs to a
 //! later `app` crate, which will call `step()` once per real frame instead.
 //! The TS `onBeat`/`onTick` callback lists are likewise dropped in favor of
-//! `step`/`pulse`/`sync_external` returning the beat count they fired:
+//! `step`/`pulse`/`sync_external` returning the beat count they fired,
 //! callback-free and trivial to assert on in tests.
 
 #[derive(Default)]

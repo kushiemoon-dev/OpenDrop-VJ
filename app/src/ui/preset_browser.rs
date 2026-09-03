@@ -4,19 +4,19 @@
 //! 17 of the plan).
 //!
 //! Takes individual `AppState`-derived fields, not `&mut AppState` as a
-//! whole: same reasoning as `ui::decks`: the call site (`main.rs`'s
+//! whole, same reasoning as `ui::decks`: the call site (`main.rs`'s
 //! `about_to_wait`) already holds `state.egui_glow` mutably borrowed for the
 //! `run()` closure, so this needs disjoint borrows of just the fields it
 //! touches.
 //!
 //! Loading a preset can't be triggered directly from here:
 //! `request_preset_load` (Step 14) needs the whole `AppState`: the
-//! preflight channel sender, `path_by_name`, `pending_validations`: none of
+//! preflight channel sender, `path_by_name`, `pending_validations`, none of
 //! which this panel owns, for the same reason `ui::decks` doesn't call it
 //! either. A click instead writes the clicked name into `*load_request`; the
 //! caller reads it back once `egui_glow.run()` returns (`show` is no longer
 //! borrowed at that point) and performs the actual `request_preset_load`
-//! call: the single validated entry point, never a direct `Deck::
+//! call, the single validated entry point, never a direct `Deck::
 //! load_preset`.
 //!
 //! Both of this panel's per-frame costs are bounded against a real
@@ -30,7 +30,7 @@
 //! 3/13 migration pattern), the tile becomes a 4:3 thumb (mockup's
 //! `.od-tile-thumb`, was 16:9) with a mono truncated name, and the fixed
 //! `ROW_HEIGHT` constant is replaced by `row_height`, derived from the
-//! live style rather than hand-picked: see that function's doc comment
+//! live style rather than hand-picked; see that function's doc comment
 //! for why. This panel is one of 3 density-frozen zones in the app (always
 //! dense, no user toggle), unlike Decks (Step 13, airy by default).
 
@@ -130,7 +130,7 @@ fn tile_stride(ui: &egui::Ui, metrics: &Metrics) -> f32 {
 /// assumed pitch for every row alike, so the row index it computes for a
 /// given scroll offset drifts further from the row actually rendered at
 /// that pixel position the deeper into the ~9800-item library the offset
-/// falls: small near the top of the list, a real overlap once scrolled
+/// falls, small near the top of the list, a real overlap once scrolled
 /// far enough.
 ///
 /// Derived, not hardcoded, by walking the exact same widget tree `tile()`
@@ -146,7 +146,7 @@ fn tile_stride(ui: &egui::Ui, metrics: &Metrics) -> f32 {
 /// frame, so it mirrors the same floor `egui::Button` itself applies
 /// before painting (`widgets/button.rs`: `min_size.y = min_size.y.
 /// at_least(interact_size.y)`) together with its content-driven height
-/// (text row + `2 * button_padding.y`), taking whichever is larger: this
+/// (text row + `2 * button_padding.y`), taking whichever is larger; this
 /// is the one part of the derivation that isn't a byte-for-byte replay of
 /// `tile()`'s own layout calls, which is exactly why `row_height_covers_
 /// the_real_tile_content_height` (below, in `mod tests`) doesn't re-run
@@ -179,7 +179,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
     // scope wraps the whole panel body rather than being conditional on
     // anything. `row_height`/`tile_stride` below both read `ui.spacing()`
     // live, so they automatically pick up the dense scale from inside
-    // this closure: no separate wiring needed.
+    // this closure; no separate wiring needed.
     let visible_names: HashSet<String> = widgets::dense(ui, |ui| {
         let t = theme(ui);
         ui.horizontal(|ui| {
@@ -210,7 +210,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
 
         // Whole-branch review Finding 4: names of the tiles actually on
         // screen this frame, collected alongside the row layout below so
-        // `thumb_queue` can be pruned to just them afterwards: the queue
+        // `thumb_queue` can be pruned to just them afterwards; the queue
         // previously grew unbounded across a fast scroll or a
         // search-query change, since nothing ever removed a job for a
         // tile that scrolled (or was filtered) away.
@@ -226,7 +226,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
 
         // `show_rows`, not `vertical() + horizontal_wrapped()`: the
         // free-flow version built every one of the ~9800 tiles as real
-        // widgets every frame: `is_rect_visible` only skipped the
+        // widgets every frame; `is_rect_visible` only skipped the
         // *painting*, never the layout. This one never even visits a row
         // that isn't on screen.
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_h, total_rows, |ui, rows| {
@@ -248,7 +248,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
 
     // A fast scroll through ~9800 tiles, or a search query that filters
     // most of them out, must not leave thousands of stale jobs queued
-    // behind the ones actually on screen: see `prune_to_visible`'s doc
+    // behind the ones actually on screen; see `prune_to_visible`'s doc
     // comment. Also naturally handles the panel-loses-focus case: this
     // function simply isn't called while the panel is hidden, so the
     // queue stays frozen (never pruned, but also never growing) until the
@@ -261,7 +261,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
 /// One preset tile: thumbnail (or placeholder while it's still queued),
 /// name, click-to-load, +A/+B playlist buttons.
 ///
-/// The thumbnail request is enqueued at most once per tile per frame: and
+/// The thumbnail request is enqueued at most once per tile per frame, and
 /// only while the tile is both actually on-screen (`ui.is_rect_visible`,
 /// which checks against the `ScrollArea`'s clip rect) and still missing its
 /// texture. Once `pump_thumbnail_queue` (Step 15) fills `thumbnail_textures`
@@ -280,7 +280,7 @@ fn tile(
     favorite_presets: &mut HashSet<String>,
 ) {
     let t = theme(ui);
-    // `name`, the preset's stable key: never a `row * per_row + i`-style
+    // `name`, the preset's stable key, never a `row * per_row + i`-style
     // index, which shifts under the caller as the list scrolls or the
     // search query changes and would silently rebind an in-progress
     // widget's state (focus, animation, drag) to a different preset. Load-
@@ -298,7 +298,7 @@ fn tile(
             // `show()`'s `ui.horizontal(|ui| { ... })`. Without this
             // wrapper, `card` (below) and the "+A"/"+B" row are two
             // siblings placed into a *left-to-right* content ui, so they'd
-            // render side by side instead of stacked: silently wasting
+            // render side by side instead of stacked, silently wasting
             // grid density (though not corrupting `show_rows`'s pitch:
             // `row_height` still overcounts a side-by-side layout, so
             // `set_min_height` still binds safely either way). This
@@ -336,7 +336,7 @@ fn tile(
                             //
                             // `ui.put` + the `Image` widget, not `Painter::
                             // image` (which takes a mandatory `tint:
-                            // Color32` with no themed meaning here:
+                            // Color32` with no themed meaning here;
                             // untinted is the only correct choice for
                             // compositing a texture as-is): `Image`'s own
                             // default tint is `Color32::WHITE` internally,
@@ -364,7 +364,7 @@ fn tile(
                     // actually be `row_height`'s value tall. The full name
                     // stays reachable on hover. Mono (mockup's `.od-tile-
                     // name`), `muted` (not uppercased like `micro_label`'s
-                    // chrome text: this is a real, case-sensitive preset
+                    // chrome text; this is a real, case-sensitive preset
                     // name, not section chrome).
                     ui.add(
                         egui::Label::new(
@@ -386,7 +386,7 @@ fn tile(
 
                 // Laid out in its own row below the card (genuinely below
                 // now that the outer `ui.vertical` above forces top-down
-                // stacking), so its rect never overlaps the card's: same
+                // stacking), so its rect never overlaps the card's, same
                 // reasoning as the bus-cycle button in `ui::decks::
                 // deck_card`.
                 ui.horizontal(|ui| {
@@ -412,7 +412,7 @@ fn tile(
 
         // Hover lift + glow (Step 22 of the Phase 7 UI redesign plan):
         // `name` (the `push_id` above, already established at Step 14) is
-        // the stable animation key: never a scroll/filter-shifting index.
+        // the stable animation key, never a scroll/filter-shifting index.
         // Hit-test (`frame.response.hovered()`) always reads the tile's
         // real, un-lifted `Response::rect` from the layout above: only
         // `tile_hover_glow`'s decorative overlay rect is ever translated,
@@ -428,7 +428,7 @@ fn tile(
 
 /// Read-modify-write of just `favorite_presets` (same idiom as `main.rs`'s
 /// runtime theme-switch handler): loads the current on-disk config,
-/// overwrites only this field, saves back: never clobbers `theme`/
+/// overwrites only this field, saves back; never clobbers `theme`/
 /// `active_panel`/`stage_mode`/... written by other call sites.
 fn persist_favorites(favorite_presets: &HashSet<String>) {
     let config_path = crate::config::config_file_path();
@@ -440,7 +440,7 @@ fn persist_favorites(favorite_presets: &HashSet<String>) {
 /// Hover lift + glow overlay (Step 22), the tile counterpart of `ui::
 /// decks::hover_glow`: painted from the tile's already laid-out, un-lifted
 /// `Response::rect` (`tile()`'s own comment above), faded in by `hover_t`
-/// and translated upward only for this decorative overlay: the tile's
+/// and translated upward only for this decorative overlay; the tile's
 /// real content and hit-test never move.
 fn tile_hover_glow(ui: &egui::Ui, rect: egui::Rect, hover_t: f32) {
     let t = theme(ui);
@@ -541,7 +541,7 @@ mod tests {
     // against itself) and asserts the derived pitch covers what actually
     // got laid out. A failure here means `show_rows` would receive a pitch
     // smaller than the real row height, which silently overlaps rows once
-    // scrolled far enough into the ~9800-item library: see `row_height`'s
+    // scrolled far enough into the ~9800-item library; see `row_height`'s
     // own doc comment for the full `show_rows` contract this guards.
     #[test]
     fn row_height_covers_the_real_tile_content_height() {
@@ -564,7 +564,7 @@ mod tests {
                 let derived = row_height(ui, metrics);
                 assert!(
                     derived >= real_height,
-                    "row_height() = {derived}, real rendered tile height = {real_height}: \
+                    "row_height() = {derived}, real rendered tile height = {real_height}. \
                      show_rows would receive a pitch smaller than the real row, which \
                      silently overlaps rows once scrolled far enough"
                 );
@@ -687,7 +687,7 @@ mod tests {
                 let mut load_request = None;
                 // Two tiles with the same name would collide on id if
                 // `push_id` were keyed on a scroll/filter-shifting index
-                // instead of the name: rendering the same name twice in
+                // instead of the name, rendering the same name twice in
                 // one `ui.horizontal` (impossible in practice since
                 // results are deduplicated preset names, but a cheap way
                 // to prove the id key is `name`-stable) must not panic on

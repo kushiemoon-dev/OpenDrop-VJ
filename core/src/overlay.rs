@@ -13,7 +13,7 @@
 //!   callback in `playlist.rs`.
 //! - `saveAsset`/`loadAsset`/`deleteAsset` (IndexedDB) and
 //!   `addOverlayFromFile`/`onOverlayFilePick` (`FileReader`) are real
-//!   storage/file I/O, not in-memory list management: dropped, they
+//!   storage/file I/O, not in-memory list management; dropped, they
 //!   belong to a later I/O-capable phase. `add_overlay_at_position` and
 //!   `remove_overlay` keep only the pure list-bookkeeping half of their TS
 //!   counterparts.
@@ -63,7 +63,7 @@ pub enum FontFamily {
 /// `Clone` (Step 13 of the Phase 8 plan): the Share panel builds an owned
 /// `SharedSet` snapshot of the currently shareable overlays
 /// (`share_set::filter_shareable_overlays` returns borrowed `&Overlay`s,
-/// but `SharedSet::overlays: Vec<Overlay>` needs owned values): no other
+/// but `SharedSet::overlays: Vec<Overlay>` needs owned values); no other
 /// consumer needed this before now.
 #[derive(Debug, Clone)]
 pub struct Overlay {
@@ -84,7 +84,7 @@ pub struct Overlay {
     pub beat_reactive: bool,
     /// scale multiplier applied on the beat (e.g. 1.2)
     pub beat_scale: f64,
-    /// true = video asset (rendered as <video> instead of <img>): ignored if kind = Text
+    /// true = video asset (rendered as <video> instead of <img>); ignored if kind = Text
     pub video: bool,
     /// deg/s, 0 = no continuous rotation
     pub spin: f64,
@@ -247,7 +247,7 @@ pub fn overlay_transform_at(overlay: &Overlay, elapsed_sec: f64, beat_pulse: boo
 /// `elapsed_sec`. `alternate` makes the full cycle twice the declared
 /// duration (out, then back); CSS `ease-in-out`
 /// (`cubic-bezier(0.42,0,0.58,1)`) is approximated by the smoothstep
-/// already used elsewhere in this crate (`snapshot::smoothstep`): same
+/// already used elsewhere in this crate (`snapshot::smoothstep`), same
 /// endpoints, same zero derivative at both ends, visually
 /// indistinguishable for a slow ambient drift.
 fn drift_offset(drift_x: f64, drift_y: f64, elapsed_sec: f64) -> (f64, f64) {
@@ -308,7 +308,7 @@ fn clamp_queue_index(index: usize, queue_length: usize) -> usize {
     }
 }
 
-/// Port of OpenDrop-VJ `overlay-queue.ts:41-49` `visibleOverlayIds`: Finding
+/// Port of OpenDrop-VJ `overlay-queue.ts:41-49` `visibleOverlayIds`, Finding
 /// I3 (this was never ported, unlike the rest of `overlay-queue.ts`).
 /// Overlays to render: every non-queued overlay (always visible) plus the
 /// single active overlay from the queue rotation, if at least one overlay is
@@ -363,7 +363,7 @@ impl OverlayStore {
 
     /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
     /// the caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment: whole-branch review Finding I4.
+    /// `rng.rs`'s module doc comment, whole-branch review Finding I4.
     /// Called from `Show::reseed_rng` since Step 12 of the Phase 8
     /// VJ-panels plan wired this store into `app`.
     pub fn reseed_rng(&mut self, seed: u64) {
@@ -405,7 +405,7 @@ impl OverlayStore {
     /// `String` fields by value instead of cloning them; the taken slot is
     /// immediately overwritten with the patched result on the next line, all
     /// synchronously within this one call, so the transient default is never
-    /// observed by any other code. Relies on `Overlay: Default`: see
+    /// observed by any other code. Relies on `Overlay: Default`, see
     /// `Overlay`'s own `impl Default` above.
     pub fn update_overlay(&mut self, id: &str, patch: OverlayPatch) {
         if let Some(ov) = self.overlays.iter_mut().find(|o| o.id == id) {
@@ -806,7 +806,7 @@ mod tests {
         /// Settles `detect_volume_peak`'s rolling average at a steady 0.3
         /// and returns the queue index once it is there. The average
         /// starts at 0, so the first non-silent samples of ANY signal read
-        /// as a transient (identical in the TS source): every assertion
+        /// as a transient (identical in the TS source); every assertion
         /// below is made relative to where that leaves the index, not
         /// against a hardcoded 0.
         fn settle_at_steady_level(store: &mut OverlayStore) -> usize {

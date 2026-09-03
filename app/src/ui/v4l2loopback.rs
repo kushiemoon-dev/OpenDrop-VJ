@@ -14,7 +14,7 @@
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels. `active` is `AppState::v4l2_active` itself (not a
-//! separate panel-only toggle re-derived elsewhere): unlike `ui::ndi`,
+//! separate panel-only toggle re-derived elsewhere); unlike `ui::ndi`,
 //! there is no per-slot array to OR together here, just the one stream, so
 //! the panel drives the gate flag directly. Resynced from `V4l2Snapshot::
 //! running` at the top of every `show` call (whole-branch review Finding

@@ -31,8 +31,8 @@ pub fn dequeue_job(mut queue: Vec<ThumbJob>) -> (Option<ThumbJob>, Vec<ThumbJob>
 
 /// Drops every queued job whose `slot_key` isn't in `visible`. Whole-branch
 /// review Finding 4: nothing previously pruned `thumb_queue` as tiles
-/// scrolled off-screen, the search query changed, or the panel lost focus
-///: a fast scroll through the ~9800-preset grid could queue thousands of
+/// scrolled off-screen, the search query changed, or the panel lost focus;
+/// a fast scroll through the ~9800-preset grid could queue thousands of
 /// jobs that then got ground through one at a time, long after the tiles
 /// that asked for them were gone. `ui::preset_browser::show` calls this
 /// once per frame with the names of the tiles actually on screen right

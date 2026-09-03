@@ -10,7 +10,7 @@
 //! readback is gated per consumer (whole-branch review Finding I5:
 //! composite on `ndi_composite_active || v4l2_active`, each deck on its own
 //! `ndi_deck_active[i]`), but this thread can still receive frames on a
-//! channel whose slot isn't started here yet: e.g. right after the
+//! channel whose slot isn't started here yet, e.g. right after the
 //! app-side toggle flips, before the matching `NdiControl::Start*` has been
 //! processed, or if that control message's `SlotSender` failed to start
 //! (SDK error). Every receiver is drained every tick regardless of whether
@@ -81,13 +81,13 @@ pub struct NdiHandle {
     state: Arc<ArcSwap<NdiSnapshot>>,
     pub control_tx: Sender<NdiControl>,
     /// Receive end of the channel [`in_::ActiveReceive`] pushes captured
-    /// frames on (RGBA bytes plus resolution: see [`NdiFrame`]; NDI
+    /// frames on (RGBA bytes plus resolution, see [`NdiFrame`]; NDI
     /// sources can be any resolution, unlike the fixed-size compositor/deck
     /// channels). The channel is created in this module (`spawn`, alongside
     /// `control_tx`'s channel); the `Sender` half stays internal to the NDI
     /// thread (owned by `ThreadState`, cloned into each `ActiveReceive`),
     /// and this `Receiver` half is handed out here for `app` (Task 12) to
-    /// read frames from directly: same shape as `control_tx`: a public
+    /// read frames from directly; same shape as `control_tx`: a public
     /// field, no wrapper method, since there is nothing to validate on
     /// either send or receive.
     pub frame_rx: Receiver<NdiFrame>,
@@ -155,7 +155,7 @@ pub enum NdiControl {
 /// bootstrap: the NDI runtime is acquired, and `in_::find` starts polling
 /// every ~5ms, in every session whether or not the user ever opens the NDI
 /// panel. A session with no NDI SDK installed does log "failed to
-/// initialize the NDI runtime" once at bootstrap now (not "never": see
+/// initialize the NDI runtime" once at bootstrap now (not "never", see
 /// `ensure_ndi`), and a persistently failing `Finder` is rate-limited to
 /// one log line per failure streak rather than flooding stderr (see
 /// `ThreadState::discovery_error_logged`).
@@ -197,8 +197,8 @@ impl SlotSender {
     }
 
     /// Pushes one already-captured RGBA8 frame out over NDI. `bytes` must
-    /// be exactly `width*height*4`: Step 5's `FrameReadback` always
-    /// produces that for a given slot's fixed resolution: a mismatch is
+    /// be exactly `width*height*4` (Step 5's `FrameReadback` always
+    /// produces that for a given slot's fixed resolution); a mismatch is
     /// logged and the frame dropped rather than panicking.
     fn send(&mut self, bytes: Vec<u8>) {
         if let Err(e) = self.frame.replace_data(bytes) {
@@ -270,7 +270,7 @@ fn is_idle_from(has_finder: bool, has_composite: bool, any_deck_active: bool, ha
 /// (`ts.finder`, which polls `in_::find` every tick once started), no
 /// composite/deck sender (which drain their frame channels every tick), and
 /// no active receive (whose `poll()` needs to run every tick to pull
-/// incoming frames): whole-branch review Finding M2. While idle the run
+/// incoming frames). Whole-branch review Finding M2. While idle the run
 /// loop below blocks on `control_rx.recv()` instead of a 5ms poll; the
 /// moment any of these starts, the next tick already sees `is_idle() ==
 /// false` and switches to the timed-poll loop.
@@ -412,7 +412,7 @@ fn ensure_ndi(ts: &mut ThreadState) -> bool {
             true
         }
         Err(e) => {
-            eprintln!("[ndi] failed to initialize the NDI runtime: {e}: NDI unavailable");
+            eprintln!("[ndi] failed to initialize the NDI runtime: {e}. NDI is unavailable.");
             false
         }
     }

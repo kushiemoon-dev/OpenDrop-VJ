@@ -476,7 +476,7 @@ mod tests {
     use super::*;
 
     /// All 223 `CommandId` variants, listed by hand (no `strum` dependency in this
-    /// workspace: see `core/Cargo.toml`). Order mirrors the enum declaration in
+    /// workspace, see `core/Cargo.toml`). Order mirrors the enum declaration in
     /// `core/src/commands.rs`.
     const ALL: &[CommandId] = &[
         CommandId::Crossfader,

@@ -9,7 +9,7 @@
 #
 # Runtime DLL bundling policy (Windows portable zip), determined by running
 # `dumpbin /dependents` on the real release exe and on each candidate DLL
-# (see task-15-report.md for the full output): not guessed:
+# (see task-15-report.md for the full output), not guessed:
 #   Bundled next to opendrop-app.exe (resolved from the build machine's
 #   real install locations, not committed to the repo):
 #     - Processing.NDI.Lib.x64.dll   (NDI SDK; grafton-ndi links statically
@@ -27,8 +27,8 @@
 #       dependency of projectM-4.dll itself, so needed for projectM to
 #       load even though opendrop-app.exe doesn't import it directly)
 #     - vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll (the VC++
-#       Redistributable, NOT part of the OS the way the Universal CRT is
-#      : confirmed direct/transitive dependencies of opendrop-app.exe
+#       Redistributable, NOT part of the OS the way the Universal CRT is,
+#       confirmed direct/transitive dependencies of opendrop-app.exe
 #       and/or projectM-4*.dll. Sourced from VS Build Tools' own
 #       Redist\MSVC\<ver>\x64\Microsoft.VC143.CRT\ folder, the
 #       Microsoft-sanctioned copy meant for bundling with an app, not
@@ -43,7 +43,7 @@
 #   Never bundled: everything else `dumpbin /dependents` reports
 #   (KERNEL32.dll, USER32.dll, ADVAPI32.dll, ntdll.dll, WS2_32.dll,
 #   OPENGL32.dll, GDI32.dll, and the api-ms-win-crt-*.dll Universal CRT
-#   API sets): these ship with Windows itself (the Universal CRT has
+#   API sets), these ship with Windows itself (the Universal CRT has
 #   been part of the OS since Windows 10), unlike the VC++ Redistributable
 #   above (same "don't bundle the base system" principle as the AppImage
 #   script's driver-library exclusions).
@@ -224,7 +224,7 @@ Copy-Item $License (Join-Path $OutDir "LICENSE")
 Copy-Item $InterOfl (Join-Path $OutDir "Inter-OFL.txt")
 Copy-Item $JetBrainsMonoOfl (Join-Path $OutDir "JetBrainsMono-OFL.txt")
 
-# Sibling-of-exe "presets" folder, flat layout: matches preset_dir_from's
+# Sibling-of-exe "presets" folder, flat layout, matches preset_dir_from's
 # Windows branch (app/src/main.rs), verified against real MSVC in Step 14.
 # robocopy (not Copy-Item) so the presets source's .git directory can be
 # excluded; robocopy exit codes are NOT standard Windows conventions, 0-7

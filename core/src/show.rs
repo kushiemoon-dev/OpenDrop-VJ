@@ -119,7 +119,7 @@ pub struct Show {
     /// parity), advanced each render tick by `tick_timeline`.
     pub timeline_playing: bool,
     /// Seconds elapsed since timeline playback last started, accumulated
-    /// by `tick_timeline` from caller-supplied dt: same "no wall clock of
+    /// by `tick_timeline` from caller-supplied dt, same "no wall clock of
     /// its own" convention as `tick_recall` (see that method's doc
     /// comment). Reset to 0 by `toggle_timeline` on every transition to
     /// `true`, so play always restarts at the beginning of the current
@@ -135,11 +135,11 @@ pub struct Show {
     /// the compositor: `Show` stores only the user-facing state, no GL.
     pub strobe: StrobeState,
     /// 4 modulation slots (Step 11 of the Phase 8 plan), written directly
-    /// by the LFO panel (`app::ui::lfo`): same "direct field mutation"
+    /// by the LFO panel (`app::ui::lfo`), same "direct field mutation"
     /// convention as `strobe`'s rate/intensity/color above. Ticked each
     /// frame by `app::about_to_wait` (`LfoEngine::tick`, driven by
     /// `clock.phase01()`); the resulting `(CommandId, value01)` pairs are
-    /// dispatched through the registry, not written to `Show` here: same
+    /// dispatched through the registry, not written to `Show` here, same
     /// registry-dispatch parity as `tick_recall`/`tick_timeline` above, so
     /// an LFO route moves its target through the exact same
     /// keyboard/MIDI/OSC/remote-ws-equivalent path.
@@ -147,8 +147,8 @@ pub struct Show {
     /// Sprite/text overlays and their auto-cycling queue (Step 12 of the
     /// Phase 8 plan). `core::overlay` was ported long before it had a
     /// consumer; this field is what finally gives it one. Written directly
-    /// by the Overlays panel (`app::ui::overlays`): same "direct field
-    /// mutation" convention as `strobe`/`lfo_engine` above: except the
+    /// by the Overlays panel (`app::ui::overlays`), same "direct field
+    /// mutation" convention as `strobe`/`lfo_engine` above, except the
     /// queue's ◀/▶ buttons, which go through
     /// `CommandContext::advance_overlay_queue` for keyboard/MIDI/OSC/
     /// remote-ws parity. The queue also self-advances: `on_beat` and
@@ -161,7 +161,7 @@ pub struct Show {
     pub overlay_store: OverlayStore,
     /// Video background layer: on/off, opacity, clip rotation, and the 4
     /// beat/volume-reactive toggles (Step 14 of the Phase 8 plan). Written
-    /// directly by the Video panel (`app::ui::video`): same "direct field
+    /// directly by the Video panel (`app::ui::video`), same "direct field
     /// mutation" convention as `strobe`/`lfo_engine`/`overlay_store` above.
     ///
     /// Same boundary as `overlay_store`: no clip file paths, no decoder
@@ -270,7 +270,7 @@ pub struct PendingPresetLoad {
 
 impl Show {
     /// Reseeds both playlist engines' shuffle-mode RNGs with real
-    /// per-launch entropy supplied by the caller (`app`'s bootstrap:
+    /// per-launch entropy supplied by the caller (`app`'s bootstrap;
     /// `core` stays zero-I/O and has no clock of its own). Deck A and B get
     /// distinct-but-derived seeds so they don't draw identical shuffle
     /// sequences from the same source entropy. Whole-branch review Finding
@@ -283,15 +283,15 @@ impl Show {
         if let Some(engine) = self.playlists.engine_b_mut() {
             engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
         }
-        // LFO Sample & Hold (Step 11 of the Phase 8 plan): an unrelated
+        // LFO Sample & Hold (Step 11 of the Phase 8 plan), an unrelated
         // RNG consumer, no lockstep risk with the playlist engines above,
         // so it reseeds from the raw `seed` rather than an XOR'd variant.
         self.lfo_engine.reseed_rng(seed);
-        // Overlay auto-cycle queue in shuffle mode (Step 12): a third
+        // Overlay auto-cycle queue in shuffle mode (Step 12), a third
         // independent consumer, XOR'd like deck B's so two shuffles driven
         // by the same beat don't advance in lockstep.
         self.overlay_store.reseed_rng(seed ^ 0x5A5A_5A5A_5A5A_5A5A);
-        // Video-loop shuffle (Step 14): a fifth independent consumer, XOR'd
+        // Video-loop shuffle (Step 14), a fifth independent consumer, XOR'd
         // with its own constant for the same anti-lockstep reason as the two
         // above: the overlay queue and the video layer are both driven by
         // the same beat, and two shuffles drawing identical sequences would
@@ -305,7 +305,7 @@ impl Show {
     ///
     /// Not folded into [`Show::on_beat`] like the overlay queue's own
     /// advance, because the clip list it rotates through is `app`-owned
-    /// (files on disk: see `Show::video`'s doc comment); `app` calls this
+    /// (files on disk, see `Show::video`'s doc comment); `app` calls this
     /// immediately after `on_beat`, from the same two call sites.
     ///
     /// `ndi_active` is `NdiSnapshot::receive_active`: see
@@ -341,7 +341,7 @@ impl Show {
     /// Drains presets fired by `navigate_preset` since the last drain,
     /// resolved to their physical slot. If a deck's letter isn't assigned to
     /// any slot (both `Off`, or both slots on the other letter), the fired
-    /// preset is silently dropped: consistent with "Active" shortcuts
+    /// preset is silently dropped, consistent with "Active" shortcuts
     /// having no visible effect when that deck isn't displayed anywhere.
     pub fn take_fired_presets(&mut self) -> Vec<PendingPresetLoad> {
         let mut out = Vec::new();
@@ -368,7 +368,7 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
-        // Overlay auto-cycle queue (Step 12): the third `shouldTriggerOn
+        // Overlay auto-cycle queue (Step 12), the third `shouldTriggerOn
         // Beat` block of `beat-tempo-actions.ts`, alongside the two
         // per-deck ones just above. Unconditional here: the store's own
         // guard checks `queue_enabled` and the trigger mode.
@@ -470,7 +470,7 @@ impl Show {
         }
         self.manual_bpm = bpm;
         self.clock.set_bpm(bpm);
-        self.clock.pulse(None); // resync phase only, bpm already set: does not emit a beat.
+        self.clock.pulse(None); // resync phase only, bpm already set; does not emit a beat.
     }
 
     /// Port of `clearManualBpm`, `beat-tempo-actions.ts:113-117`.
@@ -497,7 +497,7 @@ impl Show {
     pub fn check_volume_peak_triggers(&mut self, rms: f64, now_ms: f64) {
         self.check_one_volume_peak(Deck::A, rms, now_ms);
         self.check_one_volume_peak(Deck::B, rms, now_ms);
-        // Overlay auto-cycle queue (Step 12): the volume-peak half of
+        // Overlay auto-cycle queue (Step 12), the volume-peak half of
         // what `on_beat` does for the beat half. Its own rolling
         // average/cooldown state lives on the store, not here (see
         // `OverlayStore::queue_volume_state`).
@@ -723,7 +723,7 @@ impl CommandContext for Show {
     }
 
     /// Cycles the deck's index through the full preset catalog (not the
-    /// playlist: see `playlist::PlaylistEngine`) and reports the chosen
+    /// playlist, see `playlist::PlaylistEngine`) and reports the chosen
     /// name via `fired_preset_a`/`fired_preset_b`, drained by
     /// `take_fired_presets`. Port of `navigatePreset` in
     /// `+page.svelte:434-448`.
@@ -1431,7 +1431,7 @@ mod tests {
         fn on_beat_advances_the_queue_when_the_beat_trigger_matches() {
             let mut show = show_with_two_queued_overlays();
             // `Clock::beat_count` starts at 0, and the default trigger is
-            // every 8 beats at offset 0: so the very first beat matches.
+            // every 8 beats at offset 0, so the very first beat matches.
             show.on_beat();
             assert_eq!(show.overlay_store.queue_index, 1);
         }
@@ -2467,7 +2467,7 @@ mod tests {
     /// real registry (same path `app::about_to_wait` uses), assert `Show`
     /// changed. `amount: 0.0` pins `LfoEngine::compute`'s output to
     /// `center` regardless of phase/shape/S&H state (`value = center +
-    /// (raw - 0.5) * amount`): deterministic without depending on a
+    /// (raw - 0.5) * amount`), deterministic without depending on a
     /// specific shape's waveform, which `lfo.rs`'s own tests already cover.
     mod lfo_end_to_end_dispatch {
         use super::*;

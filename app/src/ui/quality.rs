@@ -5,7 +5,7 @@
 //! as the other panels (see `ui::decks`, `ui::audio`). Mesh-size clicks only
 //! record the requested size in `pending_mesh_size`; the actual
 //! `Deck::set_mesh_size` FFI call happens later, in `about_to_wait`'s
-//! per-deck loop, at the point that deck's context is already current: this
+//! per-deck loop, at the point that deck's context is already current. This
 //! panel never touches a `Deck` or a GL context directly.
 //!
 //! Reskinned (Step 17 of the Phase 7 UI redesign plan): the FPS and
@@ -94,7 +94,7 @@ pub fn show(
                     // Minor #18: a mesh-size change only applies once
                     // `about_to_wait`'s per-deck loop actually renders this
                     // deck, which an invisible deck in `Pause` mode may not
-                    // do for a while: previously silent, so a click could
+                    // do for a while; previously silent, so a click could
                     // look like it did nothing.
                     if mesh_size.is_some() {
                         ui.label("(queued)");

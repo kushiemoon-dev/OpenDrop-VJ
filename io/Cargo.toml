@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 arc-swap = "1.9"
 axum = { version = "0.8", features = ["ws"] }
-# Share panel's link codec (`io::share_codec`): already resolved
+# Share panel's link codec (`io::share_codec`), already resolved
 # transitively at this exact version (`reqwest`/etc.), added here as a
 # direct dependency (Step 13 of the Phase 8 plan, PLAN.md Override E).
 base64 = "0.22.1"
@@ -33,8 +33,8 @@ rosc = "0.11.4"
 # Ableton Link (`io::link`, feature `link`, OFF by default): wraps
 # Ableton's official C++ Link library, GPL-2.0-or-later. `optional`: this
 # dependency (and the GPL code it pulls in) must be completely absent
-# from a default build: see the `link` feature below and Task 18's
-# brief / PLAN.md's Risque 5.
+# from a default build, see the `link` feature below and Task 18's
+# brief / PLAN.md's Risk 5.
 rusty_link = { version = "0.4.9", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -45,18 +45,18 @@ tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 tower-http = { version = "0.7", features = ["fs"] }
 # Twitch IRC chat client (`io::twitch`): purpose-built for Twitch's
 # auth/rate-limit behavior, chosen over the generic `irc` crate (brief in
-# PHASE5-IO.PLAN's Task 17 découpage note).
+# PHASE5-IO.PLAN's Task 17 breakdown note).
 twitch-irc = "6.1"
 
 [features]
 # Ableton Link support (`io::link`). OFF by default: enabling it pulls
 # in `rusty_link`, which wraps a GPL-2.0-or-later C++ library; the
 # resulting binary must be treated as GPL-2.0-or-later as a whole (see
-# the root README's "Ableton Link (optionnel, GPL)" section).
+# the root README's "Ableton Link (optional, GPL)" section).
 link = ["dep:rusty_link"]
 
 [dev-dependencies]
-# Sync WS client used only by remote_ws's real-server smoke test: same
+# Sync WS client used only by remote_ws's real-server smoke test, same
 # version already pulled in transitively via axum/tokio-tungstenite, so
 # this doesn't add a new version to resolve.
 tungstenite = "0.29"

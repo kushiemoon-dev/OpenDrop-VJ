@@ -1,12 +1,12 @@
 //! Native port of OpenDrop-VJ `src/lib/engine/keymap.ts:5-16` (`DEFAULT_KEYMAP`),
 //! plus runtime remapping + persistence (Step 3 of the Phase 8 VJ-panels plan,
-//! transposing the MIDI-learn pattern: `AppState::midi_learning`/`ui::midi`:
+//! transposing the MIDI-learn pattern, `AppState::midi_learning`/`ui::midi`,
 //! to the keyboard: see `main.rs`'s `WindowEvent::KeyboardInput` handler for
 //! the commit side, `ui::keymap` for the panel).
 //!
 //! ## Wire-format decision
 //! `winit::keyboard::Key` derives `Serialize`/`Deserialize` itself, but only
-//! behind its own `serde` Cargo feature (off by default upstream): enabled
+//! behind its own `serde` Cargo feature (off by default upstream), enabled
 //! here via `app/Cargo.toml`. That alone doesn't make `HashMap<Key,
 //! CommandId>` usable as a `UiConfig` field though: `Key`'s derived impl
 //! serializes through `serialize_newtype_variant` (e.g. `Key::Named(NamedKey
@@ -47,8 +47,8 @@ pub fn default_keymap() -> HashMap<Key, CommandId> {
 /// Human-readable label for a key, e.g. the Keymap panel's "assigned key"
 /// column: equivalent of the web reference's `formatKey()`. Display only:
 /// unlike `key_to_wire`, this doesn't need to round-trip (`Key::Character`
-/// case isn't case-normalized, so "n" and "N": both bound in
-/// `default_keymap` above: still read as distinct keys).
+/// case isn't case-normalized, so "n" and "N", both bound in
+/// `default_keymap` above, still read as distinct keys).
 pub fn format_key(key: &Key) -> String {
     match key {
         Key::Named(named) => format!("{named:?}"),
@@ -59,7 +59,7 @@ pub fn format_key(key: &Key) -> String {
 }
 
 /// `Key` -> its own JSON string, via `Key`'s real `Serialize` impl (see this
-/// module's doc comment): round-trips exactly, unlike `format_key`.
+/// module's doc comment); round-trips exactly, unlike `format_key`.
 fn key_to_wire(key: &Key) -> String {
     serde_json::to_string(key).unwrap_or_default()
 }

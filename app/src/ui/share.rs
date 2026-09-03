@@ -15,13 +15,13 @@
 //!
 //! `SharedSet::preset_a`/`preset_b` have no direct `Show` equivalent (only
 //! `Show::preset_catalog` + the private per-bus browsing cursor exist, and
-//! those track catalog *browsing*, not what's actually loaded): resolved
+//! those track catalog *browsing*, not what's actually loaded), resolved
 //! here from `deck_preset_names` (the name actually loaded on each
 //! physical slot, already threaded through `PerformCtx` for the Decks
 //! panel) via `show.deck_bus`: the first slot routed to that bus, empty
 //! string if none is. `SharedSet::transition_time` mirrors
 //! `AppState::transition_seconds` (`PerformCtx`'s existing field, the
-//! soft-cut duration `ui::decks`' transition rail already controls): the
+//! soft-cut duration `ui::decks`' transition rail already controls), the
 //! same concept, TS-named differently.
 
 use opendrop_core::share_set::{filter_shareable_overlays, SharedSet};
@@ -82,7 +82,7 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
 }
 
 /// Name currently loaded on the first physical slot routed to `bus`, or
-/// empty if no slot is: see this module's doc comment on why `Show` alone
+/// empty if no slot is; see this module's doc comment on why `Show` alone
 /// can't answer this.
 fn preset_name_for_bus(show: &Show, deck_preset_names: &[String; 4], bus: DeckBus) -> String {
     show.deck_bus.iter().position(|&b| b == bus).map(|i| deck_preset_names[i].clone()).unwrap_or_default()

@@ -67,16 +67,22 @@ jobs:
         if: steps.cache-presets.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop C:\opendrop-presets
 
-      - name: Cache vcpkg projectM install
+      - name: Cache vcpkg installed packages
         id: cache-vcpkg-projectm
         uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-projectm-4.1.6-windows
+          key: vcpkg-projectm-4.1.6-angle-windows
 
-      - name: Install pinned projectM via vcpkg overlay port
+      - name: Install vcpkg dependencies (pinned projectM, ANGLE)
         if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
-        run: vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+        run: |
+          vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+          # Provides libEGL.dll/libGLESv2.dll/z.dll (build-portable.ps1
+          # bundles these for GLES support, same ANGLE approach as the
+          # Linux build's GLES compat work) - not projectM's own
+          # dependencies, so they need their own explicit install.
+          vcpkg install angle:x64-windows zlib:x64-windows
 
       - name: Cache NDI SDK
         id: cache-ndi
@@ -85,12 +91,50 @@ jobs:
           path: C:\Program Files\NDI
           key: windows-ndi-sdk-6
 
-      - name: Download and extract NDI SDK
+      - name: Download and install NDI SDK
         if: steps.cache-ndi.outputs.cache-hit != 'true'
         run: |
+          # 7-Zip misidentifies this installer as a plain PE resource archive
+          # (Type = PE, not Inno) and only extracts ~40 shell files, none of
+          # them the actual SDK payload. Run the Inno Setup installer itself
+          # silently instead of trying to unpack it as an archive. Verified
+          # against a local Windows Server 2022 VM: the installer itself
+          # completes in seconds there, so a hang here on windows-latest
+          # (confirmed happening: cancelled after 17 minutes) points at
+          # Defender's real-time scan of a freshly downloaded/executed exe,
+          # not the installer itself; exclude it before running.
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP", "C:\Program Files\NDI" -ErrorAction SilentlyContinue
           curl.exe -fsSL -o "$env:RUNNER_TEMP\ndi-sdk-installer.exe" "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20SDK.exe"
-          New-Item -ItemType Directory -Force -Path "C:\Program Files\NDI" | Out-Null
-          & "C:\Program Files\7-Zip\7z.exe" x "$env:RUNNER_TEMP\ndi-sdk-installer.exe" -o"C:\Program Files\NDI" -y
+          $proc = Start-Process -FilePath "$env:RUNNER_TEMP\ndi-sdk-installer.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -PassThru
+          if (-not $proc.WaitForExit(300000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Error "NDI SDK installer did not exit within 5 minutes, treating as hung"
+            exit 1
+          }
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "NDI SDK installer exited with code $($proc.ExitCode)"
+            exit 1
+          }
+
+      - name: Locate NDI SDK for cargo build
+        run: |
+          # grafton-ndi's build.rs defaults NDI_SDK_DIR to
+          # "C:\Program Files\NDI\NDI 6 SDK" on Windows when unset, but this
+          # repo's .cargo/config.toml (an Arch-Linux dev-machine convenience)
+          # unconditionally sets NDI_SDK_DIR to the repo-relative
+          # "ndi-sdk-shim" whenever the shell doesn't already have it,
+          # pre-empting that Windows default. Export the real SDK dir here
+          # so it wins instead. Searched for rather than hardcoded, since
+          # 7-Zip's raw extraction of the Inno Setup installer may not lay
+          # out folders the same way a real install would.
+          $header = Get-ChildItem -Path "C:\Program Files\NDI" -Recurse -Filter "Processing.NDI.Lib.h" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $header) {
+            Write-Error "Processing.NDI.Lib.h not found anywhere under C:\Program Files\NDI"
+            exit 1
+          }
+          $sdkDir = Split-Path (Split-Path $header.FullName -Parent) -Parent
+          Write-Output "NDI_SDK_DIR=$sdkDir"
+          Add-Content -Path $env:GITHUB_ENV -Value "NDI_SDK_DIR=$sdkDir"
 
       - name: Build Windows portable zip
         run: packaging\windows\build-portable.ps1

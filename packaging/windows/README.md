@@ -12,7 +12,7 @@ diverging silently from the version this project actually requires.
 This project requires projectM **4.1.6** specifically, to match:
 
 - The Linux build's real dependency: Arch's `libprojectm` system package
-  (see `PHASE0-DECISION.md`).
+  (see `.planning/PHASE0-DECISION.md`).
 - The LGPL third-party attribution in `app/src/ui/about.rs`, which names
   and links to the projectM v4.1.6 release tag.
 - `engine/src/lib.rs`'s `version_is_4_1_6` test, which asserts against

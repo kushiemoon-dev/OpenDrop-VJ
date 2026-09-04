@@ -940,7 +940,7 @@ mod tests {
             // `testsrc` is a color pattern with an opaque alpha channel: a
             // pix_fmt/size mismatch would show up as an all-zero buffer.
             assert!(buf.iter().any(|&b| b != 0), "the frame was entirely zero: wrong pix_fmt or size?");
-            assert!(buf.chunks_exact(4).all(|px| px[3] == 255), "rgba alpha should be opaque");
+            assert!(buf.as_chunks::<4>().0.iter().all(|px| px[3] == 255), "rgba alpha should be opaque");
         }
 
         /// Proves the `-vf vflip` in [`output_args`] really lands row 0 of

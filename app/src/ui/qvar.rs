@@ -25,7 +25,7 @@
 //! with the Time panel (`main.rs`'s `next_param_to_push`); adding or
 //! removing a watch instead re-patches and reloads that deck's preset, which
 //! restarts its animation. See `engine::qvar_patch` for why that asymmetry
-//! exists and `TIME-QVAR-SPIKE.md` for the channel itself.
+//! exists and `.planning/TIME-QVAR-SPIKE.md` for the channel itself.
 
 use crate::ui::widgets;
 use opendrop_core::q_vars::{

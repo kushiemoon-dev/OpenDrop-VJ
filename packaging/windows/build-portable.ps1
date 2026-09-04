@@ -168,14 +168,17 @@ foreach ($name in $vcpkgDlls) {
 Write-Output "vcpkg DLLs: $($resolvedVcpkgDlls -join ', ')"
 
 # VC++ Redistributable DLLs (not part of the OS, unlike the Universal CRT).
-# Sourced from VS Build Tools' own Redist folder, the Microsoft-sanctioned
-# copy meant for bundling with an app. The exact path has a toolset-version
-# component that changes across VS updates, so search for it rather than
-# hardcoding it (same reasoning as the dumpbin search below).
+# Sourced from VS's own Redist folder, the Microsoft-sanctioned copy meant
+# for bundling with an app. Both the VS edition (BuildTools on a dev box,
+# Enterprise on GitHub's hosted runners) and the version-numbered install
+# path segment (e.g. "2022", or "18" for VS2026, which is what
+# windows-latest actually resolved to when this was last hit) vary and
+# drift over time, so search the whole VS install tree instead of
+# hardcoding either.
 $vcRedistDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
 $vsRedistRoots = @(
-    "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC",
-    "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Redist\MSVC"
+    "C:\Program Files (x86)\Microsoft Visual Studio",
+    "C:\Program Files\Microsoft Visual Studio"
 ) | Where-Object { Test-Path $_ }
 
 $resolvedVcRedistDlls = @()
@@ -237,6 +240,13 @@ if ($LASTEXITCODE -ge 8) {
     Write-Error "robocopy failed copying presets (exit code $LASTEXITCODE)"
     exit 1
 }
+# robocopy's non-zero "success" code would otherwise become this script's
+# own exit code, since pwsh propagates a stale $LASTEXITCODE when the
+# script ends without an explicit exit. Must be $global: - this script
+# runs in its own child scope, so a plain assignment only shadows
+# $LASTEXITCODE locally and never reaches the real engine-wide value the
+# caller checks.
+$global:LASTEXITCODE = 0
 
 # --- 5. Zip it ---
 

@@ -29,10 +29,15 @@
 #     - vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll (the VC++
 #       Redistributable, NOT part of the OS the way the Universal CRT is,
 #       confirmed direct/transitive dependencies of opendrop-app.exe
-#       and/or projectM-4*.dll. Sourced from VS Build Tools' own
-#       Redist\MSVC\<ver>\x64\Microsoft.VC143.CRT\ folder, the
-#       Microsoft-sanctioned copy meant for bundling with an app, not
-#       from System32.)
+#       and/or projectM-4*.dll. Sourced from System32, after the official
+#       vc_redist.x64.exe is installed on the build machine by CI: the
+#       previous approach (copying from VS Build Tools' own
+#       Redist\MSVC\<ver>\x64\Microsoft.VC143.CRT\ folder) shipped DLLs
+#       from windows-latest's VS2026 preview toolset that crash on load
+#       with 0xc0000005 inside msvcp140.dll on a clean end-user machine,
+#       root-caused 2026-09-05 by reproducing the crash on a clean Windows
+#       Server 2022 VM and fixing it by swapping in the real
+#       vc_redist.x64.exe's System32 copies instead.)
 #     - libEGL.dll, libGLESv2.dll, z.dll (vcpkg x64-windows, dynamic
 #       triplet, same as glew32.dll/projectM-4.dll above: (a) the app
 #       needs an EGL/GLES implementation and Windows has none natively:
@@ -168,33 +173,24 @@ foreach ($name in $vcpkgDlls) {
 Write-Output "vcpkg DLLs: $($resolvedVcpkgDlls -join ', ')"
 
 # VC++ Redistributable DLLs (not part of the OS, unlike the Universal CRT).
-# Sourced from VS's own Redist folder, the Microsoft-sanctioned copy meant
-# for bundling with an app. Both the VS edition (BuildTools on a dev box,
-# Enterprise on GitHub's hosted runners) and the version-numbered install
-# path segment (e.g. "2022", or "18" for VS2026, which is what
-# windows-latest actually resolved to when this was last hit) vary and
-# drift over time, so search the whole VS install tree instead of
-# hardcoding either.
+# Sourced from System32, where the official vc_redist.x64.exe (installed by
+# a dedicated CI step before this script runs) places them directly: the
+# unified VC++ 2015-2022 redistributable installs flat into System32, no
+# WinSxS involved (unlike the older VC++ 2005-2008 line). Copying instead
+# from a VS toolset's own Redist\MSVC\<ver>\ folder used to crash end-user
+# machines on load (0xc0000005 inside msvcp140.dll), root-caused
+# 2026-09-05 against windows-latest's VS2026 preview toolset.
 $vcRedistDlls = @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll")
-$vsRedistRoots = @(
-    "C:\Program Files (x86)\Microsoft Visual Studio",
-    "C:\Program Files\Microsoft Visual Studio"
-) | Where-Object { Test-Path $_ }
+$system32 = Join-Path $env:SystemRoot "System32"
 
 $resolvedVcRedistDlls = @()
 foreach ($name in $vcRedistDlls) {
-    # Exclude the "onecore" variant: it targets the OneCore kernel API
-    # surface (IoT Core / Xbox), not a standard desktop Win32 app like
-    # opendrop-app.exe. Match the plain "<ver>\x64\Microsoft.VCnnn.CRT\"
-    # path only.
-    $found = Get-ChildItem -Path $vsRedistRoots -Recurse -Filter $name -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match "\\[\d.]+\\x64\\Microsoft\.VC\d+\.CRT\\" } |
-        Select-Object -First 1
-    if (-not $found) {
-        Write-Error "VC++ redistributable DLL not found under VS Build Tools' Redist folder: $name"
+    $path = Join-Path $system32 $name
+    if (-not (Test-Path $path -PathType Leaf)) {
+        Write-Error "VC++ redistributable DLL not found at $path (was vc_redist.x64.exe installed on this machine?)"
         exit 1
     }
-    $resolvedVcRedistDlls += $found.FullName
+    $resolvedVcRedistDlls += $path
 }
 Write-Output "VC++ redist DLLs: $($resolvedVcRedistDlls -join ', ')"
 

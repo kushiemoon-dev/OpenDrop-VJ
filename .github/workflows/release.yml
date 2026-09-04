@@ -136,22 +136,6 @@ jobs:
           Write-Output "NDI_SDK_DIR=$sdkDir"
           Add-Content -Path $env:GITHUB_ENV -Value "NDI_SDK_DIR=$sdkDir"
 
-      - name: Install VC++ Redistributable
-        run: |
-          # build-portable.ps1 bundles vcruntime140.dll/vcruntime140_1.dll/
-          # msvcp140.dll from System32, not from the VS toolset's own
-          # Redist folder: the latter shipped DLLs from windows-latest's
-          # VS2026 preview toolset that crash on load (0xc0000005 inside
-          # msvcp140.dll) on a clean end-user machine, root-caused
-          # 2026-09-05. Installing the real redistributable here puts the
-          # genuine DLLs in System32 for the packaging step to pick up.
-          curl.exe -fsSL -o "$env:RUNNER_TEMP\vc_redist.x64.exe" "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-          $proc = Start-Process -FilePath "$env:RUNNER_TEMP\vc_redist.x64.exe" -ArgumentList '/install','/quiet','/norestart' -PassThru -Wait
-          if ($proc.ExitCode -ne 0) {
-            Write-Error "VC++ Redistributable installer exited with code $($proc.ExitCode)"
-            exit 1
-          }
-
       - name: Build Windows portable zip
         run: packaging\windows\build-portable.ps1
 

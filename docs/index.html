@@ -59,18 +59,20 @@
   .op-eyebrow .sq { width:12px; height:12px; background:var(--ac); box-shadow:0 0 16px var(--ac); }
   .op-intro { font-family:'Big Shoulders Display',sans-serif; font-weight:700; font-size:30px; margin:0; color:#f8f8fb; }
 
-  .op-gallery { display:grid; grid-template-columns:1.6fr 1fr; gap:16px; }
+  .op-gallery { display:grid; grid-template-columns:1.6fr 1fr; gap:16px; align-items:start; }
   .op-frame { background:#0c0a10; border:1px solid var(--fc); border-radius:6px; position:relative; overflow:hidden; box-shadow:0 0 40px -12px var(--fc); transition:transform .2s, box-shadow .2s; }
   .op-frame:hover { transform:translateY(-3px); box-shadow:0 8px 40px -8px var(--fc); }
   .op-frame .chrome { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid #26222c; }
   .op-frame .dot { width:8px; height:8px; border-radius:50%; background:var(--fc); opacity:0.6; }
   .op-frame .dot.rec { animation:blink 1.6s ease-in-out infinite; }
   @keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+  .op-gallery > .op-frame .body { aspect-ratio:1889/997; }
   .op-frame .body { aspect-ratio:16/10; background:
       repeating-linear-gradient(45deg, #14101a 0 12px, #0c0a10 12px 24px);
       display:flex; align-items:center; justify-content:center; }
   .op-frame.tall .body { aspect-ratio:16/6.2; }
   .op-frame .pending { font-size:10px; color:var(--fc); letter-spacing:0.3px; opacity:0.85; }
+  .op-frame .body img { width:100%; height:100%; object-fit:cover; display:block; }
   .op-gallery .stack { display:flex; flex-direction:column; gap:16px; }
 
   .op-specs { border-top:1px solid #26222c; }
@@ -129,16 +131,16 @@
     <div class="op-gallery">
       <div class="op-frame" style="--fc:#ff2ec4">
         <div class="chrome"><div class="dot rec"></div><div class="dot"></div><div class="dot"></div></div>
-        <div class="body"><span class="pending">main window &mdash; capture pending</span></div>
+        <div class="body"><img src="readme-assets/screenshot-main-window.png" alt="OpenDrop VJ main window: control panel and live output side by side" loading="lazy"></div>
       </div>
       <div class="stack">
         <div class="op-frame" style="--fc:#2ee8ff">
           <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-          <div class="body"><span class="pending">deck strip</span></div>
+          <div class="body"><img src="readme-assets/screenshot-deck-strip.png" alt="Four-deck strip with crossfader and hard cut" loading="lazy"></div>
         </div>
         <div class="op-frame" style="--fc:#ffcf2e">
           <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-          <div class="body"><span class="pending">NDI / share panel</span></div>
+          <div class="body"><img src="readme-assets/screenshot-visualizer.png" alt="Live Milkdrop-style visualizer output" loading="lazy"></div>
         </div>
       </div>
     </div>

@@ -68,6 +68,17 @@ pub(crate) fn scan_clips() -> Vec<VideoClip> {
     clips
 }
 
+/// Resolves an rkbx_link-reported track to a clip in `clips` (ticket #10
+/// "Synchronised music video playback"): `"{artist} - {title}"` (trimmed,
+/// case-insensitive) compared against the clip's filename stem
+/// (`VideoClip::name`). `None` if nothing matches — the caller leaves the
+/// mapped visual deck's current content untouched in that case, never
+/// clearing or replacing it.
+pub(crate) fn match_clip_by_track<'a>(clips: &'a [VideoClip], artist: &str, title: &str) -> Option<&'a VideoClip> {
+    let query = format!("{} - {}", artist.trim(), title.trim()).to_lowercase();
+    clips.iter().find(|c| c.name.trim().to_lowercase() == query)
+}
+
 /// Every recognised video file directly inside `dir`, sorted by filename.
 /// A missing/unreadable directory yields nothing: the normal case for the
 /// bundled folder (see the module doc comment), and for a user who has
@@ -175,6 +186,18 @@ mod tests {
         assert_eq!(clip.key, "/loops/Neon Grid.webm");
         assert_eq!(clip.name, "Neon Grid");
         assert!(clip.builtin);
+    }
+
+    #[test]
+    fn matches_a_clip_by_artist_and_title_case_and_whitespace_insensitively() {
+        let clips = vec![clip_from_path(PathBuf::from("/loops/Daft Punk - One More Time.webm"), false)];
+        assert_eq!(match_clip_by_track(&clips, "  DAFT PUNK  ", "one more time").map(|c| &c.name), Some(&"Daft Punk - One More Time".to_string()));
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let clips = vec![clip_from_path(PathBuf::from("/loops/Someone - Something.webm"), false)];
+        assert_eq!(match_clip_by_track(&clips, "Nobody", "Nothing"), None);
     }
 
     #[test]

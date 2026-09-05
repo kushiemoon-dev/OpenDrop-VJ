@@ -89,10 +89,14 @@ const RATE_MAX: f64 = 2.0;
 /// What a source is reading from. Kept minimal on purpose: everything that
 /// varies per platform is [`camera_input_args`]'s business, not this
 /// enum's.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VideoInput {
-    /// A clip file on disk, looped forever (`-stream_loop -1`).
-    File(PathBuf),
+    /// A clip file on disk, looped forever (`-stream_loop -1`), optionally
+    /// starting `start_seconds` into the file (`-ss`, ticket #10's
+    /// "Synchronised music video playback"). `0.0` (the pre-ticket-#10
+    /// default everywhere except the sync path) omits `-ss` entirely,
+    /// preserving today's exact ffmpeg invocation.
+    File { path: PathBuf, start_seconds: f64 },
     /// A live camera, identified the way the platform's ffmpeg input device
     /// expects: `/dev/videoN` on Linux, the DirectShow device *name* on
     /// Windows, the AVFoundation device index on macOS.
@@ -104,7 +108,7 @@ impl VideoInput {
     /// module doc comment. A file is paced (ffmpeg would otherwise decode
     /// as fast as the pipe drains); a camera is not (the hardware paces it).
     fn is_paced(&self) -> bool {
-        matches!(self, VideoInput::File(_))
+        matches!(self, VideoInput::File { .. })
     }
 }
 
@@ -211,9 +215,18 @@ pub fn spawn() -> VideoCaptureHandle {
 // least verified by a test that runs everywhere.
 
 /// Input args for a local clip: looped forever, so a short loop keeps
-/// playing instead of the layer going black after one pass.
-pub fn file_input_args(path: &Path) -> Vec<String> {
-    vec!["-stream_loop".into(), "-1".into(), "-i".into(), path.to_string_lossy().into_owned()]
+/// playing instead of the layer going black after one pass. A positive
+/// `start_seconds` adds an input-side `-ss` seek (ticket #10); `0.0` omits
+/// it, unchanged from before that ticket.
+pub fn file_input_args(path: &Path, start_seconds: f64) -> Vec<String> {
+    let mut args = vec!["-stream_loop".into(), "-1".into()];
+    if start_seconds > 0.0 {
+        args.push("-ss".into());
+        args.push(format!("{start_seconds:.3}"));
+    }
+    args.push("-i".into());
+    args.push(path.to_string_lossy().into_owned());
+    args
 }
 
 /// Linux camera: Video4Linux2, device path as-is (`/dev/video0`).
@@ -284,7 +297,7 @@ pub fn output_args(width: u32, height: u32, fps: u32) -> Vec<String> {
 
 fn input_args_for(input: &VideoInput) -> Vec<String> {
     match input {
-        VideoInput::File(path) => file_input_args(path),
+        VideoInput::File { path, start_seconds } => file_input_args(path, *start_seconds),
         VideoInput::Camera(device) => camera_input_args(device),
     }
 }
@@ -624,7 +637,7 @@ mod tests {
         #[test]
         fn a_file_input_loops_forever() {
             assert_eq!(
-                file_input_args(Path::new("/clips/a b.webm")),
+                file_input_args(Path::new("/clips/a b.webm"), 0.0),
                 ["-stream_loop", "-1", "-i", "/clips/a b.webm"]
             );
         }
@@ -670,13 +683,28 @@ mod tests {
 
         #[test]
         fn input_args_dispatch_on_the_input_kind() {
-            assert_eq!(input_args_for(&VideoInput::File(PathBuf::from("/x.webm"))), file_input_args(Path::new("/x.webm")));
+            assert_eq!(
+                input_args_for(&VideoInput::File { path: PathBuf::from("/x.webm"), start_seconds: 0.0 }),
+                file_input_args(Path::new("/x.webm"), 0.0)
+            );
             assert_eq!(input_args_for(&VideoInput::Camera("cam".into())), camera_input_args("cam"));
         }
 
         #[test]
+        fn a_positive_start_offset_adds_an_ss_flag() {
+            let args = file_input_args(Path::new("/x.webm"), 12.5);
+            assert_eq!(args, vec!["-stream_loop", "-1", "-ss", "12.500", "-i", "/x.webm"]);
+        }
+
+        #[test]
+        fn a_zero_start_offset_omits_the_ss_flag() {
+            let args = file_input_args(Path::new("/x.webm"), 0.0);
+            assert_eq!(args, vec!["-stream_loop", "-1", "-i", "/x.webm"]);
+        }
+
+        #[test]
         fn only_a_file_source_is_paced() {
-            assert!(VideoInput::File(PathBuf::from("/x.webm")).is_paced());
+            assert!(VideoInput::File { path: PathBuf::from("/x.webm"), start_seconds: 0.0 }.is_paced());
             assert!(!VideoInput::Camera("cam".into()).is_paced());
         }
     }
@@ -885,7 +913,10 @@ mod tests {
             let handle = spawn();
             let _ = handle
                 .control_tx
-                .send(VideoCaptureControl::Start(VideoInput::File(PathBuf::from("/nonexistent/opendrop-no-such.webm"))));
+                .send(VideoCaptureControl::Start(VideoInput::File {
+                    path: PathBuf::from("/nonexistent/opendrop-no-such.webm"),
+                    start_seconds: 0.0,
+                }));
             // ffmpeg is spawned successfully but exits immediately (it
             // can't open the file); either the spawn failed outright (no
             // ffmpeg on PATH) or the liveness poll notices the exit. Both
@@ -921,7 +952,7 @@ mod tests {
 
         #[test]
         fn spawning_does_not_panic_whether_or_not_the_input_is_valid() {
-            let bogus = file_input_args(Path::new("/nonexistent/opendrop-no-such.webm"));
+            let bogus = file_input_args(Path::new("/nonexistent/opendrop-no-such.webm"), 0.0);
             if let Ok((mut src, _stdout)) = VideoSource::spawn(&bogus, 64, 48, 30) {
                 let _ = src.is_alive();
             }
@@ -1011,7 +1042,7 @@ mod tests {
             }
 
             let handle = spawn();
-            let _ = handle.control_tx.send(VideoCaptureControl::Start(VideoInput::File(clip)));
+            let _ = handle.control_tx.send(VideoCaptureControl::Start(VideoInput::File { path: clip, start_seconds: 0.0 }));
 
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut seen: Vec<u64> = Vec::new();

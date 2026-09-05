@@ -88,6 +88,7 @@ pub(crate) enum PanelId {
     NdiIn,
     NdiOut,
     Osc,
+    RkbxLink,
     Overlays,
     RemoteWs,
     Streaming,
@@ -115,6 +116,10 @@ pub(crate) struct UiConfig {
     pub(crate) output_monitor: Option<String>,
     pub(crate) audio_input_device: Option<String>,
     pub(crate) osc_port: u16,
+    /// The rkbx_link OSC listener's port (ticket #10 "Synchronised music
+    /// video playback"), independent of `osc_port` above. Defaults to
+    /// `4460`, rkbx_link's own default `osc.destination` port.
+    pub(crate) rkbx_link_port: u16,
     pub(crate) obs_host: String,
     pub(crate) obs_port: u16,
     pub(crate) twitch_channel: String,
@@ -150,6 +155,7 @@ impl Default for UiConfig {
             output_monitor: None,
             audio_input_device: None,
             osc_port: 7000,
+            rkbx_link_port: 4460,
             obs_host: "localhost".to_string(),
             obs_port: 4455,
             twitch_channel: String::new(),
@@ -228,6 +234,7 @@ mod tests {
             output_monitor: Some("DP-2".to_string()),
             audio_input_device: Some("Focusrite".to_string()),
             osc_port: 9000,
+            rkbx_link_port: 4461,
             obs_host: "192.168.1.50".to_string(),
             obs_port: 4444,
             twitch_channel: "kushiemoon".to_string(),
@@ -302,6 +309,7 @@ mod tests {
             PanelId::NdiIn,
             PanelId::NdiOut,
             PanelId::Osc,
+            PanelId::RkbxLink,
             PanelId::RemoteWs,
             PanelId::Streaming,
             PanelId::Share,

@@ -184,6 +184,11 @@ pub struct Show {
     /// alongside the 5 already listed on `video_rng`'s own doc comment. See
     /// `reseed_rng`.
     deck_video_rng: [Xorshift64; 4],
+    /// Which rkbx_link DJ deck index (0-3) is mapped to each of the 4 visual
+    /// deck slots, or `None` (the default: nothing happens for an unmapped DJ
+    /// deck) — ticket #10 "Synchronised music video playback". Indexed by DJ
+    /// deck, not slot: `rkbx_deck_mapping[dj_deck] == Some(slot)`.
+    pub rkbx_deck_mapping: [Option<usize>; 4],
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -258,6 +263,7 @@ impl Default for Show {
             video_rng: Xorshift64::default(),
             deck_video: std::array::from_fn(|_| VideoState::default()),
             deck_video_rng: [Xorshift64::default(); 4],
+            rkbx_deck_mapping: [None; 4],
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -356,6 +362,20 @@ impl Show {
     pub fn select_slot(&mut self, slot: usize) {
         self.selected_slot = slot;
         self.active_deck = if self.deck_bus[slot] == DeckBus::B { Deck::B } else { Deck::A };
+    }
+
+    /// Maps DJ deck `dj_deck` to visual slot `visual_slot` (or unmaps it with
+    /// `None`). Refuses (leaving the mapping untouched) if `visual_slot` is
+    /// already claimed by a *different* DJ deck: a visual slot must never be
+    /// driven by two DJ decks' sync at once (ticket #10).
+    pub fn set_rkbx_deck_mapping(&mut self, dj_deck: usize, visual_slot: Option<usize>) -> Result<(), String> {
+        if let Some(slot) = visual_slot {
+            if let Some(other) = (0..self.rkbx_deck_mapping.len()).find(|&d| d != dj_deck && self.rkbx_deck_mapping[d] == Some(slot)) {
+                return Err(format!("Deck {slot} is already mapped to DJ deck {other}"));
+            }
+        }
+        self.rkbx_deck_mapping[dj_deck] = visual_slot;
+        Ok(())
     }
 
     /// Resolves a bus letter to the first physical slot assigned to it.
@@ -1023,6 +1043,49 @@ mod tests {
         #[test]
         fn deck_video_starts_default_on_every_slot() {
             assert_eq!(Show::default().deck_video, std::array::from_fn(|_| VideoState::default()));
+        }
+
+        #[test]
+        fn rkbx_deck_mapping_starts_fully_unmapped() {
+            assert_eq!(Show::default().rkbx_deck_mapping, [None; 4]);
+        }
+    }
+
+    mod set_rkbx_deck_mapping {
+        use super::*;
+
+        #[test]
+        fn succeeds_for_an_unclaimed_slot() {
+            let mut show = Show::default();
+            assert_eq!(show.set_rkbx_deck_mapping(0, Some(2)), Ok(()));
+            assert_eq!(show.rkbx_deck_mapping[0], Some(2));
+        }
+
+        #[test]
+        fn refuses_a_slot_already_claimed_by_a_different_dj_deck() {
+            let mut show = Show::default();
+            show.set_rkbx_deck_mapping(0, Some(2)).unwrap();
+            let result = show.set_rkbx_deck_mapping(1, Some(2));
+            assert!(result.is_err());
+            // Untouched: deck 1 stays unmapped, deck 0 keeps its claim.
+            assert_eq!(show.rkbx_deck_mapping[1], None);
+            assert_eq!(show.rkbx_deck_mapping[0], Some(2));
+        }
+
+        #[test]
+        fn remapping_the_same_dj_deck_to_a_new_slot_does_not_conflict_with_itself() {
+            let mut show = Show::default();
+            show.set_rkbx_deck_mapping(0, Some(2)).unwrap();
+            assert_eq!(show.set_rkbx_deck_mapping(0, Some(3)), Ok(()));
+            assert_eq!(show.rkbx_deck_mapping[0], Some(3));
+        }
+
+        #[test]
+        fn unmapping_always_succeeds() {
+            let mut show = Show::default();
+            show.set_rkbx_deck_mapping(0, Some(2)).unwrap();
+            assert_eq!(show.set_rkbx_deck_mapping(0, None), Ok(()));
+            assert_eq!(show.rkbx_deck_mapping[0], None);
         }
     }
 

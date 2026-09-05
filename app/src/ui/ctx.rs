@@ -137,6 +137,9 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,
     pub(crate) osc: &'a opendrop_io::osc::OscHandle,
     pub(crate) osc_port: &'a mut u16,
+    pub(crate) rkbx_link: &'a opendrop_io::rkbx_link::RkbxLinkHandle,
+    pub(crate) rkbx_link_port: &'a mut u16,
+    pub(crate) rkbx_mapping_error: &'a mut Option<String>,
     /// Overlays panel (Step 12 of the Phase 8 VJ-panels plan): overlay id
     /// → the sprite file it was created from, and the id counter. The
     /// overlay list itself lives on `Show` (`PerformCtx::show`) like every

@@ -70,6 +70,20 @@ const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 /// on this thread).
 const BEAT_PULSE_DURATION: Duration = Duration::from_millis(80);
 
+/// Ticket #10: how far a synced deck's estimated elapsed playback time
+/// may diverge from its DJ deck's latest reported `/{deck}/time` before
+/// the decoder is reseeked. Picked from the requirements' own suggested
+/// "a few hundred ms to half a second" range; not user-configurable.
+const RKBX_DRIFT_THRESHOLD_SECONDS: f64 = 0.35;
+
+/// Whether estimated elapsed playback (`actual_elapsed` seconds) has
+/// drifted from the DJ deck's reported `dj_time` by more than the sync
+/// tolerance. Pure and unit-testable in isolation from `Instant`/thread
+/// plumbing.
+fn rkbx_drift_exceeds_threshold(dj_time: f64, actual_elapsed: f64) -> bool {
+    (dj_time - actual_elapsed).abs() > RKBX_DRIFT_THRESHOLD_SECONDS
+}
+
 /// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
 /// real elapsed-time measurement, matching the TS reference's
 /// `Math.min(dt, 0.1)` (`clock.ts:53`).
@@ -345,6 +359,22 @@ fn create_empty_video_texture(gl: &glow::Context, w: u32, h: u32) -> glow::Nativ
     }
 }
 
+/// One visual deck slot's active rkbx_link sync (ticket #10): which DJ
+/// deck it's tracking, which clip path the match loaded (so a later
+/// manual reassignment away from that clip can be detected and drops
+/// the sync), and the wall-clock reference point (`seek_seconds` into the
+/// file at `seeked_at`) the drift check measures elapsed playback against.
+/// Re-set every time a fresh match loads a clip or a drift correction
+/// reseeks; the actual currently-decoding-from offset is always
+/// `seek_seconds + seeked_at.elapsed()`, never tracked more precisely than
+/// that (this ticket's decoder has no true elapsed-time readback).
+struct RkbxSyncState {
+    dj_deck: usize,
+    matched_clip_path: PathBuf,
+    seek_seconds: f64,
+    seeked_at: Instant,
+}
+
 /// What the video-capture thread should be decoding right now, given the
 /// layer's state and the clip library (Step 14 of the Phase 8 VJ-panels
 /// plan). `None` means "nothing": the layer is off, or something else is
@@ -375,7 +405,7 @@ fn desired_video_input(
     if clips.is_empty() {
         return None;
     }
-    Some(VideoInput::File(clips[video.current_clip_index % clips.len()].path.clone()))
+    Some(VideoInput::File { path: clips[video.current_clip_index % clips.len()].path.clone(), start_seconds: 0.0 })
 }
 
 /// Reconciles one deck slot's video-capture thread against `desired`
@@ -460,6 +490,7 @@ pub(crate) enum Panel {
     NdiIn,
     NdiOut,
     Osc,
+    RkbxLink,
     Overlays,
     RemoteWs,
     Streaming,
@@ -499,6 +530,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::NdiIn => Panel::NdiIn,
             config::PanelId::NdiOut => Panel::NdiOut,
             config::PanelId::Osc => Panel::Osc,
+            config::PanelId::RkbxLink => Panel::RkbxLink,
             config::PanelId::Overlays => Panel::Overlays,
             config::PanelId::RemoteWs => Panel::RemoteWs,
             config::PanelId::Streaming => Panel::Streaming,
@@ -537,6 +569,7 @@ impl From<Panel> for config::PanelId {
             Panel::NdiIn => config::PanelId::NdiIn,
             Panel::NdiOut => config::PanelId::NdiOut,
             Panel::Osc => config::PanelId::Osc,
+            Panel::RkbxLink => config::PanelId::RkbxLink,
             Panel::Overlays => config::PanelId::Overlays,
             Panel::RemoteWs => config::PanelId::RemoteWs,
             Panel::Streaming => config::PanelId::Streaming,
@@ -1039,6 +1072,26 @@ struct AppState {
     /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
     /// matching the web app's `electron-features-store.svelte.ts` default.
     osc_port: u16,
+    /// Handle to the dedicated rkbx_link OSC UDP listener thread (ticket #10
+    /// "Synchronised music video playback"), independent of `osc` above:
+    /// `latest()` gives the current listening/port/per-DJ-deck-time
+    /// snapshot, `track_events` carries `RkbxTrackChanged` drained in
+    /// `about_to_wait`, `control_tx` sends Start/Stop.
+    rkbx_link: opendrop_io::rkbx_link::RkbxLinkHandle,
+    /// The Rekordbox Link panel's own port field, same reasoning as
+    /// `osc_port`.
+    rkbx_link_port: u16,
+    /// Set when the DJ-deck-mapping panel's `Show::set_rkbx_deck_mapping`
+    /// call is refused (two DJ decks claiming the same visual slot);
+    /// cleared on the next successful mapping change. Same "panel-local,
+    /// synchronous error" convention as `video_local_error`.
+    rkbx_mapping_error: Option<String>,
+    /// Per-visual-slot sync bookkeeping (ticket #10): `Some` while that
+    /// slot's currently-assigned clip was loaded by a track-change match and
+    /// is still being drift-corrected against its DJ deck's reported time;
+    /// `None` for an unmapped/un-synced/manually-reassigned slot. See
+    /// `RkbxSyncState`'s own doc comment.
+    rkbx_sync: [Option<RkbxSyncState>; 4],
     /// Handle to the dedicated remote-WS thread (Task 14), first async
     /// integration in this codebase (its own tokio runtime lives entirely
     /// inside that thread, see `opendrop_io::remote_ws`'s module doc
@@ -1618,6 +1671,9 @@ fn ui_root(
             }
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
+            }
+            Panel::RkbxLink => {
+                ui::rkbx_link::show(ui, sources.rkbx_link, sources.rkbx_link_port, sources.rkbx_mapping_error, perform.show);
             }
             Panel::Overlays => {
                 ui::overlays::show(
@@ -2370,6 +2426,54 @@ impl ApplicationHandler for App {
                 }
             }
 
+            // rkbx_link track-change -> match -> load (ticket #10): drains
+            // discrete track-changed events into a direct per-slot clip
+            // load, never touching that slot's bus assignment (AC-4). No
+            // match found leaves the mapped slot's current content
+            // untouched (AC-5).
+            while let Ok(event) = state.rkbx_link.track_events.try_recv() {
+                let Some(slot) = state.show.rkbx_deck_mapping.get(event.deck).copied().flatten() else { continue };
+                let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else { continue };
+                let path = clip.path.clone();
+                let index = state.video_clips.iter().position(|c| c.path == path).unwrap_or(0);
+                state.show.deck_video[slot].current_clip_index = index;
+                state.show.deck_video[slot].enabled = true;
+                let seek_seconds = state.rkbx_link.latest().deck_time[event.deck].unwrap_or(0.0);
+                state.rkbx_sync[slot] = Some(RkbxSyncState { dj_deck: event.deck, matched_clip_path: path, seek_seconds, seeked_at: now });
+            }
+
+            // rkbx_link drift correction (ticket #10): reseeks a synced
+            // slot whenever its estimated elapsed playback diverges from
+            // its DJ deck's latest reported time by more than
+            // `RKBX_DRIFT_THRESHOLD_SECONDS`. Drops the sync (without
+            // touching the slot's content) if the mapping was changed or
+            // the VJ manually reassigned the slot away from the matched
+            // clip since the last match/reseek: manual action supersedes
+            // sync.
+            for slot in 0..deck::DECK_COUNT {
+                let Some(sync) = &state.rkbx_sync[slot] else { continue };
+                let mapping_still_points_here = state.show.rkbx_deck_mapping.get(sync.dj_deck).copied().flatten() == Some(slot);
+                let current_clip_path = state
+                    .video_clips
+                    .get(state.show.deck_video[slot].current_clip_index % state.video_clips.len().max(1))
+                    .map(|c| c.path.clone());
+                let still_the_matched_clip = state.show.deck_video[slot].enabled && current_clip_path.as_ref() == Some(&sync.matched_clip_path);
+                if !mapping_still_points_here || !still_the_matched_clip {
+                    state.rkbx_sync[slot] = None;
+                    continue;
+                }
+                let Some(dj_time) = state.rkbx_link.latest().deck_time[sync.dj_deck] else { continue };
+                let actual_elapsed = sync.seek_seconds + sync.seeked_at.elapsed().as_secs_f64();
+                if rkbx_drift_exceeds_threshold(dj_time, actual_elapsed) {
+                    state.rkbx_sync[slot] = Some(RkbxSyncState {
+                        dj_deck: sync.dj_deck,
+                        matched_clip_path: sync.matched_clip_path.clone(),
+                        seek_seconds: dj_time,
+                        seeked_at: now,
+                    });
+                }
+            }
+
             // Per-deck video decode (ticket #9): reconcile-then-upload, one
             // slot at a time, mirroring the global block just above. Runs
             // unconditionally every tick, regardless of that slot's
@@ -2378,7 +2482,16 @@ impl ApplicationHandler for App {
             // visibility (AC-3, AC-6); the projectM `InvisibleMode` throttle
             // just below only applies to preset-mode slots.
             for slot in 0..deck::DECK_COUNT {
-                let desired_slot = desired_video_input(&state.show.deck_video[slot], &state.video_clips, false);
+                let mut desired_slot = desired_video_input(&state.show.deck_video[slot], &state.video_clips, false);
+                // ticket #10: apply the sync's seek offset when this slot's
+                // desired input is still the clip the match loaded.
+                if let (Some(opendrop_io::video_capture::VideoInput::File { path, start_seconds }), Some(sync)) =
+                    (&mut desired_slot, &state.rkbx_sync[slot])
+                {
+                    if *path == sync.matched_clip_path {
+                        *start_seconds = sync.seek_seconds;
+                    }
+                }
                 tick_deck_video(
                     &state.gl,
                     desired_slot,
@@ -2621,6 +2734,9 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                rkbx_link,
+                rkbx_link_port,
+                rkbx_mapping_error,
                 overlay_assets,
                 next_overlay_id,
                 remote_ws,
@@ -2714,6 +2830,9 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                rkbx_link,
+                rkbx_link_port,
+                rkbx_mapping_error,
                 overlay_assets,
                 next_overlay_id,
                 remote_ws,
@@ -2914,6 +3033,7 @@ impl ApplicationHandler for App {
             ui_config.output_monitor = state.selected_output_monitor.clone();
             ui_config.audio_input_device = state.selected_input_device.clone();
             ui_config.osc_port = state.osc_port;
+            ui_config.rkbx_link_port = state.rkbx_link_port;
             ui_config.obs_host = state.obs_host.clone();
             ui_config.obs_port = state.obs_port;
             ui_config.twitch_channel = state.twitch_channel.clone();
@@ -3556,6 +3676,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_led_flash_off_at: HashMap::new(),
         osc: opendrop_io::osc::spawn(),
         osc_port: ui_config.osc_port,
+        rkbx_link: opendrop_io::rkbx_link::spawn(),
+        rkbx_link_port: ui_config.rkbx_link_port,
+        rkbx_mapping_error: None,
+        rkbx_sync: [None, None, None, None],
         remote_ws: opendrop_io::remote_ws::spawn(),
         obs: opendrop_io::obs::spawn(),
         obs_host: ui_config.obs_host.clone(),
@@ -4002,7 +4126,7 @@ mod tests {
             state.current_clip_index = 1;
             assert_eq!(
                 desired_video_input(&state, &clips(&["a", "b"]), false),
-                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+                Some(VideoInput::File { path: PathBuf::from("/clips/b.webm"), start_seconds: 0.0 })
             );
         }
 
@@ -4014,7 +4138,7 @@ mod tests {
             state.current_clip_index = 7;
             assert_eq!(
                 desired_video_input(&state, &clips(&["a", "b"]), false),
-                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+                Some(VideoInput::File { path: PathBuf::from("/clips/b.webm"), start_seconds: 0.0 })
             );
         }
 
@@ -4051,7 +4175,7 @@ mod tests {
             state.current_clip_index = 2;
             let second = desired_video_input(&state, &library, false);
             assert_ne!(first, second);
-            assert_eq!(second, Some(VideoInput::File(PathBuf::from("/clips/c.webm"))));
+            assert_eq!(second, Some(VideoInput::File { path: PathBuf::from("/clips/c.webm"), start_seconds: 0.0 }));
         }
 
         #[test]
@@ -4061,6 +4185,25 @@ mod tests {
             let library = clips(&["a", "b"]);
             let state = enabled();
             assert_eq!(desired_video_input(&state, &library, false), desired_video_input(&state, &library, false));
+        }
+    }
+
+    mod rkbx_drift_exceeds_threshold_tests {
+        use super::*;
+
+        #[test]
+        fn exactly_at_the_threshold_is_not_exceeded() {
+            assert!(!rkbx_drift_exceeds_threshold(10.0, 10.0 + RKBX_DRIFT_THRESHOLD_SECONDS));
+        }
+
+        #[test]
+        fn just_over_the_threshold_is_exceeded() {
+            assert!(rkbx_drift_exceeds_threshold(10.0, 10.0 + RKBX_DRIFT_THRESHOLD_SECONDS + 0.001));
+        }
+
+        #[test]
+        fn a_negative_divergence_is_handled_the_same_as_a_positive_one() {
+            assert!(rkbx_drift_exceeds_threshold(10.0, 10.0 - RKBX_DRIFT_THRESHOLD_SECONDS - 0.001));
         }
     }
 

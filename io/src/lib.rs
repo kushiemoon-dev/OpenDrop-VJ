@@ -14,6 +14,7 @@ pub mod ndi;
 pub mod obs;
 pub mod osc;
 pub mod remote_ws;
+pub mod rkbx_link;
 pub mod secrets;
 pub mod share_codec;
 pub mod twitch;

@@ -1974,7 +1974,7 @@ impl ApplicationHandler for App {
         // rendering on every call, is what keeps that from turning into a
         // self-sustaining busy loop (measured: ~10 kHz without this gate).
         if now >= state.next_frame_at {
-            let layer_inputs = layer_inputs_from_show(&state.show);
+            let mut layer_inputs = layer_inputs_from_show(&state.show);
 
             // Each deck context injects one PCM chunk, renders one projectM
             // frame, and copies it into its shared texture; then, back on
@@ -2137,6 +2137,9 @@ impl ApplicationHandler for App {
             }
 
             for (i, layer_input) in layer_inputs.iter().enumerate() {
+                if state.show.deck_video[i].enabled {
+                    continue; // this slot's compositor content is a decoded clip, not a projectM preset
+                }
                 let visible = layer_input.opacity > 0.001;
                 // See `InvisibleMode`: `Eco` is the original always-on
                 // throttle, `Pause` skips rendering this deck entirely while
@@ -2376,6 +2379,13 @@ impl ApplicationHandler for App {
                 );
             }
 
+            let deck_beat_pulse = state.last_beat_at.is_some_and(|at| now.duration_since(at) < BEAT_PULSE_DURATION);
+            for (i, layer_input) in layer_inputs.iter_mut().enumerate() {
+                if state.show.deck_video[i].enabled {
+                    layer_input.color = state.show.deck_video[i].layer_color_params(deck_beat_pulse);
+                }
+            }
+
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for (i, layer_input) in layer_inputs.iter().enumerate() {
@@ -2385,7 +2395,8 @@ impl ApplicationHandler for App {
                 // should_force_normal_for_lowest_slot` port of `compositor.
                 // ts:140`'s `shouldForceNormalForLowestSlot`.
                 let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
-                state.compositor.composite_layer(&state.gl, state.decks[i].texture, layer_input, force_normal);
+                let deck_tex = if state.show.deck_video[i].enabled { state.deck_video_texture[i] } else { state.decks[i].texture };
+                state.compositor.composite_layer(&state.gl, deck_tex, layer_input, force_normal);
             }
             // Video layer (Step 14), composited over the 4 decks and under
             // the NDI-in layer below. **On top of the decks, not behind

@@ -21,6 +21,16 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 - Cloud presets and shareable set links
 - Local video clip playback and camera capture via `ffmpeg`
 
+## Screenshots
+
+<img src="docs/readme-assets/screenshot-main-window.png" alt="Main window: control panel and live output side by side" width="800">
+
+<img src="docs/readme-assets/screenshot-deck-strip.png" alt="Four-deck strip with crossfader and hard cut" width="800">
+
+<img src="docs/readme-assets/screenshot-ndi-out.png" alt="NDI output panel" width="800">
+
+<img src="docs/readme-assets/screenshot-visualizer.png" alt="Live Milkdrop-style visualizer output" width="800">
+
 ## Building
 
 ```sh

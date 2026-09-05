@@ -317,6 +317,34 @@ fn create_frame_texture(
     }
 }
 
+/// Allocates an empty RGBA8 texture at a fixed `w`x`h`, never resized: the
+/// bootstrap-time counterpart of `create_frame_texture` for the 4 deck-video
+/// textures (ticket #9), which are always exactly `CAPTURE_W`x`CAPTURE_H`
+/// (`opendrop_io::video_capture`'s own guarantee), so there is no `Option`/
+/// recreate-on-resize dance to do, unlike `video_texture`/`ndi_in_texture`.
+fn create_empty_video_texture(gl: &glow::Context, w: u32, h: u32) -> glow::NativeTexture {
+    unsafe {
+        let tex = gl.create_texture().expect("glGenTextures failed for a deck-video texture");
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        tex
+    }
+}
+
 /// What the video-capture thread should be decoding right now, given the
 /// layer's state and the clip library (Step 14 of the Phase 8 VJ-panels
 /// plan). `None` means "nothing": the layer is off, or something else is
@@ -643,6 +671,31 @@ struct AppState {
     /// this the same 3.5 MB frame would be re-uploaded on every tick that
     /// outpaces the source's frame rate (i.e. most of them).
     video_frame_seq: u64,
+    /// Per-deck mirror of `video` above (ticket #9): one dedicated video-capture
+    /// thread per deck slot, so up to 4 clips can decode concurrently,
+    /// independent of the global layer's own thread and of each other.
+    #[allow(dead_code)] // bootstrap-only for now (ticket #9): read/written starting Step 3
+    deck_video_capture: [opendrop_io::video_capture::VideoCaptureHandle; 4],
+    /// Per-slot mirror of `video_input`.
+    #[allow(dead_code)] // bootstrap-only for now (ticket #9): read/written starting Step 3
+    deck_video_input: [Option<opendrop_io::video_capture::VideoInput>; 4],
+    /// Per-slot mirror of `video_frame_seq`.
+    #[allow(dead_code)] // bootstrap-only for now (ticket #9): read/written starting Step 3
+    deck_video_frame_seq: [u64; 4],
+    /// Per-slot decode texture. Unlike `video_texture` (`Option`, created lazily
+    /// on the first decoded frame, recreated on a resolution change), this is
+    /// allocated once at bootstrap and never recreated: `opendrop_io::
+    /// video_capture` pins every source to `CAPTURE_W`x`CAPTURE_H`, so there is
+    /// no "first frame"/resize case to handle. Filled in place by
+    /// `tick_deck_video` (added in Step 3).
+    #[allow(dead_code)] // bootstrap-only for now (ticket #9): read/written starting Step 3
+    deck_video_texture: [glow::NativeTexture; 4],
+    /// `egui::TextureId` for each deck's video-decode texture, registered once
+    /// at bootstrap alongside `deck_tex_ids`. The deck card (Step 7) shows this
+    /// instead of `deck_tex_ids[i]` while that slot is in video mode
+    /// (`show.deck_video[i].enabled`).
+    #[allow(dead_code)] // bootstrap-only for now (ticket #9): read starting Step 7
+    deck_video_tex_ids: [egui::TextureId; 4],
     /// The clip library, scanned once at bootstrap and re-scanned only on
     /// the panel's Rescan button; a directory listing per frame would be
     /// pointless I/O, same reasoning as `input_devices`' bootstrap-only
@@ -3146,6 +3199,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let deck_tex_ids: [egui::TextureId; 4] =
         std::array::from_fn(|i| egui_glow.painter.register_native_texture(decks[i].texture));
 
+    let deck_video_texture: [glow::NativeTexture; 4] = std::array::from_fn(|_| {
+        create_empty_video_texture(&gl, opendrop_io::video_capture::CAPTURE_W, opendrop_io::video_capture::CAPTURE_H)
+    });
+    let deck_video_tex_ids: [egui::TextureId; 4] =
+        std::array::from_fn(|i| egui_glow.painter.register_native_texture(deck_video_texture[i]));
+
     // Compositor FBO/texture belong to whichever context is current at
     // creation: main_ctx is current here (on control's surface), same as
     // it will be every time the compositor's FBO is touched later.
@@ -3289,6 +3348,11 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         video_input: None,
         video_texture: None,
         video_frame_seq: 0,
+        deck_video_capture: std::array::from_fn(|_| opendrop_io::video_capture::spawn()),
+        deck_video_input: [const { None }; 4],
+        deck_video_frame_seq: [0; 4],
+        deck_video_texture,
+        deck_video_tex_ids,
         // Scanned once here (see the field's doc comment); the panel's
         // Rescan button is the only thing that re-reads either directory.
         video_clips: video_clips::scan_clips(),

@@ -67,6 +67,13 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
 fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Result<cpal::Stream, String> {
     use cpal::traits::DeviceTrait;
     use cpal::SampleFormat;
+    // On Windows `device` is an output device opened in loopback (see
+    // audio/src/device.rs): WASAPI's `default_input_config()` refuses any
+    // device whose data flow isn't capture, so the render-side query is the
+    // one that actually returns a format here.
+    #[cfg(target_os = "windows")]
+    let supported = device.default_output_config().map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "windows"))]
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let channels = supported.channels() as usize;
     let sample_format = supported.sample_format();

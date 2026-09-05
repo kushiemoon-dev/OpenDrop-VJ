@@ -15,6 +15,13 @@
 //! separate Duplex virtual alias for "the current default sink, capturable":
 //! `Device::sink_default()`, `description: "default_sink"`, which shows
 //! up directly in `input_devices()`. That's the monitor source.
+//!
+//! None of this applies on Windows: WASAPI has no such alias, but opening a
+//! WASAPI *output* device as an input transparently enables loopback mode
+//! (confirmed in the vendored comment in
+//! `cpal-0.18.2/src/host/wasapi/mod.rs`), so the output device itself is the
+//! capture source there, picked straight from `output_devices()`.
+#[cfg(not(target_os = "windows"))]
 const DEFAULT_SINK_ALIAS: &str = "default_sink";
 
 /// Picks the monitor source by its `list_input_devices` label, falling back
@@ -25,6 +32,7 @@ const DEFAULT_SINK_ALIAS: &str = "default_sink";
 /// panics when `description()` fails, and a panic here kills the capture
 /// thread outright, taking the Audio panel's device hot-swap down with it
 /// for the rest of the session.
+#[cfg(not(target_os = "windows"))]
 pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let monitor = host.input_devices().ok().and_then(|mut devices| {
@@ -37,6 +45,14 @@ pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
     host.default_input_device()
 }
 
+/// Windows: no alias needed, the default output device loopback-captures
+/// directly (see module doc).
+#[cfg(target_os = "windows")]
+pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
+    use cpal::traits::HostTrait;
+    host.default_output_device()
+}
+
 /// Labels of every available input device, for UI device pickers.
 ///
 /// Uses the fallible `description()` (not a `.name()` method, since `DeviceTrait`
@@ -46,6 +62,7 @@ pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
 /// which `ToString`'s blanket impl then turns into a panic via `.expect(...)`,
 /// reachable in practice, e.g. a device disconnected mid-enumeration. A
 /// device whose `description()` fails is skipped, not treated as an error.
+#[cfg(not(target_os = "windows"))]
 pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
     use cpal::traits::{DeviceTrait, HostTrait};
     host.input_devices()
@@ -53,10 +70,29 @@ pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Windows: lists loopback-capturable output devices, not input devices (see
+/// module doc).
+#[cfg(target_os = "windows")]
+pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    host.output_devices()
+        .map(|devices| devices.filter_map(|d| d.description().ok().map(|desc| desc.name().to_owned())).collect())
+        .unwrap_or_default()
+}
+
 /// Selects an input device by its exact `list_input_devices` label, for
 /// hot-swapping the capture device by name. A device whose `description()`
 /// fails (disconnected) is treated as a non-match, never as an error.
+#[cfg(not(target_os = "windows"))]
 pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
     use cpal::traits::{DeviceTrait, HostTrait};
     host.input_devices().ok()?.find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
+}
+
+/// Windows: matches against `output_devices()`, the same set `list_input_devices`
+/// lists on this platform (see module doc).
+#[cfg(target_os = "windows")]
+pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    host.output_devices().ok()?.find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
 }

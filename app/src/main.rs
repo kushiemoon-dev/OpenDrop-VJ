@@ -378,6 +378,54 @@ fn desired_video_input(
     Some(VideoInput::File(clips[video.current_clip_index % clips.len()].path.clone()))
 }
 
+/// Reconciles one deck slot's video-capture thread against `desired`
+/// (the caller passes `desired_video_input(&state.show.deck_video[slot],
+/// &state.video_clips, false)`), then uploads its newest decoded frame into
+/// `texture`. Mirrors the global video layer's own reconcile-then-upload
+/// block (see `desired_video_input`'s call site in `about_to_wait`), but
+/// simpler: `texture` was allocated once at bootstrap (Step 2) and is never
+/// recreated, since every source is pinned to `opendrop_io::video_capture::
+/// CAPTURE_W`x`CAPTURE_H`.
+fn tick_deck_video(
+    gl: &glow::Context,
+    desired: Option<opendrop_io::video_capture::VideoInput>,
+    tracked_input: &mut Option<opendrop_io::video_capture::VideoInput>,
+    capture: &opendrop_io::video_capture::VideoCaptureHandle,
+    frame_seq: &mut u64,
+    texture: glow::NativeTexture,
+) {
+    use opendrop_io::video_capture::VideoCaptureControl;
+    if desired != *tracked_input {
+        let msg = match desired.clone() {
+            Some(input) => VideoCaptureControl::Start(input),
+            None => VideoCaptureControl::Stop,
+        };
+        let _ = capture.control_tx.send(msg);
+        *tracked_input = desired;
+        *frame_seq = 0;
+    }
+    if let Some(frame) = capture.latest_frame() {
+        let expected_len = opendrop_io::video_capture::frame_len(frame.width, frame.height);
+        if frame.seq != *frame_seq && frame.data.len() == expected_len {
+            unsafe {
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                gl.tex_sub_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    0,
+                    0,
+                    frame.width as i32,
+                    frame.height as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(&frame.data)),
+                );
+            }
+            *frame_seq = frame.seq;
+        }
+    }
+}
+
 /// Which top-level panel the control window is currently showing. Gates
 /// per-tick work that only matters while its panel is visible (Step 17: the
 /// thumbnail pump only runs while `PresetBrowser` is on screen), besides
@@ -2008,6 +2056,9 @@ impl ApplicationHandler for App {
                 // restarts nothing.
                 for _ in 0..beats_this_tick {
                     state.show.on_video_beat(&clip_keys, ndi_active);
+                    for slot in 0..deck::DECK_COUNT {
+                        state.show.on_deck_video_beat(slot, &clip_keys);
+                    }
                 }
             }
             // The interval-driven half of the same playlist engines the
@@ -2070,6 +2121,19 @@ impl ApplicationHandler for App {
                     .video
                     .control_tx
                     .send(opendrop_io::video_capture::VideoCaptureControl::SetRate(state.show.video.playback_rate));
+            }
+            // Per-deck audio warp (ticket #9): always `ndi_active: false`
+            // (Step 1's `on_deck_video_beat` already commits to this; see
+            // its doc comment), since a deck-video slot has no NDI receive
+            // path of its own to defer to.
+            for slot in 0..deck::DECK_COUNT {
+                let previous_rate = state.show.deck_video[slot].playback_rate;
+                state.show.deck_video[slot].on_audio_tick(audio.energy_byte / 255.0, false);
+                if (state.show.deck_video[slot].playback_rate - previous_rate).abs() > 0.001 {
+                    let _ = state.deck_video_capture[slot].control_tx.send(
+                        opendrop_io::video_capture::VideoCaptureControl::SetRate(state.show.deck_video[slot].playback_rate),
+                    );
+                }
             }
 
             for (i, layer_input) in layer_inputs.iter().enumerate() {
@@ -2291,6 +2355,25 @@ impl ApplicationHandler for App {
                     }
                     state.video_frame_seq = frame.seq;
                 }
+            }
+
+            // Per-deck video decode (ticket #9): reconcile-then-upload, one
+            // slot at a time, mirroring the global block just above. Runs
+            // unconditionally every tick, regardless of that slot's
+            // bus/opacity, per the ticket's explicit requirement that a
+            // deck-video slot's decode/beat-cut/warp never gate on
+            // visibility (AC-3, AC-6); the projectM `InvisibleMode` throttle
+            // just below only applies to preset-mode slots.
+            for slot in 0..deck::DECK_COUNT {
+                let desired_slot = desired_video_input(&state.show.deck_video[slot], &state.video_clips, false);
+                tick_deck_video(
+                    &state.gl,
+                    desired_slot,
+                    &mut state.deck_video_input[slot],
+                    &state.deck_video_capture[slot],
+                    &mut state.deck_video_frame_seq[slot],
+                    state.deck_video_texture[slot],
+                );
             }
 
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);

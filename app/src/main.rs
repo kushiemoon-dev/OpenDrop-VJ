@@ -1801,6 +1801,9 @@ impl ApplicationHandler for App {
                             } else {
                                 state.preset_errors.remove(&slot);
                                 state.deck_preset_names[slot] = name;
+                                // A slot in video mode switches back to preset mode the moment a
+                                // preset actually lands on it (ticket #9's "Video per deck").
+                                state.show.deck_video[slot].enabled = false;
                             }
                         }
                     }

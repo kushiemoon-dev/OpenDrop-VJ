@@ -176,6 +176,14 @@ pub struct Show {
     /// `Xorshift64` consumer alongside the two playlist engines, the LFO,
     /// and the overlay queue. See `reseed_rng`.
     video_rng: Xorshift64,
+    /// One `VideoState` per deck slot (ticket #9's "Video per deck"),
+    /// independent of the global `video` layer above: each slot cuts on its
+    /// own beat via [`Show::on_deck_video_beat`].
+    pub deck_video: [VideoState; 4],
+    /// One more independent `Xorshift64` consumer per deck slot (ticket #9),
+    /// alongside the 5 already listed on `video_rng`'s own doc comment. See
+    /// `reseed_rng`.
+    deck_video_rng: [Xorshift64; 4],
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
     /// `beat_trigger_a/b.beats_per_change` (per-deck playlist-advance
@@ -248,6 +256,8 @@ impl Default for Show {
             overlay_store: OverlayStore::new(),
             video: VideoState::default(),
             video_rng: Xorshift64::default(),
+            deck_video: std::array::from_fn(|_| VideoState::default()),
+            deck_video_rng: [Xorshift64::default(); 4],
             auto_xfade: false,
             beats_per_change: 8,
             auto_xfade_count: 0,
@@ -297,6 +307,14 @@ impl Show {
         // the same beat, and two shuffles drawing identical sequences would
         // be visible.
         self.video_rng.reseed(seed ^ 0x3C3C_3C3C_3C3C_3C3C);
+        // Per-deck video shuffle (ticket #9's "Video per deck"): 4 more independent
+        // consumers, each XOR'd with its own constant for the same anti-lockstep
+        // reason as every RNG reseed above.
+        const DECK_VIDEO_RNG_XOR: [u64; 4] =
+            [0x1E1E_1E1E_1E1E_1E1E, 0x2D2D_2D2D_2D2D_2D2D, 0x4B4B_4B4B_4B4B_4B4B, 0x6E6E_6E6E_6E6E_6E6E];
+        for (slot, xor) in DECK_VIDEO_RNG_XOR.into_iter().enumerate() {
+            self.deck_video_rng[slot].reseed(seed ^ xor);
+        }
     }
 
     /// Beat-driven video-clip cut (Step 14 of the Phase 8 plan). Returns
@@ -314,6 +332,16 @@ impl Show {
     pub fn on_video_beat(&mut self, all_clip_keys: &[String], ndi_active: bool) -> bool {
         let draw = self.video_rng.next_f64();
         self.video.on_beat(all_clip_keys, ndi_active, draw)
+    }
+
+    /// Beat-driven video-clip cut for deck slot `slot` (ticket #9's "Video per
+    /// deck"). Same contract as [`Show::on_video_beat`], but per-slot: `slot`
+    /// indexes both `deck_video` and `deck_video_rng`. `ndi_active` is always
+    /// `false` here: a deck-video instance never exposes a live camera or NDI
+    /// source (out of scope; see the Video panel's per-deck branch).
+    pub fn on_deck_video_beat(&mut self, slot: usize, all_clip_keys: &[String]) -> bool {
+        let draw = self.deck_video_rng[slot].next_f64();
+        self.deck_video[slot].on_beat(all_clip_keys, false, draw)
     }
 
     /// Per-slot opacity for the compositor: `bus_gain(deck_bus[slot], crossfader)`.
@@ -990,6 +1018,11 @@ mod tests {
         #[test]
         fn strobe_starts_disabled() {
             assert!(!Show::default().strobe.enabled);
+        }
+
+        #[test]
+        fn deck_video_starts_default_on_every_slot() {
+            assert_eq!(Show::default().deck_video, std::array::from_fn(|_| VideoState::default()));
         }
     }
 
@@ -2413,6 +2446,39 @@ mod tests {
         }
     }
 
+    /// Ticket #9's "Video per deck": `on_deck_video_beat` must touch only
+    /// the targeted slot's `VideoState`, leaving the other 3 deck slots and
+    /// the global `video` layer untouched.
+    mod on_deck_video_beat {
+        use super::*;
+
+        fn keys(n: usize) -> Vec<String> {
+            (0..n).map(|i| format!("clip{i}")).collect()
+        }
+
+        #[test]
+        fn cuts_only_the_targeted_slot_leaving_others_untouched() {
+            let mut show = Show::default();
+            for slot in 0..4 {
+                show.deck_video[slot].enabled = true;
+                show.deck_video[slot].beats_per_cut = 1;
+                show.deck_video[slot].advance = crate::video::VideoAdvance::Sequential;
+            }
+            show.video.enabled = true;
+            show.video.beats_per_cut = 1;
+            show.video.advance = crate::video::VideoAdvance::Sequential;
+            let all = keys(3);
+
+            assert!(show.on_deck_video_beat(1, &all));
+
+            assert_eq!(show.deck_video[1].current_clip_index, 1);
+            assert_eq!(show.deck_video[0].current_clip_index, 0);
+            assert_eq!(show.deck_video[2].current_clip_index, 0);
+            assert_eq!(show.deck_video[3].current_clip_index, 0);
+            assert_eq!(show.video.current_clip_index, 0);
+        }
+    }
+
     mod reseed_rng {
         use super::*;
 
@@ -2458,6 +2524,14 @@ mod tests {
                 })
                 .collect();
             assert_ne!(draws_a, draws_b);
+        }
+
+        #[test]
+        fn seeds_the_4_deck_video_rng_slots_distinctly() {
+            let mut show = Show::default();
+            show.reseed_rng(7);
+            let draws: Vec<f64> = (0..4).map(|slot| show.deck_video_rng[slot].next_f64()).collect();
+            assert_ne!(draws[0], draws[1]);
         }
     }
 

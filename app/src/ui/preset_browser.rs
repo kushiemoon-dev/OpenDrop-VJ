@@ -589,6 +589,7 @@ mod tests {
             let mut inner_show = sample_show();
             let deck_tex_ids = [egui::TextureId::default(); 4];
             let deck_preset_names: [String; 4] = Default::default();
+            let deck_video_errors: [Option<String>; 4] = Default::default();
             let pending = HashSet::new();
             let errors = HashMap::new();
             let mut transition_seconds = 0.0;
@@ -597,6 +598,8 @@ mod tests {
                 show: &mut inner_show,
                 deck_tex_ids: &deck_tex_ids,
                 deck_preset_names: &deck_preset_names,
+                deck_video_tex_ids: &deck_tex_ids,
+                deck_video_errors: &deck_video_errors,
                 pending_validations: &pending,
                 preset_errors: &errors,
                 transition_seconds: &mut transition_seconds,
@@ -634,6 +637,7 @@ mod tests {
                 let mut inner_show = sample_show();
                 let deck_tex_ids = [egui::TextureId::default(); 4];
                 let deck_preset_names: [String; 4] = Default::default();
+                let deck_video_errors: [Option<String>; 4] = Default::default();
                 let pending = HashSet::new();
                 let errors = HashMap::new();
                 let mut transition_seconds = 0.0;
@@ -642,6 +646,8 @@ mod tests {
                     show: &mut inner_show,
                     deck_tex_ids: &deck_tex_ids,
                     deck_preset_names: &deck_preset_names,
+                    deck_video_tex_ids: &deck_tex_ids,
+                    deck_video_errors: &deck_video_errors,
                     pending_validations: &pending,
                     preset_errors: &errors,
                     transition_seconds: &mut transition_seconds,

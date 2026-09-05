@@ -29,7 +29,7 @@
 //!   split as `ui::cloud_presets`'s `local_error`).
 
 use opendrop_core::show::Show;
-use opendrop_core::video::{VideoAdvance, BEATS_PER_CUT_CHOICES};
+use opendrop_core::video::{VideoAdvance, VideoState, BEATS_PER_CUT_CHOICES};
 use opendrop_io::ndi::{NdiSnapshot, NdiSource};
 use opendrop_io::video_capture::{CameraDevice, VideoCaptureSnapshot};
 
@@ -46,6 +46,14 @@ pub enum VideoNdiRequest {
     Disconnect,
 }
 
+/// Which video state the panel currently shows/edits: the global layer, or
+/// one of the 4 deck slots' own instance (`Show::deck_video`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoPanelTarget {
+    Global,
+    Deck(usize),
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
@@ -58,44 +66,78 @@ pub fn show(
     ndi: &NdiSnapshot,
     ndi_selected_source: &mut Option<NdiSource>,
     ndi_request: &mut Option<VideoNdiRequest>,
+    target: &mut VideoPanelTarget,
 ) {
-    let ndi_active = ndi.receive_active;
-    let external_feed = show.video.external_feed_active(ndi_active);
+    target_selector_row(ui, target);
+    ui.separator();
 
-    ui.horizontal(|ui| {
-        ui.heading(format!("Video ({})", clips.len()));
-        let label = if show.video.enabled { "⏹ Off" } else { "▶ On" };
-        if ui.button(label).clicked() {
-            show.video.enabled = !show.video.enabled;
+    match *target {
+        VideoPanelTarget::Global => {
+            let ndi_active = ndi.receive_active;
+            let external_feed = show.video.external_feed_active(ndi_active);
+
+            ui.horizontal(|ui| {
+                ui.heading(format!("Video ({})", clips.len()));
+                let label = if show.video.enabled { "⏹ Off" } else { "▶ On" };
+                if ui.button(label).clicked() {
+                    show.video.enabled = !show.video.enabled;
+                }
+                if ui.button("Rescan").clicked() {
+                    *clips = video_clips::scan_clips();
+                    show.video.current_clip_index = 0;
+                }
+            });
+
+            if let Some(err) = local_error.as_deref() {
+                widgets::error_banner(ui, err);
+            }
+            if let Some(err) = capture.last_error.as_deref() {
+                widgets::error_banner(ui, err);
+            }
+
+            if show.video.enabled {
+                ui.separator();
+                opacity_row(ui, &mut show.video.opacity, ndi_active);
+                advance_row(ui, &mut show.video, external_feed);
+                reactive_row(ui, &mut show.video, external_feed);
+            }
+
+            ui.separator();
+            camera_row(ui, show, cameras, camera_device, local_error, ndi_active, ndi_request);
+
+            ui.separator();
+            ndi_row(ui, ndi, ndi_selected_source, ndi_request);
+
+            ui.separator();
+            clip_library(ui, &mut show.video, clips, local_error, external_feed, false);
         }
-        if ui.button("Rescan").clicked() {
-            *clips = video_clips::scan_clips();
-            show.video.current_clip_index = 0;
+        VideoPanelTarget::Deck(slot) => {
+            ui.heading(format!("Deck {slot} video ({})", clips.len()));
+            let video = &mut show.deck_video[slot];
+            advance_row(ui, video, false);
+            reactive_row(ui, video, false);
+            ui.separator();
+            clip_library(ui, video, clips, local_error, false, true);
+        }
+    }
+}
+
+/// Global / Deck 0-3 pill row: which `VideoState` the rest of the panel
+/// reads and writes. Same pill-toggle idiom as `advance_row`'s mode pills.
+fn target_selector_row(ui: &mut egui::Ui, target: &mut VideoPanelTarget) {
+    ui.horizontal(|ui| {
+        let t = theme(ui);
+        let mut pill_target = |ui: &mut egui::Ui, label: String, value: VideoPanelTarget| {
+            let color = if *target == value { t.palette.accent } else { t.palette.dim };
+            if widgets::pill(ui, &label, color).interact(egui::Sense::click()).clicked() {
+                *target = value;
+            }
+        };
+        pill_target(ui, "Global".to_string(), VideoPanelTarget::Global);
+        for i in 0..4 {
+            pill_target(ui, format!("Deck {i}"), VideoPanelTarget::Deck(i));
         }
     });
-
-    if let Some(err) = local_error.as_deref() {
-        widgets::error_banner(ui, err);
-    }
-    if let Some(err) = capture.last_error.as_deref() {
-        widgets::error_banner(ui, err);
-    }
-
-    if show.video.enabled {
-        ui.separator();
-        opacity_row(ui, &mut show.video.opacity, ndi_active);
-        advance_row(ui, show, external_feed);
-        reactive_row(ui, show, external_feed);
-    }
-
-    ui.separator();
-    camera_row(ui, show, cameras, camera_device, local_error, ndi_active, ndi_request);
-
-    ui.separator();
-    ndi_row(ui, ndi, ndi_selected_source, ndi_request);
-
-    ui.separator();
-    clip_library(ui, show, clips, local_error, external_feed);
 }
 
 /// The α crossfader: the layer's own opacity, independent of the deck
@@ -124,24 +166,24 @@ fn opacity_row(ui: &mut egui::Ui, opacity: &mut f64, ndi_active: bool) {
 /// an external feed drives the layer, exactly as the web disabled them
 /// (`disabled={liveActive || ndiActive}`): a single camera/NDI stream is
 /// not a rotating library.
-fn advance_row(ui: &mut egui::Ui, show: &mut Show, external_feed: bool) {
+fn advance_row(ui: &mut egui::Ui, video: &mut VideoState, external_feed: bool) {
     ui.add_enabled_ui(!external_feed, |ui| {
         ui.horizontal(|ui| {
             let t = theme(ui);
             for mode in VideoAdvance::ALL {
-                let color = if show.video.advance == mode { t.palette.accent } else { t.palette.dim };
+                let color = if video.advance == mode { t.palette.accent } else { t.palette.dim };
                 if widgets::pill(ui, mode.label(), color).interact(egui::Sense::click()).clicked() {
-                    show.video.advance = mode;
+                    video.advance = mode;
                 }
             }
-            ui.add_enabled_ui(show.video.advance != VideoAdvance::Manual, |ui| {
+            ui.add_enabled_ui(video.advance != VideoAdvance::Manual, |ui| {
                 egui::ComboBox::from_id_salt("od_video_beats_per_cut")
-                    .selected_text(format!("{} beats", show.video.beats_per_cut))
+                    .selected_text(format!("{} beats", video.beats_per_cut))
                     .width(90.0)
                     .show_ui(ui, |ui| {
                         for beats in BEATS_PER_CUT_CHOICES {
-                            if ui.selectable_label(show.video.beats_per_cut == beats, beats.to_string()).clicked() {
-                                show.video.beats_per_cut = beats;
+                            if ui.selectable_label(video.beats_per_cut == beats, beats.to_string()).clicked() {
+                                video.beats_per_cut = beats;
                             }
                         }
                     });
@@ -154,13 +196,13 @@ fn advance_row(ui: &mut egui::Ui, show: &mut Show, external_feed: bool) {
 /// the web applied: Cut and Warp need a clip library (and a non-Manual
 /// mode, for Cut); Flash and Hue are pure color correction on whatever the
 /// layer is showing, so they stay live even for a camera or NDI feed.
-fn reactive_row(ui: &mut egui::Ui, show: &mut Show, external_feed: bool) {
+fn reactive_row(ui: &mut egui::Ui, video: &mut VideoState, external_feed: bool) {
     ui.horizontal(|ui| {
-        let cut_enabled = !external_feed && show.video.advance != VideoAdvance::Manual;
-        toggle_pill(ui, "✂ Cut", &mut show.video.react_cut, cut_enabled, "Cut to another clip on the beat");
-        toggle_pill(ui, "✦ Flash", &mut show.video.react_flash, true, "Brighten the layer on the beat");
-        toggle_pill(ui, "⏩ Warp", &mut show.video.react_warp, !external_feed, "Speed the clip up with the bass");
-        toggle_pill(ui, "🌈 Hue", &mut show.video.react_hue, true, "Rotate the layer's hue on the beat");
+        let cut_enabled = !external_feed && video.advance != VideoAdvance::Manual;
+        toggle_pill(ui, "✂ Cut", &mut video.react_cut, cut_enabled, "Cut to another clip on the beat");
+        toggle_pill(ui, "✦ Flash", &mut video.react_flash, true, "Brighten the layer on the beat");
+        toggle_pill(ui, "⏩ Warp", &mut video.react_warp, !external_feed, "Speed the clip up with the bass");
+        toggle_pill(ui, "🌈 Hue", &mut video.react_hue, true, "Rotate the layer's hue on the beat");
     });
 }
 
@@ -312,19 +354,20 @@ fn ndi_row(
 /// user clips only.
 fn clip_library(
     ui: &mut egui::Ui,
-    show: &mut Show,
+    video: &mut VideoState,
     clips: &mut Vec<VideoClip>,
     local_error: &mut Option<String>,
     external_feed: bool,
+    auto_enable_on_pick: bool,
 ) {
     ui.horizontal(|ui| {
         if ui.button("+ Video").clicked() {
-            import_via_file_dialog(show, clips, local_error);
+            import_via_file_dialog(video, clips, local_error);
         }
-        if !show.video.selected_clip_keys.is_empty() {
-            ui.label(format!("{} in rotation", show.video.selected_clip_keys.len()));
+        if !video.selected_clip_keys.is_empty() {
+            ui.label(format!("{} in rotation", video.selected_clip_keys.len()));
             if ui.button("Clear").clicked() {
-                show.video.clear_clip_selection();
+                video.clear_clip_selection();
             }
         }
     });
@@ -337,19 +380,22 @@ fn clip_library(
         widgets::micro_label(ui, "An external feed is driving the layer: the clip library is paused.");
     }
 
-    let current = show.video.current_clip_index % clips.len();
+    let current = video.current_clip_index % clips.len();
     let mut to_delete: Option<usize> = None;
     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
         for (index, clip) in clips.iter().enumerate() {
             ui.push_id(index, |ui| {
                 ui.horizontal(|ui| {
-                    let mut in_rotation = show.video.selected_clip_keys.iter().any(|k| k == &clip.key);
+                    let mut in_rotation = video.selected_clip_keys.iter().any(|k| k == &clip.key);
                     if ui.checkbox(&mut in_rotation, "").on_hover_text("Include in the auto-cut rotation").changed() {
-                        show.video.toggle_clip_selection(&clip.key);
+                        video.toggle_clip_selection(&clip.key);
                     }
                     let label = if clip.builtin { format!("📦 {}", clip.name) } else { clip.name.clone() };
                     if ui.selectable_label(index == current, label).clicked() {
-                        show.video.current_clip_index = index;
+                        video.current_clip_index = index;
+                        if auto_enable_on_pick {
+                            video.enabled = true;
+                        }
                     }
                     if !clip.builtin && ui.small_button("✕").on_hover_text("Delete this clip").clicked() {
                         to_delete = Some(index);
@@ -360,21 +406,21 @@ fn clip_library(
     });
 
     if let Some(index) = to_delete {
-        delete_clip_at(show, clips, index, local_error);
+        delete_clip_at(video, clips, index, local_error);
     }
 }
 
 /// Deletes a user clip's file and drops it from the library and the
 /// rotation. Port of `removeVideoClip`, whose two bookkeeping steps live in
 /// `core::video::VideoState::forget_clip`.
-fn delete_clip_at(show: &mut Show, clips: &mut Vec<VideoClip>, index: usize, local_error: &mut Option<String>) {
+fn delete_clip_at(video: &mut VideoState, clips: &mut Vec<VideoClip>, index: usize, local_error: &mut Option<String>) {
     let Some(clip) = clips.get(index) else { return };
     if let Err(e) = video_clips::delete_clip(clip) {
         *local_error = Some(e);
         return;
     }
     let key = clips.remove(index).key;
-    show.video.forget_clip(&key, clips.len());
+    video.forget_clip(&key, clips.len());
     *local_error = None;
 }
 
@@ -385,7 +431,7 @@ fn delete_clip_at(show: &mut Show, clips: &mut Vec<VideoClip>, index: usize, loc
 /// Mirrors `onVideoFilePick`: multiple files at once, imported in order,
 /// and, when 2 or more land, added straight to the auto-cut rotation,
 /// since importing a batch *is* the "prepare a playlist" case.
-fn import_via_file_dialog(show: &mut Show, clips: &mut Vec<VideoClip>, local_error: &mut Option<String>) {
+fn import_via_file_dialog(video: &mut VideoState, clips: &mut Vec<VideoClip>, local_error: &mut Option<String>) {
     let Some(paths) = rfd::FileDialog::new().add_filter("Video", &VIDEO_EXTENSIONS).pick_files() else {
         return; // dialog cancelled
     };
@@ -402,13 +448,13 @@ fn import_via_file_dialog(show: &mut Show, clips: &mut Vec<VideoClip>, local_err
     }
     if added.len() > 1 {
         for key in &added {
-            if !show.video.selected_clip_keys.iter().any(|k| k == key) {
-                show.video.toggle_clip_selection(key);
+            if !video.selected_clip_keys.iter().any(|k| k == key) {
+                video.toggle_clip_selection(key);
             }
         }
     }
     if !added.is_empty() {
-        show.video.enabled = true; // `addVideoFromFile`'s own auto-enable
+        video.enabled = true; // `addVideoFromFile`'s own auto-enable
     }
     *local_error = if errors.is_empty() { None } else { Some(errors.join("; ")) };
 }
@@ -438,6 +484,7 @@ mod tests {
         ndi: NdiSnapshot,
         ndi_selected_source: Option<NdiSource>,
         ndi_request: Option<VideoNdiRequest>,
+        target: VideoPanelTarget,
     }
 
     impl PanelState {
@@ -452,6 +499,7 @@ mod tests {
                 ndi: NdiSnapshot::default(),
                 ndi_selected_source: None,
                 ndi_request: None,
+                target: VideoPanelTarget::Global,
             }
         }
 
@@ -467,6 +515,7 @@ mod tests {
                 &self.ndi,
                 &mut self.ndi_selected_source,
                 &mut self.ndi_request,
+                &mut self.target,
             );
         }
     }
@@ -537,6 +586,16 @@ mod tests {
         });
     }
 
+    #[test]
+    fn show_does_not_panic_with_a_deck_target_selected() {
+        themed_test_ui(|ui| {
+            let mut state = PanelState::new();
+            state.target = VideoPanelTarget::Deck(1);
+            state.clips = vec![clip("a", false), clip("b", false)];
+            state.render(ui);
+        });
+    }
+
     mod start_camera {
         use super::*;
 
@@ -576,7 +635,7 @@ mod tests {
             // Bundled clips are never deletable: `delete_clip` refuses.
             let mut clips = vec![clip("bundled", true)];
             let mut error = None;
-            delete_clip_at(&mut show, &mut clips, 0, &mut error);
+            delete_clip_at(&mut show.video, &mut clips, 0, &mut error);
             assert_eq!(clips.len(), 1);
             assert!(error.is_some());
         }
@@ -586,7 +645,7 @@ mod tests {
             let mut show = Show::default();
             let mut clips: Vec<VideoClip> = Vec::new();
             let mut error = None;
-            delete_clip_at(&mut show, &mut clips, 3, &mut error);
+            delete_clip_at(&mut show.video, &mut clips, 3, &mut error);
             assert!(error.is_none());
         }
 
@@ -608,7 +667,7 @@ mod tests {
             show.video.current_clip_index = 1;
             let mut clips = vec![real];
             let mut error = None;
-            delete_clip_at(&mut show, &mut clips, 0, &mut error);
+            delete_clip_at(&mut show.video, &mut clips, 0, &mut error);
 
             std::fs::remove_dir_all(&dir).unwrap();
             assert!(error.is_none(), "{error:?}");

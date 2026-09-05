@@ -763,6 +763,9 @@ struct AppState {
     /// `VideoCaptureSnapshot::last_error`, same split as
     /// `cloud_presets_secret_error`.
     video_local_error: Option<String>,
+    /// Which `VideoState` the Video panel currently shows/edits (ticket #9's
+    /// "Video per deck"): the global layer, or one of the 4 deck slots.
+    video_panel_target: ui::video::VideoPanelTarget,
     /// Handle to the dedicated CloudPresets thread (Step 6), `latest()`
     /// gives the current entries/busy/last-error snapshot, `control_tx`
     /// sends List/Upload/Rename/Delete/Download.
@@ -1554,6 +1557,9 @@ fn ui_root(
                     perform.show,
                     perform.deck_tex_ids,
                     perform.deck_preset_names,
+                    sources.video_clips.as_slice(),
+                    perform.deck_video_tex_ids,
+                    perform.deck_video_errors,
                     perform.pending_validations,
                     perform.preset_errors,
                     perform.transition_seconds,
@@ -1670,6 +1676,7 @@ fn ui_root(
                     &ndi_snapshot,
                     sources.ndi_in_selected_source,
                     sources.video_ndi_request,
+                    sources.video_panel_target,
                 );
             }
             Panel::CloudPresets => {
@@ -2562,6 +2569,12 @@ impl ApplicationHandler for App {
             // `ui::video`'s module doc comment on why no panel handle
             // reaches that panel.
             let video_capture_snapshot = state.video.latest();
+            // Per-deck decode-error snapshot (ticket #9's "Video per deck"),
+            // same "copy out before the destructure" reason as
+            // `video_capture_snapshot` above; read by the Decks panel to
+            // surface a video-mode slot's decode failure on its card.
+            let deck_video_errors: [Option<String>; 4] =
+                std::array::from_fn(|i| state.deck_video_capture[i].latest().last_error.clone());
 
             // Decks (Step 16), preset-browser (Step 17), playlists (Step
             // 18), and audio (Step 19) panels: real content, replacing the
@@ -2575,6 +2588,7 @@ impl ApplicationHandler for App {
                 show,
                 deck_tex_ids,
                 deck_preset_names,
+                deck_video_tex_ids,
                 pending_validations,
                 preset_errors,
                 transition_seconds,
@@ -2634,6 +2648,7 @@ impl ApplicationHandler for App {
                 video_cameras,
                 video_camera_device,
                 video_local_error,
+                video_panel_target,
                 cloud_presets,
                 cloud_presets_api_url,
                 cloud_presets_token_input,
@@ -2668,6 +2683,8 @@ impl ApplicationHandler for App {
                 show,
                 deck_tex_ids,
                 deck_preset_names,
+                deck_video_tex_ids,
+                deck_video_errors: &deck_video_errors,
                 pending_validations,
                 preset_errors,
                 transition_seconds,
@@ -2709,6 +2726,7 @@ impl ApplicationHandler for App {
                 video_local_error,
                 video_capture: &video_capture_snapshot,
                 video_ndi_request: &mut video_ndi_request,
+                video_panel_target,
                 cloud_presets,
                 cloud_presets_api_url,
                 cloud_presets_token_input,
@@ -3456,6 +3474,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         video_cameras,
         video_camera_device,
         video_local_error: None,
+        video_panel_target: ui::video::VideoPanelTarget::Global,
         cloud_presets: opendrop_io::cloud_presets::spawn(),
         cloud_presets_api_url: ui_config.cloud_presets_api_url.clone().unwrap_or_default(),
         cloud_presets_token_input: String::new(),

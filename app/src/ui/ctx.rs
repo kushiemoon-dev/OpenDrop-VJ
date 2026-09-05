@@ -88,6 +88,8 @@ pub(crate) struct PerformCtx<'a> {
     pub(crate) show: &'a mut Show,
     pub(crate) deck_tex_ids: &'a [egui::TextureId; 4],
     pub(crate) deck_preset_names: &'a [String; 4],
+    pub(crate) deck_video_tex_ids: &'a [egui::TextureId; 4],
+    pub(crate) deck_video_errors: &'a [Option<String>; 4],
     pub(crate) pending_validations: &'a HashSet<usize>,
     pub(crate) preset_errors: &'a HashMap<usize, String>,
     pub(crate) transition_seconds: &'a mut f64,
@@ -169,6 +171,7 @@ pub(crate) struct SourcesCtx<'a> {
     /// handle is borrowed by `OutputCtx` for the whole closure, so the
     /// panel records what it wants instead of sending it itself.
     pub(crate) video_ndi_request: &'a mut Option<crate::ui::video::VideoNdiRequest>,
+    pub(crate) video_panel_target: &'a mut crate::ui::video::VideoPanelTarget,
     pub(crate) cloud_presets: &'a opendrop_io::cloud_presets::CloudPresetsHandle,
     pub(crate) cloud_presets_api_url: &'a mut String,
     pub(crate) cloud_presets_token_input: &'a mut String,

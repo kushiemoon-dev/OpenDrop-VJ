@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use crate::theme::easing::ease_out_kushie;
 use crate::theme::fonts::FAMILY_MONO;
 use crate::ui::widgets::{self, theme};
+use crate::video_clips::VideoClip;
 
 /// `Deck::texture` is filled by `glCopyTexSubImage2D` from the deck's own
 /// FBO 0, so its texel row 0 is the framebuffer's *bottom* scanline: GL's
@@ -51,13 +52,27 @@ pub fn show(
     show: &mut Show,
     deck_tex_ids: &[egui::TextureId; 4],
     deck_preset_names: &[String; 4],
+    video_clips: &[VideoClip],
+    deck_video_tex_ids: &[egui::TextureId; 4],
+    deck_video_errors: &[Option<String>; 4],
     pending_validations: &HashSet<usize>,
     preset_errors: &HashMap<usize, String>,
     transition_seconds: &mut f64,
 ) {
     ui.horizontal(|ui| {
         for i in 0..4 {
-            deck_card(ui, i, show, deck_tex_ids, deck_preset_names, pending_validations, preset_errors);
+            deck_card(
+                ui,
+                i,
+                show,
+                deck_tex_ids,
+                deck_preset_names,
+                video_clips,
+                deck_video_tex_ids,
+                deck_video_errors,
+                pending_validations,
+                preset_errors,
+            );
         }
     });
 
@@ -77,6 +92,9 @@ fn deck_card(
     show: &mut Show,
     deck_tex_ids: &[egui::TextureId; 4],
     deck_preset_names: &[String; 4],
+    video_clips: &[VideoClip],
+    deck_video_tex_ids: &[egui::TextureId; 4],
+    deck_video_errors: &[Option<String>; 4],
     pending_validations: &HashSet<usize>,
     preset_errors: &HashMap<usize, String>,
 ) {
@@ -100,10 +118,20 @@ fn deck_card(
                     // label below stretches this card to consume the entire row,
                     // hiding decks 1-3 (found live, post-Phase-7-redesign).
                     ui.set_width(t.metrics.thumb_size.x);
-                    let image = ui.add(egui::Image::new((deck_tex_ids[i], t.metrics.thumb_size)).uv(FLIPPED_V_UV));
+                    let content_tex_id = if show.deck_video[i].enabled { deck_video_tex_ids[i] } else { deck_tex_ids[i] };
+                    let image = ui.add(egui::Image::new((content_tex_id, t.metrics.thumb_size)).uv(FLIPPED_V_UV));
                     thumbnail_overlay(ui, image.rect, is_active);
 
-                    if pending_validations.contains(&i) {
+                    if show.deck_video[i].enabled {
+                        if let Some(err) = deck_video_errors[i].as_deref() {
+                            widgets::error_banner(ui, err);
+                        } else if video_clips.is_empty() {
+                            ui.label("(no clip)");
+                        } else {
+                            let clip = &video_clips[show.deck_video[i].current_clip_index % video_clips.len()];
+                            ui.label(&clip.name);
+                        }
+                    } else if pending_validations.contains(&i) {
                         ui.label("Validating…");
                     } else if let Some(err) = preset_errors.get(&i) {
                         widgets::error_banner(ui, err);
@@ -353,10 +381,11 @@ mod tests {
             let mut state = sample_state();
             let tex_ids = sample_tex_ids();
             let names: [String; 4] = Default::default();
+            let video_errors: [Option<String>; 4] = Default::default();
             let pending = HashSet::new();
             let errors = HashMap::new();
             let mut transition_seconds = 1.2;
-            show(ui, &mut state, &tex_ids, &names, &pending, &errors, &mut transition_seconds);
+            show(ui, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors, &mut transition_seconds);
         });
     }
 
@@ -367,10 +396,11 @@ mod tests {
                 let mut state = sample_state();
                 let tex_ids = sample_tex_ids();
                 let names: [String; 4] = Default::default();
+                let video_errors: [Option<String>; 4] = Default::default();
                 let pending = HashSet::new();
                 let errors = HashMap::new();
                 let mut transition_seconds = 0.0;
-                show(ui, &mut state, &tex_ids, &names, &pending, &errors, &mut transition_seconds);
+                show(ui, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors, &mut transition_seconds);
             });
         });
     }
@@ -384,12 +414,13 @@ mod tests {
             state.deck_bus = [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::Off];
             let tex_ids = sample_tex_ids();
             let names: [String; 4] = Default::default();
+            let video_errors: [Option<String>; 4] = Default::default();
             let mut pending = HashSet::new();
             pending.insert(1);
             let mut errors = HashMap::new();
             errors.insert(2, "mesh load failed".to_string());
             let mut transition_seconds = 5.0;
-            show(ui, &mut state, &tex_ids, &names, &pending, &errors, &mut transition_seconds);
+            show(ui, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors, &mut transition_seconds);
         });
     }
 
@@ -399,10 +430,32 @@ mod tests {
             let mut state = sample_state();
             let tex_ids = sample_tex_ids();
             let names = ["Neon Tunnel Refract".to_string(), String::new(), String::new(), String::new()];
+            let video_errors: [Option<String>; 4] = Default::default();
             let pending = HashSet::new();
             let errors = HashMap::new();
             let mut transition_seconds = 2.5;
-            show(ui, &mut state, &tex_ids, &names, &pending, &errors, &mut transition_seconds);
+            show(ui, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors, &mut transition_seconds);
+        });
+    }
+
+    #[test]
+    fn show_renders_a_deck_in_video_mode() {
+        themed_test_ui(|ui| {
+            let mut state = sample_state();
+            state.deck_video[0].enabled = true;
+            let tex_ids = sample_tex_ids();
+            let names: [String; 4] = Default::default();
+            let video_errors: [Option<String>; 4] = Default::default();
+            let clips = vec![VideoClip {
+                key: "/clips/a.webm".into(),
+                name: "a".into(),
+                path: "/clips/a.webm".into(),
+                builtin: false,
+            }];
+            let pending = HashSet::new();
+            let errors = HashMap::new();
+            let mut transition_seconds = 1.0;
+            show(ui, &mut state, &tex_ids, &names, &clips, &tex_ids, &video_errors, &pending, &errors, &mut transition_seconds);
         });
     }
 
@@ -415,10 +468,11 @@ mod tests {
             state.selected_slot = 0;
             let tex_ids = sample_tex_ids();
             let names: [String; 4] = Default::default();
+            let video_errors: [Option<String>; 4] = Default::default();
             let pending = HashSet::new();
             let errors = HashMap::new();
-            deck_card(ui, 0, &mut state, &tex_ids, &names, &pending, &errors);
-            deck_card(ui, 1, &mut state, &tex_ids, &names, &pending, &errors);
+            deck_card(ui, 0, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors);
+            deck_card(ui, 1, &mut state, &tex_ids, &names, &[], &tex_ids, &video_errors, &pending, &errors);
         });
     }
 

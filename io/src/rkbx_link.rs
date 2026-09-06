@@ -1,6 +1,6 @@
 //! Second, independent OSC UDP listener for the `rkbx_link` community bridge
-//! (https://github.com/grufkork/rkbx_link, ticket #10 "Synchronised music
-//! video playback"). Same dedicated-thread + `ArcSwap` snapshot + `mpsc`
+//! (https://github.com/grufkork/rkbx_link), enabling synchronised music
+//! video playback. Same dedicated-thread + `ArcSwap` snapshot + `mpsc`
 //! control-channel architecture as `crate::osc` (see that module's doc
 //! comment for the full write-up); a second listener rather than an
 //! extension of `crate::osc`'s parser because rkbx_link's message shape is
@@ -17,8 +17,8 @@
 //!   track change (rkbx_link's own `track_changed` event, never per-tick):
 //!   naturally event-shaped, so they are reported over `track_events`, an
 //!   `mpsc::Receiver`, same idiom as `OscHandle::events`. `album` is
-//!   recognized as a known address but never stored: matching (ticket #10)
-//!   is title+artist only.
+//!   recognized as a known address but never stored: matching is
+//!   title+artist only.
 
 use std::net::UdpSocket;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -207,12 +207,12 @@ fn decode_packet(buf: &[u8]) -> Option<RkbxMessage> {
 /// Pure address/argument logic (mirrors `io::osc::dispatch_from_message`'s
 /// factoring), so it's unit-testable without a socket. Address shape is
 /// `/{deck}/track/title`, `/{deck}/track/artist`, or `/{deck}/time`; `deck`
-/// is a bare 0-based decimal index. Anything else — an unparseable/
-/// out-of-range deck index, `/{deck}/track/album`, `/master/*`, `/{deck}/bpm`
-/// etc. — falls through to `None` (silently ignored), matching rkbx_link's
-/// own "messages for any other address are ignored for v1" scoping: no
-/// special-casing of `album` or the `/master/*` aliases is needed, they are
-/// simply never matched by any arm below.
+/// is a bare 0-based decimal index. Anything else falls through to `None`
+/// (silently ignored): an unparseable/out-of-range deck index,
+/// `/{deck}/track/album`, `/master/*`, `/{deck}/bpm` etc. This matches
+/// rkbx_link's own "messages for any other address are ignored for v1"
+/// scoping: no special-casing of `album` or the `/master/*` aliases is
+/// needed, they are simply never matched by any arm below.
 fn decode_message(addr: &str, args: &[OscType]) -> Option<RkbxMessage> {
     let rest = addr.strip_prefix('/')?;
     let (deck_str, tail) = rest.split_once('/')?;

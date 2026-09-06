@@ -23,7 +23,7 @@ static METRICS: Metrics = Metrics {
     spacing_airy: vec2(10.0, 8.0),
     spacing_dense: vec2(6.0, 2.0),
     thumb_size: vec2(160.0, 90.0),
-    // 4:3 (mockup's `.od-tile-thumb`), not the engine's own 16:9 thumbnail
+    // 4:3, not the engine's own 16:9 thumbnail
     // render aspect ratio; see `ui::preset_browser::tile`'s doc comment.
     tile_size: vec2(96.0, 72.0),
     tile_content_w: 110.0,
@@ -36,10 +36,7 @@ static TYPE_SCALE: TypeScale =
     TypeScale { display: 24.0, heading: 18.0, section: 15.0, body: 13.0, strong: 13.0, button: 13.0, small: 9.0, micro: 8.0, numeric: 14.0, monospace: 13.0 };
 
 // Shared semantic status colors: same hex across every theme (not part of
-// a theme's visual identity), sourced from the companion mockups
-// (`shell.html`/`decks-presets.html` `--live`/`--warn`/`--error` custom
-// properties, both under `.superpowers/brainstorm/4045861-1788117215/
-// content/`).
+// a theme's visual identity).
 const OK: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
 const WARN: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
 const ERROR: Color32 = Color32::from_rgb(0xff, 0x6b, 0x6b);
@@ -83,7 +80,7 @@ static OPENDROP_CLASSIC: Theme = Theme {
 };
 
 // `ink`/`surface` below: see `cyan_palette_hex_values`'s doc comment for
-// why `ink` is `#080f12` rather than the plan text's literal `#0e1a1e`.
+// why `ink` is `#080f12` rather than `#0e1a1e`.
 static CYAN: Theme = Theme {
     id: ThemeId::Cyan,
     palette: Palette {
@@ -157,8 +154,8 @@ mod tests {
 
     // --- Cyan/Midnight: exact hex per palette field -------------------------
     //
-    // `ink` is `#080f12`, not the `#0e1a1e` the plan's prose literally
-    // states: that literal is `palettes.html`'s `.cyan` `--shell-surface`
+    // `ink` is `#080f12`, not `#0e1a1e`, which is easy to conflate:
+    // that literal is `palettes.html`'s `.cyan` `--shell-surface`
     // value, not `--shell-ink` (`--shell-ink:#080f12; --shell-surface:
     // #0e1a1e`). Using `#0e1a1e` for both `ink` and `surface` would make
     // them equal, failing `every_theme_has_monotonically_increasing_

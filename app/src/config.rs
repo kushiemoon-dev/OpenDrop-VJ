@@ -1,8 +1,7 @@
 //! UI-state persistence: `UiConfig` <-> JSON on disk at
 //! `ProjectDirs::from("", "", "opendrop-native").config_dir()/ui.json`.
 //! Structural copy of `io/src/midi/mapping.rs`'s mapping-persistence
-//! pattern (Step 7 of the Phase 7 UI redesign plan), same best-effort,
-//! never-panic philosophy: a missing/malformed/stale file degrades to
+//! pattern, same best-effort, never-panic philosophy: a missing/malformed/stale file degrades to
 //! `UiConfig::default()` rather than failing bootstrap.
 //!
 //! Most of `UiConfig` is wired into `main.rs`'s bootstrap and exit paths:
@@ -27,11 +26,11 @@ use crate::theme::registry::ThemeId;
 use crate::InvisibleMode;
 
 /// Serde "remote type" shadow for `theme::registry::ThemeId`
-/// (https://serde.rs/remote-derive.html): `ThemeId` is a Step 3 type we
-/// import rather than redefine, and it doesn't derive `Serialize`/
-/// `Deserialize` itself (Step 3 predates this module and has no reason to
-/// carry a serde dependency for a persistence need that's local to this
-/// step). This shadow's derived impl operates on the real `ThemeId`
+/// (https://serde.rs/remote-derive.html): `ThemeId` is imported rather
+/// than redefined here, and it doesn't derive `Serialize`/
+/// `Deserialize` itself since it predates this module and has no reason to
+/// carry a serde dependency for a persistence need that's local here.
+/// This shadow's derived impl operates on the real `ThemeId`
 /// directly via `#[serde(remote = "ThemeId")]`; `UiConfig::theme` opts in
 /// via `#[serde(with = "ThemeIdWire")]` below. Variant names/count must
 /// stay in sync with `ThemeId`'s real definition.
@@ -55,8 +54,8 @@ enum InvisibleModeWire {
 /// serializable type rather than adding `Serialize`/`Deserialize` to
 /// `Panel` itself, same reasoning `mapping.rs` gives for not deriving
 /// those on `CommandId`: avoid a persistence-only impl on a type whose
-/// primary job is UI navigation. Already reflects the post-Step-9 split of
-/// `Panel::Ndi` into `NdiIn`/`NdiOut` (per this step's brief), even though
+/// primary job is UI navigation. Already reflects the split of
+/// `Panel::Ndi` into `NdiIn`/`NdiOut`, even though
 /// `Panel` itself hasn't split yet.
 ///
 /// `#[serde(other)]` on `Decks` (mirroring `Panel`'s own `#[default]`
@@ -116,9 +115,8 @@ pub(crate) struct UiConfig {
     pub(crate) output_monitor: Option<String>,
     pub(crate) audio_input_device: Option<String>,
     pub(crate) osc_port: u16,
-    /// The rkbx_link OSC listener's port (ticket #10 "Synchronised music
-    /// video playback"), independent of `osc_port` above. Defaults to
-    /// `4460`, rkbx_link's own default `osc.destination` port.
+    /// The rkbx_link OSC listener's port, independent of `osc_port` above.
+    /// Defaults to `4460`, rkbx_link's own default `osc.destination` port.
     pub(crate) rkbx_link_port: u16,
     pub(crate) obs_host: String,
     pub(crate) obs_port: u16,
@@ -131,8 +129,8 @@ pub(crate) struct UiConfig {
     /// Base URL of the CloudPresets backend Worker (`workers/presets-
     /// cloud/` in the web app's repo, see the `legacy-web` branch). `None`/empty means the
     /// feature is disabled, same convention as the web app's
-    /// `PUBLIC_CLOUD_PRESETS_API=` (empty in `.env.example`), see Step 6's
-    /// Override 4: no production URL is committed anywhere yet, the user
+    /// `PUBLIC_CLOUD_PRESETS_API=` (empty in `.env.example`): no production
+    /// URL is committed anywhere yet, the user
     /// must supply one before this panel does anything.
     pub(crate) cloud_presets_api_url: Option<String>,
     /// On-disk shape of `AppState::keymap` (`HashMap<winit::keyboard::Key,

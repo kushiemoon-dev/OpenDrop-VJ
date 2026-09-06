@@ -1,10 +1,9 @@
 //! Playlists panel: per-deck (A/B) playlist transport/lock/item list, mode/
 //! interval controls, and per-deck beat-sync toggle + trigger config. Port
-//! of `SidebarPlaylist.svelte` (Step 18 of the plan). The shared BPM
+//! of `SidebarPlaylist.svelte`. The shared BPM
 //! display, Tap Tempo/Clear, beats-per-change selector, and auto-crossfade
 //! toggle that used to sit here moved into the header's hand-painted
-//! mini-transport (Step 10 of the Phase 7 UI redesign plan, `ui::shell::
-//! header`). This panel no longer renders them.
+//! mini-transport (`ui::shell::header`). This panel no longer renders them.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as
 //! `ui::decks`/`ui::preset_browser`: the call site (`main.rs`'s
@@ -20,8 +19,8 @@
 //! so this panel shows one shared mode/interval control above the two
 //! per-deck sections, not two independent ones.
 //!
-//! Reskinned (Step 15 of the Phase 7 UI redesign plan): the whole panel is
-//! one of the plan's 3 permanently-dense zones (with the presets grid, Step
+//! Reskinned: the whole panel is
+//! one of 3 permanently-dense zones (with the presets grid, Step
 //! 14, and the MIDI learn rows, Step 17). `widgets::dense` wraps the
 //! entire body below, no user-facing toggle. `🔒` is replaced by a plain
 //! "LOCK" text label: no emoji in displayed text, even though Step 5's

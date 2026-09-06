@@ -1,5 +1,5 @@
-//! Strobe flash timing (Step 10 of the Phase 8 VJ-panels plan): a
-//! BPM-synced full-screen flash, rendered by the compositor
+//! Strobe flash timing: a BPM-synced full-screen flash, rendered by the
+//! compositor
 //! (`engine::compositor::Compositor::render_strobe_flash`). No OpenDrop-VJ
 //! source to port from beyond the command name: `SidebarStrobe.svelte`
 //! only held on/off/rate/intensity/color state, the timing itself is new

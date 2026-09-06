@@ -1,6 +1,6 @@
 //! The OSC I/O thread: a UDP server that receives `/opendrop/<command>`
-//! messages and dispatches them via `command_names::parse_command_id`
-//! (Task 3). Mirrors `midi::handle`'s shape (see that module's doc
+//! messages and dispatches them via `command_names::parse_command_id`.
+//! Mirrors `midi::handle`'s shape (see that module's doc
 //! comment for the full architecture writeup): a dedicated `std::thread`
 //! owns the `UdpSocket`, publishes continuous state via `ArcSwap`, and
 //! never panics on a bind/recv error.
@@ -8,11 +8,11 @@
 //! Input only: no OSC output, mirroring OpenDrop-VJ's `main.cjs:112-139`,
 //! which has none either.
 //!
-//! One deliberate departure from the later remote-WS task (Task 14, not
-//! yet built on this branch): the OSC port is always chosen by the user,
+//! One deliberate departure from the later remote-WS feature (not yet
+//! built on this branch): the OSC port is always chosen by the user,
 //! never OS-assigned: `main.cjs`'s `ipcMain.handle('osc:start', {
-//! port })` takes the port from the renderer's own input field, and the
-//! brief is explicit this differs from remote WS's OS-assigned port.
+//! port })` takes the port from the renderer's own input field; this
+//! deliberately differs from remote WS's OS-assigned port.
 
 use std::net::UdpSocket;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -206,17 +206,16 @@ fn decode_packet(buf: &[u8]) -> Option<(CommandId, f64)> {
 /// reference's `if (!cmdId) return`, `main.cjs:157`), then takes the first
 /// argument.
 ///
-/// Strictness judgment call (the brief leaves this open): the first
+/// Strictness judgment call: the first
 /// argument must decode as `OscType::Float` (OSC's `f` float32 type tag):
 /// a message with no arguments, or whose first argument is a different
 /// OSC type (`Int`, `Double`, a string, ...), is treated as malformed and
 /// the whole packet is ignored. This is a deliberate departure from the JS
 /// reference, which defaults a missing argument to `0.0` and dispatches
 /// anyway (`main.cjs:129-135`); requiring an actual float32 is stricter
-/// but matches the brief's explicit "first argument float32" and its
-/// "if the packet's first arg isn't a float, treat as malformed/ignore"
-/// framing more directly than silently substituting a default. See the
-/// task report for the full write-up of this choice.
+/// but matches the intended "first argument float32" and "if the packet's
+/// first arg isn't a float, treat as malformed/ignore" framing more
+/// directly than silently substituting a default.
 fn dispatch_from_message(addr: &str, args: &[OscType]) -> Option<(CommandId, f64)> {
     let suffix = addr.strip_prefix(ADDRESS_PREFIX)?;
     let id = parse_command_id(suffix)?;

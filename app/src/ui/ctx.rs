@@ -1,4 +1,4 @@
-//! Step 9 of the Phase 7 UI redesign plan: `ui_root`'s 51 (53 with
+//! `ui_root`'s 51 (53 with
 //! `--features link`) positional parameters, grouped into 7 disjoint `&mut`
 //! context structs. Pure re-packaging: every field below is exactly the
 //! binding `main.rs`'s `let AppState { ... } = state;` destructure already
@@ -48,7 +48,7 @@ use crate::{InvisibleMode, Panel};
 
 /// Nav chrome: which panel is active, the Stage toggle, and the status
 /// bar's frame-timing readout (Step 10). The mini-transport (crossfader,
-/// BPM, tap) named alongside these in Step 9's own reviewer note stays out
+/// BPM, tap) stays out
 /// of this struct on purpose: it lives on `Show` (`PerformCtx::show`, the
 /// single owner of that business object; see this module's doc comment),
 /// so `ui::shell::header` takes `(&mut ShellCtx, &mut PerformCtx)` as two
@@ -63,7 +63,7 @@ pub(crate) struct ShellCtx<'a> {
     /// Header's Stage toggle (`⛶`, `ghost_button`) and the `F11` keyboard
     /// toggle in `main.rs`'s `window_event`, drives `ui_root`'s choice
     /// between the Normal and Stage variants of the header/nav/status
-    /// bar (Step 11 of the Phase 7 UI redesign plan).
+    /// bar.
     pub(crate) stage_mode: &'a mut bool,
     /// Status bar's fps/frame-ms readout: wall-clock swap-to-swap time
     /// from `main.rs`'s `about_to_wait`, one frame stale by construction
@@ -93,7 +93,7 @@ pub(crate) struct PerformCtx<'a> {
     pub(crate) pending_validations: &'a HashSet<usize>,
     pub(crate) preset_errors: &'a HashMap<usize, String>,
     pub(crate) transition_seconds: &'a mut f64,
-    /// Share panel's name field (Step 13 of the Phase 8 plan), lives here
+    /// Share panel's name field, lives here
     /// rather than a new struct because the Share panel needs the same
     /// `show`/`deck_preset_names`/`transition_seconds` this struct already
     /// carries (crossfade duration doubles as `SharedSet::transition_time`,
@@ -140,7 +140,7 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) rkbx_link: &'a opendrop_io::rkbx_link::RkbxLinkHandle,
     pub(crate) rkbx_link_port: &'a mut u16,
     pub(crate) rkbx_mapping_error: &'a mut Option<String>,
-    /// Overlays panel (Step 12 of the Phase 8 VJ-panels plan): overlay id
+    /// Overlays panel: overlay id
     /// → the sprite file it was created from, and the id counter. The
     /// overlay list itself lives on `Show` (`PerformCtx::show`) like every
     /// other business object: these two are the I/O-side halves
@@ -154,7 +154,7 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) v4l2: &'a opendrop_io::v4l2loopback::V4l2Handle,
     pub(crate) v4l2_active: &'a mut bool,
     pub(crate) v4l2_device: &'a mut Option<Option<PathBuf>>,
-    /// Video panel (Step 14 of the Phase 8 VJ-panels plan): the clip
+    /// Video panel: the clip
     /// library, the camera picker's cached device list and its current
     /// selection, and the panel's own synchronous import/delete errors.
     /// Same split as the Overlays fields above: the layer's *state* lives
@@ -223,8 +223,8 @@ pub(crate) struct StreamCtx<'a> {
 
 /// Ableton Link panel state. `#[cfg(feature = "link")]` is on the two
 /// fields individually, never on the struct itself, so `ControlCtx` exists
-/// (and `ui_root`'s arity stays 8 params) in both build configurations;
-/// see the plan's explicit vigilance note on this struct. With the `link`
+/// (and `ui_root`'s arity stays 8 params) in both build configurations.
+/// With the `link`
 /// feature off (the default), both real fields disappear and `_marker` is
 /// the struct's only field: a zero-sized `PhantomData` purely so the `'a`
 /// lifetime parameter stays used (an empty struct with a declared-but-

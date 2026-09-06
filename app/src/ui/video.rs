@@ -1,16 +1,16 @@
 //! Video panel: the background video layer: on/off, opacity, clip
 //! rotation, the 4 beat/volume-reactive toggles, a live camera, an NDI
-//! source, and the clip library. Port of `SidebarVideo.svelte` (Step 14 of
-//! the Phase 8 VJ-panels plan), the last of the 13 sidebars and the only
+//! source, and the clip library. Port of `SidebarVideo.svelte`, the last
+//! of the 13 sidebars and the only
 //! one whose engine half (decode → GL texture → a compositor layer) did not
 //! exist in any form beforehand.
 //!
 //! Same "direct field mutation, no `CommandRegistry::dispatch`" convention
-//! as every other panel. No Recipe-B setter is added here on purpose: the
-//! plan's transversal command list has no video entry, `CommandId` has no
+//! as every other panel. No Recipe-B setter is added here on purpose:
+//! there is no transversal command-list entry for video, `CommandId` has no
 //! video variant, and adding one would ripple through `io::command_names`,
 //! the persisted keymap wire format, and the MIDI mapping file for a
-//! control the plan never asked to bind. Noted in this step's report.
+//! control nothing currently binds.
 //!
 //! **Handles never reach this function**, unlike `ui::ndi`/`ui::v4l2loopback`
 //! /`ui::osc`: it takes the two *snapshots* it needs to read
@@ -148,7 +148,7 @@ fn target_selector_row(ui: &mut egui::Ui, target: &mut VideoPanelTarget) {
 /// `composite_video_layer` never runs and never reads `show.video.opacity`;
 /// the NDI-in layer is composited separately in `main.rs` at a hardcoded
 /// `opacity: 1.0`. Leaving it enabled offered a control that silently did
-/// nothing (whole-branch review Finding M1). Unlike `advance_row`/
+/// nothing. Unlike `advance_row`/
 /// `reactive_row`, this must NOT also gate on a live camera feed: under a
 /// camera, `desired_video_input` returns `Camera` and `opacity` is still a
 /// real, live control.
@@ -221,8 +221,8 @@ fn toggle_pill(ui: &mut egui::Ui, label: &str, value: &mut bool, enabled: bool, 
 /// enumerate them (Linux, see `video_capture::list_cameras`), the device
 /// field itself, and the on/off toggle.
 ///
-/// The field is shown **always**, not only when the dropdown is empty
-/// (review finding): `list_cameras` filters to each physical device's
+/// The field is shown **always**, not only when the dropdown is empty:
+/// `list_cameras` filters to each physical device's
 /// primary capture node, so a device that doesn't follow that convention
 /// would otherwise be both absent from the list and unreachable. The
 /// dropdown, when there is one, just writes into the same field.

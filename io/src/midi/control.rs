@@ -1,7 +1,7 @@
 //! Handling for each `MidiControl` variant, plus the small `midir`
 //! port-enumeration/connect helpers they (and `handle.rs`'s hotplug poll)
 //! share. Split out of `handle.rs` to keep that file under the ~400-line
-//! convention: see the task report for why.
+//! convention.
 
 use std::sync::mpsc::Sender;
 
@@ -32,8 +32,8 @@ pub(super) fn handle_control(ts: &mut ThreadState, ctrl: MidiControl, midi_tx: &
 }
 
 /// Initializes the MIDI backend and loads the persisted mapping from disk
-/// ("loaded once at connect time" per the brief): never opens a port by
-/// itself, that's `SelectPort`'s job. Whole-branch review Finding M7:
+/// (loaded once, at connect time): never opens a port by itself, that's
+/// `SelectPort`'s job.
 /// `ts.connected` (surfaced by the panel as "MIDI: connected") must NOT be
 /// set here: this only probes the backend and lists ports, it doesn't open
 /// one. `ts.connected` only goes `true` once `handle_select_port` actually
@@ -176,7 +176,7 @@ mod tests {
         handle_push_led(&mut ts, CommandId::Crossfader, true); // must not panic
     }
 
-    /// Whole-branch review Finding M7: `Connect` only probes the backend
+    /// `Connect` only probes the backend
     /// and lists ports: it must never claim `connected`, regardless of
     /// whether a real MIDI backend happens to be available in this test
     /// environment. Only `SelectPort` actually opening a port may set it.

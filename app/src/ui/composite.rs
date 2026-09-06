@@ -3,7 +3,7 @@
 //! (`SlotComposite`, already ported+tested in `core::blend`, already
 //! consumed by the GPU compositor every frame via `blend_state_for`/
 //! `LayerInput.composite`, zero engine change here).
-//! Port of `SidebarComposite.svelte` (Step 2 of the Phase 8 VJ-panels plan).
+//! Port of `SidebarComposite.svelte`.
 //!
 //! Unlike Color (one group of controls per deck, both shown side by side),
 //! the web reference only ever shows the one slot named by

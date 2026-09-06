@@ -1,8 +1,8 @@
 //! Native port of the web app's `src/lib/engine/keymap.ts:5-16` (`DEFAULT_KEYMAP`),
-//! plus runtime remapping + persistence (Step 3 of the Phase 8 VJ-panels plan,
-//! transposing the MIDI-learn pattern, `AppState::midi_learning`/`ui::midi`,
-//! to the keyboard: see `main.rs`'s `WindowEvent::KeyboardInput` handler for
-//! the commit side, `ui::keymap` for the panel).
+//! plus runtime remapping + persistence, transposing the MIDI-learn pattern,
+//! `AppState::midi_learning`/`ui::midi`, to the keyboard: see `main.rs`'s
+//! `WindowEvent::KeyboardInput` handler for the commit side, `ui::keymap` for
+//! the panel.
 //!
 //! ## Wire-format decision
 //! `winit::keyboard::Key` derives `Serialize`/`Deserialize` itself, but only

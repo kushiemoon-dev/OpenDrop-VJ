@@ -234,9 +234,9 @@ impl Deck {
 
     /// Injects one chunk of PCM, renders one projectM frame: GL state
     /// saved/restored in absolute terms around the opaque render call (see
-    /// `gl_state`, and the plan's step-1 review: without this, the
-    /// subsequent copy can read garbage left behind by whatever the preset
-    /// did to blend/framebuffer/viewport state), then copies the result
+    /// `gl_state`: an early review found that without this, the subsequent
+    /// copy can read garbage left behind by whatever the preset did to
+    /// blend/framebuffer/viewport state), then copies the result
     /// into this deck's shared texture. Must be called while this deck's
     /// context is current.
     ///

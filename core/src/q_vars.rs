@@ -1,4 +1,4 @@
-//! Port of OpenDrop-VJ `src/lib/engine/q-vars.ts`, Q-var live editing (Track 2):
+//! Port of OpenDrop-VJ `src/lib/engine/q-vars.ts`, Q-var live editing:
 //! generic q1-q32 overrides per deck, matching NestDrop's "Q Var" knobs. Presets
 //! define/use these internally with no universal meaning (unlike Time's
 //! documented speed/zoom/etc, see time_params.rs), so there is no neutral
@@ -61,12 +61,11 @@ pub fn default_q_var_params() -> DeckQVarParams {
 pub type QVarParamsTuple = [DeckQVarParams; 4];
 
 /// Update a single q-var's value (1-indexed) for one deck slot, without
-/// touching `enabled`. Pure: returns a new tuple. Whole-branch review
-/// Finding M5: an out-of-range `slot` (>3) or `n` (0, or >32) used to panic
-/// via array indexing; both are now a no-op (the input tuple comes back
-/// unchanged) instead, the least invasive fix that doesn't change this
-/// function's `QVarParamsTuple -> QVarParamsTuple` contract into a
-/// `Result`/`Option`.
+/// touching `enabled`. Pure: returns a new tuple. An out-of-range `slot`
+/// (>3) or `n` (0, or >32) used to panic via array indexing; both are now
+/// a no-op (the input tuple comes back unchanged) instead, the least
+/// invasive fix that doesn't change this function's `QVarParamsTuple ->
+/// QVarParamsTuple` contract into a `Result`/`Option`.
 pub fn with_q_var_value(
     mut params: QVarParamsTuple,
     slot: usize,
@@ -82,7 +81,7 @@ pub fn with_q_var_value(
 
 /// Enable watching a q-var (1-indexed), resetting its value to 0. Pure:
 /// returns a new tuple. See `with_q_var_value`'s doc comment re: out-of-range
-/// `slot`/`n` (Finding M5).
+/// `slot`/`n`.
 pub fn with_q_var_watch(mut params: QVarParamsTuple, slot: usize, n: usize) -> QVarParamsTuple {
     if slot >= params.len() || n == 0 || n > 32 {
         return params;
@@ -94,7 +93,7 @@ pub fn with_q_var_watch(mut params: QVarParamsTuple, slot: usize, n: usize) -> Q
 
 /// Disable watching a q-var (1-indexed), leaving its last value untouched.
 /// Pure: returns a new tuple. See `with_q_var_value`'s doc comment re:
-/// out-of-range `slot`/`n` (Finding M5).
+/// out-of-range `slot`/`n`.
 pub fn without_q_var_watch(mut params: QVarParamsTuple, slot: usize, n: usize) -> QVarParamsTuple {
     if slot >= params.len() || n == 0 || n > 32 {
         return params;

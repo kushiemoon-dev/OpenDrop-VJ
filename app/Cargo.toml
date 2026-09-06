@@ -9,9 +9,9 @@ opendrop-engine = { path = "../engine" }
 opendrop-audio = { path = "../audio" }
 opendrop-io = { path = "../io" }
 # `serde`: `winit::keyboard::Key` derives `Serialize`/`Deserialize` only
-# behind this feature: needed by `app::keymap`'s `ui.json` persistence
-# (Step 3 of the Phase 8 VJ-panels plan). See that module's doc comment for
-# why a `Key`-as-JSON-object-key still isn't the actual on-disk shape.
+# behind this feature: needed by `app::keymap`'s `ui.json` persistence.
+# See that module's doc comment for why a `Key`-as-JSON-object-key still
+# isn't the actual on-disk shape.
 winit = { version = "0.30.13", features = ["serde"] }
 glutin = "0.32.3"
 glutin-winit = "0.5.0"

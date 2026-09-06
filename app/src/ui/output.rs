@@ -1,18 +1,18 @@
 //! Output panel: monitor picker for the `output` window + a fullscreen
-//! toggle (Step 21 of the plan).
+//! toggle.
 //!
 //! Monitors are re-queried fresh every frame this panel is visible: no
-//! caching, unlike Step 19's audio input-device list. The brief is explicit
-//! that this is deliberately different: enumerating monitors is a cheap OS
+//! caching, unlike the audio input-device list. This is deliberately
+//! different: enumerating monitors is a cheap OS
 //! query, re-running it live is what makes hotplug work for free, and there
 //! is no bootstrap-time list to keep in sync.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as the
 //! other panels (`ui::decks`, `ui::audio`, `ui::quality`).
 //!
-//! Audited for the theme pass (Step 17 of the Phase 7 UI redesign plan):
-//! no `Color32` literals, the monitor `ComboBox` already re-themes itself
-//! automatically (untouched here, per this step's brief), and the
+//! Audited for the theme pass: no `Color32` literals, the monitor
+//! `ComboBox` already re-themes itself
+//! automatically (untouched here), and the
 //! fullscreen toggle stays a plain `ui.button`, matching the precedent set
 //! by other panels' action buttons that were left unstyled (for example
 //! playlists' Play/Pause/Prev/Next) rather than converted to a
@@ -25,7 +25,7 @@
 //! constructor for it), so this panel cannot be exercised under
 //! `themed_test_ui`/`__run_test_ui` the way every other panel here is. Same
 //! determination `ui::audio` made for `AudioHandle` (a real-hardware-only
-//! handle, Step 19): not fabricating a stand-in for an unmockable external
+//! handle): not fabricating a stand-in for an unmockable external
 //! handle.
 
 use winit::event_loop::ActiveEventLoop;
@@ -54,7 +54,7 @@ pub fn show(
                     if ui.selectable_label(is_selected, &name).clicked() {
                         *selected_output_monitor = Some(name.clone());
                         if is_fullscreen {
-                            // Whole-branch review Finding 8: the picker
+                            // The picker
                             // used to be inert while the output window was
                             // already fullscreen: the button below reads
                             // "Exit fullscreen" at that point, so there was

@@ -61,7 +61,7 @@ impl PlaylistEngine {
 
     /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
     /// the caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment, whole-branch review Finding I4.
+    /// `rng.rs`'s module doc comment for why.
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng.reseed(seed);
     }
@@ -143,16 +143,16 @@ impl PlaylistEngine {
     /// Caller-driven replacement for `setTimeout`: advances the internal
     /// clock by `delta_ms`, firing as many auto-advances as fit.
     ///
-    /// Whole-branch review Finding C1: a playing playlist emptied out from
-    /// under `tick` (e.g. the last item removed from the panel while it's
-    /// still playing) used to panic on the unguarded `advance_index`/`items[
-    /// self.index]` below: `start`/`next`/`prev` all guard `items.is_empty
-    /// ()` already, this was the one caller that didn't.
+    /// A playing playlist emptied out from under `tick` (e.g. the last item
+    /// removed from the panel while it's still playing) used to panic on
+    /// the unguarded `advance_index`/`items[self.index]` below: `start`/
+    /// `next`/`prev` all guard `items.is_empty()` already, this was the one
+    /// caller that didn't.
     pub fn tick(&mut self, delta_ms: f64) {
         if self.items.is_empty() {
             return;
         }
-        // Finding M4: `interval_ms <= 0` (not just non-finite) must also
+        // `interval_ms <= 0` (not just non-finite) must also
         // bail out here: otherwise `elapsed_ms -= self.interval_ms` never
         // shrinks `elapsed_ms` below `interval_ms` and the loop below spins
         // forever. `!(self.interval_ms > 0.0)` alone would reject 0/negative/
@@ -517,7 +517,7 @@ mod tests {
 
         #[test]
         fn reseed_rng_makes_shuffle_draws_actually_differ_across_seeds() {
-            // Finding I4: shuffle used to run off a hardcoded, never-reseeded
+            // Shuffle used to run off a hardcoded, never-reseeded
             // constant, so the draw sequence was identical every app launch.
             let draws = |seed: u64| -> Vec<usize> {
                 let (_, cb) = spy();
@@ -540,7 +540,7 @@ mod tests {
 
         #[test]
         fn tick_does_not_panic_when_the_playlist_is_emptied_while_playing() {
-            // Finding C1 regression test: PlaylistEngine::tick used to call
+            // Regression test: PlaylistEngine::tick used to call
             // advance_index()/items[index] with no empty-list guard, unlike
             // start/next/prev: emptying a playing playlist (e.g. removing
             // its last item from the panel) panicked the whole app on the
@@ -554,7 +554,7 @@ mod tests {
 
         #[test]
         fn tick_with_a_zero_interval_returns_instead_of_spinning_forever() {
-            // Finding M4: tick only guarded `!interval_ms.is_finite()`,
+            // tick only guarded `!interval_ms.is_finite()`,
             // which lets 0 (and negative) through: the `while elapsed_ms >=
             // interval_ms { elapsed_ms -= interval_ms; ... }` loop below
             // would then never terminate.

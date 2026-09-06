@@ -1,8 +1,8 @@
 //! The MIDI I/O thread: port open/hotplug, learn-mode mapping, LED
 //! feedback, clock. Mirrors `audio::capture::spawn`/`AudioHandle`'s shape
-//! exactly (see the task report for the full architecture writeup): a
-//! dedicated `std::thread` owns every `midir` connection, publishes
-//! continuous state via `ArcSwap`, and never panics on a connection error.
+//! exactly: a dedicated `std::thread` owns every `midir` connection,
+//! publishes continuous state via `ArcSwap`, and never panics on a
+//! connection error.
 //!
 //! Control-message handling (`Connect`/`Disconnect`/`SelectPort`/`PushLed`)
 //! lives in `control.rs`, split out to keep this file under the ~400-line
@@ -13,11 +13,10 @@
 //! One deliberate departure from the OpenDrop-VJ (WebMIDI) reference:
 //! WebMIDI auto-connects to *every* input port; this thread connects to at
 //! most one input port at a time, selected explicitly via
-//! `MidiControl::SelectPort` (mirroring the dropdown Task 8's brief
-//! describes: "port-in dropdown"). `midir` also has no hotplug
-//! *callback* (unlike WebMIDI's `onstatechange`): output-port reconnection
-//! is detected by polling, not a callback; see `check_hotplug` below and
-//! the task report for why this isn't a `BLOCKED`.
+//! `MidiControl::SelectPort` (mirroring the UI's "port-in dropdown").
+//! `midir` also has no hotplug *callback* (unlike WebMIDI's
+//! `onstatechange`): output-port reconnection is detected by polling, not
+//! a callback; see `check_hotplug` below.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
@@ -42,16 +41,15 @@ const POLL_TICK: Duration = Duration::from_millis(20);
 const CLOCK_TIMEOUT: Duration = Duration::from_millis(2000);
 /// How often to re-enumerate ports for hotplug detection (device_names
 /// refresh + "did our output port come back" check). `midir` has no
-/// hotplug callback, so this is a deliberate poll, not the brief's assumed
-/// "callback midir": see the module doc comment and the task report.
+/// hotplug callback, so this is a deliberate poll rather than a
+/// callback-driven check: see the module doc comment above for why.
 const HOTPLUG_POLL_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// Handle to the running MIDI thread. Mirrors `AudioHandle`'s shape:
 /// `latest()` never blocks, `control_tx` sends never block. `events` and
 /// `control_tx` are public fields (not wrapped in accessor methods, unlike
-/// `AudioHandle`) because Task 8's brief drains/sends through them directly
-/// (`midi.events.try_recv()`, `control_tx.send(StartLearn(id))`): see the
-/// task report for this judgment call.
+/// `AudioHandle`) because the UI drains/sends through them directly
+/// (`midi.events.try_recv()`, `control_tx.send(StartLearn(id))`).
 pub struct MidiHandle {
     state: Arc<ArcSwap<MidiSnapshot>>,
     pub events: Receiver<MidiDispatch>,
@@ -216,7 +214,7 @@ fn handle_raw_midi(ts: &mut ThreadState, events_tx: &Sender<MidiDispatch>, raw: 
         if note_off {
             return; // wait for the next non-note-off message, mirrors midi-connection-actions.ts:61
         }
-        // Whole-branch review Finding M6: `bind_trigger` evicts any OTHER
+        // `bind_trigger` evicts any OTHER
         // command already bound to this same `key` first, so a trigger has
         // at most one owner and `resolve_mapping`'s reverse lookup stays
         // unambiguous.

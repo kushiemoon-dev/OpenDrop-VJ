@@ -1,17 +1,15 @@
-//! v4l2loopback output: pipes the compositor's RGBA readback bytes (Step 5)
-//! into an existing v4l2loopback device via an `ffmpeg` subprocess, fed by
-//! its own `mpsc::Receiver<Vec<u8>>`: a second channel pair alongside
-//! `io::ndi`'s, since Task 9/10 already moved the original `compositor_
-//! frame_rx` into `opendrop_io::ndi::spawn` and each consumer needs its own
-//! `Sender` (see Task 19's report for the full write-up of why a second
-//! channel pair was added rather than reused).
+//! v4l2loopback output: pipes the compositor's RGBA readback bytes into an
+//! existing v4l2loopback device via an `ffmpeg` subprocess, fed by its own
+//! `mpsc::Receiver<Vec<u8>>`: a second channel pair alongside `io::ndi`'s,
+//! since the original `compositor_frame_rx` was already moved into
+//! `opendrop_io::ndi::spawn` and each consumer needs its own `Sender`.
 //!
 //! Mirrors `findV4l2Device`, OpenDrop-VJ's `electron/main.cjs:82-99`,
 //! exactly: [`find_device`] is a pure filesystem scan, no subprocess, no
 //! side effects.
 //!
 //! **RGBA, not BGRA**: same departure from the OpenDrop-VJ reference as
-//! `io::ndi::out` (see that module's doc comment): Step 4/5's readback is
+//! `io::ndi::out` (see that module's doc comment): the readback is
 //! native GL RGBA8, not `Electron.capturePage()`'s BGRA, so there is no
 //! reason to swizzle just to match the old pix_fmt.
 //!
@@ -132,7 +130,7 @@ impl V4l2Handle {
 /// Start`: mirrors `OscHandle::spawn`'s "starts idle until an explicit
 /// connect" pattern.
 ///
-/// `compositor_rx` is this task's own second channel pair (see the module
+/// `compositor_rx` is this module's own second channel pair (see the module
 /// doc comment for why it isn't shared with `io::ndi`'s), passed in by
 /// value.
 pub fn spawn(compositor_rx: Receiver<Vec<u8>>) -> V4l2Handle {
@@ -148,7 +146,7 @@ pub fn spawn(compositor_rx: Receiver<Vec<u8>>) -> V4l2Handle {
 /// The running ffmpeg subprocess plus its stdin handle. `stdout`/`stderr`
 /// are both discarded (`Stdio::null()`): capturing `stderr` for
 /// diagnostics would need a second thread draining it, or a full pipe
-/// buffer would eventually stall ffmpeg: out of scope for this task, and
+/// buffer would eventually stall ffmpeg: not attempted here, and
 /// `Drop` still guarantees the process never outlives the pipe either way.
 struct FfmpegPipe {
     child: Child,
@@ -259,7 +257,7 @@ fn run(state: Arc<ArcSwap<V4l2Snapshot>>, compositor_rx: Receiver<Vec<u8>>, cont
         if pipe.is_none() {
             // Idle: no ffmpeg process to feed or watch, so block until a
             // control message arrives instead of spinning the 5ms poll for
-            // nothing (whole-branch review Finding M2): same idle/active
+            // nothing: same idle/active
             // split as `io::ndi::out::run`.
             match control_rx.recv() {
                 Ok(ctrl) => handle_control(&mut pipe, ctrl, &state),
@@ -318,7 +316,7 @@ mod tests {
 
     /// Real-environment test: this machine has no v4l2loopback device
     /// loaded (only a real USB webcam under `/sys/class/video4linux`,
-    /// verified by hand for Task 19), so `find_device()` must gracefully
+    /// verified by hand), so `find_device()` must gracefully
     /// return `None` rather than panicking or erroring.
     #[test]
     fn find_device_returns_none_when_no_opendrop_device_exists_on_this_machine() {
@@ -377,7 +375,7 @@ mod tests {
         assert_eq!(EXPECTED_FRAME_LEN, (COMP_W as usize) * (COMP_H as usize) * 4);
     }
 
-    /// Structural check only, per the task brief: confirms `Command::new(
+    /// Structural check only: confirms `Command::new(
     /// "ffmpeg")...spawn()` itself never panics, whether or not the target
     /// device path is real. No v4l2loopback device exists on this machine
     /// (see `find_device_returns_none...` above), so ffmpeg will fail once

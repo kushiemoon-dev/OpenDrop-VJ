@@ -47,19 +47,19 @@ pub trait CommandContext {
     /// parameterized by slot, not 8 separate methods: same shape as
     /// `set_composite_blend(slot, v)` above.
     fn recall_snapshot(&mut self, slot: usize);
-    /// Toggles timeline playback (Step 5). Starting playback resets the
+    /// Toggles timeline playback. Starting playback resets the
     /// loop's internal progress to 0 rather than resuming stale progress
     /// or jumping in time: see `Show::tick_timeline`'s doc comment for why
     /// that's a dt-accumulated elapsed counter rather than an absolute
     /// wall-clock timestamp. No parameter, same shape as
     /// `switch_active_deck` above.
     fn toggle_timeline(&mut self);
-    /// Toggles the strobe on/off (Step 10 of the Phase 8 VJ-panels plan).
-    /// No parameter, same shape as `toggle_timeline`/`switch_active_deck`
+    /// Toggles the strobe on/off. No parameter, same shape as
+    /// `toggle_timeline`/`switch_active_deck`
     /// above: rate/intensity/color have no `CommandContext` setter, only
     /// the toggle is in the transversal keyboard/MIDI/OSC/remote-ws list.
     fn toggle_strobe(&mut self);
-    /// The 8 per-deck Time multipliers (Step 8). One method per multiplier,
+    /// The 8 per-deck Time multipliers. One method per multiplier,
     /// each parameterized by deck slot (0..4): same shape as
     /// `set_composite_blend(slot, v)` above, not 32 separate methods for the
     /// 32 `CommandId::Time*` commands. `v` is in the panel's own 0..
@@ -73,7 +73,7 @@ pub trait CommandContext {
     fn set_time_dy(&mut self, slot: usize, v: f64);
     fn set_time_stretch(&mut self, slot: usize, v: f64);
     fn set_time_wave(&mut self, slot: usize, v: f64);
-    /// One q-var override (Step 9), for the 128 `CommandId::Qvar{n}_{slot}`
+    /// One q-var override, for the 128 `CommandId::Qvar{n}_{slot}`
     /// commands: `n` is the 1-indexed q-var (1..=32, matching
     /// `q_vars::with_q_var_value`'s own convention), `slot` the deck (0..4).
     /// A single method rather than Time's one-per-multiplier shape because
@@ -337,24 +337,20 @@ pub struct Command {
 ///
 /// Of the 223 `CommandId` variants `create_default_registry` registers,
 /// only 2, `LfoRateUp`/`LfoRateDown` (Trigger), are still permanent
-/// `noop` stubs. This used to describe a much larger gap (whole-branch
-/// review: most `Range` commands and several `Trigger` commands stubbed
-/// out pending a future dedicated phase); that gap has since been closed
-/// across Steps 1-10 of the Phase 8 VJ-panels plan, which gave
-/// `CommandContext` real setters for color, composite/lumakey/colorkey,
-/// snapshot recall, timeline toggle, all 32 time-param multipliers, all
-/// 128 q-var slots, and the strobe toggle. `run` only ever receives `&mut
-/// dyn CommandContext`.
+/// `noop` stubs. Most `Range` commands and several `Trigger` commands used
+/// to be stubbed out too; `CommandContext` now has real setters for color,
+/// composite/lumakey/colorkey, snapshot recall, timeline toggle, all 32
+/// time-param multipliers, all 128 q-var slots, and the strobe toggle.
+/// `run` only ever receives `&mut dyn CommandContext`.
 ///
-/// The 2 remaining stubs stay stubs: LFO routing (Step 11 of the same plan)
-/// has shipped and deliberately did not wire them, because `LfoRateUp`/
-/// `LfoRateDown` are not in the REQUIREMENTS' transversal-setter list:
-/// LFO rate is a per-slot panel control, not a dispatchable transversal
-/// parameter. This is a closed design decision, not a gap awaiting a later
-/// step.
+/// The 2 remaining stubs stay stubs: LFO routing shipped and deliberately
+/// did not wire them, because `LfoRateUp`/`LfoRateDown` are not part of
+/// the transversal-setter surface: LFO rate is a per-slot panel control,
+/// not a dispatchable transversal parameter. This is a closed design
+/// decision, not a gap awaiting future work.
 #[derive(Default)]
 pub struct CommandRegistry {
-    /// Insertion order matters here (whole-branch review Finding I2): 3
+    /// Insertion order matters here: 3
     /// reference UI panels, and this app's own `ui::midi`, expect `all()`
     /// to come back in the curated `DEFAULT_COMMANDS`/`default_commands()`
     /// grouping (deck controls -> active-deck shortcuts -> M2/M3 ->
@@ -389,7 +385,7 @@ impl CommandRegistry {
     /// Dispatch a command. value01 must be 0..1 (callers normalize MIDI 0-127 before calling).
     ///
     /// A non-finite `value01` (NaN, ±∞) is dropped here rather than handed to
-    /// `run` (whole-branch review Finding I1). Every command path funnels
+    /// `run`. Every command path funnels
     /// through this method, so this one check covers all 221 real setters
     /// instead of 221 individual guards. It matters because NaN survives
     /// `f64::clamp` untouched (`clamp` is NaN-transparent), and the Time/Qvar
@@ -876,7 +872,7 @@ mod tests {
 
         #[test]
         fn dispatch_ignores_non_finite_values() {
-            // Finding I1 regression test: NaN/±∞ arriving from an
+            // Regression test: NaN/±∞ arriving from an
             // unauthenticated remote input (OSC UDP, remote-ws) must not
             // reach any `run` closure. NaN in particular survives
             // `f64::clamp` and saturates to `0` in `encode_param`'s
@@ -912,7 +908,7 @@ mod tests {
 
         #[test]
         fn all_preserves_insertion_order_not_hashmap_order() {
-            // Finding I2 regression test: register a batch of ids that would
+            // Regression test: register a batch of ids that would
             // NOT come back sorted by any single obvious key (id/label/enum
             // discriminant), then repeat register() with a different batch:
             // if `all()` were ever backed by a HashMap again, at least one of
@@ -949,7 +945,7 @@ mod tests {
 
         #[test]
         fn all_matches_the_curated_default_commands_construction_order() {
-            // Finding I2: `all()`'s order must match `default_commands()`'s
+            // `all()`'s order must match `default_commands()`'s
             // construction order (deck controls -> active-deck shortcuts ->
             // M2/M3 -> compositing -> snapshots -> time params -> overlay ->
             // timeline -> q-vars), not alphabetical, not hash order.

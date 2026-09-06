@@ -1,5 +1,5 @@
 //! Remote-WS panel: IP:port + token (for the phone to type into a URL) and
-//! a Start/Stop button (Task 14 of the plan).
+//! a Start/Stop button.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::midi`, `ui::ndi`, `ui::osc`). Unlike `ui::osc`, there
@@ -8,11 +8,10 @@
 //! (`RemoteWsControl::Start` takes no arguments), so this panel only ever
 //! displays `RemoteWsSnapshot`, it never owns any of its own state.
 //!
-//! No QR code: a bonus, not requested, deliberately not added (brief is
-//! explicit). No soft-takeover, no mapping/learn UI, same reasoning as
-//! `ui::osc`.
+//! No QR code: a bonus, not requested, deliberately not added. No
+//! soft-takeover, no mapping/learn UI, same reasoning as `ui::osc`.
 //!
-//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the two-branch
+//! Reskinned: the two-branch
 //! `label("Remote: listening on ...")` / `label("Remote: not listening")`
 //! pair (an `if`/`else` across separate `ui.label` calls, not a single
 //! `label(if ... else ...)` like `ui::midi`/`ui::ndi`, but the same

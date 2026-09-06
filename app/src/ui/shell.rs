@@ -1,4 +1,4 @@
-//! Shell chrome (Step 10 of the Phase 7 UI redesign plan): the header
+//! Shell chrome: the header
 //! (wordmark, hand-painted crossfader, BPM/tap mini-transport, Stage
 //! toggle, theme picker), the sectioned nav, and the status bar.
 //! `main.rs`'s `ui_root` wires these 3 zones plus the unchanged content
@@ -13,10 +13,10 @@
 //! already established. `status_bar` extends that idiom further: it reads
 //! a little from nearly every context struct (connection status, audio,
 //! loading activity), so it takes all of them rather than growing a long
-//! flat parameter list the way `ui_root` itself used to before Step 9.
+//! flat parameter list the way `ui_root` itself used to.
 //!
-//! Step 11 adds the Stage-mode counterparts `header_stage` and
-//! `status_bar_stage`, wired by `ui_root` via `egui::Panel::show_switched`
+//! `header_stage` and `status_bar_stage` are the Stage-mode counterparts,
+//! wired by `ui_root` via `egui::Panel::show_switched`
 //! instead of `header`/`status_bar` while `stage_mode` is on (see that
 //! call site's own comment). Both reuse `header`'s hand-painted pieces:
 //! `crossfader` directly, and the BPM readout via the `bpm_readout` helper
@@ -37,17 +37,17 @@ use crate::Panel;
 
 // --- Header --------------------------------------------------------------
 
-/// Always visible regardless of `active_panel` (Step 10 brief): this is
+/// Always visible regardless of `active_panel`: this is
 /// the header zone, drawn once per frame before the content match, not
 /// gated on which panel is active.
 pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx, theme_request: &mut Option<ThemeId>) {
-    // `dense` (Step 8's density-scope helper): the header packs a lot into
+    // `dense` (the density-scope helper): the header packs a lot into
     // 48px: wordmark, crossfader, the whole BPM/tap row, and the
     // right-aligned Stage/theme group, so this tightens `item_spacing`
-    // between all of them (Step 10 fix-round-1: the airy default measured
+    // between all of them: the airy default measured
     // ~830px of wanted content against a real ~622-800px window at the
     // app's default/untouched size, overflowing the right-aligned group to
-    // 0 available width and making it disappear rather than overlap).
+    // 0 available width and making it disappear rather than overlap.
     widgets::dense(ui, |ui| {
         ui.horizontal(|ui| {
             let t = theme(ui);
@@ -60,7 +60,7 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx,
             bpm_tap(ui, perform.show, perform.t0);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Rightmost: the theme picker (Step 12: now interactive;
+                // Rightmost: the theme picker (now interactive;
                 // see `theme_combo`'s own doc comment).
                 theme_combo(ui, theme_request);
                 if widgets::ghost_button(ui, "⛶").clicked() {
@@ -71,12 +71,12 @@ pub fn header(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx,
     });
 }
 
-/// Stage-mode header (Step 11): a 28px band replacing `header`'s 48px:
+/// Stage-mode header: a 28px band replacing `header`'s 48px:
 /// wordmark, a `STAGE` mode indicator, no crossfader/BPM/theme controls
 /// (those stay in `status_bar_stage`/`header`), but the same `⛶`
 /// `ghost_button` `header` uses to toggle `stage_mode`, right-aligned.
 /// `F11` is still the primary toggle, but a pointer-driven way out is
-/// required too (fix-round-1 review finding): `F11` is a near-universal
+/// required too: `F11` is a near-universal
 /// OS/window-manager fullscreen binding a user's WM could intercept,
 /// which would otherwise trap them in Stage mode with no mouse escape.
 pub fn header_stage(ui: &mut egui::Ui, stage_mode: &mut bool) {
@@ -97,7 +97,7 @@ pub fn header_stage(ui: &mut egui::Ui, stage_mode: &mut bool) {
 }
 
 /// `OPEN` + `DROP` wordmark: `ui-bold` family alias, accent color on
-/// `DROP` only, no gradient text (Step 10 brief).
+/// `DROP` only, no gradient text.
 fn wordmark(ui: &mut egui::Ui) {
     let t = theme(ui);
     let font = egui::FontId::new(t.type_scale.heading, egui::FontFamily::Name(FAMILY_UI_BOLD.into()));
@@ -107,13 +107,13 @@ fn wordmark(ui: &mut egui::Ui) {
     ui.label(job);
 }
 
-/// Hand-painted crossfader (Step 10 brief, moved from `ui::decks`, was
+/// Hand-painted crossfader (moved from `ui::decks`, was
 /// `decks.rs:47-51`, a plain `egui::Slider`): 1px `dim` ticks, a rail
 /// filled with an accent-transparent -> accent@22% gradient (a real
 /// GPU-interpolated 2-triangle `Mesh`, not an approximation), a 4px handle
 /// with a ~12px glow halo (simulated as several `rect_filled` calls at
-/// decreasing opacity/growing radius, the brief's explicitly-allowed
-/// technique), and mono `A · NN%` / `NN% · B` labels either side. Still a
+/// decreasing opacity/growing radius), and mono `A · NN%` / `NN% · B`
+/// labels either side. Still a
 /// real drag control, not a static readout: dragging or clicking anywhere
 /// along the rail sets `show.crossfader` directly, same end effect as the
 /// `Slider` it replaces.
@@ -126,7 +126,7 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 
     mono_label(ui, format!("A · {:.0}%", (1.0 - show.crossfader) * 100.0));
 
-    // Step 10 fix-round-1: narrowed from 200 to fit the default/untouched
+    // Narrowed from 200 to fit the default/untouched
     // window width (see `header`'s own doc comment) without dropping any
     // control; still a full-width drag-anywhere-on-rail target, just more
     // compact.
@@ -191,14 +191,14 @@ fn crossfader(ui: &mut egui::Ui, show: &mut Show) {
 /// `playlists.rs:44-75`, already a single self-contained `ui.horizontal`
 /// row there, which is why the whole block (not just the BPM readout)
 /// fits the header cleanly. Only the BPM readout itself gets the header's
-/// special treatment: mono font with a light glow (Step 10 brief), factored
-/// into `bpm_readout` below (Step 11) so `status_bar_stage`'s BPM display
+/// special treatment: mono font with a light glow, factored
+/// into `bpm_readout` below so `status_bar_stage`'s BPM display
 /// can reuse the same hand-painted glow instead of repainting it.
 fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
     ui.horizontal(|ui| {
         bpm_readout(ui, show);
 
-        // "Tap" (Step 10 fix-round-1: shortened from "Tap Tempo" to help
+        // "Tap" (shortened from "Tap Tempo" to help
         // the header row fit the app's default/untouched window width;
         // see `header`'s own doc comment).
         if ui.button("Tap").clicked() {
@@ -207,10 +207,10 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
         if ui.button("Clear").clicked() {
             show.clear_manual_bpm();
         }
-        // Whole-branch review Finding 6 (moved verbatim): `Show::
+        // (moved verbatim): `Show::
         // beats_per_change` (auto-crossfade cadence). Same fixed option
         // set as the TS reference's `<select>` (`SidebarPlaylist.svelte:118`).
-        // `.width(40.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults
+        // `.width(40.0)`: egui's `ComboBox` defaults
         // to a 100px minimum width (`Spacing::combo_width`) regardless of
         // content, way oversized for a 1-2 digit value, and a real
         // contributor to the header overflow.
@@ -224,7 +224,7 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
                     }
                 }
             });
-        // Whole-branch review Finding 7 (moved verbatim): resets the
+        // (moved verbatim): resets the
         // cadence on every toggle (either direction), matching the TS
         // reference's unconditional `resetAutoXfadeCount()` call
         // (`+page.svelte:1754`).
@@ -236,25 +236,25 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
 
 /// The BPM readout alone: bare number (or `—` if unknown), mono font, with
 /// the light accent glow described on `bpm_tap`. Split out of `bpm_tap`
-/// (Step 11 of the Phase 7 UI redesign plan) so `status_bar_stage` can show
+/// so `status_bar_stage` can show
 /// just the number, without the Tap/Clear/beats-per-change/auto-crossfade
 /// controls that stay header-only, while still painting the exact same
 /// glow rather than a second hand-rolled copy of it.
 fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     let t = theme(ui);
     let bpm = show.current_bpm();
-    // Bare number, no "BPM" unit suffix (Step 10 fix-round-1): sitting
+    // Bare number, no "BPM" unit suffix: sitting
     // directly next to "Tap"/"Clear" already makes it unambiguous, and
     // dropping the 3-letter suffix was part of closing the header
-    // overflow found in review; see `header`'s own doc comment.
+    // overflow; see `header`'s own doc comment.
     let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
     let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
     let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
     let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
     if ui.is_rect_visible(rect) {
         // Light glow: a single low-opacity accent backdrop, smaller and
-        // fainter than the crossfader handle's halo (the brief calls for
-        // "a similar light glow", not the same intensity).
+        // fainter than the crossfader handle's halo (a similar light
+        // glow, not the same intensity).
         ui.painter().rect_filled(
             rect.expand(5.0),
             egui::CornerRadius::from(t.metrics.radius_md),
@@ -264,18 +264,18 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     }
 }
 
-/// Theme picker (Step 12): shows the current theme via a real `ComboBox`,
+/// Theme picker: shows the current theme via a real `ComboBox`,
 /// now interactive, selecting a different entry writes it to the
-/// `theme_request` out-param (posed at Step 9) instead of switching
+/// `theme_request` out-param instead of switching
 /// anything directly. `ui_root` can't apply a theme change itself (that
 /// needs the live `egui::Context`, not available here), so this mirrors
 /// `library.load_request`'s idiom: `main.rs` drains `theme_request` once
 /// `egui_glow.run()` returns and applies the switch there.
 fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
     let t = theme(ui);
-    // `.width(48.0)` (Step 10 fix-round-1): egui's `ComboBox` defaults to
+    // `.width(48.0)`: egui's `ComboBox` defaults to
     // a 100px minimum width regardless of content, a real contributor to
-    // the header overflow found in review; this is only a floor, so
+    // the header overflow; this is only a floor, so
     // `OpenDropClassic` (the longest name) still renders in full, just
     // without padding every other, shorter name out to 100px too.
     egui::ComboBox::from_id_salt("od_theme_combo").width(48.0).selected_text(format!("{:?}", t.id)).show_ui(ui, |ui| {
@@ -290,18 +290,18 @@ fn theme_combo(ui: &mut egui::Ui, theme_request: &mut Option<ThemeId>) {
 // --- Nav -------------------------------------------------------------------
 
 /// Sectioned nav: PERFORM / SOURCES / OUTPUTS / CONTROL, About pinned at
-/// the bottom outside the 4 sections (Step 10 brief).
+/// the bottom outside the 4 sections.
 pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
     // Filled in by whichever `nav_item` call below is active this frame,
     // used after the `vertical` block to slide the one shared accent rail
-    // toward it (Step 22 of the Phase 7 UI redesign plan).
+    // toward it.
     let mut active_rect: Option<egui::Rect> = None;
 
     ui.vertical(|ui| {
         // Wrapped in a `ScrollArea` (default settings: shrinks to content
         // height when it fits, scrolls internally otherwise) so the list
         // stays reachable past a fixed-height panel. Found live-testing
-        // this phase's nav, which nearly doubled item count from 14 to 27:
+        // the redesigned nav, which nearly doubled item count from 14 to 27:
         // with no scroll mechanism at all, every item past the panel's
         // fixed height, including "About" below this block, was simply
         // unreachable. Default `auto_shrink` (not forced false) matters:
@@ -311,16 +311,12 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             widgets::section(ui, "Perform");
             nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
-            // `PresetBrowser` isn't named in this step's brief's PERFORM/
-            // SOURCES/OUTPUTS/CONTROL section listing (13 entries across the 4
-            // sections in the default build), a gap in that listing: the
-            // brief's own manual-verification line ("all 14 panels are
-            // reachable from the sectioned nav") requires every
-            // default-build `Panel` variant reachable, and `PresetBrowser` is
-            // the 14th; nothing else in the app can set `active_panel` to it
-            // (the old tab row's "Presets" button is gone). Placed here since
+            // `PresetBrowser` isn't part of the PERFORM/SOURCES/OUTPUTS/
+            // CONTROL section listing, but every default-build `Panel`
+            // variant needs to be reachable from the sectioned nav, and
+            // nothing else in the app can set `active_panel` to it (the
+            // old tab row's "Presets" button is gone). Placed here since
             // browsing presets is part of the live-performance workflow.
-            // Documented as a judgment call in the task report.
             nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists", &mut active_rect);
 
@@ -361,7 +357,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         });
 
         // About: pinned to the bottom of the nav column, outside the 4
-        // sections above (Step 10 brief). A `bottom_up` child layout
+        // sections above. A `bottom_up` child layout
         // placed last in the outer `vertical` claims the rest of the
         // panel's height and bottom-anchors its one item inside it,
         // standard egui idiom for a sidebar's pinned-bottom item. Only
@@ -372,11 +368,11 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         });
     });
 
-    // Sliding accent rail (Step 22): one persistent rail whose vertical
+    // Sliding accent rail: one persistent rail whose vertical
     // position animates toward the active item's real rect via
     // `animate_value_with_time`, instead of `nav_item` hand-painting a
-    // fresh static one at each active item's position every frame (Step
-    // 10's original behavior). Fixed `Id`: `nav` has exactly one call site
+    // fresh static one at each active item's position every frame.
+    // Fixed `Id`: `nav` has exactly one call site
     // (`main.rs`'s `ui_root`), called once per frame, so a literal key is
     // stable by construction, not a scroll/filter-shifting one.
     if let Some(rect) = active_rect {
@@ -389,11 +385,10 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
 }
 
 /// One nav row: a `selectable_label`. When active, records its rect into
-/// `active_rect` (Step 22) so `nav`'s own accent rail, now a single
+/// `active_rect` so `nav`'s own accent rail, now a single
 /// animated rail slid between active items via `animate_value_with_time`,
 /// knows where to slide toward, instead of this function hand-painting a
-/// fresh static rail at each active item's position every frame (Step 10's
-/// original behavior).
+/// fresh static rail at each active item's position every frame.
 fn nav_item(ui: &mut egui::Ui, active_panel: &mut Panel, panel: Panel, label: &str, active_rect: &mut Option<egui::Rect>) {
     let is_active = *active_panel == panel;
     let response = ui.selectable_label(is_active, label);
@@ -408,8 +403,8 @@ fn nav_item(ui: &mut egui::Ui, active_panel: &mut Panel, panel: Panel, label: &s
 // --- Status bar --------------------------------------------------------
 
 /// Dense status bar: fps/frame-ms, audio device + VU, one connection
-/// pill per service, and preset/thumbnail loading activity (Step 10
-/// brief). Pure display: nothing here mutates any context struct's
+/// pill per service, and preset/thumbnail loading activity. Pure
+/// display: nothing here mutates any context struct's
 /// state.
 #[allow(clippy::too_many_arguments)]
 pub fn status_bar(
@@ -427,8 +422,7 @@ pub fn status_bar(
     // empty marker variant (see that struct's own doc comment) and this
     // line is the only "use" of the parameter, avoiding a spurious
     // unused-variable warning without renaming the param. Same idiom
-    // `ui_root` used before `control` was also threaded through here
-    // (Step 10).
+    // `ui_root` used before `control` was also threaded through here.
     let _ = &control;
 
     widgets::dense(ui, |ui| {
@@ -447,15 +441,14 @@ pub fn status_bar(
             // `vu_meter` sizes itself to `ui.available_width()`, meant for
             // its full-width Audio-panel usage, wrapped in a fixed-size
             // child region here so it doesn't swallow the rest of this
-            // dense row (Step 10 judgment call, documented in the task
-            // report).
+            // dense row.
             ui.allocate_ui(egui::vec2(60.0, 12.0), |ui| {
                 widgets::vu_meter(ui, sources.last_vu_level as f32);
             });
             sep(ui);
 
-            // Connection pills: one 5px dot per service, in the brief's
-            // own listed order: MIDI · NDI · OSC · Remote · OBS · Twitch ·
+            // Connection pills: one 5px dot per service, in a fixed
+            // order: MIDI · NDI · OSC · Remote · OBS · Twitch ·
             // Kick · V4L2 · Link · preset/thumbnail loading activity.
             status_dot(ui, "MIDI", sources.midi.latest().connected);
             let ndi = output.ndi.latest();
@@ -470,24 +463,22 @@ pub fn status_bar(
             status_dot(ui, "LINK", control.link.latest().enabled);
 
             // Preset preflight validation / thumbnail queue activity.
-            // Approximated from what's visible to `ui::ctx` (Step 10
-            // judgment call, documented in the task report: the actual
+            // Approximated from what's visible to `ui::ctx`: the actual
             // in-flight `--render-thumbnail` child process isn't threaded
-            // through any context struct, only `AppState` itself).
+            // through any context struct, only `AppState` itself.
             let loading = !perform.pending_validations.is_empty() || !library.thumb_queue.is_empty();
             status_dot(ui, "LOAD", loading);
         });
     });
 }
 
-/// Stage bottom bar (Step 11): the live-transport counterpart to
+/// Stage bottom bar: the live-transport counterpart to
 /// `status_bar`, shown instead of it while `stage_mode` is on: 4 deck
 /// vignettes, a bus A/B deck-count readout, the crossfader, VU, BPM, and
 /// FPS, plus the preset drawer's open/close toggle. Deliberately narrower
 /// than `status_bar`'s own reads: no connection pills or loading activity
-/// here, since those aren't part of the brief's Stage-bar listing and this
-/// bar already reuses `crossfader`/`bpm_readout` rather than growing new
-/// hand-painted pieces of its own. Takes `SourcesCtx` (for `last_vu_level`)
+/// here, since this bar already reuses `crossfader`/`bpm_readout` rather
+/// than growing new hand-painted pieces of its own. Takes `SourcesCtx` (for `last_vu_level`)
 /// but not `LibraryCtx`/`OutputCtx`/`StreamCtx`/`ControlCtx`: nothing
 /// here reads them.
 pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut PerformCtx, sources: &mut SourcesCtx) {
@@ -503,8 +494,8 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
                 sep(ui);
 
                 // `accent` = bus A, `ok` = bus B (the same mapping
-                // `Metrics`' own doc comment establishes for Step 13's
-                // Decks panel), so this reads consistently with the
+                // `Metrics`' own doc comment establishes for the Decks
+                // panel), so this reads consistently with the
                 // bus-cycle buttons once those are themed.
                 let bus_a = perform.show.deck_bus.iter().filter(|&&b| b == DeckBus::A).count();
                 let bus_b = perform.show.deck_bus.iter().filter(|&&b| b == DeckBus::B).count();
@@ -516,20 +507,20 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
             });
 
             // Row 2 (live readouts): VU meter, a separator, the BPM
-            // readout, Tap/Clear buttons (whole-branch review fix wave,
-            // finding 4, added after this row's last real measurement),
+            // readout, Tap/Clear buttons (added after this row's initial
+            // measurement),
             // then a right-aligned group of the FPS label, a separator,
             // and the preset drawer toggle. Split onto its own row rather
             // than packed into row 1 (measured live at the app's default
             // ~624px content width, same instrumented-probe technique
-            // Step 10 used for the header's own overflow): `vu_meter`
+            // used for the header's own overflow): `vu_meter`
             // floors its width at `Metrics::tile_content_w` (sized for
             // the Audio panel's own full-width usage) regardless of the
             // space handed to it, which alone left no room for BPM/FPS/
             // the drawer toggle after 4 vignettes + bus pills + the
             // crossfader on one row. Allocated width below reads
-            // `t.metrics.tile_content_w` directly (fix-round-1 review
-            // finding: a hardcoded `110.0` literal here only avoided
+            // `t.metrics.tile_content_w` directly (a hardcoded `110.0`
+            // literal here only avoided
             // clipping because it happened to equal `tile_content_w`'s
             // current value, and would silently re-clip if that token
             // ever changed). Re-measured after Tap/Clear landed
@@ -546,7 +537,7 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
                 sep(ui);
 
                 bpm_readout(ui, perform.show);
-                // Whole-branch review fix wave, finding 4: Stage mode (the
+                // Stage mode (the
                 // live-performance mode) had no way to tap or clear the
                 // manual BPM at all; `bpm_tap` (the only caller of
                 // `Show::tap_tempo`/`clear_manual_bpm`) lives in `header`
@@ -577,8 +568,8 @@ pub fn status_bar_stage(ui: &mut egui::Ui, shell: &mut ShellCtx, perform: &mut P
 }
 
 /// A `micro_label`ed 5px dot: `ok` (green) + a soft glow when `active`,
-/// `dim` with no glow otherwise (whole-branch review fix wave, finding 5:
-/// was `warn`, which made a freshly-launched app's status bar read as a
+/// `dim` with no glow otherwise (was `warn`, which made a freshly-launched
+/// app's status bar read as a
 /// row of warnings for a merely-offline state; `dim` matches `widgets::
 /// connection_row`'s established convention for the same conceptual
 /// state).

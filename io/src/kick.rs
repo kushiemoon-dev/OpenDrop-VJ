@@ -26,9 +26,9 @@
 //!    simply be blocked where Puppeteer would succeed: there is no way to
 //!    replicate a full headless-browser TLS/JS fingerprint with `reqwest`
 //!    alone, and no headless-browser crate was introduced here (out of
-//!    scope for an I/O crate, and Real-hardware/service verification is
-//!    explicitly out of scope for this task). A realistic `User-Agent` is
-//!    sent as the only mitigation attempted.
+//!    scope for an I/O crate, and verifying this against the real service
+//!    wasn't attempted). A realistic `User-Agent` is sent as the only
+//!    mitigation attempted.
 //! 2. Opens a WebSocket to Kick's third-party Pusher app instance:
 //!    `wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=
 //!    js&version=8.4.0&flash=false` (`websocket.ts`, `index.cjs:224-232`)
@@ -112,7 +112,7 @@ const DISCOVERY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ap
 pub struct KickSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (missing bearer/xsrf/cookies, or a
-    /// keyring lookup failure). Whole-branch review Finding 1 (AC-12):
+    /// keyring lookup failure). AC-12:
     /// this used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.
@@ -247,7 +247,7 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                         }
                     },
                     Err(e) => {
-                        // Whole-branch review Finding 1 (AC-12): this
+                        // AC-12: this
                         // refusal used to be an `eprintln!` only, invisible
                         // to a GUI user: now also surfaced via
                         // `KickSnapshot::last_error`.

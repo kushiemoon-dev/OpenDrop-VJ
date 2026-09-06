@@ -71,13 +71,13 @@ pub struct Show {
     pub slot_composites: [SlotComposite; 4],
     pub color_params_a: ColorParams,
     pub color_params_b: ColorParams,
-    /// The 8 Time multipliers per deck slot (Step 8 of the Phase 8 plan),
-    /// written by the Time panel and by the 32 `CommandId::Time*` setters.
+    /// The 8 Time multipliers per deck slot, written by the Time panel and
+    /// by the 32 `CommandId::Time*` setters.
     /// Read by `app`'s per-frame push loop, which forwards the changed ones
     /// into each deck's running preset: `Show` itself stays engine-free.
     pub time_params: [DeckTimeParams; 4],
-    /// The 32 q-var overrides per deck slot (Step 9 of the Phase 8 plan),
-    /// written by the Qvar panel and by the 128 `CommandId::Qvar*` setters.
+    /// The 32 q-var overrides per deck slot, written by the Qvar panel and
+    /// by the 128 `CommandId::Qvar*` setters.
     /// Read by `app` on two different cadences, both engine-free from here:
     /// changed *values* go into the running preset through the same
     /// one-word-per-frame side channel Time uses, while a change to the set
@@ -98,7 +98,7 @@ pub struct Show {
     pub beat_sync_b: bool,
     pub beat_trigger_a: BeatTriggerConfig,
     pub beat_trigger_b: BeatTriggerConfig,
-    /// The 8 snapshot slots (Step 4 of the Phase 8 plan). `None` = empty
+    /// The 8 snapshot slots. `None` = empty
     /// slot. Populated by the snapshot panel's Save button
     /// (`capture_snapshot_values`), consumed by `recall_snapshot`/
     /// `tick_recall`.
@@ -109,7 +109,7 @@ pub struct Show {
     /// The in-progress recall, if any: armed by `recall_snapshot`,
     /// advanced each render tick by `tick_recall`.
     pub active_recall: Option<ActiveRecall>,
-    /// Up to 8 keyframes (Step 5 of the Phase 8 plan) sequencing playback
+    /// Up to 8 keyframes sequencing playback
     /// across the existing snapshot slots. Kept sorted by `time_sec` by
     /// the timeline panel (`app::ui::timeline`): `timeline_values_at`
     /// assumes sorted input.
@@ -125,7 +125,7 @@ pub struct Show {
     /// `true`, so play always restarts at the beginning of the current
     /// loop cycle rather than resuming stale progress or jumping in time.
     timeline_elapsed_sec: f64,
-    /// Strobe on/off/rate/intensity/color (Step 10 of the Phase 8 plan).
+    /// Strobe on/off/rate/intensity/color.
     /// Toggled through `CommandContext::toggle_strobe` (keyboard/MIDI/OSC/
     /// remote-ws parity); rate/intensity/color are written directly by
     /// the panel (`app::ui::strobe`), same "direct field mutation"
@@ -134,7 +134,7 @@ pub struct Show {
     /// `strobe::strobe_flash_intensity(&show.strobe, ...)` and handed to
     /// the compositor: `Show` stores only the user-facing state, no GL.
     pub strobe: StrobeState,
-    /// 4 modulation slots (Step 11 of the Phase 8 plan), written directly
+    /// 4 modulation slots, written directly
     /// by the LFO panel (`app::ui::lfo`), same "direct field mutation"
     /// convention as `strobe`'s rate/intensity/color above. Ticked each
     /// frame by `app::about_to_wait` (`LfoEngine::tick`, driven by
@@ -144,8 +144,8 @@ pub struct Show {
     /// an LFO route moves its target through the exact same
     /// keyboard/MIDI/OSC/remote-ws-equivalent path.
     pub lfo_engine: LfoEngine,
-    /// Sprite/text overlays and their auto-cycling queue (Step 12 of the
-    /// Phase 8 plan). `core::overlay` was ported long before it had a
+    /// Sprite/text overlays and their auto-cycling queue. `core::overlay`
+    /// was ported long before it had a
     /// consumer; this field is what finally gives it one. Written directly
     /// by the Overlays panel (`app::ui::overlays`), same "direct field
     /// mutation" convention as `strobe`/`lfo_engine` above, except the
@@ -160,7 +160,7 @@ pub struct Show {
     /// id→GL-texture cache alongside it (see `AppState::overlay_assets`).
     pub overlay_store: OverlayStore,
     /// Video background layer: on/off, opacity, clip rotation, and the 4
-    /// beat/volume-reactive toggles (Step 14 of the Phase 8 plan). Written
+    /// beat/volume-reactive toggles. Written
     /// directly by the Video panel (`app::ui::video`), same "direct field
     /// mutation" convention as `strobe`/`lfo_engine`/`overlay_store` above.
     ///
@@ -176,18 +176,18 @@ pub struct Show {
     /// `Xorshift64` consumer alongside the two playlist engines, the LFO,
     /// and the overlay queue. See `reseed_rng`.
     video_rng: Xorshift64,
-    /// One `VideoState` per deck slot (ticket #9's "Video per deck"),
-    /// independent of the global `video` layer above: each slot cuts on its
-    /// own beat via [`Show::on_deck_video_beat`].
+    /// One `VideoState` per deck slot, independent of the global `video`
+    /// layer above: each slot cuts on its own beat via
+    /// [`Show::on_deck_video_beat`].
     pub deck_video: [VideoState; 4],
-    /// One more independent `Xorshift64` consumer per deck slot (ticket #9),
-    /// alongside the 5 already listed on `video_rng`'s own doc comment. See
+    /// One more independent `Xorshift64` consumer per deck slot, alongside
+    /// the 5 already listed on `video_rng`'s own doc comment. See
     /// `reseed_rng`.
     deck_video_rng: [Xorshift64; 4],
     /// Which rkbx_link DJ deck index (0-3) is mapped to each of the 4 visual
     /// deck slots, or `None` (the default: nothing happens for an unmapped DJ
-    /// deck) — ticket #10 "Synchronised music video playback". Indexed by DJ
-    /// deck, not slot: `rkbx_deck_mapping[dj_deck] == Some(slot)`.
+    /// deck). Indexed by DJ deck, not slot: `rkbx_deck_mapping[dj_deck] ==
+    /// Some(slot)`.
     pub rkbx_deck_mapping: [Option<usize>; 4],
     pub auto_xfade: bool,
     /// Cadence of the auto-crossfade, in beats: DISTINCT from
@@ -289,9 +289,8 @@ impl Show {
     /// per-launch entropy supplied by the caller (`app`'s bootstrap;
     /// `core` stays zero-I/O and has no clock of its own). Deck A and B get
     /// distinct-but-derived seeds so they don't draw identical shuffle
-    /// sequences from the same source entropy. Whole-branch review Finding
-    /// I4: without this, shuffle mode replayed the exact same sequence
-    /// every single app launch.
+    /// sequences from the same source entropy. Without this, shuffle mode
+    /// replayed the exact same sequence every single app launch.
     pub fn reseed_rng(&mut self, seed: u64) {
         if let Some(engine) = self.playlists.engine_a_mut() {
             engine.reseed_rng(seed);
@@ -299,23 +298,23 @@ impl Show {
         if let Some(engine) = self.playlists.engine_b_mut() {
             engine.reseed_rng(seed ^ 0xA5A5_A5A5_A5A5_A5A5);
         }
-        // LFO Sample & Hold (Step 11 of the Phase 8 plan), an unrelated
-        // RNG consumer, no lockstep risk with the playlist engines above,
-        // so it reseeds from the raw `seed` rather than an XOR'd variant.
+        // LFO Sample & Hold, an unrelated RNG consumer, no lockstep risk
+        // with the playlist engines above, so it reseeds from the raw
+        // `seed` rather than an XOR'd variant.
         self.lfo_engine.reseed_rng(seed);
-        // Overlay auto-cycle queue in shuffle mode (Step 12), a third
-        // independent consumer, XOR'd like deck B's so two shuffles driven
-        // by the same beat don't advance in lockstep.
+        // Overlay auto-cycle queue in shuffle mode, a third independent
+        // consumer, XOR'd like deck B's so two shuffles driven by the same
+        // beat don't advance in lockstep.
         self.overlay_store.reseed_rng(seed ^ 0x5A5A_5A5A_5A5A_5A5A);
-        // Video-loop shuffle (Step 14), a fifth independent consumer, XOR'd
-        // with its own constant for the same anti-lockstep reason as the two
-        // above: the overlay queue and the video layer are both driven by
-        // the same beat, and two shuffles drawing identical sequences would
+        // Video-loop shuffle, a fifth independent consumer, XOR'd with its
+        // own constant for the same anti-lockstep reason as the two above:
+        // the overlay queue and the video layer are both driven by the
+        // same beat, and two shuffles drawing identical sequences would
         // be visible.
         self.video_rng.reseed(seed ^ 0x3C3C_3C3C_3C3C_3C3C);
-        // Per-deck video shuffle (ticket #9's "Video per deck"): 4 more independent
-        // consumers, each XOR'd with its own constant for the same anti-lockstep
-        // reason as every RNG reseed above.
+        // Per-deck video shuffle: 4 more independent consumers, each XOR'd
+        // with its own constant for the same anti-lockstep reason as every
+        // RNG reseed above.
         const DECK_VIDEO_RNG_XOR: [u64; 4] =
             [0x1E1E_1E1E_1E1E_1E1E, 0x2D2D_2D2D_2D2D_2D2D, 0x4B4B_4B4B_4B4B_4B4B, 0x6E6E_6E6E_6E6E_6E6E];
         for (slot, xor) in DECK_VIDEO_RNG_XOR.into_iter().enumerate() {
@@ -323,7 +322,7 @@ impl Show {
         }
     }
 
-    /// Beat-driven video-clip cut (Step 14 of the Phase 8 plan). Returns
+    /// Beat-driven video-clip cut. Returns
     /// `true` when the current clip actually changed, so `app` knows to
     /// point its decoder at the new file.
     ///
@@ -340,8 +339,8 @@ impl Show {
         self.video.on_beat(all_clip_keys, ndi_active, draw)
     }
 
-    /// Beat-driven video-clip cut for deck slot `slot` (ticket #9's "Video per
-    /// deck"). Same contract as [`Show::on_video_beat`], but per-slot: `slot`
+    /// Beat-driven video-clip cut for deck slot `slot`. Same contract as
+    /// [`Show::on_video_beat`], but per-slot: `slot`
     /// indexes both `deck_video` and `deck_video_rng`. `ndi_active` is always
     /// `false` here: a deck-video instance never exposes a live camera or NDI
     /// source (out of scope; see the Video panel's per-deck branch).
@@ -367,7 +366,7 @@ impl Show {
     /// Maps DJ deck `dj_deck` to visual slot `visual_slot` (or unmaps it with
     /// `None`). Refuses (leaving the mapping untouched) if `visual_slot` is
     /// already claimed by a *different* DJ deck: a visual slot must never be
-    /// driven by two DJ decks' sync at once (ticket #10).
+    /// driven by two DJ decks' sync at once.
     pub fn set_rkbx_deck_mapping(&mut self, dj_deck: usize, visual_slot: Option<usize>) -> Result<(), String> {
         if let Some(slot) = visual_slot {
             if let Some(other) = (0..self.rkbx_deck_mapping.len()).find(|&d| d != dj_deck && self.rkbx_deck_mapping[d] == Some(slot)) {
@@ -403,10 +402,9 @@ impl Show {
         out
     }
 
-    /// Called by `app` once per beat emitted by `clock`/`beat_detector` (see
-    /// step 18 for the call site). Port of `onBeat`,
-    /// `beat-tempo-actions.ts:48-70` (minus the overlay/video/network pulse,
-    /// out of scope here).
+    /// Called by `app` once per beat emitted by `clock`/`beat_detector`.
+    /// Port of `onBeat`, `beat-tempo-actions.ts:48-70` (minus the
+    /// overlay/video/network pulse, out of scope here).
     pub fn on_beat(&mut self) {
         if self.auto_xfade {
             self.auto_xfade_count = (self.auto_xfade_count + 1) % self.beats_per_change.max(1);
@@ -416,7 +414,7 @@ impl Show {
         }
         self.maybe_advance_on_beat(Deck::A);
         self.maybe_advance_on_beat(Deck::B);
-        // Overlay auto-cycle queue (Step 12), the third `shouldTriggerOn
+        // Overlay auto-cycle queue, the third `shouldTriggerOn
         // Beat` block of `beat-tempo-actions.ts`, alongside the two
         // per-deck ones just above. Unconditional here: the store's own
         // guard checks `queue_enabled` and the trigger mode.
@@ -429,10 +427,10 @@ impl Show {
     /// Restarts the auto-crossfade cadence from the top. Port of the
     /// unconditional `resetAutoXfadeCount()` call the TS reference makes on
     /// every auto-xfade toggle, either direction (`+page.svelte:1754`).
-    /// Whole-branch review Finding 7: `app` never called an equivalent of
-    /// this: toggling auto-xfade off then back on resumed the crossfade
-    /// cycle mid-count instead of restarting it, so the first crossfade
-    /// after re-enabling could land 1-7 beats early/late.
+    /// `app` never called an equivalent of this: toggling auto-xfade off
+    /// then back on resumed the crossfade cycle mid-count instead of
+    /// restarting it, so the first crossfade after re-enabling could land
+    /// 1-7 beats early/late.
     pub fn reset_auto_xfade_count(&mut self) {
         self.auto_xfade_count = 0;
     }
@@ -541,11 +539,11 @@ impl Show {
 
     /// Trigger independent of the beat count, for `BeatTriggerMode::VolumePeak`
     /// (`should_trigger_on_beat` explicitly ignores that mode). `rms` is
-    /// supplied by `app`: see step 9's `audio::analysis::vu_level`.
+    /// supplied by `app`: see `audio::analysis::vu_level`.
     pub fn check_volume_peak_triggers(&mut self, rms: f64, now_ms: f64) {
         self.check_one_volume_peak(Deck::A, rms, now_ms);
         self.check_one_volume_peak(Deck::B, rms, now_ms);
-        // Overlay auto-cycle queue (Step 12), the volume-peak half of
+        // Overlay auto-cycle queue, the volume-peak half of
         // what `on_beat` does for the beat half. Its own rolling
         // average/cooldown state lives on the store, not here (see
         // `OverlayStore::queue_volume_state`).
@@ -664,17 +662,17 @@ impl Show {
 }
 
 /// `CommandId`s the snapshot panel's Save button captures and a recall
-/// interpolates toward: the Color and Composite setters (steps 1-2 of the
-/// Phase 8 plan). See `Show::get_command_value`.
+/// interpolates toward: the Color and Composite setters. See
+/// `Show::get_command_value`.
 ///
 /// This is a curated subset, not "every setter that exists yet": having a
 /// real `CommandContext` setter is necessary but not sufficient, and the
-/// list is not expected to keep growing with each new one. As of the end of
-/// Phase 8, 221 of the 223 commands have a setter and only these 30 are
-/// captured: the two large families left out are excluded permanently and
-/// by design, for the reasons below.
+/// list is not expected to keep growing with each new one. 221 of the 223
+/// commands have a setter and only these 30 are captured: the two large
+/// families left out are excluded permanently and by design, for the
+/// reasons below.
 ///
-/// **The 32 `CommandId::Time*` setters (step 8) are deliberately left out**,
+/// **The 32 `CommandId::Time*` setters are deliberately left out**,
 /// rather than overlooked. Two reasons:
 ///
 /// - *Bandwidth.* Time values reach the decks through a side channel that
@@ -692,7 +690,7 @@ impl Show {
 ///   easy to get wrong, and silently wrong if it ever is, since a snapshot
 ///   would recall to half or double what was saved.
 ///
-/// **The 128 `CommandId::Qvar*` setters (step 9) are left out for the same
+/// **The 128 `CommandId::Qvar*` setters are left out for the same
 /// two reasons**, both of which apply at least as strongly: they share the
 /// very same one-value-per-deck-per-frame channel (so a captured Qvar would
 /// compete with Time *and* with the other 31 watches), and they are stored
@@ -755,7 +753,7 @@ impl CommandContext for Show {
             Deck::A => Deck::B,
             Deck::B => Deck::A,
         };
-        // Whole-branch review Finding 19: keep `selected_slot` (what the
+        // Keep `selected_slot` (what the
         // Decks panel highlights) in sync on a keyboard-driven switch too.
         // `select_slot` already derives `active_deck` from a clicked
         // slot's bus; without this, the reverse direction let the
@@ -817,9 +815,8 @@ impl CommandContext for Show {
         }
     }
 
-    /// Step 12 of the Phase 8 VJ-panels plan: the overlay queue is real
-    /// state now (`Show::overlay_store`), so this stops being the no-op
-    /// stub it was through Phase 4/M2. `direction` is +1/-1 straight from
+    /// The overlay queue is real state now (`Show::overlay_store`), so
+    /// this is no longer a no-op stub. `direction` is +1/-1 straight from
     /// `CommandId::OverlayQueueNext`/`Prev`; `advance_overlay_queue`
     /// itself treats anything that isn't +1 as "backwards", same as the
     /// TS source's `direction === 1 ? ... : ...`.
@@ -1208,9 +1205,9 @@ mod tests {
 
         #[test]
         fn switch_active_deck_keeps_selected_slot_in_sync() {
-            // Whole-branch review Finding 19: a keyboard-driven active-deck
-            // switch used to leave `selected_slot` (what the Decks panel
-            // highlights) pointing at the previous deck's slot.
+            // A keyboard-driven active-deck switch used to leave
+            // `selected_slot` (what the Decks panel highlights) pointing
+            // at the previous deck's slot.
             let mut show = Show::default(); // deck_bus: [A, B, Off, Off]
             assert_eq!(show.selected_slot, 0);
             show.switch_active_deck(); // now active_deck == B, which is slot 1
@@ -1475,7 +1472,7 @@ mod tests {
 
         #[test]
         fn advance_overlay_queue_moves_the_stores_queue_index() {
-            // Step 12: this setter was an empty no-op through Phase 4/M2.
+            // This setter used to be an empty no-op.
             let mut show = Show::default();
             show.overlay_store.overlays = vec![
                 Overlay { id: "a".to_string(), in_queue: true, ..Default::default() },
@@ -1507,9 +1504,9 @@ mod tests {
         }
     }
 
-    /// Step 12: the two auto-advance signals `Show` forwards into
-    /// `OverlayStore`: the store's own trigger logic is tested in
-    /// `core::overlay`; these assert the wiring from `Show`'s side.
+    /// The two auto-advance signals `Show` forwards into `OverlayStore`:
+    /// the store's own trigger logic is tested in `core::overlay`; these
+    /// assert the wiring from `Show`'s side.
     mod overlay_queue_wiring {
         use super::*;
 
@@ -2179,8 +2176,8 @@ mod tests {
 
         #[test]
         fn reset_auto_xfade_count_restarts_the_cadence_from_the_top() {
-            // Whole-branch review Finding 7: without a reset, re-enabling
-            // auto-xfade mid-count would fire the next crossfade early.
+            // Without a reset, re-enabling auto-xfade mid-count would fire
+            // the next crossfade early.
             let mut show = Show { auto_xfade: true, beats_per_change: 4, ..Default::default() };
             show.on_beat();
             show.on_beat();
@@ -2442,7 +2439,7 @@ mod tests {
         }
     }
 
-    /// Step 14 of the Phase 8 plan: `Show`'s half of the video-clip cut.
+    /// `Show`'s half of the video-clip cut.
     /// The cut *rules* themselves are covered in `core::video`; what's
     /// tested here is only the seam: that `Show` feeds the layer a real
     /// draw, and that the draw is reseedable like every other RNG consumer.
@@ -2509,9 +2506,9 @@ mod tests {
         }
     }
 
-    /// Ticket #9's "Video per deck": `on_deck_video_beat` must touch only
-    /// the targeted slot's `VideoState`, leaving the other 3 deck slots and
-    /// the global `video` layer untouched.
+    /// `on_deck_video_beat` must touch only the targeted slot's
+    /// `VideoState`, leaving the other 3 deck slots and the global `video`
+    /// layer untouched.
     mod on_deck_video_beat {
         use super::*;
 

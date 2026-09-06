@@ -1,9 +1,9 @@
 //! Disk + GPU-texture cache for preset thumbnails, driven by `core::
 //! thumb_queue`'s pure job queue. Port of `thumbnailer.svelte.ts`'s
-//! `onVisible`/`onHidden`-driven pipeline (Step 15 of the plan). `main.rs`'s
+//! `onVisible`/`onHidden`-driven pipeline. `main.rs`'s
 //! `about_to_wait` pumps `pump_thumbnail_queue` once per tick, gated on the
 //! preset-browser panel's visibility; `ui::preset_browser` feeds jobs in via
-//! `enqueue_front` as tiles scroll into view (both Step 17).
+//! `enqueue_front` as tiles scroll into view.
 //!
 //! Disk cache entries are raw RGBA8 (`THUMB_W * THUMB_H * 4` bytes), no
 //! header: the size is always known ahead of time, so a length check on
@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 const RGBA_BYTES: usize = (THUMB_W * THUMB_H * 4) as usize;
 
-/// Whole-branch review Finding 4: max GPU textures kept resident in
+/// Max GPU textures kept resident in
 /// `thumbnail_textures` at once. Nothing previously removed an entry once
 /// created, so every tile ever scrolled past kept its texture alive for
 /// the whole session, up to ~812MB VRAM for the full ~9795-preset catalog
@@ -157,7 +157,7 @@ pub fn reap_killed(killed: &mut Vec<Child>) {
 
 /// Inserts `(key, tex)` into `textures`, tracking insertion order in
 /// `order` so the oldest entry can be evicted once
-/// `MAX_RESIDENT_THUMBNAILS` is exceeded (whole-branch review Finding 4).
+/// `MAX_RESIDENT_THUMBNAILS` is exceeded.
 /// FIFO, not true LRU (no re-touch-on-view bump): the simplest structure
 /// that bounds memory. A tile evicted while still on screen just gets
 /// re-queued and re-rendered next time it's visible and missing (a cheap
@@ -350,7 +350,7 @@ mod tests {
         }
     }
 
-    /// Whole-branch review Finding 4: the bounded thumbnail-texture cache.
+    /// The bounded thumbnail-texture cache.
     /// `egui::TextureHandle` needs no GL context to construct: its
     /// texture manager is CPU-side bookkeeping only, so this is a real
     /// unit test of the eviction logic, not just a description of it.

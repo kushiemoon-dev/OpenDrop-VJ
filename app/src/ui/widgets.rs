@@ -1,16 +1,16 @@
-//! Shared widget library (Step 8 of the Phase 7 UI redesign plan): a set of
-//! standalone helper functions built on the pure tokens (Step 3) and the
-//! `Style`/`Visuals` translation (Step 4), already wired onto the live
-//! `Context` at bootstrap (Step 6). No panel calls any of these yet: that
-//! substitution happens panel by panel at Steps 13-21, at which point each
-//! panel is retouched for the theme anyway. No animation lives here either
-//! (Step 22 owns easing/transitions); `card`'s and `ghost_button`'s hover
+//! Shared widget library: a set of
+//! standalone helper functions built on the pure tokens and the
+//! `Style`/`Visuals` translation, already wired onto the live
+//! `Context` at bootstrap. No panel calls any of these yet: that
+//! substitution happens panel by panel later, at which point each
+//! panel is retouched for the theme anyway. No animation lives here either;
+//! `card`'s and `ghost_button`'s hover
 //! response is a plain binary state switch, not a tween.
 //!
 //! Every color routed through a helper here comes from `theme(ui).palette`
 //! (or a blend derived from two palette colors via `Color32::lerp_to_gamma`/
 //! `gamma_multiply`, never a hand-picked literal) and every spacing/radius
-//! from `theme(ui).metrics`, so a runtime theme switch (Step 12) repaints
+//! from `theme(ui).metrics`, so a runtime theme switch repaints
 //! every widget built from this file correctly with no separate wiring.
 
 use crate::theme::fonts::FAMILY_MONO;
@@ -20,8 +20,8 @@ use crate::theme::THEME_ID_KEY;
 
 /// Resolve the active theme's `&'static Theme` from the live `Context`.
 ///
-/// Reads the `ThemeId` written into `ctx.data` at bootstrap (`main.rs`,
-/// Step 6) under `egui::Id::new(THEME_ID_KEY)`, falling back to
+/// Reads the `ThemeId` written into `ctx.data` at bootstrap (`main.rs`)
+/// under `egui::Id::new(THEME_ID_KEY)`, falling back to
 /// `ThemeId::default()` (Kushie) when absent, which is always the case
 /// under `egui::__run_test_ui` (`egui/src/lib.rs:683`), whose fresh
 /// `Context::default()` never runs that bootstrap wiring. This is what
@@ -55,7 +55,7 @@ pub fn dense<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R
 /// `TextStyle::Name("Micro")`: the latter depends on `Style::text_styles`
 /// already containing that entry, which requires composing in
 /// `fonts::text_styles(theme)` wherever the live `Style` gets built,
-/// something `main.rs`'s Step 6 bootstrap doesn't currently do. Building
+/// something `main.rs`'s bootstrap doesn't currently do. Building
 /// the `FontId` straight from the token, like `fonts::text_styles` itself
 /// does internally, keeps every helper below correct regardless of that.
 pub fn micro_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
@@ -83,12 +83,12 @@ pub fn section(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// run `f` (typically `|ui| ui.button(text)`) inside that scope. Used by
 /// `ghost_button` below, which picks its own `fill`/`fg`/`border` colors,
 /// all sourced from `theme(ui).palette`, and reuses whatever `bg_stroke`
-/// width/`corner_radius` Step 4's `visuals()` already set on the ambient
+/// width/`corner_radius` `visuals()` already set on the ambient
 /// style (only the colors are touched here).
 fn styled_button<R>(ui: &mut egui::Ui, fill: egui::Color32, fg: egui::Color32, border: egui::Color32, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let t = theme(ui);
-    // Hover/press feedback is a plain static color per state (not a tween,
-    // per this step's "no animation" scope), derived from the variant's
+    // Hover/press feedback is a plain static color per state (not a
+    // tween), derived from the variant's
     // own fill blended toward the theme's lightest (`text`) or darkest
     // (`ink`) token so it stays correct across every theme without a new
     // palette field.
@@ -253,7 +253,7 @@ pub fn warn_banner(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// allocating layout space or interaction (a caller draws this over a
 /// widget it already placed, using that widget's `Response::rect`).
 ///
-/// `radius_lg` (whole-branch review fix wave, finding 6): the only caller
+/// `radius_lg`: the only caller
 /// (`ui::decks`'s `active_glow`) rings a `card`, which is itself built with
 /// `radius_lg`, not `radius_md`: a mismatch here left the ring's corners
 /// visibly not following the card's.
@@ -273,27 +273,27 @@ pub fn focus_ring(ui: &egui::Ui, rect: egui::Rect) {
 /// That's fine for widgets built only from egui's own built-in
 /// `TextStyle`s (which stay present, just with empty font lists, under
 /// `FontDefinitions::empty()`), but every helper here that goes
-/// through a family alias (`FAMILY_MONO`, mandated by this step's
+/// through a family alias (`FAMILY_MONO`, required by the
 /// "font weight only via family aliases" constraint) needs that
 /// family actually registered, or egui panics trying to shape text in
 /// a family it's never heard of (`FontFamily::Name("mono") is not
 /// bound to any fonts`). `Context::set_fonts` only takes effect "at
 /// the start of the next pass" (`context.rs:2124`), too late to
 /// matter if called mid-`__run_test_ui`. So: prime a fresh `Context`
-/// with the real `font_definitions()` (Step 5) *before* its first
-/// pass, mirroring `main.rs`'s bootstrap (Step 6), then run one pass
+/// with the real `font_definitions()` *before* its first
+/// pass, mirroring `main.rs`'s bootstrap, then run one pass
 /// with the same `run_ui`/`drop_without_applying_deltas` mechanics
-/// `__run_test_ui` itself uses. Also installs the real `style()`
-/// (Step 4), so the ambient `Visuals::widgets` grid (corner radii,
+/// `__run_test_ui` itself uses. Also installs the real `style()`,
+/// so the ambient `Visuals::widgets` grid (corner radii,
 /// border colors) the button/`card` helpers scope over matches
-/// production, not `Visuals::dark()`'s own defaults. Step 5's own
-/// `fonts.rs` tests hit the fonts half of this identical constraint
+/// production, not `Visuals::dark()`'s own defaults. `fonts.rs`'s own
+/// tests hit the fonts half of this identical constraint
 /// and likewise never use `__run_test_ui` for anything
 /// font-shaping-sensitive.
 ///
-/// `pub(crate)` (Step 13 of the Phase 7 UI redesign plan): panel test
+/// `pub(crate)`: panel test
 /// modules that call through a family alias too (`ui::decks`'s `card`/
-/// `pill`/`micro_label` usage, and every panel Steps 14-21 theme after
+/// `pill`/`micro_label` usage, and every panel that themes after
 /// it) hit this exact constraint, so this lives outside `mod tests`
 /// rather than duplicated per panel file.
 #[cfg(test)]

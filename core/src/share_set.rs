@@ -1,7 +1,7 @@
 //! Port of OpenDrop-VJ `src/lib/engine/share-set.ts` and
 //! `share-set-store.svelte.ts`: the curated, machine-agnostic subset of
 //! live VJ state a "share link" carries, aggregating every other ported
-//! Phase-1 module's state into one struct, plus the overlay filter used to
+//! module's state into one struct, plus the overlay filter used to
 //! decide what's safe to put in a URL.
 //!
 //! Adaptations for a zero-I/O, fully unit-testable `core`:
@@ -48,7 +48,7 @@ use crate::timeline::TimelineKeyframe;
 /// defines this inline (`Array<'A' | 'B' | 'off'>`), but `show.rs` already
 /// has an identical Rust `DeckBus` enum for the same concept (`Show::
 /// deck_bus`), so this reuses it rather than redeclaring a second,
-/// structurally-identical type (whole-branch review Finding M6).
+/// structurally-identical type.
 pub use crate::show::DeckBus;
 
 pub struct SharedSet {
@@ -56,8 +56,7 @@ pub struct SharedSet {
     pub preset_a: String,
     pub preset_b: String,
     /// Fixed at 4, one per physical slot: same convention as
-    /// `slot_composites`/`time_params` below, not a `Vec` (whole-branch
-    /// review Finding M7).
+    /// `slot_composites`/`time_params` below, not a `Vec`.
     pub deck_bus: [DeckBus; 4],
     pub crossfader: f64,
     pub transition_time: f64,

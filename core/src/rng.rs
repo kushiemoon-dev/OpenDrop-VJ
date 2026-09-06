@@ -1,11 +1,11 @@
 //! Shared xorshift64 PRNG used by shuffle-mode index selection
 //! (`playlist.rs`, `overlay.rs`) and LFO sample-and-hold (`lfo.rs`).
 //!
-//! Whole-branch review Finding I4: these three call sites used to each carry
-//! their own copy of the same xorshift64 algorithm, and `lfo.rs` used the
-//! `rand` crate instead: a needless dependency in a crate whose whole point
-//! is "zero I/O, testable to 100%" (`rand` pulls in `getrandom`/`libc`/
-//! `chacha20`/etc). Consolidated here.
+//! These three call sites used to each carry their own copy of the same
+//! xorshift64 algorithm, and `lfo.rs` used the `rand` crate instead: a
+//! needless dependency in a crate whose whole point is "zero I/O, testable
+//! to 100%" (`rand` pulls in `getrandom`/`libc`/`chacha20`/etc).
+//! Consolidated here.
 //!
 //! `core` is zero-I/O and owns no entropy source of its own, so every
 //! instance starts from a caller-supplied seed rather than a real random

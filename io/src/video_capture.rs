@@ -1,13 +1,12 @@
 //! Video input: decodes a local clip file, or captures a live camera, into
-//! raw RGBA frames this app can upload as a GL texture (Step 14 of the
-//! Phase 8 VJ-panels plan).
+//! raw RGBA frames this app can upload as a GL texture.
 //!
 //! **The mirror image of [`crate::v4l2loopback`]**, deliberately so: that
 //! module pipes the compositor's readback bytes *into* an `ffmpeg`
 //! subprocess (output), this one reads raw frames *out* of one (input).
-//! Same subprocess choice for the same reason (PLAN.md Override 2: no video
-//! decoding crate exists anywhere in `Cargo.lock`, and `ffmpeg` is already a
-//! runtime dependency of the v4l2 output path), same lifecycle discipline:
+//! Same subprocess choice for the same reason (no video decoding crate
+//! exists anywhere in `Cargo.lock`, and `ffmpeg` is already a runtime
+//! dependency of the v4l2 output path), same lifecycle discipline:
 //! a dedicated thread, an `mpsc` control channel, state published through
 //! `ArcSwap`, and an `impl Drop` doing `kill()` + `wait()` so no ffmpeg
 //! process ever outlives its owner and no zombie is ever left behind.
@@ -92,10 +91,10 @@ const RATE_MAX: f64 = 2.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum VideoInput {
     /// A clip file on disk, looped forever (`-stream_loop -1`), optionally
-    /// starting `start_seconds` into the file (`-ss`, ticket #10's
-    /// "Synchronised music video playback"). `0.0` (the pre-ticket-#10
-    /// default everywhere except the sync path) omits `-ss` entirely,
-    /// preserving today's exact ffmpeg invocation.
+    /// starting `start_seconds` into the file (`-ss`, for synchronised
+    /// music video playback). `0.0` (the default everywhere except the
+    /// sync path) omits `-ss` entirely, preserving today's exact ffmpeg
+    /// invocation.
     File { path: PathBuf, start_seconds: f64 },
     /// A live camera, identified the way the platform's ffmpeg input device
     /// expects: `/dev/videoN` on Linux, the DirectShow device *name* on
@@ -216,8 +215,8 @@ pub fn spawn() -> VideoCaptureHandle {
 
 /// Input args for a local clip: looped forever, so a short loop keeps
 /// playing instead of the layer going black after one pass. A positive
-/// `start_seconds` adds an input-side `-ss` seek (ticket #10); `0.0` omits
-/// it, unchanged from before that ticket.
+/// `start_seconds` adds an input-side `-ss` seek; `0.0` omits
+/// it, unchanged from before that feature existed.
 pub fn file_input_args(path: &Path, start_seconds: f64) -> Vec<String> {
     let mut args = vec!["-stream_loop".into(), "-1".into()];
     if start_seconds > 0.0 {

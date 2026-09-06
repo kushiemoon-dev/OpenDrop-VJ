@@ -1,5 +1,4 @@
-//! egui panel content, one file per panel (Step 16 begins with the decks
-//! panel; later steps add more under this module).
+//! egui panel content, one file per panel.
 
 pub mod about;
 pub mod audio;
@@ -11,7 +10,7 @@ pub mod decks;
 pub mod keymap;
 // Feature-gated on the `mod` declaration itself, mirroring `opendrop_io
 // ::link`'s own gating: with the `link` feature off (the default), this
-// file is never parsed. See Task 18's brief and PLAN.md's Risque 5.
+// file is never parsed.
 #[cfg(feature = "link")]
 pub mod link;
 pub mod lfo;

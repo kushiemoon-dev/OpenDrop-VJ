@@ -156,8 +156,8 @@ pub const DEFAULT_SLOT_COMPOSITE: SlotComposite = SlotComposite {
     color_tol: 0.0,
 };
 
-/// Port of OpenDrop-VJ `compositor.ts:140` `shouldForceNormalForLowestSlot`,
-/// whole-branch review Finding I5. Whether the lowest active deck slot
+/// Port of OpenDrop-VJ `compositor.ts:140` `shouldForceNormalForLowestSlot`.
+/// Whether the lowest active deck slot
 /// should be forced to `BlendMode::Normal`: multiply/screen/additive against
 /// a still-transparent framebuffer reads wrong (e.g. multiply -> black).
 /// Independent of any video/NDI-in layer, which draws last, on top of the

@@ -1,7 +1,6 @@
 //! Keymap panel: one row per registered command showing its currently
 //! assigned key (or "—"), a Learn button, and a Clear button, plus a
-//! reset-to-defaults action: port of `SidebarKeymap.svelte` (Step 3 of the
-//! Phase 8 VJ-panels plan).
+//! reset-to-defaults action: port of `SidebarKeymap.svelte`.
 //!
 //! Same Learn/Clear row shape as `ui::midi`, but the capture side is
 //! simpler: MIDI capture happens asynchronously on a separate IO thread, so

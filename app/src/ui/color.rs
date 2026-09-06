@@ -2,7 +2,7 @@
 //! contrast, invert) plus a reset button, backed by `Show::color_params_a/
 //! b` (`ColorParams`, already ported+tested in `core::blend`, already
 //! consumed by the GPU compositor every frame, zero engine change here).
-//! Port of `SidebarColor.svelte` (Step 1 of the Phase 8 VJ-panels plan).
+//! Port of `SidebarColor.svelte`.
 //!
 //! `ColorParams`'s fields are all stored 0..1 (see that struct's own field
 //! comments for what each maps to: hue 0..1->0..360deg, saturate/

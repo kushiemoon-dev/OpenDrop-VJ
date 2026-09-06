@@ -1,18 +1,17 @@
 //! NDI output panel: a composite toggle + 4 per-deck toggles, plus the
-//! mandatory NDI trademark attribution (Task 10 of the plan). Extended with
-//! an NDI-in source selector (Task 12): a dropdown of discovered sources
+//! mandatory NDI trademark attribution. Extended with
+//! an NDI-in source selector: a dropdown of discovered sources
 //! plus a Connect/Disconnect toggle, mirroring `ui::midi::show`'s
 //! connect-toggle pattern.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::decks`, `ui::midi`, `ui::output`). Stream names are
-//! fixed (`"OpenDrop"` / `"OpenDrop Deck N"`), not user-configurable: the
-//! brief says either is fine and there's no other panel field to hold a
-//! per-stream name.
+//! fixed (`"OpenDrop"` / `"OpenDrop Deck N"`), not user-configurable:
+//! there's no other panel field to hold a per-stream name.
 //!
 //! `composite_active`/`deck_active` are the caller's own toggle state, but
 //! resynced from `NdiSnapshot::composite_active`/`deck_active` at the top of
-//! every `show_out` call (whole-branch review Finding M5): a sender that failed
+//! every `show_out` call: a sender that failed
 //! to start (SDK error) or died mid-session leaves the snapshot's flag
 //! false on its own, and without this resync the checkbox would stay
 //! checked forever for a stream that isn't actually running. The resync
@@ -23,20 +22,19 @@
 //! ndi_in_selected_source`), not derived from `NdiSnapshot`, which has no
 //! "currently selected" concept, only `sources` (discovered) and
 //! `receive_active` (whether a receive session is actually running).
-//! Discovery itself is started once at bootstrap (`main.rs`'s `bootstrap`,
-//! Task 12), not from this panel: by the time this panel is ever shown,
+//! Discovery itself is started once at bootstrap (`main.rs`'s `bootstrap`),
+//! not from this panel: by the time this panel is ever shown,
 //! `NdiSnapshot::sources` is already populated (or empty, if nothing is on
 //! the network yet).
 //!
-//! Reskinned (Step 18 of the Phase 7 UI redesign plan): the NDI input
+//! Reskinned: the NDI input
 //! connection row swaps its `label(if snapshot.receive_active {...})`
 //! branch for `widgets::connection_row`, same substitution as
-//! `ui::midi::show`'s connect row (Step 17). The device `ComboBox` and
+//! `ui::midi::show`'s connect row. The device `ComboBox` and
 //! every other row stay untouched.
 //!
-//! Split into `show_out`/`show_in` (whole-branch review fix wave, finding
-//! 3): Step 18's brief required `Panel::NdiIn`/`Panel::NdiOut` to render
-//! their own distinct half, "no visual merging of the two": both nav
+//! Split into `show_out`/`show_in`: `Panel::NdiIn`/`Panel::NdiOut` render
+//! their own distinct half, with no visual merging of the two: both nav
 //! entries called the same combined `show` until this fix. The seam
 //! between the two sections (output toggles vs. input connect/ComboBox)
 //! was already there, just not split into two callable functions; the
@@ -122,7 +120,7 @@ pub fn show_in(ui: &mut egui::Ui, ndi: &NdiHandle, selected_source: &mut Option<
     } else {
         // Disabled while a receive is active: matches `ui::osc`/
         // `ui::streaming`'s convention of disabling fields while their
-        // respective connection is live (whole-branch review Finding M9).
+        // respective connection is live.
         ui.add_enabled_ui(!snapshot.receive_active, |ui| {
             egui::ComboBox::from_id_salt("ndi_in_source")
                 .selected_text(selected_source.as_ref().map(|s| s.name.as_str()).unwrap_or("select a source"))
@@ -140,7 +138,7 @@ pub fn show_in(ui: &mut egui::Ui, ndi: &NdiHandle, selected_source: &mut Option<
     attribution_footer(ui);
 }
 
-/// Mandatory NDI trademark attribution (Task 10 of the plan), shared by
+/// Mandatory NDI trademark attribution, shared by
 /// both halves above so it's present regardless of which of the two panels
 /// a viewer opens.
 fn attribution_footer(ui: &mut egui::Ui) {

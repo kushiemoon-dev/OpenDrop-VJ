@@ -1,4 +1,4 @@
-//! Pure font data (Step 5 of the Phase 7 UI redesign plan): embeds the 2
+//! Pure font data: embeds the 2
 //! variable-weight fonts vendored at Step 2 and registers 6 weight-alias
 //! `FontFamily::Name`s over them, plus the `text_styles` size map driven by
 //! `TypeScale` (Step 3). Nothing here is applied to a `Context` yet (that
@@ -12,7 +12,7 @@ use egui::{FontData, FontDefinitions, FontFamily, FontId, FontTweak, TextStyle};
 
 use super::tokens::Theme;
 
-// `pub(crate)` since Step 12 of the Phase 8 VJ-panels plan: overlay text
+// `pub(crate)` because overlay text
 // rasterization (`main::overlay_font_bytes` → `engine::overlay_texture::
 // rasterize_text`) needs the same two faces, and re-`include_bytes!`ing
 // them elsewhere would duplicate 1.1 MB of `.rodata`.

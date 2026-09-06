@@ -3,8 +3,7 @@
 //! OpenDrop-VJ's `encodeSharedSet`/`decodeSharedSet` (`share-set.ts`): the
 //! JSON + gzip + base64url pipeline `core::share_set`'s own module doc
 //! comment explicitly deferred to "a later, I/O-aware crate" (`core` has
-//! zero dependencies by design; this is that crate, Step 13 of the Phase 8
-//! VJ-panels plan).
+//! zero dependencies by design; this is that crate).
 //!
 //! **The wire format itself deliberately diverges from the web app's** and
 //! no interop guarantee is claimed or needed: a link produced here is meant
@@ -456,9 +455,9 @@ impl From<BeatTriggerConfigWire> for BeatTriggerConfig {
 }
 
 /// Wire-format version stamped into every link [`encode_shared_set`]
-/// produces and required by [`decode_shared_set`] (whole-branch review
-/// Finding I2). The forward-compatibility hook: a future format change
-/// bumps this, and links from an older/newer build are rejected with a
+/// produces and required by [`decode_shared_set`]. The
+/// forward-compatibility hook: a future format change bumps this, and
+/// links from an older/newer build are rejected with a
 /// legible error instead of being deserialized into the wrong shape or
 /// silently losing fields. Only ever compared for equality: there is no
 /// migration path to a different version yet, and inventing one before a
@@ -726,7 +725,7 @@ mod tests {
 
     #[test]
     fn encode_always_stamps_the_current_wire_version() {
-        // Finding I2: every link carries the version tag, so a future format
+        // Every link carries the version tag, so a future format
         // change has something to key off.
         let encoded = encode_shared_set(&sample_shared_set()).expect("encode should succeed");
         assert_eq!(link_json(&encoded).get("version"), Some(&serde_json::json!(SHARE_WIRE_VERSION)));

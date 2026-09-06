@@ -1,7 +1,6 @@
-//! Rekordbox Link panel (ticket #10 "Synchronised music video playback"):
-//! the rkbx_link OSC bridge's port + Start/Stop + connection status,
-//! mirroring `ui::osc` exactly for that half, plus the DJ-deck-to-visual-
-//! deck mapping new to this ticket.
+//! Rekordbox Link panel: the rkbx_link OSC bridge's port + Start/Stop +
+//! connection status, mirroring `ui::osc` exactly for that half, plus the
+//! DJ-deck-to-visual-deck mapping.
 
 use opendrop_core::show::Show;
 use opendrop_io::rkbx_link::{RkbxLinkControl, RkbxLinkHandle, MAX_DJ_DECKS};

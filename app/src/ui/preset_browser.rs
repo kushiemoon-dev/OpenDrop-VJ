@@ -1,7 +1,6 @@
 //! Preset Browser panel: search box + scrollable grid of preset tiles with
 //! lazy, cached thumbnails, click-to-load through pre-flight validation, and
-//! per-tile "+A"/"+B" playlist buttons. Port of `PresetBrowser.svelte` (Step
-//! 17 of the plan).
+//! per-tile "+A"/"+B" playlist buttons. Port of `PresetBrowser.svelte`.
 //!
 //! Takes individual `AppState`-derived fields, not `&mut AppState` as a
 //! whole, same reasoning as `ui::decks`: the call site (`main.rs`'s
@@ -10,7 +9,7 @@
 //! touches.
 //!
 //! Loading a preset can't be triggered directly from here:
-//! `request_preset_load` (Step 14) needs the whole `AppState`: the
+//! `request_preset_load` needs the whole `AppState`: the
 //! preflight channel sender, `path_by_name`, `pending_validations`, none of
 //! which this panel owns, for the same reason `ui::decks` doesn't call it
 //! either. A click instead writes the clicked name into `*load_request`; the
@@ -25,14 +24,12 @@
 //! off-screen tiles cost nothing at all rather than a full widget layout
 //! each.
 //!
-//! Reskinned per `decks-presets.html` (Step 14 of the Phase 7 UI redesign
-//! plan): tile size/content width move into `Metrics` (`THUMB_SIZE`'s Step
-//! 3/13 migration pattern), the tile becomes a 4:3 thumb (mockup's
-//! `.od-tile-thumb`, was 16:9) with a mono truncated name, and the fixed
-//! `ROW_HEIGHT` constant is replaced by `row_height`, derived from the
-//! live style rather than hand-picked; see that function's doc comment
-//! for why. This panel is one of 3 density-frozen zones in the app (always
-//! dense, no user toggle), unlike Decks (Step 13, airy by default).
+//! Reskinned: tile size/content width move into `Metrics`, the tile
+//! becomes a 4:3 thumb (was 16:9) with a mono truncated name, and the
+//! fixed `ROW_HEIGHT` constant is replaced by `row_height`, derived from
+//! the live style rather than hand-picked; see that function's doc
+//! comment for why. This panel is one of 3 density-frozen zones in the
+//! app (always dense, no user toggle), unlike Decks (airy by default).
 
 use opendrop_core::commands::Deck;
 use opendrop_core::preset_index::{filter_favorites, search};
@@ -166,7 +163,7 @@ fn row_height(ui: &egui::Ui, metrics: &Metrics) -> f32 {
     frame.total_margin().sum().y + metrics.tile_size.y + spacing.item_spacing.y + name_height + spacing.item_spacing.y + button_height
 }
 
-// Step 9 (Phase 7 UI redesign plan): takes the two context structs that
+// Takes the two context structs that
 // carry this panel's params instead of 7 individual ones: `perform.show`
 // (needed for the tiles' +A/+B buttons) and `library`'s 6 browser-local
 // fields. Pure re-packaging: every access below is exactly the field the
@@ -208,7 +205,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
         let results = library.search_cache.resolve(&*perform.show, library.preset_search_query.as_str(), *library.favorites_only, library.favorite_presets);
         let total_rows = results.len().div_ceil(per_row);
 
-        // Whole-branch review Finding 4: names of the tiles actually on
+        // Names of the tiles actually on
         // screen this frame, collected alongside the row layout below so
         // `thumb_queue` can be pruned to just them afterwards; the queue
         // previously grew unbounded across a fast scroll or a
@@ -264,7 +261,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
 /// The thumbnail request is enqueued at most once per tile per frame, and
 /// only while the tile is both actually on-screen (`ui.is_rect_visible`,
 /// which checks against the `ScrollArea`'s clip rect) and still missing its
-/// texture. Once `pump_thumbnail_queue` (Step 15) fills `thumbnail_textures`
+/// texture. Once `pump_thumbnail_queue` fills `thumbnail_textures`
 /// for this name, the `else` branch below stops firing on its own: no
 /// separate "stop requesting" signal needed.
 #[allow(clippy::too_many_arguments)]
@@ -284,8 +281,8 @@ fn tile(
     // index, which shifts under the caller as the list scrolls or the
     // search query changes and would silently rebind an in-progress
     // widget's state (focus, animation, drag) to a different preset. Load-
-    // bearing for widget ids from this step on; Step 22 reuses this same
-    // key for animation ids.
+    // bearing for widget ids, and also reused as the hover-glow animation
+    // key below.
     ui.push_id(name, |ui| {
         let frame = egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(metrics.tile_content_w);
@@ -307,8 +304,8 @@ fn tile(
             // stacked) match the real render.
             ui.vertical(|ui| {
                 let card = ui.vertical(|ui| {
-                    // `metrics.tile_size`: 4:3 (mockup's `.od-tile-thumb`),
-                    // not the 16:9 the engine's own thumbnail render uses.
+                    // `metrics.tile_size`: 4:3, not the 16:9 the engine's
+                    // own thumbnail render uses.
                     // The `uv` below crops the source horizontally to a 4:3
                     // center slice (keeping full height) so it displays
                     // undistorted rather than stretched into the narrower
@@ -341,7 +338,7 @@ fn tile(
                             // compositing a texture as-is): `Image`'s own
                             // default tint is `Color32::WHITE` internally,
                             // so no literal needs to live in this file for
-                            // it (AC-15). `ui.put` places it into the exact
+                            // it. `ui.put` places it into the exact
                             // `rect` already allocated above, same as
                             // `Painter::image` did.
                             let uv = egui::Rect::from_min_max(egui::pos2(0.125, 0.0), egui::pos2(0.875, 1.0));
@@ -362,8 +359,8 @@ fn tile(
                     // name makes the tile's height depend on the name's
                     // length, and `show_rows` above needs every row to
                     // actually be `row_height`'s value tall. The full name
-                    // stays reachable on hover. Mono (mockup's `.od-tile-
-                    // name`), `muted` (not uppercased like `micro_label`'s
+                    // stays reachable on hover. Mono, `muted` (not
+                    // uppercased like `micro_label`'s
                     // chrome text; this is a real, case-sensitive preset
                     // name, not section chrome).
                     ui.add(
@@ -410,8 +407,7 @@ fn tile(
             });
         });
 
-        // Hover lift + glow (Step 22 of the Phase 7 UI redesign plan):
-        // `name` (the `push_id` above, already established at Step 14) is
+        // Hover lift + glow: `name` (the `push_id` above) is
         // the stable animation key, never a scroll/filter-shifting index.
         // Hit-test (`frame.response.hovered()`) always reads the tile's
         // real, un-lifted `Response::rect` from the layout above: only
@@ -437,7 +433,7 @@ fn persist_favorites(favorite_presets: &HashSet<String>) {
     crate::config::save_config(config_path.as_deref(), &ui_config);
 }
 
-/// Hover lift + glow overlay (Step 22), the tile counterpart of `ui::
+/// Hover lift + glow overlay, the tile counterpart of `ui::
 /// decks::hover_glow`: painted from the tile's already laid-out, un-lifted
 /// `Response::rect` (`tile()`'s own comment above), faded in by `hover_t`
 /// and translated upward only for this decorative overlay; the tile's

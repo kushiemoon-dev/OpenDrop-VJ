@@ -7,8 +7,8 @@
 //! `HashMap<String, MidiTriggerKey>` keyed by the same kebab-case wire name
 //! `opendrop_io::command_names` already uses for OSC/remote-WS: converted
 //! to/from `CommandId` at the (de)serialize boundary via
-//! `command_id_name`/`parse_command_id`, per the brief's explicit steer
-//! ("simpler, avoids a custom `Serialize` on `CommandId`").
+//! `command_id_name`/`parse_command_id` ("simpler, avoids a custom
+//! `Serialize` on `CommandId`").
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

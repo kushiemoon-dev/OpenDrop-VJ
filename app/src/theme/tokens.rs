@@ -1,15 +1,14 @@
 //! Pure, egui-independent theme data: colors, spacing/radius/layout
 //! constants, animation durations and the type scale, plus the WCAG
 //! contrast formula used to keep every registry theme (`registry.rs`)
-//! legible. Nothing here touches an egui `Context`/`Visuals`/`Style`: that
-//! wiring starts at Step 4.
+//! legible. Nothing here touches an egui `Context`/`Visuals`/`Style`.
 
 use egui::{Color32, Vec2};
 
 use super::registry::ThemeId;
 
 /// Per-theme colors. Shared field names are reused as-is by `widgets.rs`
-/// (Step 8) and by Decks (Step 13: bus A = `accent`, bus B = `ok`, off =
+/// and by Decks (bus A = `accent`, bus B = `ok`, off =
 /// `dim`); `ok`/`warn`/`error` are the same hex across all 3 themes
 /// (semantic status colors, not part of a theme's visual identity), only
 /// `accent` and the backgrounds differ per theme.
@@ -29,10 +28,10 @@ pub struct Palette {
 
 /// Layout constants shared by all 3 themes (the same `&'static Metrics` for
 /// every `Theme`), so switching themes never reflows a layout. `thumb_size`
-/// (`ui::decks`, Step 13) and `tile_size`/`tile_content_w` (`ui::
-/// preset_browser`, Step 14) were repatriated from those panels' own former
+/// (`ui::decks`) and `tile_size`/`tile_content_w` (`ui::
+/// preset_browser`) were repatriated from those panels' own former
 /// local consts; both panels now read straight from here. `ROW_HEIGHT`
-/// never joined this struct: Step 14 replaced that fixed constant with
+/// never joined this struct: it was replaced with
 /// `preset_browser::row_height`, derived from `tile_size` plus the live
 /// style instead.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,8 +41,8 @@ pub struct Metrics {
     pub radius_lg: f32,
     pub radius_xl: f32,
     pub border_width: f32,
-    /// Default spacing scale (airy), used everywhere except the
-    /// scopes `dense` (Step 8's density-scope helper) overrides.
+    /// Default spacing scale (airy), used everywhere except where the
+    /// `dense` density-scope helper overrides it.
     pub spacing_airy: Vec2,
     /// Tighter spacing scale, frozen (no user toggle) to the presets grid,
     /// MIDI-learn rows and playlist lists.
@@ -53,8 +52,8 @@ pub struct Metrics {
     pub tile_content_w: f32,
     /// Small 16:9 preview used where a row needs a thumbnail but not a full
     /// deck/tile-sized one: the Stage bottom bar's deck thumbnails
-    /// (`ui::shell`, Step 11) and playlist item rows (`ui::playlists`,
-    /// found live post-Phase-7: added visual preview parity with
+    /// (`ui::shell`) and playlist item rows (`ui::playlists`,
+    /// added for visual preview parity with
     /// Decks/Presets). Repatriated from `ui::shell`'s own former
     /// `STAGE_THUMB_SIZE` local const.
     pub mini_thumb_size: Vec2,
@@ -68,10 +67,10 @@ pub struct Durations {
     pub slow: f32,
 }
 
-/// Point sizes for the 10 `TextStyle` names Step 5's `text_styles` maps:
+/// Point sizes for the 10 `TextStyle` names `text_styles` maps:
 /// egui's built-ins (`heading`/`body`/`button`/`small`/`monospace`) plus
 /// the custom `TextStyle::Name`s (`display`/`section`/`strong`/`micro`/
-/// `numeric`) referenced by `widgets.rs` (Step 8). Shared by all 3 themes,
+/// `numeric`) referenced by `widgets.rs`. Shared by all 3 themes,
 /// same reflow-safety reasoning as `Metrics`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TypeScale {
@@ -102,7 +101,7 @@ pub struct Theme {
 /// WCAG 2.x relative luminance
 /// (<https://www.w3.org/TR/WCAG21/#dfn-relative-luminance>).
 ///
-/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// Test-oracle only: every
 /// caller is a palette invariant test in this file, `visuals.rs`, or
 /// `registry.rs`, never production code.
 #[cfg(test)]
@@ -122,7 +121,7 @@ pub(crate) fn relative_luminance(color: Color32) -> f32 {
 /// (<https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio>): `(L1 + 0.05) /
 /// (L2 + 0.05)` where `L1` is the lighter of the two relative luminances.
 ///
-/// Test-oracle only (whole-branch review fix wave, finding 2): every
+/// Test-oracle only: every
 /// caller is a palette invariant test, never production code.
 #[cfg(test)]
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f32 {

@@ -1,5 +1,4 @@
-//! OSC panel: a port field + Start/Stop button, and a listening indicator
-//! (Task 13 of the plan).
+//! OSC panel: a port field + Start/Stop button, and a listening indicator.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::midi`, `ui::ndi`, `ui::output`). `osc_port` is the
@@ -10,9 +9,9 @@
 //! the user is currently typing, which Start reads at click time.
 //!
 //! No soft-takeover, no mapping/learn UI: unlike MIDI, OSC has no such
-//! concept in the existing app (the brief is explicit about this).
+//! concept in the existing app.
 //!
-//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the listening row
+//! Reskinned: the listening row
 //! swaps its `label(if snapshot.listening {...})` branch for `widgets::
 //! connection_row`, same substitution as `ui::midi`/`ui::ndi` (Steps
 //! 17-18). Unlike those, `snapshot.listening`'s label carried the bound

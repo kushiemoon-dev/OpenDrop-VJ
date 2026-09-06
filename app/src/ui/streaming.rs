@@ -1,9 +1,8 @@
-//! Streaming panel: OBS WebSocket connect/disconnect + scene control (Task
-//! 16 of the plan), plus Twitch chat and Kick chat connect/disconnect
-//! (Task 17). See PHASE5-IO.PLAN's breakdown note for why the three share
-//! one file rather than three separate ones (comparable size to the other
+//! Streaming panel: OBS WebSocket connect/disconnect + scene control,
+//! plus Twitch chat and Kick chat connect/disconnect. The three share
+//! one file rather than three separate ones: comparable size to the other
 //! single-file panels once all three sections exist, not yet the case with
-//! only OBS built).
+//! only OBS built.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::osc`, `ui::remote`). `obs_host`/`obs_port`/
@@ -16,7 +15,7 @@
 //! Scene switching is one button per scene name (not a dropdown+Go): each
 //! click dispatches `ObsControl::SetScene` immediately, and `ObsSnapshot`
 //! carries no "current scene" field to highlight a selection against
-//! (Override: `CurrentProgramSceneChanged`, OBS->app, isn't ported, see
+//! (`CurrentProgramSceneChanged`, OBS->app, isn't ported, see
 //! `opendrop_io::obs`'s module doc comment), so there's nothing for a
 //! dropdown's "selected" state to reflect anyway.
 //!
@@ -31,11 +30,11 @@
 //! no-op (guarded by `is_empty()`) so tabbing through the form can't
 //! accidentally overwrite an already-stored secret with a blank one.
 //!
-//! Reskinned (Step 20 of the Phase 7 UI redesign plan): each of the OBS/
+//! Reskinned: each of the OBS/
 //! Twitch/Kick connected-status rows swaps its own `label(if
 //! snapshot.connected {...})` branch for `widgets::connection_row`, same
-//! substitution as `ui::midi`/`ui::ndi`/`ui::osc`/`ui::remote` (Steps
-//! 17-19). The Connect/Disconnect button pair around each row was
+//! substitution as `ui::midi`/`ui::ndi`/`ui::osc`/`ui::remote`. The
+//! Connect/Disconnect button pair around each row was
 //! otherwise identical across all three services, so that row shape is
 //! factored into this file's own `service_connect_row` helper instead of
 //! being triplicated verbatim. This is a local helper, not a
@@ -180,8 +179,7 @@ pub fn show(
     ui.label("Chat");
     egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
         // Newest first: a VJ glancing at this panel live wants the latest
-        // message visible without having to scroll (whole-branch review
-        // Finding 2).
+        // message visible without having to scroll.
         for msg in chat_log.iter().rev() {
             let platform = match msg.platform {
                 ChatPlatform::Twitch => "Twitch",
@@ -218,11 +216,11 @@ fn service_connect_row(ui: &mut egui::Ui, label: &str, connected: bool, on_conne
 /// after. See this module's doc comment for the full UX rationale. Shared
 /// by the Twitch OAuth-token field and the 3 Kick credential fields, the
 /// only difference between them being the label and the keyring key.
-/// `error` is `show`'s shared panel-local save-error field (whole-branch
-/// review Finding 1, AC-12): a `set_secret` failure used to be an
+/// `error` is `show`'s shared panel-local save-error field: a `set_secret`
+/// failure used to be an
 /// `eprintln!` only; it's now also written there (and rendered by `show`),
-/// and cleared on the next successful save. Also renders a `Clear` button
-/// (whole-branch review Finding M8). See `clear_secret_button`.
+/// and cleared on the next successful save. Also renders a `Clear` button.
+/// See `clear_secret_button`.
 fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &str, error: &mut Option<String>) {
     ui.horizontal(|ui| {
         ui.label(label);
@@ -243,7 +241,7 @@ fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &s
 
 /// A `Clear` button that deletes the secret stored under `key` from the OS
 /// keyring on click: `io::secrets::clear_secret` finally gets a caller
-/// (whole-branch review Finding M8: it existed with no way to reach it from
+/// (it existed with no way to reach it from
 /// the UI, so a saved Twitch/Kick/OBS credential could never be removed
 /// again short of editing the OS keyring directly). Never redisplays
 /// anything on success: this is a delete action, not a reveal, same

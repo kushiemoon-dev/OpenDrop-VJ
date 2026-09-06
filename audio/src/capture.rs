@@ -48,7 +48,7 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
         drop(current_stream.take()); // Drop stops the old cpal stream before opening the new one
         current_stream = crate::device::select_input_device_by_name(&host, &name).and_then(|d| open_and_play(&d, snapshot.clone()));
         if current_stream.is_none() {
-            // Whole-branch review Finding 5: the old stream is already
+            // The old stream is already
             // dropped above, but without this `AudioHandle::latest()`
             // would keep returning the LAST successful PCM chunk from the
             // now-dead old device forever: decks keep reacting to frozen

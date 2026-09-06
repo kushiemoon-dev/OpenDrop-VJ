@@ -1,5 +1,5 @@
 //! Quality panel: target-FPS buttons, invisible-deck power mode selector,
-//! and per-deck mesh-size presets (Step 20 of the plan).
+//! and per-deck mesh-size presets.
 //!
 //! Takes individual `AppState` fields, not `&mut AppState`: same reasoning
 //! as the other panels (see `ui::decks`, `ui::audio`). Mesh-size clicks only
@@ -8,7 +8,7 @@
 //! per-deck loop, at the point that deck's context is already current. This
 //! panel never touches a `Deck` or a GL context directly.
 //!
-//! Reskinned (Step 17 of the Phase 7 UI redesign plan): the FPS and
+//! Reskinned: the FPS and
 //! invisible-mode rows use `widgets::pill` plus `Response::interact(Sense::
 //! click())`, not `widgets::chip_row`, following `ui::playlists`' and
 //! `ui::decks`' established precedent. `chip_row` takes `&[&str]` and
@@ -16,14 +16,14 @@
 //! one chip differently to show which target is currently active. Both
 //! rows here are the same shape as playlists' Sequential/Shuffle mode
 //! picker: a single mutually-exclusive group. This panel is also the one
-//! Step 22's future 30fps/60fps manual verification reads to confirm the
+//! a future 30fps/60fps manual verification reads to confirm the
 //! active target, so losing the selected-state highlight would make that
 //! check unreliable, and `chip_row` structurally can't express per-item
 //! selected-state coloring even for a single group with no per-item
 //! semantic color otherwise. The mesh-size buttons below stay untouched:
-//! one-shot queue actions, not a selectable group, out of this step's
-//! scope. Neither row lives inside `widgets::dense`, this panel stays airy
-//! by default, not one of the plan's 3 fixed-dense zones.
+//! one-shot queue actions, not a selectable group, out of scope for this
+//! reskin. Neither row lives inside `widgets::dense`, this panel stays airy
+//! by default, not one of the UI's 3 fixed-dense zones.
 
 use crate::ui::widgets::{self, theme};
 use crate::InvisibleMode;

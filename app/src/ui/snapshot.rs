@@ -2,8 +2,7 @@
 //! slots, backed by `Show::snapshot_slots`/`snapshot_recall_duration_sec`
 //! (already ported+tested in `core::snapshot`: `Snapshot`, `smoothstep`,
 //! `interpolate_snapshot`; and `core::show`: `capture_snapshot_values`,
-//! `recall_snapshot`, `tick_recall`). Port of `SidebarSnapshot.svelte`
-//! (Step 4 of the Phase 8 VJ-panels plan).
+//! `recall_snapshot`, `tick_recall`). Port of `SidebarSnapshot.svelte`.
 //!
 //! Save/rename/Clear mutate `Show::snapshot_slots` directly, same "direct
 //! field mutation" convention as `ui::quality`/`ui::color`/`ui::composite`.
@@ -12,8 +11,7 @@
 //! instead of a direct field write, so a recall fired from this button
 //! takes the exact same path (`CommandContext::recall_snapshot` capturing
 //! `start_values` and arming `Show::active_recall`) as one fired from
-//! keyboard/MIDI/OSC/remote-ws (the plan's own cross-cutting parity
-//! requirement). That's also why this panel takes `&mut Show` as a whole
+//! keyboard/MIDI/OSC/remote-ws (a cross-cutting parity requirement). That's also why this panel takes `&mut Show` as a whole
 //! (`perform.show`) rather than individual `&mut` fields like the other
 //! Recipe A panels: dispatch needs `&mut dyn CommandContext`, which only a
 //! whole `Show` can provide.

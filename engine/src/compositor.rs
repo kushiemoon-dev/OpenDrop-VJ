@@ -1,16 +1,16 @@
 //! Native port of OpenDrop-VJ `src/lib/engine/compositor.ts`: the deck-slot
 //! blend/keying/color-correction shader (`#version 330 core` here vs
 //! `#version 300 es` there). Two deltas from the source, both required by
-//! the native pipeline (see the plan's step-1 review):
+//! the native pipeline:
 //!  - the vertex shader's `vUV.y = 1.0 - vUV.y` is dropped: it only existed
 //!    to cancel a `<canvas>` upload's top-left origin, and projectM's
 //!    FBO-0 → texture copy (`deck::copy_fbo0_to_shared_texture`) is already
 //!    in GL's bottom-left convention. Nothing in this pipeline flips rows.
-//!  - 14 uniforms, not 13 (PLAN.md's count; corrected in step 10).
+//!  - 14 uniforms, not 13 as first counted.
 //!
 //! compositor.ts's 5th layer, the video background, was out of scope for
-//! Phase 2 (no video decode path existed then) and arrived in Step 14 of
-//! the Phase 8 VJ-panels plan as [`Compositor::composite_video_layer`],
+//! Phase 2 (no video decode path existed then) and arrived later
+//! as [`Compositor::composite_video_layer`],
 //! which reuses the deck shader above rather than adding a program of its
 //! own, exactly as the TS source does. Its frames come from a CPU-side
 //! decoder, so they *would* need the dropped row flip; that flip happens
@@ -140,7 +140,7 @@ struct Uniforms {
 
 /// One deck slot's compositing input for one frame: same `SlotComposite`/
 /// `ColorParams` `core::blend` already models, plus the opacity that in the
-/// real app comes from the crossfader (step 7).
+/// real app comes from the crossfader.
 ///
 /// Deck slots only: an overlay sprite is a different primitive with
 /// different semantics (arbitrary position/rotation/size, its own blend
@@ -265,17 +265,17 @@ impl OverlayBlendMode {
 /// replacement for the DOM element `OverlayLayer.svelte` positioned over
 /// the visualizer.
 ///
-/// Distinct from [`LayerInput`] on purpose (the plan is explicit about
-/// this): that one is a full-screen deck slot with keying and color
-/// correction, this one is a positioned, rotated, scaled quad.
+/// Distinct from [`LayerInput`] on purpose: that one is a full-screen deck
+/// slot with keying and color correction, this one is a positioned,
+/// rotated, scaled quad.
 ///
 /// `x`/`y` are normalized 0-1 with the CSS convention `Overlay` uses:
 /// origin top-left, `y` growing downward. `scale` multiplies the sprite's
 /// fitted natural size (see [`overlay_quad_half_size_px`]). `rotation_deg`
 /// is clockwise on screen, like CSS `rotate()`.
 ///
-/// `tex_w`/`tex_h` are not in the plan's field sketch but are required:
-/// aspect-correct sizing needs the texture's own dimensions, and GLES 3.0
+/// `tex_w`/`tex_h` are stored here rather than derived: aspect-correct
+/// sizing needs the texture's own dimensions, and GLES 3.0
 /// has no `glGetTexLevelParameter` to query them back from the handle.
 /// They come free. Every caller has just decoded or rasterized the image.
 #[derive(Clone, Copy)]
@@ -338,17 +338,17 @@ pub struct Compositor {
     /// this, which is why the WebGL2 source never had one.
     empty_vao: glow::NativeVertexArray,
     composite_timer: PassTimer,
-    /// Strobe flash pass (Step 10 of the Phase 8 VJ-panels plan): its own
-    /// tiny program (solid color * alpha, no texture sampling) rather than
-    /// reusing `program`/`uniforms` above, which is shaped around sampling
-    /// a deck texture. Shares `empty_vao`: same "fullscreen triangle from
+    /// Strobe flash pass: its own tiny program (solid color * alpha, no
+    /// texture sampling) rather than reusing `program`/`uniforms` above,
+    /// which is shaped around sampling a deck texture. Shares `empty_vao`:
+    /// same "fullscreen triangle from
     /// `gl_VertexID`, no vertex attributes" trick, no per-draw geometry to
     /// own.
     strobe_program: glow::NativeProgram,
     strobe_uniforms: StrobeUniforms,
-    /// Overlay sprite/text pass (Step 12 of the Phase 8 VJ-panels plan),
-    /// again its own program: unlike `program` (fullscreen, no geometry
-    /// uniforms) and `strobe_program` (fullscreen, no texture), this one
+    /// Overlay sprite/text pass, again its own program: unlike `program`
+    /// (fullscreen, no geometry uniforms) and `strobe_program` (fullscreen,
+    /// no texture), this one
     /// builds a positioned/rotated quad in its vertex stage. Shares
     /// `empty_vao` with both, same `gl_VertexID`-only trick.
     overlay_program: glow::NativeProgram,
@@ -508,11 +508,10 @@ impl Compositor {
         }
     }
 
-    /// Draws the video background layer (Step 14 of the Phase 8 VJ-panels
-    /// plan): one full-screen quad sampling a decoded clip / camera /
-    /// capture frame (`opendrop_io::video_capture`), always in normal
-    /// (alpha-over) blend at its own opacity, with `color` carrying the
-    /// beat-reactive flash/hue (`core::video::VideoState::
+    /// Draws the video background layer: one full-screen quad sampling a
+    /// decoded clip / camera / capture frame (`opendrop_io::video_capture`),
+    /// always in normal (alpha-over) blend at its own opacity, with `color`
+    /// carrying the beat-reactive flash/hue (`core::video::VideoState::
     /// layer_color_params`).
     ///
     /// **Reuses the deck shader verbatim** rather than adding a fifth
@@ -528,11 +527,11 @@ impl Compositor {
     ///
     /// **Position in the frame: on top of the 4 decks, under the NDI-in
     /// layer, the strobe flash and the overlays**, not behind the decks.
-    /// The Phase 8 plan's step-14 sketch said "behind"; the OpenDrop-VJ
-    /// compositor this ports says the opposite, in a class header that
-    /// records *why*: drawing the video first made it disappear the moment
-    /// any deck slot reached full opacity ("confirmed live"), which is the
-    /// default state at either end of the crossfader. Behind-the-decks
+    /// It might seem more natural to draw it behind the decks; the
+    /// OpenDrop-VJ compositor this ports says the opposite, in a class
+    /// header that records *why*: drawing the video first made it
+    /// disappear the moment any deck slot reached full opacity ("confirmed
+    /// live"), which is the default state at either end of the crossfader. Behind-the-decks
     /// would therefore ship a layer that is invisible in the app's normal
     /// configuration. Drawing it last also keeps
     /// `should_force_normal_for_lowest_slot` correct as-is (the reference
@@ -550,11 +549,11 @@ impl Compositor {
         self.composite_layer(gl, video_tex, &input, false);
     }
 
-    /// Draws the BPM-synced strobe flash (Step 10 of the Phase 8 VJ-panels
-    /// plan) as a fullscreen quad, additive-blended into the composite FBO
+    /// Draws the BPM-synced strobe flash as a fullscreen quad,
+    /// additive-blended into the composite FBO
     /// on top of everything already drawn there this frame. Call once per
-    /// frame, after the deck, video ([`Compositor::composite_video_layer`],
-    /// Step 14) and NDI-in `composite_layer` calls and before
+    /// frame, after the deck, video ([`Compositor::composite_video_layer`])
+    /// and NDI-in `composite_layer` calls and before
     /// `blit_to_current_window`/the compositor readback (`FrameReadback`),
     /// so the flash shows up in the control preview, the output window,
     /// and NDI/v4l2 alike: all four read `color_tex` through this same
@@ -597,8 +596,8 @@ impl Compositor {
     ///
     /// Position in the frame: after the deck/NDI-in `composite_layer`
     /// calls (an overlay is over the visuals, never under them) and after
-    /// `render_strobe_flash`. The plan leaves the strobe/overlay order to
-    /// the implementation; strobe-first is chosen so an overlay stays
+    /// `render_strobe_flash`. Nothing dictates the relative order of
+    /// strobe and overlay; strobe-first is chosen so an overlay stays
     /// readable through a flash instead of being washed out by it: the
     /// flash is an effect on the visuals, the overlay is content on top of
     /// the result.
@@ -778,7 +777,7 @@ fn build_program(gl: &glow::Context) -> Result<glow::NativeProgram, String> {
 }
 
 /// Compiles+links one vertex/fragment pair into a program. Factored out of
-/// `build_program` (Step 10) so the strobe pass's own tiny program can
+/// `build_program` so the strobe pass's own tiny program can
 /// share the same compile/link/error-handling path instead of duplicating
 /// it.
 fn build_program_from(gl: &glow::Context, vertex_src: &str, fragment_src: &str) -> Result<glow::NativeProgram, String> {
@@ -929,7 +928,7 @@ fn locate_uniforms(gl: &glow::Context, program: glow::NativeProgram) -> Uniforms
 mod tests {
     use super::*;
 
-    /// The overlay pass's geometry and blend-state math (Step 12): the
+    /// The overlay pass's geometry and blend-state math: the
     /// parts that decide *where* and *how* a sprite lands, testable with
     /// no GL context. The GL calls themselves are covered by the headless
     /// EGL tests in `app` (`compositor_overlay_gl_tests`), which is where

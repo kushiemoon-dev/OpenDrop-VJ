@@ -1,16 +1,16 @@
 //! Strobe panel: on/off, rate, intensity, and color for the BPM-synced
 //! full-screen flash rendered by the compositor
 //! (`engine::compositor::Compositor::render_strobe_flash`, timed by
-//! `core::strobe::strobe_flash_intensity`). Port of `SidebarStrobe.svelte`
-//! (Step 10 of the Phase 8 VJ-panels plan). There was no prior engine
+//! `core::strobe::strobe_flash_intensity`). Port of `SidebarStrobe.svelte`.
+//! There was no prior engine
 //! behavior to port beyond the command name (`CommandId::StrobeToggle`).
 //!
 //! Only the toggle goes through `CommandRegistry::dispatch` (Recipe B:
 //! keyboard/MIDI/OSC/remote-ws parity, same precedent as `ui::timeline`'s
 //! Play/Pause button). Rate/intensity/color mutate `Show::strobe` directly,
 //! same "direct field mutation" convention as every other panel
-//! (`ui::quality`/`ui::color`/`ui::composite`). The plan's transversal
-//! command list only names the toggle.
+//! (`ui::quality`/`ui::color`/`ui::composite`). The transversal command
+//! list only names the toggle.
 
 use opendrop_core::commands::{CommandId, CommandRegistry};
 use opendrop_core::show::Show;

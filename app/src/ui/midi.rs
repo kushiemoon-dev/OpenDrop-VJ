@@ -1,11 +1,11 @@
 //! MIDI panel: connect toggle + input-port dropdown, and one row per
 //! mappable command showing its current trigger, a Learn button, and a
-//! Clear button (Task 8 of the plan).
+//! Clear button.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::decks`, `ui::audio`, `ui::output`). Display only:
 //! soft-takeover, LED flash/persistent state, clock sync, and hotplug LED
-//! replay all live in `main.rs`'s `about_to_wait` (Ruling A of the task);
+//! replay all live in `main.rs`'s `about_to_wait`;
 //! this panel just reads `MidiHandle::latest()` and sends control messages.
 //!
 //! No "currently selected port" is tracked on `AppState`: `MidiSnapshot`
@@ -14,12 +14,12 @@
 //! click. A judgment call: acceptable since nothing else in this panel
 //! needs that state.
 //!
-//! Reskinned (Step 17 of the Phase 7 UI redesign plan): the connection row
+//! Reskinned: the connection row
 //! swaps its `label(if snapshot.connected {...})` branch for `widgets::
 //! connection_row`, which reports the same connected/offline state through
 //! a `pill` (theme's `ok`/`dim` colors) instead of plain text. The MIDI
 //! learn rows (the `for cmd in commands` loop inside the `ScrollArea`) are
-//! wrapped in `widgets::dense`, one of the plan's 3 permanently-dense zones
+//! wrapped in `widgets::dense`, one of 3 permanently-dense zones
 //! (with the presets grid and Playlists). The connection row and port
 //! dropdown above stay at the default airy spacing, since they aren't part
 //! of that fixed-dense zone. The port `ComboBox` is untouched, already
@@ -32,7 +32,7 @@
 //! run loop also polls real system MIDI port enumeration on a timer
 //! (`check_hotplug`), an external I/O dependency a unit test shouldn't
 //! spin up. Same shape and same determination as `ui::audio`'s
-//! `AudioHandle` (Step 19): an unmockable external handle, not faked here.
+//! `AudioHandle`: an unmockable external handle, not faked here.
 
 use opendrop_core::commands::{CommandId, CommandRegistry};
 use opendrop_io::midi::{MidiControl, MidiHandle, MidiTriggerKey, TriggerKind};
@@ -87,8 +87,7 @@ pub fn show(
     // grouping (deck controls -> active-deck shortcuts -> ... -> q-vars),
     // matching the 3 reference UI panels; no longer needs the alphabetical
     // `.sort_by_key(|cmd| cmd.label)` workaround this panel used to carry
-    // for the registry's old nondeterministic HashMap order (whole-branch
-    // review Finding I2).
+    // for the registry's old nondeterministic HashMap order.
     let commands = registry.all();
 
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -108,7 +107,7 @@ pub fn show(
                         // "still the old entry": StartLearn doesn't clear it.
                         *midi_learning = Some((cmd.id, snapshot.mapping.get(&cmd.id).cloned()));
                     }
-                    // Whole-branch review Finding M10: before this, the only
+                    // Before this, the only
                     // way out of learn mode was a real MIDI message arriving;
                     // no way to back out of a Learn clicked by mistake.
                     if is_learning && ui.button("Cancel").clicked() {

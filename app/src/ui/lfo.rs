@@ -2,8 +2,7 @@
 //! routable to any registered `CommandId` of kind `Range`: driven by
 //! `LfoEngine` (already ported+tested in `core::lfo`; this step is the
 //! first to actually instantiate and drive it, see that module's own doc
-//! comment). Port of `SidebarLfo.svelte` (Step 11 of the Phase 8
-//! VJ-panels plan).
+//! comment). Port of `SidebarLfo.svelte`.
 //!
 //! Same "direct field mutation, no `CommandRegistry::dispatch`" convention
 //! as every other panel for the panel's *own* controls (enable/shape/

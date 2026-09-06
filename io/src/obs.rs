@@ -4,11 +4,11 @@
 //!
 //! App->OBS direction only: `main.cjs`'s `obs.on('CurrentProgramSceneChanged',
 //! ...)` (OBS->app) is deliberately NOT ported: nothing in the existing
-//! app consumes that event (Override already acted in REQUIREMENTS.md), so
-//! there is no event-listening/broadcast path here at all.
+//! app consumes that event, so there is no event-listening/broadcast path
+//! here at all.
 //!
-//! Same async-thread-per-integration pattern as `remote_ws` (Task 14): a
-//! dedicated `std::thread` builds its own single-threaded tokio runtime and
+//! Same async-thread-per-integration pattern as `remote_ws`: a dedicated
+//! `std::thread` builds its own single-threaded tokio runtime and
 //! never leaves it for the thread's whole lifetime, bridging the
 //! synchronous `control_tx`/`control_rx` into the async world once via
 //! `tokio::task::spawn_blocking` (see that module's doc comment for the
@@ -47,8 +47,8 @@ pub struct ObsSnapshot {
     /// Empty while not connected.
     pub scenes: Vec<String>,
     /// Set when the OBS password keyring lookup fails during `Connect`
-    /// (whole-branch review Finding 1 (AC-12): this used to be an
-    /// `eprintln!` only, invisible to a GUI user). Rendered in the
+    /// (AC-12: this used to be an `eprintln!` only, invisible to a GUI
+    /// user). Rendered in the
     /// Streaming panel. Cleared by a subsequent successful `Connect` or by
     /// `Disconnect`; carried through this same `Connect` attempt's outcome
     /// (success or failure) rather than dropped, so it isn't lost before
@@ -167,11 +167,10 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                     old.disconnect().await;
                 }
                 let secret_result = secrets::get_secret(secrets::OBS_PASSWORD);
-                // Captured (not just logged) per whole-branch review Finding
-                // 1 (AC-12): a keyring lookup failure used to be an
-                // `eprintln!` only, invisible to a GUI user launched from a
-                // desktop environment. Still lenient (the connect attempt
-                // below proceeds without a password either way), but now
+                // Captured (not just logged) per AC-12: a keyring lookup
+                // failure used to be an `eprintln!` only, invisible to a
+                // GUI user launched from a desktop environment. Still
+                // lenient (the connect attempt below proceeds without a password either way), but now
                 // surfaced via `ObsSnapshot::last_error` regardless of
                 // whether that attempt goes on to succeed or fail.
                 let keyring_error = secret_result.as_ref().err().map(|e| {

@@ -1,5 +1,5 @@
-//! Video-loop layer state (Step 14 of the Phase 8 VJ-panels plan): the
-//! user-facing half of the video background layer: on/off, opacity,
+//! Video-loop layer state: the user-facing half of the video background
+//! layer: on/off, opacity,
 //! clip-rotation mode, and the 4 beat/volume-reactive toggles. Port of
 //! `playback-store.svelte.ts`'s `videoState` plus `onVideoBeat`/
 //! `onVideoAudioTick` (OpenDrop-VJ), following the same colocated-test

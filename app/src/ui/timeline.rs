@@ -2,8 +2,8 @@
 //! across a wall-clock-free playback loop, plus play/pause. Backed by
 //! `Show::timeline_keyframes`/`timeline_playing` and the pure
 //! `core::timeline::{timeline_loop_duration, timeline_values_at}`
-//! (already ported+tested, zero prior usage before this panel, Step 5 of
-//! the Phase 8 VJ-panels plan). Port of `SidebarTimeline.svelte` +
+//! (already ported+tested, zero prior usage before this panel). Port of
+//! `SidebarTimeline.svelte` +
 //! `timeline-store.svelte.ts`.
 //!
 //! Keyframe slot/time edits and remove mutate `Show::timeline_keyframes`
@@ -17,7 +17,7 @@
 //! `CommandRegistry::dispatch(CommandId::TimelineToggle, ...)` (Recipe B)
 //! so a toggle fired from this button takes the same path as
 //! keyboard/MIDI/OSC/remote-ws: `CommandContext::toggle_timeline`,
-//! mirroring `CommandContext::recall_snapshot`'s precedent (Step 4/
+//! mirroring `CommandContext::recall_snapshot`'s precedent (see
 //! `ui::snapshot`).
 //!
 //! "+ Point" appends a new keyframe defaulting to the first non-empty

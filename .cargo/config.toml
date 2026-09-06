@@ -1,4 +1,4 @@
-# grafton-ndi's build.rs (io/Cargo.toml, Task 9) expects the NewTek NDI SDK
+# grafton-ndi's build.rs (io/Cargo.toml) expects the NewTek NDI SDK
 # installer layout: headers under `<SDK>/include`, libs under
 # `<SDK>/lib/<arch-triple>`. This machine's `ndi-sdk` pacman package instead
 # drops headers straight into /usr/include and libndi.so straight into

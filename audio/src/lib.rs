@@ -18,7 +18,7 @@ pub struct AudioSnapshot {
 /// to `synth_audio_chunk` (AC-4).
 const SILENT_PLACEHOLDER_FRAMES: usize = 480;
 /// `pub(crate)`, not private: also published by `capture::run` on a failed
-/// device hot-swap (whole-branch review Finding 5), not just here at
+/// device hot-swap, not just here at
 /// bootstrap, see that call site's doc comment.
 pub(crate) fn silent_snapshot() -> AudioSnapshot {
     AudioSnapshot { pcm: vec![0.0; SILENT_PLACEHOLDER_FRAMES * 2], energy_byte: 0.0 }

@@ -1,12 +1,12 @@
 //! The Ableton Link I/O thread: bidirectional tempo/beat/phase sync via
-//! `rusty_link` (Task 18 of the plan). This entire file only exists in a
+//! `rusty_link`. This entire file only exists in a
 //! build with the `link` Cargo feature enabled: see the `#[cfg(feature
 //! = "link")]` on this module's `pub mod link;` declaration in `lib.rs`.
 //! `rusty_link` wraps Ableton's official C++ Link library, which is
 //! GPL-2.0-or-later; gating on the `mod` declaration itself (rather than
 //! sprinkling `#[cfg]` through this file) means that with the feature
 //! off, this file is never parsed, so no GPL code and no GPL symbol
-//! reaches a default build (PLAN.md's Risque 5).
+//! reaches a default build.
 //!
 //! Mirrors OpenDrop-VJ `main.cjs:306-361`'s `link:start`/`link:stop`/
 //! `link:set-tempo` IPC handlers: `enable(true)` + `enable_start_stop_
@@ -27,7 +27,7 @@
 //!
 //! The thread never touches `Show`/`Clock` directly: it only publishes
 //! `(tempo, phase01, ...)` via `LinkSnapshot`; `app`'s own per-frame
-//! wiring (Task 18's `main.rs` changes) is what calls `Clock::
+//! wiring (in `main.rs`) is what calls `Clock::
 //! sync_external` once per frame with the latest snapshot, same "thread
 //! doesn't own Show" convention used by every other `io` module.
 //!

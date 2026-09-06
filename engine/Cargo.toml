@@ -7,9 +7,8 @@ edition = "2021"
 glutin = "0.32.3"
 glow = "0.17"
 opendrop-core = { path = "../core" }
-# Overlay sprites (Step 12 of the Phase 8 VJ-panels plan): PNG/JPEG decode
-# for `overlay_texture::decode_image`. Absent from the workspace before this
-# step. `default-features = false` + an explicit codec list: the default
+# Overlay sprites: PNG/JPEG decode for `overlay_texture::decode_image`.
+# `default-features = false` + an explicit codec list: the default
 # feature set pulls in ~15 more decoders (AVIF, TIFF, EXR, …) this app has
 # no use for, and the file dialog in `ui::overlays` filters to exactly these
 # extensions.

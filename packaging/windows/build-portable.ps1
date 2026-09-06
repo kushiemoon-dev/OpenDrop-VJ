@@ -21,8 +21,8 @@
 #       NOT found in opendrop-app.exe's import table or delay-load table
 #       by dumpbin: the app doesn't currently call any playlist API.
 #       Bundled anyway alongside projectM-4.dll as a same-family/
-#       forward-compat precaution, since the plan explicitly names
-#       "projectM DLL(s)" and the file is already resolved for free.)
+#       forward-compat precaution: it's part of the same projectM DLL
+#       set and the file is already resolved for free.)
 #     - glew32.dll                   (vcpkg x64-windows; confirmed a
 #       dependency of projectM-4.dll itself, so needed for projectM to
 #       load even though opendrop-app.exe doesn't import it directly)

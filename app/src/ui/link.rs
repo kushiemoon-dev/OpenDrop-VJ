@@ -1,5 +1,5 @@
 //! Ableton Link panel: toggle on/off, tempo/peers display and a tempo
-//! field to push into the Link session (Task 18 of the plan).
+//! field to push into the Link session.
 //!
 //! This entire file only exists in a build with the `link` Cargo
 //! feature enabled: see `#[cfg(feature = "link")]` on this module's
@@ -15,7 +15,7 @@
 //! field is what the user is currently typing, sent via `SetTempo` only
 //! when they click the button.
 //!
-//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the
+//! Reskinned: the
 //! `label(if snapshot.enabled {...})` enabled/disabled row swaps for
 //! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`
 //! (Steps 17-18). Not compile-verified in this sandbox (missing cmake for

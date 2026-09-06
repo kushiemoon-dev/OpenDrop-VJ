@@ -1,5 +1,4 @@
-//! Audio panel: input-device dropdown with hot-swap + VU meter (Step 19 of
-//! the plan).
+//! Audio panel: input-device dropdown with hot-swap + VU meter.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as the
 //! other panels (`ui::decks`, `ui::playlists`, `ui::preset_browser`): the

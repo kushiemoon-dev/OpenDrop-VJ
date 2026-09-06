@@ -1,7 +1,7 @@
 //! Time panel: the 8 time/warp multipliers for the currently selected deck
 //! slot, plus a reset, backed by `Show::time_params` (`DeckTimeParams`,
 //! already ported+tested in `core::time_params`).
-//! Port of `SidebarTime.svelte` (Step 8 of the Phase 8 VJ-panels plan).
+//! Port of `SidebarTime.svelte`.
 //!
 //! Takes the whole `[DeckTimeParams; 4]` plus the already-selected index
 //! (`Show::selected_slot`) and only renders/mutates that one slot's group;

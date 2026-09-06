@@ -1,5 +1,5 @@
 //! About panel: third-party attribution required by projectM's LGPL-2.1
-//! license (PLAN.md Risque 3). This app links libprojectM dynamically
+//! license. This app links libprojectM dynamically
 //! (`engine/build.rs`, via pkg-config against the system `libprojectm`
 //! package), which keeps the resulting MIT binary free of LGPL
 //! contamination: the documented, wiki-endorsed usage for LGPL as a
@@ -63,8 +63,8 @@ mod tests {
     use crate::ui::widgets::themed_test_ui;
 
     // `show` takes no fields at all (this panel has no mutable state,
-    // unlike every other panel in this app), anticipated as testable
-    // already at Step 8, no external handle needed.
+    // unlike every other panel in this app), so it's testable directly,
+    // no external handle needed.
 
     #[test]
     fn show_does_not_panic() {

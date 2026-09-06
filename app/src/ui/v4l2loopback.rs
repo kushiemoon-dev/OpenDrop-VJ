@@ -1,5 +1,5 @@
 //! v4l2loopback output panel: device-found/not-found status plus a
-//! Start/Stop button (Task 19 of the plan).
+//! Start/Stop button.
 //!
 //! `find_device()` is polled exactly once, the first frame this panel is
 //! shown, not every frame: mirrors `ui::output`'s doc comment on why its
@@ -17,16 +17,16 @@
 //! separate panel-only toggle re-derived elsewhere); unlike `ui::ndi`,
 //! there is no per-slot array to OR together here, just the one stream, so
 //! the panel drives the gate flag directly. Resynced from `V4l2Snapshot::
-//! running` at the top of every `show` call (whole-branch review Finding
-//! M5): if ffmpeg exits on its own (bad/removed device, killed externally),
+//! running` at the top of every `show` call: if ffmpeg exits on its own
+//! (bad/removed device, killed externally),
 //! `running` flips to `false` on its own (`io::v4l2loopback::run`'s
 //! liveness check), and without this resync the Start/Stop button would
 //! stay stuck showing "Stop" for a pipe that no longer exists.
 //!
-//! Reskinned (Step 19 of the Phase 7 UI redesign plan): the
+//! Reskinned: the
 //! `label(if snapshot.running {...})` running/stopped row swaps for
-//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`
-//! (Steps 17-18). The device-found/not-found `match` above it is left
+//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`.
+//! The device-found/not-found `match` above it is left
 //! untouched: it reports a resolved path, not a binary connected status,
 //! so folding it into `connection_row` would drop the path detail for no
 //! gain.

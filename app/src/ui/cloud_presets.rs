@@ -1,12 +1,12 @@
 //! CloudPresets panel: upload JSON, copy/link the device token, and a
 //! list of the device's cloud presets with rename/delete/download.
-//! Port of `SidebarCloudPresets.svelte` (Step 6 of the plan).
+//! Port of `SidebarCloudPresets.svelte`.
 //!
 //! Takes individual fields, not `&mut AppState`, same convention as the
 //! other panels (`ui::osc`, `ui::streaming`). `api_url` is this panel's
 //! own editable field (`AppState::cloud_presets_api_url`), mirroring
 //! `obs_host`; an empty value gates the whole panel down to just that one
-//! field (Override 4 in the plan: empty means the feature is disabled,
+//! field (empty means the feature is disabled,
 //! same convention as the web app's `PUBLIC_CLOUD_PRESETS_API=`).
 //!
 //! No "Load onto deck" here, unlike `SidebarCloudPresets.svelte`'s
@@ -14,9 +14,9 @@
 //! own format), not this native app's `.milk`/projectM format. This
 //! app's loader only reaches projectM through
 //! `projectm_load_preset_file`/`projectm_load_preset_data` (both `.milk`
-//! text), and no Butterchurn->`.milk` converter exists or is scoped
-//! anywhere in this 14-task plan (confirmed, not merely unverified:
-//! building one is explicitly out of scope for this step; see
+//! text), and no Butterchurn->`.milk` converter exists
+//! (confirmed, not merely unverified:
+//! building one is explicitly out of scope here; see
 //! `opendrop_io::cloud_presets`'s module doc comment). "Download" here
 //! only writes the raw JSON to a local cache file and reports the path;
 //! it does not touch `Show::preset_catalog`. The format gap is surfaced

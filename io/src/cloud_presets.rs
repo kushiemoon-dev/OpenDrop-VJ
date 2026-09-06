@@ -565,9 +565,8 @@ mod tests {
     // against a real bound socket rather than just asserting on request
     // construction. No new dependency: `axum` is already a direct `io`
     // dependency (used by `remote_ws`), just reused here for tests. This
-    // is the "local mock" option this task's brief calls out: no real
-    // CloudPresets backend URL is available to test against yet
-    // (Override 4 in the plan).
+    // is a local mock: no real CloudPresets backend URL is available to
+    // test against yet.
 
     #[derive(Clone, Default)]
     struct MockBackend(Arc<Mutex<MockState>>);

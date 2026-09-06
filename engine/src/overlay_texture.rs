@@ -1,6 +1,5 @@
-//! Pixel sources for the compositor's overlay pass (Step 12 of the Phase 8
-//! VJ-panels plan): decode a sprite file, rasterize a string, upload either
-//! one as a `glow` texture.
+//! Pixel sources for the compositor's overlay pass: decode a sprite file,
+//! rasterize a string, upload either one as a `glow` texture.
 //!
 //! The web had neither of these: an overlay was a DOM `<img>`/`<div>` the
 //! browser laid out, rasterized and blended over the visualizer canvas.
@@ -59,9 +58,9 @@ pub fn decode_image(bytes: &[u8]) -> Result<RgbaImage, String> {
 /// Rasterizes `text` at `px_size` pixels into a tightly-cropped RGBA
 /// buffer: every pixel carries `color` in RGB and the glyph's antialiasing
 /// coverage in A, so the result drops straight into the same sprite path
-/// `decode_image`'s output takes (Override 3 of the plan: no glyph atlas,
-/// one texture per string, rebuilt only when the string/font/size/color
-/// changes).
+/// `decode_image`'s output takes (a deliberate simplification: no glyph
+/// atlas, one texture per string, rebuilt only when the
+/// string/font/size/color changes).
 ///
 /// `\n` starts a new line; lines are laid out left-aligned one
 /// `ascent - descent + line_gap` apart, with horizontal kerning applied.

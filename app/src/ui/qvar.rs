@@ -2,7 +2,7 @@
 //! a dropdown that adds a watch, then one slider plus a remove button per
 //! watched q-var. Backed by `Show::q_var_params` (`DeckQVarParams`, already
 //! ported+tested in `core::q_vars`).
-//! Port of `SidebarQvar.svelte` (Step 9 of the Phase 8 VJ-panels plan).
+//! Port of `SidebarQvar.svelte`.
 //!
 //! Takes the whole `[DeckQVarParams; 4]` plus the already-selected index
 //! (`Show::selected_slot`) and only renders/mutates that one slot's group;

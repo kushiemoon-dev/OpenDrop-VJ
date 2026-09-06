@@ -1,13 +1,12 @@
 //! Overlays panel: sprite/text overlays drawn on top of the composited
 //! decks, plus the auto-cycling queue that rotates through the ones marked
-//! for it. Port of `SidebarOverlays.svelte` (Step 12 of the Phase 8
-//! VJ-panels plan). The richest of the ported sidebars, and the one whose
-//! engine half (`core::overlay`, ported long ago and unused until now) this
-//! step finally gives a consumer.
+//! for it. Port of `SidebarOverlays.svelte`. The richest of the ported
+//! sidebars, and the one whose engine half (`core::overlay`, ported long
+//! ago and unused until now) this step finally gives a consumer.
 //!
 //! Same "direct field mutation, no `CommandRegistry::dispatch`" convention
-//! as every other panel for its own controls, with one exception matching
-//! the plan's transversal command list: the queue's ◀/▶ buttons dispatch
+//! as every other panel for its own controls, with one exception: the
+//! queue's ◀/▶ buttons dispatch
 //! `CommandId::OverlayQueuePrev`/`Next` so a keyboard/MIDI/OSC/remote-ws
 //! binding and a click take the exact same path (Recipe B: same precedent
 //! as `ui::strobe`'s toggle and `ui::timeline`'s Play/Pause).

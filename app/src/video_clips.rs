@@ -1,15 +1,14 @@
 //! The Video panel's clip library: what replaces the web app's IndexedDB
-//! blob store (`video-store.ts`) with plain files on disk (Step 14 of the
-//! Phase 8 VJ-panels plan).
+//! blob store (`video-store.ts`) with plain files on disk.
 //!
 //! Two sources, in the same order the web listed `[...builtinClips,
 //! ...userClips]`:
 //!  - **bundled loops**, `<exe dir>/assets/video-loops/`: the native
-//!    equivalent of the web's `cdn-video-loops` pack. Per the plan's
-//!    Override 5 this step ships the *folder and its README*, not the ~46
-//!    `.webm` files themselves (an asset-relocation task, deliberately left
-//!    to a manual step); the directory being absent or empty is the normal
-//!    case and is not an error.
+//!    equivalent of the web's `cdn-video-loops` pack. This ships the
+//!    *folder and its README*, not the ~46 `.webm` files themselves
+//!    (an asset-relocation task, deliberately left to be done manually);
+//!    the directory being absent or empty is the normal case and is not
+//!    an error.
 //!  - **user clips**, `ProjectDirs::data_dir()/video-clips/`: where the
 //!    panel's "+ Video" button copies whatever the file dialog returned.
 //!    The *data* dir, not the config dir `ui.json` uses (`app::config`):
@@ -66,6 +65,16 @@ pub(crate) fn scan_clips() -> Vec<VideoClip> {
     let mut clips = scan_dir(bundled_clips_dir().as_deref(), true);
     clips.extend(scan_dir(user_clips_dir().as_deref(), false));
     clips
+}
+
+/// Resolves an rkbx_link-reported track to a clip in `clips`:
+/// `"{artist} - {title}"` (trimmed, case-insensitive) compared against the
+/// clip's filename stem (`VideoClip::name`). `None` if nothing matches:
+/// the caller leaves the mapped visual deck's current content untouched
+/// in that case, never clearing or replacing it.
+pub(crate) fn match_clip_by_track<'a>(clips: &'a [VideoClip], artist: &str, title: &str) -> Option<&'a VideoClip> {
+    let query = format!("{} - {}", artist.trim(), title.trim()).to_lowercase();
+    clips.iter().find(|c| c.name.trim().to_lowercase() == query)
 }
 
 /// Every recognised video file directly inside `dir`, sorted by filename.
@@ -175,6 +184,18 @@ mod tests {
         assert_eq!(clip.key, "/loops/Neon Grid.webm");
         assert_eq!(clip.name, "Neon Grid");
         assert!(clip.builtin);
+    }
+
+    #[test]
+    fn matches_a_clip_by_artist_and_title_case_and_whitespace_insensitively() {
+        let clips = vec![clip_from_path(PathBuf::from("/loops/Daft Punk - One More Time.webm"), false)];
+        assert_eq!(match_clip_by_track(&clips, "  DAFT PUNK  ", "one more time").map(|c| &c.name), Some(&"Daft Punk - One More Time".to_string()));
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let clips = vec![clip_from_path(PathBuf::from("/loops/Someone - Something.webm"), false)];
+        assert_eq!(match_clip_by_track(&clips, "Nobody", "Nothing"), None);
     }
 
     #[test]

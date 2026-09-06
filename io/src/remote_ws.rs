@@ -101,9 +101,9 @@ impl RemoteWsHandle {
 /// The static-asset directory: `io/assets/remote` resolved relative to
 /// this crate's own `Cargo.toml` at *build* time via `CARGO_MANIFEST_DIR`.
 /// This bakes the build machine's absolute path into the binary: fine for
-/// dev (the brief is explicit packaging-time path resolution is out of
-/// scope here, deferred to Phase 6), not meant to survive relocating the
-/// binary to a different machine.
+/// dev (packaging-time path resolution is out of scope here, deferred to
+/// Phase 6), not meant to survive relocating the binary to a different
+/// machine.
 fn assets_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/remote"))
 }
@@ -264,7 +264,7 @@ fn generate_token() -> String {
 /// `getLanIp`, `main.cjs:186-193` (`family === 'IPv4' && !iface.internal`).
 /// Deliberately not `local_ip_address::local_ip()` (which picks the
 /// outbound-routing interface via a UDP connect trick and could land on a
-/// VPN/tunnel interface): the brief asks for the exact `getLanIp` mirror,
+/// VPN/tunnel interface): this needs the exact `getLanIp` mirror,
 /// enumerate-and-filter, not "whichever interface has a default route".
 fn first_lan_ipv4() -> Option<String> {
     let ifaces = local_ip_address::list_afinet_netifas().ok()?;
@@ -296,8 +296,7 @@ struct WsState {
 
 /// Mounted at `/` (root, no path segment) to match `+page.svelte`'s
 /// `new WebSocket(\`ws://${host}:${port}\`)` exactly: that page is never
-/// rewritten (REQUIREMENTS.md), so the server side has to meet it where it
-/// is. A plain (non-upgrade) GET to `/` gets axum's standard
+/// rewritten, so the server side has to meet it where it is. A plain (non-upgrade) GET to `/` gets axum's standard
 /// `WebSocketUpgrade` rejection response instead of the SPA's `index.html`.
 /// Acceptable here: the phone is always given a `/remote?host=&port=&
 /// token=` URL, never a bare `/`, and everything other than the exact `/`

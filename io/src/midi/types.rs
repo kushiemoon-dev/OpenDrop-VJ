@@ -21,12 +21,11 @@ pub enum TriggerKind {
 
 /// A learned MIDI trigger: which device, what kind of message, on which
 /// channel/number. `device_id` is the MIDI port *name* (not midir's opaque,
-/// backend-dependent port id): see the "device_id = port name" judgment
-/// call in the task report for why. `number` is unused (fixed at 0) for
+/// backend-dependent port id). `number` is unused (fixed at 0) for
 /// `TriggerKind::Pitchbend`, which has no CC/note number of its own:
 /// mirrors the JS `ParsedTriggerKey` union, which simply omits the field
 /// for the `pb` variant; our flat struct shape (one shape for all three
-/// kinds, as specified by the brief) keeps the field but ignores it.
+/// kinds) keeps the field but ignores it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MidiTriggerKey {
     pub device_id: String,
@@ -40,9 +39,8 @@ pub type MidiMapping = HashMap<CommandId, MidiTriggerKey>;
 
 /// One resolved dispatch: `(CommandId, value01)`. NOT filtered by
 /// soft-takeover: that comparison against the live app value (`Show`'s
-/// crossfader) happens entirely in `app`'s `about_to_wait` loop (Task 8),
-/// since this thread has no access to `Show`. See the task report for the
-/// full ruling.
+/// crossfader) happens entirely in `app`'s `about_to_wait` loop,
+/// since this thread has no access to `Show`.
 pub type MidiDispatch = (CommandId, f64);
 
 /// Continuous state published via `MidiHandle::latest()`: never blocks,
@@ -52,22 +50,20 @@ pub type MidiDispatch = (CommandId, f64);
 /// counters, not booleans/events: `app` remembers the last value it saw and
 /// diffs against the current one each frame to detect "N quarter-note beats
 /// fired since I last checked" / "an output port (re)connected since I last
-/// checked", without needing a second channel (see task report for why this
-/// was chosen over a dedicated clock/hotplug channel).
+/// checked", without needing a second channel.
 pub struct MidiSnapshot {
     /// `true` only once an input port is actually open (set by a successful
     /// `MidiControl::SelectPort`): NOT merely once `Connect` has
     /// initialized the `midir` backend and enumerated `device_names`.
-    /// Whole-branch review Finding M7: the MIDI panel surfaces this as
-    /// "MIDI: connected", so it must not go true until something is
-    /// actually wired to a controller.
+    /// The MIDI panel surfaces this as "MIDI: connected", so it must not
+    /// go true until something is actually wired to a controller.
     pub connected: bool,
     pub device_names: Vec<String>,
     pub clock_bpm: f64,
     pub clock_beat_count: u64,
     pub hotplug_epoch: u64,
     /// The learned CC/note/pitchbend -> command mapping, mirrored here so
-    /// `app`'s MIDI panel (Task 8) can show each `CommandId`'s current
+    /// `app`'s MIDI panel can show each `CommandId`'s current
     /// trigger without a dedicated "mapping changed" event: `events` only
     /// ever reports resolved dispatches, never mapping-change notices.
     pub mapping: MidiMapping,
@@ -86,19 +82,17 @@ impl MidiSnapshot {
     }
 }
 
-/// Outward control messages sent to the MIDI thread. `PushLed` isn't in the
-/// brief's illustrative code sketch but is required by the `push_led`
-/// method the brief explicitly asks for: see task report.
+/// Outward control messages sent to the MIDI thread. `PushLed` lets the
+/// app trigger MIDI LED feedback through this same channel.
 pub enum MidiControl {
     Connect,
     Disconnect,
     SelectPort(String),
     StartLearn(CommandId),
     /// Cancels learn mode without changing the mapping: a no-op if nothing
-    /// is currently being learned. Whole-branch review Finding M10: the
-    /// only previous way out of learn mode was a real MIDI message arriving
-    /// (or an app restart); this gives the panel's Cancel button something
-    /// to send.
+    /// is currently being learned. The only previous way out of learn mode
+    /// was a real MIDI message arriving (or an app restart); this gives
+    /// the panel's Cancel button something to send.
     StopLearn,
     ClearMapping(CommandId),
     PushLed(CommandId, bool),
@@ -151,8 +145,8 @@ pub(crate) fn resolve_mapping(mapping: &MidiMapping, key: &MidiTriggerKey) -> Op
 /// already bound to the same `key`: a `MidiTriggerKey` can be owned by at
 /// most one `CommandId` at a time, mirroring the JS reference's
 /// `takenOver.add(key)` "one trigger, one owner" intent
-/// (`midi-connection-actions.ts`). Whole-branch review Finding M6: without
-/// this, learn-mode binding a trigger already bound to a DIFFERENT command
+/// (`midi-connection-actions.ts`). Without this, learn-mode binding a
+/// trigger already bound to a DIFFERENT command
 /// left both entries in the map, making [`resolve_mapping`]'s reverse
 /// lookup ambiguous and its winner nondeterministic across runs (HashMap
 /// iteration order).
@@ -233,9 +227,9 @@ mod tests {
         assert_eq!(resolve_mapping(&mapping, &key("dev", TriggerKind::Cc, 1, 99)), None);
     }
 
-    /// Whole-branch review Finding M6: binding a trigger already owned by a
-    /// DIFFERENT command must evict that command's entry, so the trigger
-    /// has exactly one owner and `resolve_mapping` stays unambiguous.
+    /// Binding a trigger already owned by a DIFFERENT command must evict
+    /// that command's entry, so the trigger has exactly one owner and
+    /// `resolve_mapping` stays unambiguous.
     #[test]
     fn bind_trigger_evicts_the_other_command_bound_to_the_same_key() {
         let mut mapping = MidiMapping::new();

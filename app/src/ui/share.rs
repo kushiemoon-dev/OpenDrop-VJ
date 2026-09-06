@@ -1,5 +1,5 @@
-//! Share panel: port of `SidebarShare.svelte` (Step 13 of the Phase 8 VJ-
-//! panels plan): a set-name field, a "copy link" button, and a count of
+//! Share panel: port of `SidebarShare.svelte`: a set-name field, a "copy
+//! link" button, and a count of
 //! overlays the link can't carry (only text overlays survive a URL, see
 //! `opendrop_core::share_set::filter_shareable_overlays`).
 //!

@@ -1,14 +1,14 @@
 //! The NDI output thread: composite (1) + per-deck (up to `DECK_COUNT`) NDI
-//! senders, fed by the `mpsc::Receiver<Vec<u8>>` channels Step 5 already
+//! senders, fed by the `mpsc::Receiver<Vec<u8>>` channels already
 //! wired up in `app`'s render loop (one per `FrameReadback`). This module
 //! only owns the sending side: it does not create its own frame-data
 //! channels (unlike `audio::spawn_capture`, which owns its device-selection
 //! channel internally): those 5 receivers already exist upstream in `app`
 //! and are handed to [`spawn`] once, by value, at construction time.
 //!
-//! **Correctness requirement driving the whole run loop**: `app`'s Step 5
-//! readback is gated per consumer (whole-branch review Finding I5:
-//! composite on `ndi_composite_active || v4l2_active`, each deck on its own
+//! **Correctness requirement driving the whole run loop**: `app`'s
+//! readback is gated per consumer (composite on
+//! `ndi_composite_active || v4l2_active`, each deck on its own
 //! `ndi_deck_active[i]`), but this thread can still receive frames on a
 //! channel whose slot isn't started here yet, e.g. right after the
 //! app-side toggle flips, before the matching `NdiControl::Start*` has been
@@ -19,7 +19,7 @@
 //! (unbounded) filling up forever: a real memory leak, not a hypothetical
 //! one.
 //!
-//! **RGBA, not BGRA, for both streams**: Step 4/5's readback is native GL
+//! **RGBA, not BGRA, for both streams**: the readback is native GL
 //! RGBA8 (no swizzle) for the compositor's texture and all 4 deck
 //! textures. This is a deliberate departure from the OpenDrop-VJ (Electron)
 //! reference, which sent the composite over NDI as BGRA: that choice was
@@ -45,7 +45,7 @@ use super::in_::{self, NdiFrame, NdiSource};
 /// Mirrors `engine::compositor::COMP_W`/`COMP_H`: hardcoded here rather
 /// than depending on `opendrop-engine` (a GL/projectM crate) from this
 /// I/O-only crate just for 4 integers. `audio` and `midi` don't depend on
-/// `engine` either, and a mismatch would fail loudly at Task 10's call site
+/// `engine` either, and a mismatch would fail loudly at the call site
 /// (an `[mpsc::Receiver<Vec<u8>>; N]` size mismatch), not silently.
 ///
 /// Not auto-synced: if `engine::compositor::COMP_W`/`COMP_H` ever change,
@@ -75,7 +75,7 @@ const POLL_TICK: Duration = Duration::from_millis(5);
 /// Handle to the running NDI thread. Mirrors `MidiHandle`'s shape:
 /// `latest()` never blocks, `control_tx` sends never block. `control_tx` is
 /// a public field, not wrapped in setter methods, for the same reason as
-/// `MidiHandle::control_tx`: Task 10 sends one of several `NdiControl`
+/// `MidiHandle::control_tx`: `app` sends one of several `NdiControl`
 /// variants directly (`ndi.control_tx.send(StartDeck(slot, name))`).
 pub struct NdiHandle {
     state: Arc<ArcSwap<NdiSnapshot>>,
@@ -86,7 +86,7 @@ pub struct NdiHandle {
     /// channels). The channel is created in this module (`spawn`, alongside
     /// `control_tx`'s channel); the `Sender` half stays internal to the NDI
     /// thread (owned by `ThreadState`, cloned into each `ActiveReceive`),
-    /// and this `Receiver` half is handed out here for `app` (Task 12) to
+    /// and this `Receiver` half is handed out here for `app` to
     /// read frames from directly; same shape as `control_tx`: a public
     /// field, no wrapper method, since there is nothing to validate on
     /// either send or receive.
@@ -114,7 +114,7 @@ pub struct NdiSnapshot {
     /// run-loop tick while discovery is active (see `in_::find`): empty
     /// when discovery was never started or has been stopped. Polled, not
     /// event-driven: there is no separate "source list changed" signal,
-    /// `app` (Task 12) just re-reads this on its own cadence via `latest()`.
+    /// `app` just re-reads this on its own cadence via `latest()`.
     pub sources: Vec<NdiSource>,
     /// Whether a receive session is currently connected (mirrors
     /// `composite_active`/`deck_active`'s convention), also going back to
@@ -149,18 +149,18 @@ pub enum NdiControl {
 /// whichever of `StartComposite`/`StartDeck`/`StartDiscovery` arrives
 /// first.
 ///
-/// **No longer true as of Task 12's `app` bootstrap** (whole-branch review
-/// Finding 4): `app` sends `StartDiscovery` unconditionally right after
-/// this call returns, so "first" is now effectively every session's
-/// bootstrap: the NDI runtime is acquired, and `in_::find` starts polling
-/// every ~5ms, in every session whether or not the user ever opens the NDI
-/// panel. A session with no NDI SDK installed does log "failed to
-/// initialize the NDI runtime" once at bootstrap now (not "never", see
-/// `ensure_ndi`), and a persistently failing `Finder` is rate-limited to
-/// one log line per failure streak rather than flooding stderr (see
-/// `ThreadState::discovery_error_logged`).
+/// `app`'s bootstrap used to send `StartDiscovery` unconditionally
+/// right after this call returned, so "first" was effectively every
+/// session's bootstrap: `in_::find` polled every ~5ms for the whole
+/// session whether or not the user ever opened the NDI panel. `app` now
+/// sends `StartDiscovery`/`StopDiscovery` from its `Panel::NdiIn`
+/// enter/leave gate instead (see `AppState::ndi_discovery_active`'s doc
+/// comment), so this branch is genuinely hit on every panel switch away
+/// from NDI-in, not just once at startup. A persistently failing `Finder`
+/// is still rate-limited to one log line per failure streak rather than
+/// flooding stderr (see `ThreadState::discovery_error_logged`).
 ///
-/// `compositor_rx`/`deck_rx` are the Step 5 `FrameReadback` channels,
+/// `compositor_rx`/`deck_rx` are the `FrameReadback` channels,
 /// passed in by value: this function does not create them (see the module
 /// doc comment).
 pub fn spawn(compositor_rx: Receiver<Vec<u8>>, deck_rx: [Receiver<Vec<u8>>; DECK_COUNT]) -> NdiHandle {
@@ -197,7 +197,7 @@ impl SlotSender {
     }
 
     /// Pushes one already-captured RGBA8 frame out over NDI. `bytes` must
-    /// be exactly `width*height*4` (Step 5's `FrameReadback` always
+    /// be exactly `width*height*4` (`FrameReadback` always
     /// produces that for a given slot's fixed resolution); a mismatch is
     /// logged and the frame dropped rather than panicking.
     fn send(&mut self, bytes: Vec<u8>) {
@@ -209,8 +209,8 @@ impl SlotSender {
     }
 }
 
-/// `slot` indices from `NdiControl::StartDeck`/`StopDeck` come from Task
-/// 10's UI wiring, not from this thread: validate before indexing.
+/// `slot` indices from `NdiControl::StartDeck`/`StopDeck` come from the
+/// UI, not from this thread: validate before indexing.
 fn is_valid_deck_slot(slot: usize) -> bool {
     slot < DECK_COUNT
 }
@@ -233,7 +233,7 @@ struct ThreadState {
     /// `Some` and published verbatim into `NdiSnapshot::sources`.
     sources: Vec<NdiSource>,
     /// Whether `in_::find`'s current failure streak has already been
-    /// logged once (whole-branch review Finding 4): reset to `false` the
+    /// logged once: reset to `false` the
     /// moment discovery succeeds again, so a later failure streak still
     /// gets its own one log line rather than staying silent forever.
     discovery_error_logged: bool,
@@ -270,7 +270,7 @@ fn is_idle_from(has_finder: bool, has_composite: bool, any_deck_active: bool, ha
 /// (`ts.finder`, which polls `in_::find` every tick once started), no
 /// composite/deck sender (which drain their frame channels every tick), and
 /// no active receive (whose `poll()` needs to run every tick to pull
-/// incoming frames). Whole-branch review Finding M2. While idle the run
+/// incoming frames). While idle the run
 /// loop below blocks on `control_rx.recv()` instead of a 5ms poll; the
 /// moment any of these starts, the next tick already sees `is_idle() ==
 /// false` and switches to the timed-poll loop.
@@ -293,10 +293,12 @@ fn run(
         if is_idle(&ts) {
             // Fully idle: nothing needs a periodic tick, so block until a
             // control message arrives instead of spinning the 5ms poll for
-            // nothing (Finding M2). In practice `app` sends `StartDiscovery`
-            // unconditionally right after `spawn` returns (see `spawn`'s
-            // doc comment), so this branch is mainly hit for the brief
-            // instant before that first message arrives.
+            // nothing. `app` now sends `StartDiscovery`/
+            // `StopDiscovery` from its `Panel::NdiIn` enter/leave gate (see
+            // `spawn`'s doc comment), so this branch is genuinely hit
+            // whenever nothing else is active and the NDI-in panel isn't
+            // on screen, not just the brief instant before bootstrap's
+            // first message.
             match control_rx.recv() {
                 Ok(ctrl) => handle_control(&mut ts, ctrl),
                 Err(_) => owner_gone = true,
@@ -497,9 +499,8 @@ mod tests {
         assert!(is_idle(&ts));
     }
 
-    /// Whole-branch review Finding M2: any one of discovery/composite/a
-    /// deck/receive being active is enough to take the run loop out of its
-    /// idle (blocking-`recv`) branch.
+    /// Any one of discovery/composite/a deck/receive being active is enough
+    /// to take the run loop out of its idle (blocking-`recv`) branch.
     #[test]
     fn is_idle_true_only_when_nothing_needs_periodic_work() {
         assert!(is_idle_from(false, false, false, false));
@@ -520,7 +521,7 @@ mod tests {
 
     /// The dimension constants mirrored from `engine::compositor`/
     /// `engine::deck` (see their doc comments) must line up with what
-    /// `PixelFormat::RGBA` expects a frame's buffer to be, since Step 5's
+    /// `PixelFormat::RGBA` expects a frame's buffer to be, since
     /// `FrameReadback` publishes exactly `w*h*4` RGBA8 bytes and this
     /// module never infers dimensions from the buffer length.
     #[test]

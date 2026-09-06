@@ -58,7 +58,7 @@ const IDLE_DECK_INTERVAL: Duration = Duration::from_millis(100); // ~10fps floor
 /// before `about_to_wait` pushes it back off: mirrors the JS reference's
 /// `setTimeout(..., 120)` (`midi-connection-actions.ts:90`), but as a
 /// per-frame `Instant` deadline check instead of an async timer, since this
-/// thread has no async runtime (Task 8).
+/// thread has no async runtime.
 const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
 /// How long after a beat a `beat_reactive` overlay stays scaled up by its
@@ -70,14 +70,27 @@ const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 /// on this thread).
 const BEAT_PULSE_DURATION: Duration = Duration::from_millis(80);
 
-/// Whole-branch review Finding 3: clamp applied to `compute_tick_dt`'s
-/// real elapsed-time measurement, matching the TS reference's
-/// `Math.min(dt, 0.1)` (`clock.ts:53`).
+/// How far a synced deck's estimated elapsed playback time
+/// may diverge from its DJ deck's latest reported `/{deck}/time` before
+/// the decoder is reseeked: a few hundred ms to half a second, picked by
+/// feel; not user-configurable.
+const RKBX_DRIFT_THRESHOLD_SECONDS: f64 = 0.35;
+
+/// Whether estimated elapsed playback (`actual_elapsed` seconds) has
+/// drifted from the DJ deck's reported `dj_time` by more than the sync
+/// tolerance. Pure and unit-testable in isolation from `Instant`/thread
+/// plumbing.
+fn rkbx_drift_exceeds_threshold(dj_time: f64, actual_elapsed: f64) -> bool {
+    (dj_time - actual_elapsed).abs() > RKBX_DRIFT_THRESHOLD_SECONDS
+}
+
+/// Clamp applied to `compute_tick_dt`'s real elapsed-time measurement,
+/// matching the TS reference's `Math.min(dt, 0.1)` (`clock.ts:53`).
 const MAX_TICK_DT: Duration = Duration::from_millis(100);
 
-/// Max messages kept in `AppState::chat_log` (whole-branch review Finding
-/// 2): a bounded ring buffer, oldest dropped first, so the Streaming
-/// panel's chat display can't grow unbounded over a long-running session.
+/// Max messages kept in `AppState::chat_log`: a bounded ring buffer,
+/// oldest dropped first, so the Streaming panel's chat display can't grow
+/// unbounded over a long-running session.
 const CHAT_LOG_CAP: usize = 50;
 
 /// Power mode applied to invisible (opacity ≤ 0.001) decks, selected from
@@ -111,8 +124,7 @@ fn layer_inputs_from_show(show: &Show) -> [LayerInput; 4] {
     })
 }
 
-/// One overlay's cached GL texture (Step 12 of the Phase 8 VJ-panels
-/// plan). `key` is a fingerprint of everything the pixels depend on: the
+/// One overlay's cached GL texture. `key` is a fingerprint of everything the pixels depend on: the
 /// sprite's file path, or the text's content/font/size/color, so the
 /// texture is rebuilt exactly when one of those changes, and never
 /// per-frame. `texture` is `None` for an overlay whose build failed
@@ -317,10 +329,53 @@ fn create_frame_texture(
     }
 }
 
+/// Allocates an empty RGBA8 texture at a fixed `w`x`h`, never resized: the
+/// bootstrap-time counterpart of `create_frame_texture` for the 4 deck-video
+/// textures, which are always exactly `CAPTURE_W`x`CAPTURE_H`
+/// (`opendrop_io::video_capture`'s own guarantee), so there is no `Option`/
+/// recreate-on-resize dance to do, unlike `video_texture`/`ndi_in_texture`.
+fn create_empty_video_texture(gl: &glow::Context, w: u32, h: u32) -> glow::NativeTexture {
+    unsafe {
+        let tex = gl.create_texture().expect("glGenTextures failed for a deck-video texture");
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            w as i32,
+            h as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        tex
+    }
+}
+
+/// One visual deck slot's active rkbx_link sync: which DJ
+/// deck it's tracking, which clip path the match loaded (so a later
+/// manual reassignment away from that clip can be detected and drops
+/// the sync), and the wall-clock reference point (`seek_seconds` into the
+/// file at `seeked_at`) the drift check measures elapsed playback against.
+/// Re-set every time a fresh match loads a clip or a drift correction
+/// reseeks; the actual currently-decoding-from offset is always
+/// `seek_seconds + seeked_at.elapsed()`, never tracked more precisely than
+/// that, since the decoder has no true elapsed-time readback.
+struct RkbxSyncState {
+    dj_deck: usize,
+    matched_clip_path: PathBuf,
+    seek_seconds: f64,
+    seeked_at: Instant,
+}
+
 /// What the video-capture thread should be decoding right now, given the
-/// layer's state and the clip library (Step 14 of the Phase 8 VJ-panels
-/// plan). `None` means "nothing": the layer is off, or something else is
-/// feeding it.
+/// layer's state and the clip library. `None` means "nothing": the layer
+/// is off, or something else is feeding it.
 ///
 /// Precedence mirrors the web store's mutual exclusion, with NDI on top:
 /// an active NDI receive already reaches the compositor through its own
@@ -347,15 +402,62 @@ fn desired_video_input(
     if clips.is_empty() {
         return None;
     }
-    Some(VideoInput::File(clips[video.current_clip_index % clips.len()].path.clone()))
+    Some(VideoInput::File { path: clips[video.current_clip_index % clips.len()].path.clone(), start_seconds: 0.0 })
+}
+
+/// Reconciles one deck slot's video-capture thread against `desired`
+/// (the caller passes `desired_video_input(&state.show.deck_video[slot],
+/// &state.video_clips, false)`), then uploads its newest decoded frame into
+/// `texture`. Mirrors the global video layer's own reconcile-then-upload
+/// block (see `desired_video_input`'s call site in `about_to_wait`), but
+/// simpler: `texture` was allocated once at bootstrap (Step 2) and is never
+/// recreated, since every source is pinned to `opendrop_io::video_capture::
+/// CAPTURE_W`x`CAPTURE_H`.
+fn tick_deck_video(
+    gl: &glow::Context,
+    desired: Option<opendrop_io::video_capture::VideoInput>,
+    tracked_input: &mut Option<opendrop_io::video_capture::VideoInput>,
+    capture: &opendrop_io::video_capture::VideoCaptureHandle,
+    frame_seq: &mut u64,
+    texture: glow::NativeTexture,
+) {
+    use opendrop_io::video_capture::VideoCaptureControl;
+    if desired != *tracked_input {
+        let msg = match desired.clone() {
+            Some(input) => VideoCaptureControl::Start(input),
+            None => VideoCaptureControl::Stop,
+        };
+        let _ = capture.control_tx.send(msg);
+        *tracked_input = desired;
+        *frame_seq = 0;
+    }
+    if let Some(frame) = capture.latest_frame() {
+        let expected_len = opendrop_io::video_capture::frame_len(frame.width, frame.height);
+        if frame.seq != *frame_seq && frame.data.len() == expected_len {
+            unsafe {
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                gl.tex_sub_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    0,
+                    0,
+                    frame.width as i32,
+                    frame.height as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(&frame.data)),
+                );
+            }
+            *frame_seq = frame.seq;
+        }
+    }
 }
 
 /// Which top-level panel the control window is currently showing. Gates
 /// per-tick work that only matters while its panel is visible (Step 17: the
 /// thumbnail pump only runs while `PresetBrowser` is on screen), besides
 /// driving `ui_root`'s own tab row.
-// `pub(crate)`: read by `ui::ctx::ShellCtx` (Step 9 of the Phase 7 UI
-// redesign plan), a different module from this one.
+// `pub(crate)`: read by `ui::ctx::ShellCtx`, a different module from this one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum Panel {
     #[default]
@@ -384,6 +486,7 @@ pub(crate) enum Panel {
     NdiIn,
     NdiOut,
     Osc,
+    RkbxLink,
     Overlays,
     RemoteWs,
     Streaming,
@@ -396,11 +499,10 @@ pub(crate) enum Panel {
     About,
 }
 
-/// Whole-branch review fix wave, finding 1 (AC-10): `config::PanelId` ->
-/// `Panel`, for restoring `AppState::active_panel` from a loaded `ui.json`
-/// at bootstrap. Kept as an explicit conversion rather than merging the
-/// two enums, per `config.rs`'s own module doc comment (`Panel` must not
-/// derive `Serialize`/`Deserialize`).
+/// `config::PanelId` -> `Panel`, for restoring `AppState::active_panel`
+/// from a loaded `ui.json` at bootstrap. Kept as an explicit conversion
+/// rather than merging the two enums, per `config.rs`'s own module doc
+/// comment (`Panel` must not derive `Serialize`/`Deserialize`).
 impl From<config::PanelId> for Panel {
     fn from(id: config::PanelId) -> Self {
         match id {
@@ -423,6 +525,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::NdiIn => Panel::NdiIn,
             config::PanelId::NdiOut => Panel::NdiOut,
             config::PanelId::Osc => Panel::Osc,
+            config::PanelId::RkbxLink => Panel::RkbxLink,
             config::PanelId::Overlays => Panel::Overlays,
             config::PanelId::RemoteWs => Panel::RemoteWs,
             config::PanelId::Streaming => Panel::Streaming,
@@ -461,6 +564,7 @@ impl From<Panel> for config::PanelId {
             Panel::NdiIn => config::PanelId::NdiIn,
             Panel::NdiOut => config::PanelId::NdiOut,
             Panel::Osc => config::PanelId::Osc,
+            Panel::RkbxLink => config::PanelId::RkbxLink,
             Panel::Overlays => config::PanelId::Overlays,
             Panel::RemoteWs => config::PanelId::RemoteWs,
             Panel::Streaming => config::PanelId::Streaming,
@@ -548,11 +652,11 @@ struct AppState {
     /// frame in `about_to_wait`. Composite is gated on `ndi_composite_active
     /// || v4l2_active` (either consumer needs the composite), each deck on
     /// that deck's own `ndi_deck_active[i]` only (v4l2 never needs per-deck
-    /// readbacks). Whole-branch review Finding I5: a single combined
-    /// `ndi_active || v4l2_active` gate over all 5 readbacks used to make a
-    /// v4l2-only session pay for 4 wasted deck `glReadPixels`+`to_vec()`
-    /// calls every frame, and symmetrically made an NDI-composite-only
-    /// session pay for v4l2's extra `bytes.clone()`.
+    /// readbacks). A single combined `ndi_active || v4l2_active` gate over
+    /// all 5 readbacks used to make a v4l2-only session pay for 4 wasted
+    /// deck `glReadPixels`+`to_vec()` calls every frame, and symmetrically
+    /// made an NDI-composite-only session pay for v4l2's extra
+    /// `bytes.clone()`.
     compositor_readback: FrameReadback,
     deck_readback: [FrameReadback; deck::DECK_COUNT],
     /// Outlet for `compositor_readback`'s polled RGBA bytes, feeding the NDI
@@ -561,8 +665,8 @@ struct AppState {
     /// comment).
     compositor_frame_tx: mpsc::Sender<Vec<u8>>,
     /// Same compositor bytes as `compositor_frame_tx`, on a second channel
-    /// pair feeding the v4l2loopback output thread's own `compositor_rx`
-    /// (Task 19): each consumer needs its own `Sender`, since Task 9/10
+    /// pair feeding the v4l2loopback output thread's own `compositor_rx`:
+    /// each consumer needs its own `Sender`, since the NDI output thread
     /// already moved the original single receiver into `opendrop_io::
     /// ndi::spawn`. Unlike `compositor_frame_tx`/`deck_frame_tx`, there is
     /// no per-deck counterpart: v4l2loopback only ever pipes the composite
@@ -570,46 +674,53 @@ struct AppState {
     v4l2_frame_tx: mpsc::Sender<Vec<u8>>,
     /// Same as `compositor_frame_tx`, one channel pair per deck.
     deck_frame_tx: [mpsc::Sender<Vec<u8>>; deck::DECK_COUNT],
-    /// Handle to the dedicated NDI output thread (Task 9), owns the
+    /// Handle to the dedicated NDI output thread, owns the
     /// `Receiver` ends of `compositor_frame_tx`/`deck_frame_tx` (handed to
     /// `opendrop_io::ndi::spawn` once, at construction time), and takes
-    /// start/stop control messages from the NDI panel (Task 10).
+    /// start/stop control messages from the NDI panel.
     ndi: opendrop_io::ndi::NdiHandle,
     /// The NDI panel's own composite toggle state (resynced from
     /// `NdiSnapshot::composite_active` each frame the panel is drawn; see
-    /// `ui::ndi`'s doc comment, whole-branch review Finding M5). Directly
-    /// gates the composite readback in `about_to_wait` (Finding I5).
+    /// `ui::ndi`'s doc comment). Directly
+    /// gates the composite readback in `about_to_wait`.
     /// There's no separate recomputed aggregate any more: the previous
     /// `ndi_active` field, recomputed *after* the readback gate already
-    /// consumed it, was one frame stale by construction (whole-branch
-    /// review Finding M1); reading this field directly removes that extra
-    /// staleness.
+    /// consumed it, was one frame stale by construction; reading this
+    /// field directly removes that extra staleness.
     ndi_composite_active: bool,
     /// Same as `ndi_composite_active`, one per deck: each element directly
-    /// gates that deck's own readback (Finding I5).
+    /// gates that deck's own readback.
     ndi_deck_active: [bool; deck::DECK_COUNT],
-    /// GL texture holding the most recently received NDI-in frame (Task
-    /// 12), composited as the topmost layer over the 4 decks. `None`
+    /// GL texture holding the most recently received NDI-in frame,
+    /// composited as the topmost layer over the 4 decks. `None`
     /// until the first frame of an active receive arrives. Carries its own
     /// `(width, height)` alongside the texture handle so a same-size frame
     /// can `tex_sub_image_2d` in place, while a resolution change (or a
     /// freshly connected source) recreates it: NDI-in sources can be any
     /// resolution, unlike the fixed-size compositor/deck textures.
     ndi_in_texture: Option<(glow::NativeTexture, u32, u32)>,
-    /// Source currently selected in the NDI panel's dropdown (Task 12),
-    /// same convention as `ndi_composite_active`: this is the panel's own
+    /// Source currently selected in the NDI panel's dropdown, same
+    /// convention as `ndi_composite_active`: this is the panel's own
     /// toggle state, not `NdiSnapshot::receive_active` (which reflects
     /// whether the receiver actually started).
     ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
+    /// Whether `NdiControl::StartDiscovery` is the last message sent to the
+    /// NDI thread (mirrors `ndi_composite_active`'s "own toggle state, not
+    /// the thread's" convention): discovery only runs while the NDI-in
+    /// panel is on screen (see the `about_to_wait` gate near the thumbnail
+    /// pump), instead of for the whole session regardless of use. Tracked
+    /// here so the gate below sends Start/Stop exactly once per transition
+    /// rather than re-opening the SDK's `Finder` every tick while the panel
+    /// stays open (`start_discovery` unconditionally recreates it).
+    ndi_discovery_active: bool,
     /// Whether a v4l2loopback output consumer is active: this panel's own
-    /// Start/Stop toggle (Task 19), resynced from `V4l2Snapshot::running`
-    /// each frame the panel is drawn (`ui::v4l2loopback::show`, whole-branch
-    /// review Finding M5). There's no per-slot array to OR together, just the one
+    /// Start/Stop toggle, resynced from `V4l2Snapshot::running`
+    /// each frame the panel is drawn (`ui::v4l2loopback::show`). There's no
+    /// per-slot array to OR together, just the one
     /// stream, so no separate aggregate field is needed. Gates the
-    /// composite readback in `about_to_wait` alongside `ndi_composite_active`
-    /// (Finding I5).
+    /// composite readback in `about_to_wait` alongside `ndi_composite_active`.
     v4l2_active: bool,
-    /// Handle to the dedicated v4l2loopback output thread (Task 19), owns
+    /// Handle to the dedicated v4l2loopback output thread, owns
     /// the `Receiver` end of `v4l2_frame_tx` (handed to `opendrop_io::
     /// v4l2loopback::spawn` once, at construction time), and takes
     /// start/stop control messages from the v4l2loopback panel.
@@ -620,8 +731,8 @@ struct AppState {
     /// the first frame that panel is shown; see that module's doc comment
     /// for why this is deliberately not re-queried per frame.
     v4l2_device: Option<Option<PathBuf>>,
-    /// Handle to the dedicated video-capture thread (Step 14 of the Phase 8
-    /// VJ-panels plan), the input-side mirror of `v4l2` above: `latest()`
+    /// Handle to the dedicated video-capture thread, the input-side mirror
+    /// of `v4l2` above: `latest()`
     /// gives the running/last-error snapshot, `latest_frame()` the newest
     /// decoded RGBA frame, `control_tx` sends Start/Stop/SetRate.
     video: opendrop_io::video_capture::VideoCaptureHandle,
@@ -643,6 +754,31 @@ struct AppState {
     /// this the same 3.5 MB frame would be re-uploaded on every tick that
     /// outpaces the source's frame rate (i.e. most of them).
     video_frame_seq: u64,
+    /// Per-deck mirror of `video` above: one dedicated video-capture
+    /// thread per deck slot, so up to 4 clips can decode concurrently,
+    /// independent of the global layer's own thread and of each other.
+    #[allow(dead_code)] // bootstrap-only for now: read/written starting Step 3
+    deck_video_capture: [opendrop_io::video_capture::VideoCaptureHandle; 4],
+    /// Per-slot mirror of `video_input`.
+    #[allow(dead_code)] // bootstrap-only for now: read/written starting Step 3
+    deck_video_input: [Option<opendrop_io::video_capture::VideoInput>; 4],
+    /// Per-slot mirror of `video_frame_seq`.
+    #[allow(dead_code)] // bootstrap-only for now: read/written starting Step 3
+    deck_video_frame_seq: [u64; 4],
+    /// Per-slot decode texture. Unlike `video_texture` (`Option`, created lazily
+    /// on the first decoded frame, recreated on a resolution change), this is
+    /// allocated once at bootstrap and never recreated: `opendrop_io::
+    /// video_capture` pins every source to `CAPTURE_W`x`CAPTURE_H`, so there is
+    /// no "first frame"/resize case to handle. Filled in place by
+    /// `tick_deck_video` (added in Step 3).
+    #[allow(dead_code)] // bootstrap-only for now: read/written starting Step 3
+    deck_video_texture: [glow::NativeTexture; 4],
+    /// `egui::TextureId` for each deck's video-decode texture, registered once
+    /// at bootstrap alongside `deck_tex_ids`. The deck card (Step 7) shows this
+    /// instead of `deck_tex_ids[i]` while that slot is in video mode
+    /// (`show.deck_video[i].enabled`).
+    #[allow(dead_code)] // bootstrap-only for now: read starting Step 7
+    deck_video_tex_ids: [egui::TextureId; 4],
     /// The clip library, scanned once at bootstrap and re-scanned only on
     /// the panel's Rescan button; a directory listing per frame would be
     /// pointless I/O, same reasoning as `input_devices`' bootstrap-only
@@ -662,6 +798,9 @@ struct AppState {
     /// `VideoCaptureSnapshot::last_error`, same split as
     /// `cloud_presets_secret_error`.
     video_local_error: Option<String>,
+    /// Which `VideoState` the Video panel currently shows/edits: the
+    /// global layer, or one of the 4 deck slots.
+    video_panel_target: ui::video::VideoPanelTarget,
     /// Handle to the dedicated CloudPresets thread (Step 6), `latest()`
     /// gives the current entries/busy/last-error snapshot, `control_tx`
     /// sends List/Upload/Rename/Delete/Download.
@@ -704,8 +843,8 @@ struct AppState {
     audio: opendrop_audio::AudioHandle,
     /// Labels of every available input device, enumerated once at bootstrap
     /// via `opendrop_audio::list_input_devices()` and cached here for the
-    /// Audio panel's dropdown (Step 19). The brief is explicit that the
-    /// device list doesn't change mid-session, so this is never re-scanned
+    /// Audio panel's dropdown (Step 19). The device list doesn't change
+    /// mid-session, so this is never re-scanned
     /// per frame.
     input_devices: Vec<String>,
     /// Name of the input device currently selected in the Audio panel's
@@ -746,7 +885,7 @@ struct AppState {
     /// Wall-clock instant the output window's surface was last swapped, or
     /// `None` before the first tick. Doubles as `compute_tick_dt`'s
     /// `last_tick_at`, read near the top of the same gated tick that
-    /// overwrites it near the bottom (Finding 3); the two ends of one
+    /// overwrites it near the bottom; the two ends of one
     /// tick are close enough together that this is a faithful "previous
     /// tick's real elapsed-time reference", without a second field.
     last_output_swap_at: Option<Instant>,
@@ -755,7 +894,7 @@ struct AppState {
     /// site, just below `last_output_swap_at`'s own write), one frame
     /// stale by construction, same as `last_output_swap_at` itself.
     /// `None` before the first tick. Feeds the status bar's fps/frame-ms
-    /// readout (Step 10 of the Phase 7 UI redesign plan).
+    /// readout.
     last_wall_ms: Option<f64>,
     perf_tick: u64,
     /// Sender handed to `preflight::spawn_preflight`, cloned once per
@@ -780,8 +919,8 @@ struct AppState {
     /// Soft-cut transition duration applied to every load routed through
     /// `request_preset_load`, one global setting, not per-slot (see Step 16).
     transition_seconds: f64,
-    /// Live text in the Share panel's name field (Step 13 of the Phase 8
-    /// plan), transient scratch state, deliberately not part of `UiConfig`
+    /// Live text in the Share panel's name field, transient scratch state,
+    /// deliberately not part of `UiConfig`
     /// (a share link's name is a one-off label, not persistent UI state).
     share_set_name: String,
     /// `egui::TextureId` for each deck's live GPU texture, registered once
@@ -809,8 +948,7 @@ struct AppState {
     deck_q_var_watches: [[bool; opendrop_core::q_vars::Q_VAR_COUNT]; deck::DECK_COUNT],
     /// Which panel the control window currently shows; see `Panel`.
     active_panel: Panel,
-    /// Header's Stage toggle (Step 10 of the Phase 7 UI redesign plan),
-    /// wired to the Normal/Stage shell switch at Step 11.
+    /// Header's Stage toggle, wired to the Normal/Stage shell switch at Step 11.
     stage_mode: bool,
     /// Whether the Stage bottom bar's collapsible preset drawer is open
     /// (Step 11), independent of `stage_mode` itself, so leaving Stage
@@ -842,9 +980,8 @@ struct AppState {
     thumb_queue: Vec<ThumbJob>,
     /// Cached preset thumbnails, keyed by preset name, populated by
     /// `pump_thumbnail_queue`, read by the preset-browser panel. Bounded to
-    /// `thumbnails::MAX_RESIDENT_THUMBNAILS` entries (whole-branch review
-    /// Finding 4). `thumbnail_order` is its insertion-order companion,
-    /// see `thumbnails::insert_bounded`.
+    /// `thumbnails::MAX_RESIDENT_THUMBNAILS` entries. `thumbnail_order` is
+    /// its insertion-order companion, see `thumbnails::insert_bounded`.
     thumbnail_textures: HashMap<String, egui::TextureHandle>,
     thumbnail_order: VecDeque<String>,
     /// The one outstanding `--render-thumbnail` child process, if any.
@@ -867,7 +1004,7 @@ struct AppState {
     /// frame it's visible (see `ui::output`'s doc comment for why this is
     /// deliberately unlike Step 19's `input_devices` cache).
     selected_output_monitor: Option<String>,
-    /// Handle to the dedicated MIDI I/O thread (Task 8), `latest()` gives
+    /// Handle to the dedicated MIDI I/O thread, `latest()` gives
     /// the current connection/mapping/clock snapshot, `events` carries raw,
     /// unfiltered `(CommandId, value01)` dispatches drained in
     /// `about_to_wait`, `control_tx` sends port/learn/LED control messages.
@@ -905,10 +1042,10 @@ struct AppState {
     /// back off once the deadline passes (no `std::thread::sleep`, no
     /// async timer).
     midi_led_flash_off_at: HashMap<CommandId, Instant>,
-    /// Overlay id → the sprite file it was created from (Step 12 of the
-    /// Phase 8 VJ-panels plan). The web kept the bytes themselves in
-    /// IndexedDB under the same key; here the file stays where the user
-    /// picked it and is read on demand by `sync_overlay_textures`. Written
+    /// Overlay id → the sprite file it was created from. The web kept the
+    /// bytes themselves in IndexedDB under the same key; here the file
+    /// stays where the user picked it and is read on demand by
+    /// `sync_overlay_textures`. Written
     /// by the Overlays panel's `+ Sprite` button, never by `core`
     /// (`Overlay` is a pure value type with no path field, by design).
     overlay_assets: HashMap<String, PathBuf>,
@@ -924,10 +1061,10 @@ struct AppState {
     /// (`beatSyncState.beat`, true for 80 ms after each beat in the TS
     /// source; see `BEAT_PULSE_DURATION`). `None` until the first beat.
     last_beat_at: Option<Instant>,
-    /// Handle to the dedicated OSC UDP server thread (Task 13), `latest()`
+    /// Handle to the dedicated OSC UDP server thread, `latest()`
     /// gives the current listening/port snapshot, `events` carries
     /// `(CommandId, value01)` dispatches drained in `about_to_wait` (no
-    /// soft-takeover, unlike MIDI's crossfader: the brief is explicit OSC
+    /// soft-takeover, unlike MIDI's crossfader: OSC
     /// has none in the existing app), `control_tx` sends Start/Stop.
     osc: opendrop_io::osc::OscHandle,
     /// The OSC panel's own port field, read by `Start` at click time, not
@@ -935,7 +1072,27 @@ struct AppState {
     /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
     /// matching the web app's `electron-features-store.svelte.ts` default.
     osc_port: u16,
-    /// Handle to the dedicated remote-WS thread (Task 14), first async
+    /// Handle to the dedicated rkbx_link OSC UDP listener thread for
+    /// synchronized music-video playback, independent of `osc` above:
+    /// `latest()` gives the current listening/port/per-DJ-deck-time
+    /// snapshot, `track_events` carries `RkbxTrackChanged` drained in
+    /// `about_to_wait`, `control_tx` sends Start/Stop.
+    rkbx_link: opendrop_io::rkbx_link::RkbxLinkHandle,
+    /// The Rekordbox Link panel's own port field, same reasoning as
+    /// `osc_port`.
+    rkbx_link_port: u16,
+    /// Set when the DJ-deck-mapping panel's `Show::set_rkbx_deck_mapping`
+    /// call is refused (two DJ decks claiming the same visual slot);
+    /// cleared on the next successful mapping change. Same "panel-local,
+    /// synchronous error" convention as `video_local_error`.
+    rkbx_mapping_error: Option<String>,
+    /// Per-visual-slot sync bookkeeping: `Some` while that
+    /// slot's currently-assigned clip was loaded by a track-change match and
+    /// is still being drift-corrected against its DJ deck's reported time;
+    /// `None` for an unmapped/un-synced/manually-reassigned slot. See
+    /// `RkbxSyncState`'s own doc comment.
+    rkbx_sync: [Option<RkbxSyncState>; 4],
+    /// Handle to the dedicated remote-WS thread, first async
     /// integration in this codebase (its own tokio runtime lives entirely
     /// inside that thread, see `opendrop_io::remote_ws`'s module doc
     /// comment; no tokio type reaches `AppState` itself, only the same
@@ -943,7 +1100,7 @@ struct AppState {
     /// carries `(CommandId, value01)` dispatches drained in
     /// `about_to_wait`, same no-soft-takeover contract as OSC.
     remote_ws: opendrop_io::remote_ws::RemoteWsHandle,
-    /// Handle to the dedicated OBS WebSocket thread (Task 16), app->OBS
+    /// Handle to the dedicated OBS WebSocket thread, app->OBS
     /// direction only, no `events`/`about_to_wait` drain (see
     /// `opendrop_io::obs`'s module doc comment): `latest()` gives the
     /// current connected/scenes snapshot, `control_tx` sends Connect/
@@ -955,7 +1112,7 @@ struct AppState {
     /// `obs-link-store.svelte.ts` (`localhost`/`4455`).
     obs_host: String,
     obs_port: u16,
-    /// Handle to the dedicated Twitch IRC thread (Task 17), `latest()`
+    /// Handle to the dedicated Twitch IRC thread, `latest()`
     /// gives the current connected snapshot, `control_tx` sends Connect/
     /// Disconnect. Chat messages are forwarded to `chat_events` (below),
     /// not read through this handle.
@@ -966,7 +1123,7 @@ struct AppState {
     /// Draft text for the Twitch OAuth-token secret field, never holds a
     /// value after a successful save (see `ui::streaming`'s doc comment).
     twitch_oauth_token_input: String,
-    /// Handle to the dedicated Kick thread (Task 17), same shape as
+    /// Handle to the dedicated Kick thread, same shape as
     /// `twitch` above.
     kick: opendrop_io::kick::KickHandle,
     /// The Streaming panel's own Kick channel field.
@@ -976,7 +1133,7 @@ struct AppState {
     kick_bearer_token_input: String,
     kick_xsrf_token_input: String,
     kick_cookies_input: String,
-    /// Handle to the dedicated Ableton Link thread (Task 18), `latest()`
+    /// Handle to the dedicated Ableton Link thread, `latest()`
     /// gives the current enabled/tempo/beat/phase/peers snapshot,
     /// `control_tx` sends Start/Stop/SetTempo. Present only when the
     /// `link` feature is enabled (OFF by default, GPL licensing
@@ -992,23 +1149,21 @@ struct AppState {
     /// Receiving end of the shared chat-message channel both `twitch` and
     /// `kick` feed (mirrors `broadcastChatMessage`, `main.cjs:425-429`;
     /// see `opendrop_io::chat`'s module doc comment). Drained every
-    /// `about_to_wait` call into `chat_log` below (whole-branch review
-    /// Finding 2, AC-8/AC-9: an undrained unbounded channel with a live
-    /// producer is exactly the leak hazard `io::ndi::out.rs`'s `drain_slot`
-    /// doc comment warns against).
+    /// `about_to_wait` call into `chat_log` below: an undrained unbounded
+    /// channel with a live producer is exactly the leak hazard
+    /// `io::ndi::out.rs`'s `drain_slot` doc comment warns against.
     chat_events: std::sync::mpsc::Receiver<opendrop_io::chat::ChatMessage>,
     /// Bounded chat history (most recent `CHAT_LOG_CAP` messages, oldest
     /// dropped first; see `push_chat_message`) rendered at the bottom of
     /// the Streaming panel, so real Twitch/Kick chat activity is actually
-    /// observable in the running app (whole-branch review Finding 2).
+    /// observable in the running app.
     chat_log: VecDeque<opendrop_io::chat::ChatMessage>,
     /// Panel-local error from the Streaming panel's save-on-blur secret
     /// fields (Twitch OAuth token, Kick bearer/xsrf/cookies), set
     /// synchronously on the UI thread by `ui::streaming::save_secret_field`
     /// when `secrets::set_secret` fails, so it can't be an `ArcSwap`
     /// snapshot field like `ObsSnapshot`/`TwitchSnapshot`/`KickSnapshot`'s
-    /// `last_error` (whole-branch review Finding 1, AC-12). Cleared on the
-    /// next successful save.
+    /// `last_error`. Cleared on the next successful save.
     streaming_secret_save_error: Option<String>,
 }
 
@@ -1031,7 +1186,7 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
     preflight::spawn_preflight(path, slot, name, state.preflight_tx.clone());
 }
 
-/// Whole-branch review Finding 1/2: the dedup/backpressure guard for
+/// The dedup/backpressure guard for
 /// `request_preset_load`, split out so it's testable without a real
 /// `AppState` (which needs a live GL context to construct). Resolves
 /// `name` to a path; the load-bearing part is that it only claims `slot` (via
@@ -1046,7 +1201,7 @@ fn request_preset_load(state: &mut AppState, slot: usize, name: String) {
 /// spawned a brand new out-of-process `projectm_create()` validation on
 /// every repeat: a couple of seconds of a held key could spawn 50-60
 /// concurrent instances alongside the 4 live decks already running. This
-/// also closes Finding 2's stale-verdict race as a side effect: with at
+/// also closes a stale-verdict race as a side effect: with at
 /// most one in-flight validation per slot, there is never a second one
 /// around to land its verdict out of order against the first. Verified by
 /// grepping every `pending_validations` read/write site (`main.rs`,
@@ -1253,7 +1408,7 @@ fn midi_learn_completed(prev_trigger: Option<&MidiTriggerKey>, current_trigger: 
     current_trigger != prev_trigger
 }
 
-/// Whole-branch review Finding 3: whether a MIDI-dispatched command with no
+/// Whether a MIDI-dispatched command with no
 /// known persistent state (`about_to_wait`'s `persistent_led == None`)
 /// should still get a confirmation flash. Mirrors the JS reference's
 /// positive test (`midi-connection-actions.ts:92`: `cmd?.kind === 'trigger'
@@ -1268,7 +1423,7 @@ fn should_flash_led(kind: Option<CommandKind>) -> bool {
     kind == Some(CommandKind::Trigger)
 }
 
-/// Whole-branch review Finding 3: real (measured) dt for
+/// Real (measured) dt for
 /// `Show::clock.step`/`Show::tick_playlists`, instead of the nominal
 /// `refresh_interval` the render-pacing loop targets. `about_to_wait`'s
 /// pacing resyncs `next_frame_at = now + refresh_interval` whenever the
@@ -1312,9 +1467,9 @@ fn drain_to_latest<T>(rx: &mpsc::Receiver<T>) -> Option<T> {
 }
 
 /// Pushes `msg` onto `log`, then trims from the front until `log.len() <=
-/// cap`: keeps only the most recent `cap` messages. Whole-branch review
-/// Finding 2: pure and side-effect-free so the capping behavior is
-/// testable without a real chat channel.
+/// cap`: keeps only the most recent `cap` messages. Pure and
+/// side-effect-free so the capping behavior is testable without a real
+/// chat channel.
 fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: opendrop_io::chat::ChatMessage, cap: usize) {
     log.push_back(msg);
     while log.len() > cap {
@@ -1325,9 +1480,8 @@ fn push_chat_message(log: &mut VecDeque<opendrop_io::chat::ChatMessage>, msg: op
 /// Root of the control window's egui content for this frame. `ui` here is
 /// already `&mut egui::Ui` (this vendored `egui_glow`'s `EguiGlow::run`
 /// hands a `Ui`, not a `Context`; `CentralPanel::show` in this vendored
-/// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument; see
-/// Task 2's notes on this same drift). A 4-zone shell (Step 10 of the Phase
-/// 7 UI redesign plan): header, sectioned nav, status bar, then content:
+/// `egui` 0.36.1 matches, taking `ui: &mut Ui` as its first argument).
+/// A 4-zone shell: header, sectioned nav, status bar, then content:
 /// `egui::Panel::top`/`left`/`bottom` (not `SidePanel`/`TopBottomPanel`,
 /// which don't exist in this vendored egui 0.36.1), `CentralPanel` last, in
 /// that mandated order. `ui::shell::{header,nav,status_bar}` hold the zone
@@ -1358,11 +1512,11 @@ fn ui_root(
     control: &mut ui::ctx::ControlCtx,
     theme_request: &mut Option<theme::registry::ThemeId>,
 ) {
-    // Step 11 of the Phase 7 UI redesign plan: Stage mode retracts the nav
+    // Stage mode retracts the nav
     // and switches the header/status bar to compact, translucent variants
     // while live-mixing. `Panel::show_switched` is a `Panel`-associated
-    // function, not a method chained onto one builder as the brief's own
-    // prose first suggested; verified against vendored egui 0.36.1 source
+    // function, not a method chained onto one builder as initially assumed;
+    // verified against vendored egui 0.36.1 source
     // (`egui-0.36.1/src/containers/panel.rs:563`): it takes the collapsed
     // and expanded `Panel` builders as two separate arguments plus one
     // shared `is_expanded: &mut bool`, and animates the slide between
@@ -1387,7 +1541,7 @@ fn ui_root(
     // background + border + shadow modulated together in one operation
     // (`egui-0.36.1/src/containers/frame.rs:313`), never a per-color
     // `gamma_multiply` hack, so the live GL compositor (confirmed opaque
-    // and hidden behind Normal-mode chrome, Task 1) shows through the
+    // and hidden behind Normal-mode chrome) shows through the
     // retracted areas.
     let stage_frame = egui::Frame::side_top_panel(ui.style()).multiply_with_opacity(0.6);
 
@@ -1429,8 +1583,8 @@ fn ui_root(
     // Preset drawer: Stage-only, collapsible over the live content
     // (`Panel::bottom("od_presets_drawer").show_collapsible`), toggled by
     // a `ghost_button` inside `status_bar_stage` rather than a new
-    // keyboard binding (the brief's own "Bascule clavier" section only
-    // calls out `stage_mode`'s toggle). Gated on `*shell.stage_mode`
+    // keyboard binding (only `stage_mode`'s toggle needs one). Gated on
+    // `*shell.stage_mode`
     // itself, not just left permanently mounted with `presets_drawer_open`
     // pinned to `false`: Normal mode already reaches the same content via
     // `Panel::PresetBrowser` in the nav, so there's no reason to reserve
@@ -1453,6 +1607,9 @@ fn ui_root(
                     perform.show,
                     perform.deck_tex_ids,
                     perform.deck_preset_names,
+                    sources.video_clips.as_slice(),
+                    perform.deck_video_tex_ids,
+                    perform.deck_video_errors,
                     perform.pending_validations,
                     perform.preset_errors,
                     perform.transition_seconds,
@@ -1512,6 +1669,9 @@ fn ui_root(
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
             }
+            Panel::RkbxLink => {
+                ui::rkbx_link::show(ui, sources.rkbx_link, sources.rkbx_link_port, sources.rkbx_mapping_error, perform.show);
+            }
             Panel::Overlays => {
                 ui::overlays::show(
                     ui,
@@ -1569,6 +1729,7 @@ fn ui_root(
                     &ndi_snapshot,
                     sources.ndi_in_selected_source,
                     sources.video_ndi_request,
+                    sources.video_panel_target,
                 );
             }
             Panel::CloudPresets => {
@@ -1612,7 +1773,7 @@ impl ApplicationHandler for App {
         // keep working except while an egui text widget (e.g. the preset
         // browser search) actually has focus.
         if let WindowEvent::KeyboardInput { event: key_event, .. } = &event {
-            // Whole-branch review Finding 1: `!key_event.repeat` excludes
+            // `!key_event.repeat` excludes
             // OS auto-repeat: every command dispatched from this path is a
             // discrete press/trigger (deck navigation, toggles), and a
             // held key re-firing one at ~25-30/sec is never the intended
@@ -1623,7 +1784,7 @@ impl ApplicationHandler for App {
                 && !key_event.repeat
                 && !state.egui_glow.egui_ctx.egui_wants_keyboard_input()
             {
-                // Step 3 of the Phase 8 VJ-panels plan: the Keymap panel's
+                // The Keymap panel's
                 // Learn button only records which command is waiting
                 // (`keymap_learning`); the key that commits the binding is
                 // captured right here, on the very next accepted press,
@@ -1637,7 +1798,7 @@ impl ApplicationHandler for App {
                         state.registry.dispatch(cmd_id, 1.0, &mut state.show);
                     }
 
-                    // Step 11 of the Phase 7 UI redesign plan: Stage mode is
+                    // Stage mode is
                     // a transient UI bool on `AppState`, not a `CommandId`:
                     // matched directly against the logical key here rather
                     // than routed through `state.keymap`/`state.registry.
@@ -1700,6 +1861,9 @@ impl ApplicationHandler for App {
                             } else {
                                 state.preset_errors.remove(&slot);
                                 state.deck_preset_names[slot] = name;
+                                // A slot in video mode switches back to preset mode the moment a
+                                // preset actually lands on it.
+                                state.show.deck_video[slot].enabled = false;
                             }
                         }
                     }
@@ -1713,8 +1877,8 @@ impl ApplicationHandler for App {
             request_preset_load(state, load.slot, load.name);
         }
 
-        // MIDI (Task 8). `midi.events` carries raw, unfiltered
-        // `(CommandId, value01)` dispatches (Task 7's `MidiDispatch`):
+        // MIDI. `midi.events` carries raw, unfiltered
+        // `(CommandId, value01)` dispatches (`MidiDispatch`):
         // soft-takeover (crossfader only, Ruling A), LED flash vs.
         // persistent-state confirmation, and mapping/clock/hotplug sync all
         // happen here, mirroring `midi-connection-actions.ts:70-134`.
@@ -1733,8 +1897,7 @@ impl ApplicationHandler for App {
             // flash here would wrongly overwrite the state just pushed).
             // Every other dispatched *Trigger*-kind command gets a 120ms
             // flash instead; a `Range`-kind command (fader/knob) gets no
-            // LED write at all. Whole-branch review Finding 3 (real bug):
-            // the previous `_ => flash` branch swept in every Range-kind
+            // LED write at all. The previous `_ => flash` branch swept in every Range-kind
             // command too, sending a real MIDI LED write for every incoming
             // CC message from a mapped fader, potentially hundreds per
             // second, fighting a motorized fader or flooding a DIN-MIDI
@@ -1820,7 +1983,7 @@ impl ApplicationHandler for App {
             state.midi_learning = None;
         }
 
-        // OSC (Task 13). `osc.events` carries `(CommandId, value01)`
+        // OSC. `osc.events` carries `(CommandId, value01)`
         // dispatches already filtered/clamped by the OSC thread (address
         // prefix + command-name lookup + 0..1 clamp all happen in
         // `opendrop_io::osc`, not here). No soft-takeover: unlike MIDI's
@@ -1829,7 +1992,7 @@ impl ApplicationHandler for App {
             state.registry.dispatch(id, value01, &mut state.show);
         }
 
-        // Remote WS (Task 14). Same shape as the OSC drain just above:
+        // Remote WS. Same shape as the OSC drain just above:
         // `remote_ws.events` carries `(CommandId, value01)` dispatches
         // already filtered (token check + command-name lookup) and
         // clamped by the remote-WS thread itself (`opendrop_io::
@@ -1838,7 +2001,7 @@ impl ApplicationHandler for App {
             state.registry.dispatch(id, value01, &mut state.show);
         }
 
-        // Ableton Link (Task 18). The Link thread never touches `Show`
+        // Ableton Link. The Link thread never touches `Show`
         // itself (see `opendrop_io::link`'s module doc comment); it only
         // publishes the latest polled `(tempo, phase01)`; applying that
         // to the clock happens here, once per `about_to_wait` call, same
@@ -1855,7 +2018,7 @@ impl ApplicationHandler for App {
             }
         }
 
-        // Chat (Task 17 follow-up, whole-branch review Finding 2). Same
+        // Chat. Same
         // non-blocking drain shape as the OSC/remote-WS drains above, but
         // there's no command dispatch here: just a bounded history so
         // this unbounded `mpsc::Sender` (fed by `twitch`/`kick`) never
@@ -1873,7 +2036,7 @@ impl ApplicationHandler for App {
         // rendering on every call, is what keeps that from turning into a
         // self-sustaining busy loop (measured: ~10 kHz without this gate).
         if now >= state.next_frame_at {
-            let layer_inputs = layer_inputs_from_show(&state.show);
+            let mut layer_inputs = layer_inputs_from_show(&state.show);
 
             // Each deck context injects one PCM chunk, renders one projectM
             // frame, and copies it into its shared texture; then, back on
@@ -1932,7 +2095,7 @@ impl ApplicationHandler for App {
             if beat_fired {
                 state.last_beat_at = Some(now);
             }
-            // Video layer (Step 14 of the Phase 8 VJ-panels plan). Two
+            // Video layer. Two
             // per-tick hooks, both ports of the web's own:
             //  - the beat-driven clip cut, called here rather than from
             //    `Show::on_beat` because the clip list it rotates through
@@ -1955,6 +2118,9 @@ impl ApplicationHandler for App {
                 // restarts nothing.
                 for _ in 0..beats_this_tick {
                     state.show.on_video_beat(&clip_keys, ndi_active);
+                    for slot in 0..deck::DECK_COUNT {
+                        state.show.on_deck_video_beat(slot, &clip_keys);
+                    }
                 }
             }
             // The interval-driven half of the same playlist engines the
@@ -1963,7 +2129,7 @@ impl ApplicationHandler for App {
             // the current item. Same `dt` as `clock.step`, converted to the
             // milliseconds `PlaylistEngine` works in.
             state.show.tick_playlists(dt * 1000.0);
-            // Snapshot recall (Step 4 of the Phase 8 VJ-panels plan). Same
+            // Snapshot recall. Same
             // dt-driven cadence as `tick_playlists` just above: `Show` has
             // no wall clock of its own (see `Show::reseed_rng`'s doc
             // comment), so `tick_recall` accumulates elapsed time from this
@@ -1980,13 +2146,13 @@ impl ApplicationHandler for App {
             for (id, value) in state.show.tick_recall(dt) {
                 state.registry.dispatch(id, value, &mut state.show);
             }
-            // Timeline playback (Step 5 of the Phase 8 VJ-panels plan).
-            // Same dt-driven cadence and registry-dispatch parity as the
+            // Timeline playback. Same dt-driven cadence and
+            // registry-dispatch parity as the
             // snapshot recall loop just above.
             for (id, value) in state.show.tick_timeline(dt) {
                 state.registry.dispatch(id, value, &mut state.show);
             }
-            // LFO modulation (Step 11 of the Phase 8 VJ-panels plan). Same
+            // LFO modulation. Same
             // registry-dispatch parity as the snapshot recall/timeline
             // loops above, but driven by beat phase rather than dt:
             // `LfoSlot::rate` is a multiplier of beat rate (see
@@ -2018,8 +2184,24 @@ impl ApplicationHandler for App {
                     .control_tx
                     .send(opendrop_io::video_capture::VideoCaptureControl::SetRate(state.show.video.playback_rate));
             }
+            // Per-deck audio warp: always `ndi_active: false`
+            // (Step 1's `on_deck_video_beat` already commits to this; see
+            // its doc comment), since a deck-video slot has no NDI receive
+            // path of its own to defer to.
+            for slot in 0..deck::DECK_COUNT {
+                let previous_rate = state.show.deck_video[slot].playback_rate;
+                state.show.deck_video[slot].on_audio_tick(audio.energy_byte / 255.0, false);
+                if (state.show.deck_video[slot].playback_rate - previous_rate).abs() > 0.001 {
+                    let _ = state.deck_video_capture[slot].control_tx.send(
+                        opendrop_io::video_capture::VideoCaptureControl::SetRate(state.show.deck_video[slot].playback_rate),
+                    );
+                }
+            }
 
             for (i, layer_input) in layer_inputs.iter().enumerate() {
+                if state.show.deck_video[i].enabled {
+                    continue; // this slot's compositor content is a decoded clip, not a projectM preset
+                }
                 let visible = layer_input.opacity > 0.001;
                 // See `InvisibleMode`: `Eco` is the original always-on
                 // throttle, `Pause` skips rendering this deck entirely while
@@ -2110,6 +2292,24 @@ impl ApplicationHandler for App {
                 }
             }
 
+            // NDI source discovery (see `ndi_discovery_active`'s doc
+            // comment): only worth running while the NDI-in panel is on
+            // screen to actually show the result. Edge-triggered, not a
+            // level check re-sent every tick: `start_discovery` recreates
+            // the SDK's `Finder` unconditionally, so resending `Start`
+            // every frame while the panel stays open would reopen it 60x/s
+            // for nothing.
+            let want_ndi_discovery = state.active_panel == Panel::NdiIn;
+            if want_ndi_discovery != state.ndi_discovery_active {
+                let msg = if want_ndi_discovery {
+                    opendrop_io::ndi::NdiControl::StartDiscovery
+                } else {
+                    opendrop_io::ndi::NdiControl::StopDiscovery
+                };
+                let _ = state.ndi.control_tx.send(msg);
+                state.ndi_discovery_active = want_ndi_discovery;
+            }
+
             // Reacquire the main context (any of its surfaces works; the
             // composite FBO belongs to the context, not the surface) before
             // touching the compositor or either window.
@@ -2117,20 +2317,20 @@ impl ApplicationHandler for App {
                 eprintln!("[app] failed to reacquire main context: {e}");
             }
 
-            // NDI-in (Task 12): drains `frame_rx` to its newest frame per
-            // tick, before compositing (whole-branch review Finding 5: a
-            // single `try_recv()` took exactly one frame per app tick,
-            // which falls behind and can never recatch against this
-            // unbounded channel if the NDI source's rate ever briefly
-            // exceeds the app's tick rate; mirrors `io::ndi::out.rs`'s own
-            // `drain_slot`, which loops for exactly this reason). `frame_rx`
-            // only yields a frame once `NdiControl::StartReceive` is active
-            // and a source is actually connected (io/src/ndi/in_.rs). Most
-            // ticks this is empty. The texture is sized from the frame's
-            // own width/height (`NdiFrame`, see io's Task-12 prerequisite
-            // fix) rather than a fixed constant, since NDI-in sources can be
-            // any resolution; a same-size frame is uploaded in place, a
-            // resolution change (or first connect) recreates the texture.
+            // NDI-in: drains `frame_rx` to its newest frame per
+            // tick, before compositing. A single `try_recv()` took exactly
+            // one frame per app tick, which falls behind and can never
+            // recatch against this unbounded channel if the NDI source's
+            // rate ever briefly exceeds the app's tick rate; mirrors
+            // `io::ndi::out.rs`'s own `drain_slot`, which loops for exactly
+            // this reason. `frame_rx` only yields a frame once
+            // `NdiControl::StartReceive` is active and a source is actually
+            // connected (io/src/ndi/in_.rs). Most ticks this is empty. The
+            // texture is sized from the frame's own width/height
+            // (`NdiFrame`) rather than a fixed constant, since NDI-in
+            // sources can be any resolution; a same-size frame is uploaded
+            // in place, a resolution change (or first connect) recreates
+            // the texture.
             if let Some(frame) = drain_to_latest(&state.ndi.frame_rx) {
                 let expected_len = frame.width as usize * frame.height as usize * 4;
                 if frame.data.len() != expected_len {
@@ -2240,25 +2440,109 @@ impl ApplicationHandler for App {
                 }
             }
 
+            // rkbx_link track-change -> match -> load: drains
+            // discrete track-changed events into a direct per-slot clip
+            // load, never touching that slot's bus assignment. No
+            // match found leaves the mapped slot's current content
+            // untouched.
+            while let Ok(event) = state.rkbx_link.track_events.try_recv() {
+                let Some(slot) = state.show.rkbx_deck_mapping.get(event.deck).copied().flatten() else { continue };
+                let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else { continue };
+                let path = clip.path.clone();
+                let index = state.video_clips.iter().position(|c| c.path == path).unwrap_or(0);
+                state.show.deck_video[slot].current_clip_index = index;
+                state.show.deck_video[slot].enabled = true;
+                let seek_seconds = state.rkbx_link.latest().deck_time[event.deck].unwrap_or(0.0);
+                state.rkbx_sync[slot] = Some(RkbxSyncState { dj_deck: event.deck, matched_clip_path: path, seek_seconds, seeked_at: now });
+            }
+
+            // rkbx_link drift correction: reseeks a synced
+            // slot whenever its estimated elapsed playback diverges from
+            // its DJ deck's latest reported time by more than
+            // `RKBX_DRIFT_THRESHOLD_SECONDS`. Drops the sync (without
+            // touching the slot's content) if the mapping was changed or
+            // the VJ manually reassigned the slot away from the matched
+            // clip since the last match/reseek: manual action supersedes
+            // sync.
+            for slot in 0..deck::DECK_COUNT {
+                let Some(sync) = &state.rkbx_sync[slot] else { continue };
+                let mapping_still_points_here = state.show.rkbx_deck_mapping.get(sync.dj_deck).copied().flatten() == Some(slot);
+                let current_clip_path = state
+                    .video_clips
+                    .get(state.show.deck_video[slot].current_clip_index % state.video_clips.len().max(1))
+                    .map(|c| c.path.clone());
+                let still_the_matched_clip = state.show.deck_video[slot].enabled && current_clip_path.as_ref() == Some(&sync.matched_clip_path);
+                if !mapping_still_points_here || !still_the_matched_clip {
+                    state.rkbx_sync[slot] = None;
+                    continue;
+                }
+                let Some(dj_time) = state.rkbx_link.latest().deck_time[sync.dj_deck] else { continue };
+                let actual_elapsed = sync.seek_seconds + sync.seeked_at.elapsed().as_secs_f64();
+                if rkbx_drift_exceeds_threshold(dj_time, actual_elapsed) {
+                    state.rkbx_sync[slot] = Some(RkbxSyncState {
+                        dj_deck: sync.dj_deck,
+                        matched_clip_path: sync.matched_clip_path.clone(),
+                        seek_seconds: dj_time,
+                        seeked_at: now,
+                    });
+                }
+            }
+
+            // Per-deck video decode: reconcile-then-upload, one
+            // slot at a time, mirroring the global block just above. Runs
+            // unconditionally every tick, regardless of that slot's
+            // bus/opacity: a deck-video slot's decode/beat-cut/warp must
+            // never gate on visibility; the projectM `InvisibleMode`
+            // throttle just below only applies to preset-mode slots.
+            for slot in 0..deck::DECK_COUNT {
+                let mut desired_slot = desired_video_input(&state.show.deck_video[slot], &state.video_clips, false);
+                // Apply the sync's seek offset when this slot's
+                // desired input is still the clip the match loaded.
+                if let (Some(opendrop_io::video_capture::VideoInput::File { path, start_seconds }), Some(sync)) =
+                    (&mut desired_slot, &state.rkbx_sync[slot])
+                {
+                    if *path == sync.matched_clip_path {
+                        *start_seconds = sync.seek_seconds;
+                    }
+                }
+                tick_deck_video(
+                    &state.gl,
+                    desired_slot,
+                    &mut state.deck_video_input[slot],
+                    &state.deck_video_capture[slot],
+                    &mut state.deck_video_frame_seq[slot],
+                    state.deck_video_texture[slot],
+                );
+            }
+
+            let deck_beat_pulse = state.last_beat_at.is_some_and(|at| now.duration_since(at) < BEAT_PULSE_DURATION);
+            for (i, layer_input) in layer_inputs.iter_mut().enumerate() {
+                if state.show.deck_video[i].enabled {
+                    layer_input.color = state.show.deck_video[i].layer_color_params(deck_beat_pulse);
+                }
+            }
+
             let lowest_active = (0..deck::DECK_COUNT).find(|&i| layer_inputs[i].opacity > 0.001);
             state.compositor.begin_frame(&state.gl);
             for (i, layer_input) in layer_inputs.iter().enumerate() {
-                // Whole-branch review Finding I5: this used to be
+                // This used to be
                 // open-coded (`lowest_active == Some(i)`), untested here;
                 // now the tested `opendrop_core::blend::
                 // should_force_normal_for_lowest_slot` port of `compositor.
                 // ts:140`'s `shouldForceNormalForLowestSlot`.
                 let force_normal = should_force_normal_for_lowest_slot(i, lowest_active);
-                state.compositor.composite_layer(&state.gl, state.decks[i].texture, layer_input, force_normal);
+                let deck_tex = if state.show.deck_video[i].enabled { state.deck_video_texture[i] } else { state.decks[i].texture };
+                state.compositor.composite_layer(&state.gl, deck_tex, layer_input, force_normal);
             }
             // Video layer (Step 14), composited over the 4 decks and under
             // the NDI-in layer below. **On top of the decks, not behind
             // them**; see `Compositor::composite_video_layer`'s doc
-            // comment for why that deviates from the plan's step-14
-            // sketch (short version: the web app's compositor this ports
-            // records, in its own class header, that drawing it first made
-            // it vanish whenever a deck reached full opacity, which is the
-            // default at either end of the crossfader).
+            // comment for why the video layer is drawn after the decks
+            // instead of before them (short version: the web app's
+            // compositor this ports records, in its own class header, that
+            // drawing it first made it vanish whenever a deck reached full
+            // opacity, which is the default at either end of the
+            // crossfader).
             //
             // Gated on the capture thread's own `running`, not on merely
             // having a texture: the texture is kept across a Stop (cheap,
@@ -2305,7 +2589,7 @@ impl ApplicationHandler for App {
                     state.compositor.composite_layer(&state.gl, tex, &ndi_in_input, false);
                 }
             }
-            // Strobe flash (Step 10 of the Phase 8 VJ-panels plan): drawn
+            // Strobe flash: drawn
             // last, on top of every deck/NDI-in layer just composited
             // above, and still inside the `begin_frame`/`end_frame`
             // bracket so it lands in `color_tex` before the readback below
@@ -2352,8 +2636,8 @@ impl ApplicationHandler for App {
 
             // Step 5: GPU->CPU readback feeding the NDI / v4l2loopback
             // output paths: gated per consumer so an idle (or
-            // partially-idle) session never pays for a copy nobody wants
-            // (whole-branch review Finding I5). The composite readback is
+            // partially-idle) session never pays for a copy nobody wants.
+            // The composite readback is
             // needed by either `ndi_composite_active` or `v4l2_active`
             // (v4l2 only ever pipes the composite stream); each deck
             // readback is needed only by that specific deck's
@@ -2412,6 +2696,12 @@ impl ApplicationHandler for App {
             // `ui::video`'s module doc comment on why no panel handle
             // reaches that panel.
             let video_capture_snapshot = state.video.latest();
+            // Per-deck decode-error snapshot, same "copy out before the
+            // destructure" reason as
+            // `video_capture_snapshot` above; read by the Decks panel to
+            // surface a video-mode slot's decode failure on its card.
+            let deck_video_errors: [Option<String>; 4] =
+                std::array::from_fn(|i| state.deck_video_capture[i].latest().last_error.clone());
 
             // Decks (Step 16), preset-browser (Step 17), playlists (Step
             // 18), and audio (Step 19) panels: real content, replacing the
@@ -2425,6 +2715,7 @@ impl ApplicationHandler for App {
                 show,
                 deck_tex_ids,
                 deck_preset_names,
+                deck_video_tex_ids,
                 pending_validations,
                 preset_errors,
                 transition_seconds,
@@ -2457,6 +2748,9 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                rkbx_link,
+                rkbx_link_port,
+                rkbx_mapping_error,
                 overlay_assets,
                 next_overlay_id,
                 remote_ws,
@@ -2484,6 +2778,7 @@ impl ApplicationHandler for App {
                 video_cameras,
                 video_camera_device,
                 video_local_error,
+                video_panel_target,
                 cloud_presets,
                 cloud_presets_api_url,
                 cloud_presets_token_input,
@@ -2518,6 +2813,8 @@ impl ApplicationHandler for App {
                 show,
                 deck_tex_ids,
                 deck_preset_names,
+                deck_video_tex_ids,
+                deck_video_errors: &deck_video_errors,
                 pending_validations,
                 preset_errors,
                 transition_seconds,
@@ -2547,6 +2844,9 @@ impl ApplicationHandler for App {
                 ndi_in_selected_source,
                 osc,
                 osc_port,
+                rkbx_link,
+                rkbx_link_port,
+                rkbx_mapping_error,
                 overlay_assets,
                 next_overlay_id,
                 remote_ws,
@@ -2559,6 +2859,7 @@ impl ApplicationHandler for App {
                 video_local_error,
                 video_capture: &video_capture_snapshot,
                 video_ndi_request: &mut video_ndi_request,
+                video_panel_target,
                 cloud_presets,
                 cloud_presets_api_url,
                 cloud_presets_token_input,
@@ -2619,7 +2920,7 @@ impl ApplicationHandler for App {
                 // Step 14 added.
                 request_preset_load(state, state.show.selected_slot, name);
             }
-            // Video panel's NDI section (Step 14 of the Phase 8 plan):
+            // Video panel's NDI section:
             // translated straight into the already-ported NDI-in
             // subsystem's own control messages: the exact two
             // `ui::ndi::show_in` sends, no second receiver, no second
@@ -2666,8 +2967,7 @@ impl ApplicationHandler for App {
                 // write just the `theme` field so this doesn't clobber
                 // `active_panel`/`stage_mode`/the other already-persisted
                 // fields, which are wired at other call sites (bootstrap
-                // and `App::exiting`, "Whole-branch review fix wave,
-                // finding 1 (AC-10)").
+                // and `App::exiting`).
                 let config_path = config::config_file_path();
                 let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
                 ui_config.theme = new_id;
@@ -2730,7 +3030,7 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(state) = &mut self.state {
-            // Whole-branch review fix wave, finding 1 (AC-10): persist
+            // Persist
             // `active_panel`/`stage_mode` on exit, matching Step 7's
             // original "How" text ("write on exiting ... and
             // immediately on every runtime theme change"). Same
@@ -2746,6 +3046,7 @@ impl ApplicationHandler for App {
             ui_config.output_monitor = state.selected_output_monitor.clone();
             ui_config.audio_input_device = state.selected_input_device.clone();
             ui_config.osc_port = state.osc_port;
+            ui_config.rkbx_link_port = state.rkbx_link_port;
             ui_config.obs_host = state.obs_host.clone();
             ui_config.obs_port = state.obs_port;
             ui_config.twitch_channel = state.twitch_channel.clone();
@@ -2867,7 +3168,7 @@ fn preset_dir_from(
     let _ = exe_path;
 
     // macOS packaged fallback: not implemented, no build/test machine
-    // available (see PHASE6-PACKAGING.REQUIREMENTS.md)
+    // available
 
     Err(
         "OPENDROP_PRESET_DIR is not set. Point it at a directory of .milk presets, e.g.:\n  \
@@ -2962,11 +3263,11 @@ fn pick_distinct_presets(dir: &Path, count: usize) -> Vec<PathBuf> {
     picks
 }
 
-/// Step 3 of Phase 2: two windows sharing one GL context, paced explicitly
-/// instead of relying on vsync. See `piped-rolling-sunrise.md` step 3: a
-/// Wayland surface that stops being visible stops receiving frame
-/// callbacks, so `SwapInterval::Wait` on it would block `swap_buffers` and
-/// freeze the whole single-threaded render loop, output window included.
+/// Two windows sharing one GL context, paced explicitly
+/// instead of relying on vsync: a Wayland surface that stops being visible
+/// stops receiving frame callbacks, so `SwapInterval::Wait` on it would
+/// block `swap_buffers` and freeze the whole single-threaded render loop,
+/// output window included.
 fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let control_attrs = Window::default_attributes()
         .with_title("OpenDrop: Control")
@@ -3105,7 +3406,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // (examples/pure_glow.rs:188).
     let mut egui_glow = egui_glow::EguiGlow::new(event_loop, Arc::clone(&gl), None, None, true);
 
-    // Whole-branch review fix wave, finding 1 (AC-10): load the persisted
+    // Load the persisted
     // `ui.json` once, here, before the theme/active_panel/stage_mode it
     // carries are wired onto the Context/AppState below: Step 7's `config.
     // rs` landed with this load call deferred (Ruling D: `AppState` didn't
@@ -3146,6 +3447,12 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let deck_tex_ids: [egui::TextureId; 4] =
         std::array::from_fn(|i| egui_glow.painter.register_native_texture(decks[i].texture));
 
+    let deck_video_texture: [glow::NativeTexture; 4] = std::array::from_fn(|_| {
+        create_empty_video_texture(&gl, opendrop_io::video_capture::CAPTURE_W, opendrop_io::video_capture::CAPTURE_H)
+    });
+    let deck_video_tex_ids: [egui::TextureId; 4] =
+        std::array::from_fn(|i| egui_glow.painter.register_native_texture(deck_video_texture[i]));
+
     // Compositor FBO/texture belong to whichever context is current at
     // creation: main_ctx is current here (on control's surface), same as
     // it will be every time the compositor's FBO is touched later.
@@ -3171,7 +3478,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     // Output channels for the readback bytes above. `compositor_frame_rx`/
     // `deck_frame_rx` are moved into the NDI thread below; `v4l2_frame_rx`
     // is a second, v4l2loopback-only channel for the same compositor bytes
-    // (Task 19; see `v4l2_frame_tx`'s doc comment on `AppState`).
+    // (see `v4l2_frame_tx`'s doc comment on `AppState`).
     let (compositor_frame_tx, compositor_frame_rx) = mpsc::channel::<Vec<u8>>();
     let (v4l2_frame_tx, v4l2_frame_rx) = mpsc::channel::<Vec<u8>>();
     type DeckFrameChannels = ([mpsc::Sender<Vec<u8>>; deck::DECK_COUNT], [mpsc::Receiver<Vec<u8>>; deck::DECK_COUNT]);
@@ -3230,7 +3537,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
     let (chat_tx, chat_events) = mpsc::channel();
 
     let mut show = Show::default();
-    // Whole-branch review Finding I4: `core` is zero-I/O and has no clock of
+    // `core` is zero-I/O and has no clock of
     // its own, so its playlist engines start from a fixed, hardcoded RNG
     // seed; shuffle mode would otherwise replay the exact same sequence
     // every single app launch. Real per-launch entropy is supplied here,
@@ -3264,20 +3571,19 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         deck_frame_tx,
         // Receivers moved into the NDI thread here, once; they are no
         // longer needed as `AppState` fields once `spawn` takes ownership.
-        ndi: {
-            let handle = opendrop_io::ndi::spawn(compositor_frame_rx, deck_frame_rx);
-            // Task 12: discovery is started once, here, rather than behind a
-            // manual "Scan" button; it's a cheap, non-blocking poll on the
-            // NDI thread's own tick (`in_::find` with `timeout_ms = 0`, see
-            // that function's doc comment), and the source dropdown should
-            // just work whenever the NDI panel is opened, with no extra step.
-            let _ = handle.control_tx.send(opendrop_io::ndi::NdiControl::StartDiscovery);
-            handle
-        },
+        // Discovery used to start unconditionally here, right after
+        // spawn, so the source dropdown would "just work" whenever the NDI
+        // panel was opened. In practice that runs `in_::find`'s SDK call
+        // every ~5ms for the entire session, on every machine, whether or
+        // not NDI is ever used (see `ndi::in_::find`'s doc comment). Now
+        // started/stopped from the `about_to_wait` gate near the thumbnail
+        // pump instead, keyed on `Panel::NdiIn` being on screen.
+        ndi: opendrop_io::ndi::spawn(compositor_frame_rx, deck_frame_rx),
         ndi_composite_active: false,
         ndi_deck_active: [false; deck::DECK_COUNT],
         ndi_in_texture: None,
         ndi_in_selected_source: None,
+        ndi_discovery_active: false,
         overlay_assets: HashMap::new(),
         next_overlay_id: 0,
         overlay_textures: HashMap::new(),
@@ -3289,12 +3595,18 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         video_input: None,
         video_texture: None,
         video_frame_seq: 0,
+        deck_video_capture: std::array::from_fn(|_| opendrop_io::video_capture::spawn()),
+        deck_video_input: [const { None }; 4],
+        deck_video_frame_seq: [0; 4],
+        deck_video_texture,
+        deck_video_tex_ids,
         // Scanned once here (see the field's doc comment); the panel's
         // Rescan button is the only thing that re-reads either directory.
         video_clips: video_clips::scan_clips(),
         video_cameras,
         video_camera_device,
         video_local_error: None,
+        video_panel_target: ui::video::VideoPanelTarget::Global,
         cloud_presets: opendrop_io::cloud_presets::spawn(),
         cloud_presets_api_url: ui_config.cloud_presets_api_url.clone().unwrap_or_default(),
         cloud_presets_token_input: String::new(),
@@ -3307,8 +3619,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         t0: Instant::now(),
         audio: opendrop_audio::spawn_capture(),
         // Step 19: enumerated once here at bootstrap and cached; the Audio
-        // panel never calls `list_input_devices()` itself, per the brief
-        // ("the list doesn't change mid-session").
+        // panel never calls `list_input_devices()` itself: the list
+        // doesn't change mid-session.
         input_devices: opendrop_audio::list_input_devices(),
         // Panel settings restored from the same `ui_config` loaded above,
         // not just navigation state.
@@ -3349,7 +3661,7 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         transition_seconds: 0.0,
         share_set_name: String::new(),
         deck_tex_ids,
-        // Whole-branch review fix wave, finding 1 (AC-10): restored from
+        // Restored from
         // the same `ui_config` loaded above, instead of always starting on
         // the hardcoded defaults.
         active_panel: ui_config.active_panel.into(),
@@ -3376,6 +3688,10 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         midi_led_flash_off_at: HashMap::new(),
         osc: opendrop_io::osc::spawn(),
         osc_port: ui_config.osc_port,
+        rkbx_link: opendrop_io::rkbx_link::spawn(),
+        rkbx_link_port: ui_config.rkbx_link_port,
+        rkbx_mapping_error: None,
+        rkbx_sync: [None, None, None, None],
         remote_ws: opendrop_io::remote_ws::spawn(),
         obs: opendrop_io::obs::spawn(),
         obs_host: ui_config.obs_host.clone(),
@@ -3442,7 +3758,7 @@ fn main() {
 mod tests {
     use super::*;
 
-    /// Whole-branch review Finding 3: real elapsed-time dt for beat-sync/
+    /// Real elapsed-time dt for beat-sync/
     /// playlist ticking.
     mod compute_tick_dt_tests {
         use super::*;
@@ -3481,7 +3797,7 @@ mod tests {
         }
     }
 
-    /// Whole-branch review Finding 1/2: the preset-load dedup/backpressure
+    /// The preset-load dedup/backpressure
     /// guard.
     mod should_spawn_preflight_tests {
         use super::*;
@@ -3738,7 +4054,7 @@ mod tests {
         }
     }
 
-    /// Whole-branch review Finding 3: the LED-flash Trigger-kind gating.
+    /// The LED-flash Trigger-kind gating.
     mod should_flash_led_tests {
         use super::*;
 
@@ -3762,7 +4078,7 @@ mod tests {
         }
     }
 
-    /// Whole-branch review Finding 5: the NDI-in drain-to-latest behavior.
+    /// The NDI-in drain-to-latest behavior.
     mod drain_to_latest_tests {
         use super::*;
 
@@ -3822,7 +4138,7 @@ mod tests {
             state.current_clip_index = 1;
             assert_eq!(
                 desired_video_input(&state, &clips(&["a", "b"]), false),
-                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+                Some(VideoInput::File { path: PathBuf::from("/clips/b.webm"), start_seconds: 0.0 })
             );
         }
 
@@ -3834,7 +4150,7 @@ mod tests {
             state.current_clip_index = 7;
             assert_eq!(
                 desired_video_input(&state, &clips(&["a", "b"]), false),
-                Some(VideoInput::File(PathBuf::from("/clips/b.webm")))
+                Some(VideoInput::File { path: PathBuf::from("/clips/b.webm"), start_seconds: 0.0 })
             );
         }
 
@@ -3871,7 +4187,7 @@ mod tests {
             state.current_clip_index = 2;
             let second = desired_video_input(&state, &library, false);
             assert_ne!(first, second);
-            assert_eq!(second, Some(VideoInput::File(PathBuf::from("/clips/c.webm"))));
+            assert_eq!(second, Some(VideoInput::File { path: PathBuf::from("/clips/c.webm"), start_seconds: 0.0 }));
         }
 
         #[test]
@@ -3884,7 +4200,26 @@ mod tests {
         }
     }
 
-    /// Whole-branch review Finding 2: the chat-log ring-buffer capping.
+    mod rkbx_drift_exceeds_threshold_tests {
+        use super::*;
+
+        #[test]
+        fn exactly_at_the_threshold_is_not_exceeded() {
+            assert!(!rkbx_drift_exceeds_threshold(10.0, 10.0 + RKBX_DRIFT_THRESHOLD_SECONDS));
+        }
+
+        #[test]
+        fn just_over_the_threshold_is_exceeded() {
+            assert!(rkbx_drift_exceeds_threshold(10.0, 10.0 + RKBX_DRIFT_THRESHOLD_SECONDS + 0.001));
+        }
+
+        #[test]
+        fn a_negative_divergence_is_handled_the_same_as_a_positive_one() {
+            assert!(rkbx_drift_exceeds_threshold(10.0, 10.0 - RKBX_DRIFT_THRESHOLD_SECONDS - 0.001));
+        }
+    }
+
+    /// The chat-log ring-buffer capping.
     mod push_chat_message_tests {
         use super::*;
         use opendrop_io::chat::{ChatMessage, ChatPlatform};
@@ -4572,8 +4907,9 @@ mod tests {
     ///
     /// The load-bearing test here is
     /// `the_video_layer_draws_over_a_full_opacity_deck_not_under_it`: it
-    /// pins the one place this step deliberately deviates from the plan's
-    /// step-14 sketch (see `composite_video_layer`'s doc comment).
+    /// pins the one place this deliberately deviates from drawing the
+    /// video layer before the decks (see `composite_video_layer`'s doc
+    /// comment).
     mod compositor_video_layer_gl_tests {
         use super::*;
         use glow::HasContext;
@@ -4703,8 +5039,8 @@ mod tests {
         /// The ordering decision this step makes, pinned as behavior.
         ///
         /// A deck slot at full opacity covers the frame; if the video layer
-        /// were composited *before* the decks (as the plan's step-14 sketch
-        /// said), it would be completely hidden here, and "a deck at
+        /// were composited *before* the decks, it would be completely
+        /// hidden here, and "a deck at
         /// opacity 1" is the default state at either end of the crossfader,
         /// so the layer would be invisible in normal use. Drawing it after
         /// the decks is what makes its own opacity slider the sole control

@@ -1,7 +1,7 @@
 //! GL state hygiene around code we don't control.
 //!
-//! `reset_read_framebuffer_to_fbo0` is the fix from the plan's step-1
-//! review: `projectm_opengl_render_frame()` (from step 5 on) leaves
+//! `reset_read_framebuffer_to_fbo0` is a fix found during an early review:
+//! `projectm_opengl_render_frame()` (from step 5 on) leaves
 //! `READ_FRAMEBUFFER_BINDING` pointed at one of projectM's own internal
 //! FBOs and `READ_BUFFER` on `GL_COLOR_ATTACHMENT0`. `glCopyTexSubImage2D`
 //! reads from the *read* framebuffer, so without resetting both to an

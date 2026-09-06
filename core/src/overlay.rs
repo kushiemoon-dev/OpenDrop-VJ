@@ -24,9 +24,9 @@
 //! Svelte `$state` reactivity is likewise dropped: `OverlayStore` fields
 //! are plain struct fields mutated through `&mut self` methods.
 //!
-//! Step 12 of the Phase 8 VJ-panels plan wired this module into `app` and
-//! added the two pieces the original port left on the other side of the
-//! I/O boundary but which are pure after all:
+//! Wiring this module into `app` added the two pieces the original port
+//! left on the other side of the I/O boundary but which are pure after
+//! all:
 //! - [`overlay_transform_at`] / [`parse_hex_color`]: the per-frame
 //!   animation math `OverlayLayer.svelte` expressed as CSS animations,
 //!   evaluated here instead so `engine::compositor` can draw the sprite.
@@ -60,7 +60,7 @@ pub enum FontFamily {
     Comic,
 }
 
-/// `Clone` (Step 13 of the Phase 8 plan): the Share panel builds an owned
+/// `Clone`: the Share panel builds an owned
 /// `SharedSet` snapshot of the currently shareable overlays
 /// (`share_set::filter_shareable_overlays` returns borrowed `&Overlay`s,
 /// but `SharedSet::overlays: Vec<Overlay>` needs owned values); no other
@@ -236,7 +236,7 @@ pub fn overlay_transform_at(overlay: &Overlay, elapsed_sec: f64, beat_pulse: boo
         // a pivot, so they add. (The one visible difference: the web's
         // drift wrapper sits *inside* the spinning anchor, so its drift
         // direction spins too. Here drift stays in screen space: a
-        // deliberate simplification, documented in the task report.)
+        // deliberate simplification.)
         rotation_deg: overlay.rotation + overlay.spin * elapsed_sec,
         scale: if beat_pulse && overlay.beat_reactive { overlay.scale * overlay.beat_scale } else { overlay.scale },
     }
@@ -308,8 +308,8 @@ fn clamp_queue_index(index: usize, queue_length: usize) -> usize {
     }
 }
 
-/// Port of OpenDrop-VJ `overlay-queue.ts:41-49` `visibleOverlayIds`, Finding
-/// I3 (this was never ported, unlike the rest of `overlay-queue.ts`).
+/// Port of OpenDrop-VJ `overlay-queue.ts:41-49` `visibleOverlayIds` (this
+/// was never ported, unlike the rest of `overlay-queue.ts`).
 /// Overlays to render: every non-queued overlay (always visible) plus the
 /// single active overlay from the queue rotation, if at least one overlay is
 /// queued. Returns borrowed ids (like `pick_queued_overlays`/
@@ -363,9 +363,8 @@ impl OverlayStore {
 
     /// Reseeds the shuffle-mode RNG with real per-launch entropy supplied by
     /// the caller (`core` stays zero-I/O and has no clock of its own). See
-    /// `rng.rs`'s module doc comment, whole-branch review Finding I4.
-    /// Called from `Show::reseed_rng` since Step 12 of the Phase 8
-    /// VJ-panels plan wired this store into `app`.
+    /// `rng.rs`'s module doc comment for why. Called from
+    /// `Show::reseed_rng`, which wired this store into `app`.
     pub fn reseed_rng(&mut self, seed: u64) {
         self.rng.reseed(seed);
     }

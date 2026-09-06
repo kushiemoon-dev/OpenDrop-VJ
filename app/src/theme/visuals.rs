@@ -19,12 +19,12 @@ const FAINT_BG_BLEND_TOWARD_INK: f32 = 0.08;
 const WINDOW_SHADOW_ALPHA: u8 = 96;
 
 /// Slider/scrollbar handle aspect ratio, narrower than egui's default
-/// `0.75` per the Step 4 brief.
+/// `0.75`.
 const HANDLE_ASPECT_RATIO: f32 = 0.4;
 
 /// The 5-state `Widgets` grid: starts from egui's own dark-theme
 /// defaults (button/checkbox fills, corner radii, text strokes) and
-/// overrides only what the brief calls out: every state's `expansion`
+/// overrides only two properties: every state's `expansion`
 /// (egui's default 1px hover growth causes a visible jitter against the
 /// violet accent) and `noninteractive.bg_stroke` (1px borders on every
 /// existing `Frame::group(ui.style())` call site, without editing those
@@ -76,7 +76,7 @@ pub fn style(t: &Theme) -> Style {
         visuals: visuals(t),
         text_styles: super::fonts::text_styles(t),
         spacing: egui::style::Spacing { item_spacing: t.metrics.spacing_airy, ..Default::default() },
-        // Step 11 of the Phase 7 UI redesign plan: the Stage mode
+        // The Stage mode
         // nav/header slide (`Panel::show_collapsible`/`show_switched`)
         // rides this for free rather than a bespoke tween: `durations.
         // base` (0.25s) is this theme's one animation-speed token, so

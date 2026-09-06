@@ -11,7 +11,7 @@
 //! loop, which pushed each captured frame out over Electron IPC: here it
 //! pushes each frame (RGBA bytes plus resolution, see [`NdiFrame`]) on an
 //! `mpsc::Sender<NdiFrame>` instead, whose `Receiver` end is exposed as
-//! `NdiHandle::frame_rx` for `app` (Task 12) to read directly, no IPC
+//! `NdiHandle::frame_rx` for `app` to read directly, no IPC
 //! involved.
 
 use std::sync::mpsc::Sender;
@@ -87,12 +87,13 @@ fn filter_sources(sources: Vec<NdiSource>, source_filter: Option<&str>) -> Vec<N
 /// would stall output frame draining for just as long.
 ///
 /// Returns `Err` (the SDK's error, stringified) rather than logging and
-/// falling back to an empty list itself. Whole-branch review Finding 4:
-/// this is polled every ~5ms by [`super::out::run`]'s loop, and a
-/// persistently failing `Finder` (e.g. no NDI SDK installed) used to
-/// `eprintln!` on every single call, roughly 200 lines/second indefinitely.
-/// The caller now logs at most once per failure streak: see
-/// `super::out::ThreadState::discovery_error_logged`.
+/// falling back to an empty list itself:
+/// this is polled every ~5ms by [`super::out::run`]'s loop while discovery
+/// is active (`app` starts/stops it with the NDI-in panel, not for the
+/// whole session), and a persistently failing `Finder` (e.g. no NDI SDK
+/// installed) used to `eprintln!` on every single call, roughly 200
+/// lines/second for as long as discovery ran. The caller now logs at most
+/// once per failure streak: see `super::out::ThreadState::discovery_error_logged`.
 pub(super) fn find(finder: &Finder, source_filter: Option<&str>, timeout_ms: u32) -> Result<Vec<NdiSource>, String> {
     let sources = finder.find_sources(Duration::from_millis(u64::from(timeout_ms))).map_err(|e| e.to_string())?;
     Ok(filter_sources(sources.into_iter().map(NdiSource::from).collect(), source_filter))
@@ -113,7 +114,7 @@ pub(super) fn open_finder(ndi: &NDI) -> Option<Finder> {
 /// One captured frame from an active receive: RGBA bytes plus the
 /// resolution needed to interpret them. Unlike [`super::out`]'s
 /// compositor/deck channels (fixed `COMP_W`/`COMP_H`/`DECK_W`/`DECK_H`), an
-/// NDI-in source can be any resolution, so `app` (Task 12) needs the
+/// NDI-in source can be any resolution, so `app` needs the
 /// dimensions alongside the bytes to size/recreate its GL texture: byte
 /// count alone can't disambiguate width×height.
 #[derive(Debug, Clone)]
@@ -161,7 +162,7 @@ impl ActiveReceive {
     pub(super) fn poll(&self) {
         match self.receiver.video().try_capture(Duration::ZERO) {
             Ok(Some(frame)) => {
-                // frame_tx is unbounded; `app` (Task 12) is expected to
+                // frame_tx is unbounded; `app` is expected to
                 // drain NdiHandle::frame_rx continuously. A disconnected
                 // receiver (app dropped that Receiver) just means these
                 // sends fail silently from here on, until StopReceive

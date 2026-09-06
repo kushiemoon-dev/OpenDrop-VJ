@@ -188,6 +188,8 @@ pub(crate) struct SourcesCtx<'a> {
     /// stash cross-frame widget state of its own (see `ui::quality`'s
     /// module doc comment on that convention).
     pub(crate) cloud_presets_rename: &'a mut Option<(String, String)>,
+    pub(crate) cloud_video: &'a opendrop_io::cloud_video::CloudVideoHandle,
+    pub(crate) cloud_video_api_url: &'a mut String,
 }
 
 /// Output-side state: the NDI-out handle and its composite/per-deck

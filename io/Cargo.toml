@@ -27,8 +27,10 @@ opendrop-core = { path = "../core" }
 rand = "0.10.2"
 # Kick chatroom-id discovery HTTP call (`io::kick`): default features
 # include `default-tls` (native-tls), `json` added for the discovery
-# response's `.json::<T>()` deserialization.
-reqwest = { version = "0.12", features = ["json"] }
+# response's `.json::<T>()` deserialization. `stream` is added for
+# `io::cloud_video`'s chunked download (tracking bytes read against its
+# size cap without buffering the whole body first).
+reqwest = { version = "0.12", features = ["json", "stream"] }
 rosc = "0.11.4"
 # Ableton Link (`io::link`, feature `link`, OFF by default): wraps
 # Ableton's official C++ Link library, GPL-2.0-or-later. `optional`: this

@@ -97,6 +97,7 @@ pub(crate) enum PanelId {
     V4l2,
     Video,
     CloudPresets,
+    CloudVideo,
     About,
     #[serde(other)]
     Decks,
@@ -133,6 +134,11 @@ pub(crate) struct UiConfig {
     /// URL is committed anywhere yet, the user
     /// must supply one before this panel does anything.
     pub(crate) cloud_presets_api_url: Option<String>,
+    /// Base URL of a self-hosted static CDN serving the Cloud Video panel's
+    /// `manifest.json` + clip files. `None`/empty means the feature is
+    /// disabled, same convention as `cloud_presets_api_url` above: no
+    /// working URL is committed anywhere, the user must supply their own.
+    pub(crate) cloud_video_api_url: Option<String>,
     /// On-disk shape of `AppState::keymap` (`HashMap<winit::keyboard::Key,
     /// CommandId>`); see `keymap.rs`'s module doc comment for why this is
     /// `HashMap<String, String>` (key-wire -> command-wire) rather than
@@ -162,6 +168,7 @@ impl Default for UiConfig {
             target_fps: 60,
             favorite_presets: HashSet::new(),
             cloud_presets_api_url: None,
+            cloud_video_api_url: None,
             keymap: HashMap::new(),
         }
     }
@@ -241,6 +248,7 @@ mod tests {
             target_fps: 144,
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
             cloud_presets_api_url: Some("https://presets-cloud.example.workers.dev".to_string()),
+            cloud_video_api_url: Some("https://loops.example.com".to_string()),
             keymap: HashMap::from([(r#"{"Named":"Tab"}"#.to_string(), "deck-switch".to_string())]),
         };
 
@@ -314,6 +322,7 @@ mod tests {
             PanelId::V4l2,
             PanelId::Video,
             PanelId::CloudPresets,
+            PanelId::CloudVideo,
             PanelId::About,
         ];
         for variant in variants {

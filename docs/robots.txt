@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://opendrop.kushie.dev/sitemap.xml

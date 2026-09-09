@@ -3,7 +3,43 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenDrop&middot;VJ</title>
+<title>OpenDrop · VJ — 4-deck Milkdrop VJ instrument</title>
+<meta name="description" content="Native 4-deck Milkdrop VJ instrument for Linux and Windows. GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out. No Electron, no install step.">
+<link rel="canonical" href="https://opendrop.kushie.dev/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://opendrop.kushie.dev/">
+<meta property="og:title" content="OpenDrop · VJ — 4-deck Milkdrop VJ instrument">
+<meta property="og:description" content="Native 4-deck Milkdrop VJ instrument for Linux and Windows. GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out. No Electron, no install step.">
+<meta property="og:site_name" content="OpenDrop · VJ">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://opendrop.kushie.dev/og-image.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="OpenDrop VJ: four decks composited live over a GPU-rendered Milkdrop visualizer">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="OpenDrop · VJ — 4-deck Milkdrop VJ instrument">
+<meta name="twitter:description" content="Native 4-deck Milkdrop VJ instrument for Linux and Windows. GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out.">
+<meta name="twitter:image" content="https://opendrop.kushie.dev/og-image.jpg">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "OpenDrop VJ",
+  "description": "Native 4-deck Milkdrop VJ instrument for Linux and Windows. GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out.",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Linux, Windows",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "url": "https://opendrop.kushie.dev/",
+  "downloadUrl": "https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest",
+  "license": "https://github.com/kushiemoon-dev/OpenDrop-VJ/blob/main/LICENSE"
+}
+</script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
@@ -108,20 +144,21 @@
 <body>
 <div class="op-root">
   <div class="op-grain"></div>
-  <div class="op-topbar">
+  <header class="op-topbar">
     <div class="op-word">Open<b>Drop</b>&middot;VJ</div>
     <div class="op-dl">
       <a class="op-btn a" href="https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest">Download &middot; Linux</a>
       <a class="op-btn b" href="https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest">Download &middot; Windows</a>
     </div>
-  </div>
+  </header>
 
+  <main>
   <div class="op-hero" id="op-hero">
     <canvas id="op-canvas"></canvas>
     <div class="op-scrim"></div>
     <div class="op-content">
       <h1 class="op-h1">A 4-deck<br><span class="l2">Milkdrop VJ</span><br>instrument.</h1>
-      <p class="op-sub">GPU compositor. <code>MIDI</code> &middot; <code>OSC</code> &middot; <code>Ableton&nbsp;Link</code>. NDI in/out. Native desktop &mdash; Linux &amp; Windows.</p>
+      <p class="op-sub">GPU compositor. <code>MIDI</code> &middot; <code>OSC</code> &middot; <code>Ableton&nbsp;Link</code>. NDI in/out. Native desktop for Linux and Windows.</p>
     </div>
     <div class="op-hint">move &middot; click</div>
   </div>
@@ -138,49 +175,54 @@
     <div class="op-feat"><span>128 BPM</span><span>Ableton Link synced</span><span>NDI out &middot; 2 sinks</span></div>
   </div>
 
-  <div class="op-section glow-a">
+  <section class="op-section glow-a">
     <div class="op-eyebrow" style="--ac:#2ee8ff"><span class="sq"></span></div>
-    <p class="op-intro">See it running.</p>
+    <h2 class="op-intro">See it running.</h2>
     <div style="height:36px"></div>
     <div class="op-gallery">
       <div class="op-frame" style="--fc:#ff2ec4">
         <div class="chrome"><div class="dot rec"></div><div class="dot"></div><div class="dot"></div></div>
-        <div class="body"><img src="readme-assets/screenshot-main-window.png" alt="OpenDrop VJ main window: control panel and live output side by side" loading="lazy"></div>
+        <div class="body"><img src="readme-assets/screenshot-main-window.webp" width="1889" height="997" alt="OpenDrop VJ main window: control panel and live output side by side" loading="lazy"></div>
       </div>
       <div class="stack">
         <div class="op-frame" style="--fc:#2ee8ff">
           <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-          <div class="body"><img src="readme-assets/screenshot-deck-strip.png" alt="Four-deck strip with crossfader and hard cut" loading="lazy"></div>
+          <div class="body"><img src="readme-assets/screenshot-deck-strip.webp" width="1891" height="996" alt="Four-deck strip with crossfader and hard cut" loading="lazy"></div>
         </div>
         <div class="op-frame" style="--fc:#ffcf2e">
           <div class="chrome"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-          <div class="body"><img src="readme-assets/screenshot-visualizer.png" alt="Live Milkdrop-style visualizer output" loading="lazy"></div>
+          <div class="body"><img src="readme-assets/screenshot-visualizer.webp" width="1881" height="982" alt="Live Milkdrop-style visualizer output" loading="lazy"></div>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
-  <div class="op-section glow-b">
+  <section class="op-section glow-b">
     <div class="op-eyebrow" style="--ac:#7a4bff"><span class="sq"></span></div>
-    <p class="op-intro">What's inside.</p>
+    <h2 class="op-intro">What's inside.</h2>
     <div style="height:36px"></div>
     <div class="op-specs">
-      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#ff2ec4;--pd:0s"></span>GPU compositor</div><div class="desc">Four decks composited in real time on the GPU. Blend modes, opacity, and crossfade curves, all live.</div></div>
-      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#2ee8ff;--pd:.4s"></span>MIDI / OSC / Ableton Link</div><div class="desc">Map any controller. Sync tempo across your rig without touching a cable.</div></div>
-      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#ffcf2e;--pd:.8s"></span>NDI in / out</div><div class="desc">Send and receive video over the network. Drops straight into OBS or a second machine.</div></div>
-      <div class="op-spec-row"><div class="name"><span class="tick" style="--dc:#7a4bff;--pd:1.2s"></span>Native, cross-platform</div><div class="desc">One binary for Linux and Windows. No Electron, no browser, no install step beyond unzip.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#ff2ec4;--pd:0s"></span>GPU compositor</h3><div class="desc">Four decks composited in real time on the GPU. Blend modes, opacity, and crossfade curves, all live.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#2ee8ff;--pd:.4s"></span>MIDI / OSC / Ableton Link</h3><div class="desc">Map any controller. Sync tempo across your rig without touching a cable.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#ffcf2e;--pd:.8s"></span>NDI in / out</h3><div class="desc">Send and receive video over the network. Drops straight into OBS or a second machine.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#7a4bff;--pd:1.2s"></span>Native, cross-platform</h3><div class="desc">One binary for Linux and Windows. No Electron, no browser, no install step beyond unzip.</div></div>
     </div>
-  </div>
+  </section>
+  </main>
 
-  <div class="op-footer">
+  <footer class="op-footer">
     <div class="op-badges">
       <b>MIT</b><span>&middot;</span>
       <img src="https://img.shields.io/github/stars/kushiemoon-dev/OpenDrop-VJ?style=flat-square&color=ff2ec4&labelColor=0c0a10" alt="GitHub stars" height="16">
       <span>&middot;</span>
       <img src="https://img.shields.io/github/actions/workflow/status/kushiemoon-dev/OpenDrop-VJ/ci.yml?branch=main&style=flat-square&label=CI&color=2ee8ff&labelColor=0c0a10" alt="CI status" height="16">
     </div>
-    <a class="op-repo" href="https://github.com/kushiemoon-dev/OpenDrop-VJ">github.com/kushiemoon-dev/OpenDrop-VJ &rarr;</a>
-  </div>
+    <div class="op-badges">
+      <a class="op-repo" href="https://kushie.dev/realisations/opendrop-vj/">kushie.dev &rarr;</a>
+      <span>&middot;</span>
+      <a class="op-repo" href="https://github.com/kushiemoon-dev/OpenDrop-VJ">github.com/kushiemoon-dev/OpenDrop-VJ &rarr;</a>
+    </div>
+  </footer>
 </div>
 
 <script>

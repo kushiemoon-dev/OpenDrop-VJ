@@ -239,6 +239,7 @@ jobs:
       - name: Build .app bundle
         env:
           PRESETS_SRC: /tmp/opendrop-presets
+          PROJECTM_INSTALL_PREFIX: /tmp/projectm-4.1.6-install
         run: packaging/macos/build-app.sh
 
       - name: Publish release asset

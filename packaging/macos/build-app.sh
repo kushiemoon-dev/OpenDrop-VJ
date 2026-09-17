@@ -116,21 +116,45 @@ iconutil -c icns "$ICONSET/opendrop-native.iconset" -o "$APP_DIR/Contents/Resour
 rm -rf "$ICONSET"
 
 # --- 3. Bundle the two non-system dylibs (policy documented above) ---
+#
+# The binary references both by install name (`otool -L`), not by a real
+# filesystem path - grafton-ndi/the projectM build link them via @rpath,
+# so the path `otool -L` prints can't be `cp`'d directly (found by running
+# this for real in CI: "cp: .../@rpath/libndi.dylib: No such file or
+# directory"). Resolve the real file separately, from where each SDK
+# actually installs it.
+resolve_dylib_source() {
+    case "$1" in
+        libndi.dylib)
+            find "${NDI_SDK_DIR:?NDI_SDK_DIR must be set}" -name libndi.dylib -print -quit
+            ;;
+        libprojectM-4.dylib)
+            find "${PROJECTM_INSTALL_PREFIX:?PROJECTM_INSTALL_PREFIX must be set}/lib" -name libprojectM-4.dylib -print -quit
+            ;;
+        *)
+            echo "error: no source resolver defined for '$1'" >&2
+            ;;
+    esac
+}
 
 BUNDLE_LIBS=(
     libndi.dylib
     libprojectM-4.dylib
 )
 for soname in "${BUNDLE_LIBS[@]}"; do
-    lib_path=$(otool -L "$BINARY" | awk -v s="$soname" '$1 ~ s { print $1; exit }')
-    if [[ -z "$lib_path" ]]; then
+    load_name=$(otool -L "$BINARY" | awk -v s="$soname" '$1 ~ s { print $1; exit }')
+    if [[ -z "$load_name" ]]; then
         echo "error: '$soname' not found in 'otool -L $BINARY' output" >&2
         exit 1
     fi
-    real_path=$(python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$lib_path")
+    real_path=$(resolve_dylib_source "$soname")
+    if [[ -z "$real_path" ]]; then
+        echo "error: could not locate a real file for '$soname' on disk" >&2
+        exit 1
+    fi
     cp -L "$real_path" "$APP_DIR/Contents/Frameworks/$soname"
     install_name_tool -id "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/Frameworks/$soname"
-    install_name_tool -change "$lib_path" "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/MacOS/opendrop-app"
+    install_name_tool -change "$load_name" "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/MacOS/opendrop-app"
 done
 
 echo "Copying presets from $PRESETS_SRC ..."

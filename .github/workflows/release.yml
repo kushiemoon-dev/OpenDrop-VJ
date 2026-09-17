@@ -180,7 +180,7 @@ jobs:
           # port: Homebrew's projectm formula floats on upstream HEAD, and
           # this app's LGPL attribution + version_is_4_1_6 test require this
           # exact version. See packaging/macos/README.md.
-          git clone --branch v4.1.6 --depth 1 https://github.com/projectM-visualizer/projectm /tmp/projectm-src
+          git clone --recurse-submodules --branch v4.1.6 --depth 1 https://github.com/projectM-visualizer/projectm /tmp/projectm-src
           cmake -S /tmp/projectm-src -B /tmp/projectm-build \
             -DCMAKE_INSTALL_PREFIX=/tmp/projectm-4.1.6-install \
             -DCMAKE_BUILD_TYPE=Release

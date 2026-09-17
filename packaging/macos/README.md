@@ -11,8 +11,13 @@ Windows solved with a pinned vcpkg overlay port.
 There is no equivalent of a pinned Homebrew formula here, so the release
 build compiles projectM 4.1.6 from source instead:
 
+`--recurse-submodules` is required: `vendor/projectm-eval` is a git
+submodule, and CMake's `add_subdirectory` fails on an uninitialized one
+with no clearer error than a missing `CMakeLists.txt` (found by running
+this for real in CI).
+
 ```
-git clone --branch v4.1.6 --depth 1 https://github.com/projectM-visualizer/projectm /tmp/projectm-src
+git clone --recurse-submodules --branch v4.1.6 --depth 1 https://github.com/projectM-visualizer/projectm /tmp/projectm-src
 cmake -S /tmp/projectm-src -B /tmp/projectm-build \
     -DCMAKE_INSTALL_PREFIX=/tmp/projectm-4.1.6-install \
     -DCMAKE_BUILD_TYPE=Release

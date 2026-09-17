@@ -26,6 +26,13 @@ cmake --install /tmp/projectm-build
 export PKG_CONFIG_PATH="/tmp/projectm-4.1.6-install/lib/pkgconfig"
 ```
 
+`projectM-4.pc` declares `Requires: opengl`, which has no macOS
+equivalent (OpenGL is a system framework there, not a pkg-config
+package - `engine/build.rs`'s macOS branch links `-framework OpenGL`
+directly). The release job writes an empty stub `opengl.pc` next to it
+after install to satisfy that dependency; without it `pkg-config --libs
+--cflags projectM-4` fails with "Package opengl was not found".
+
 `engine/build.rs`'s macOS branch discovers projectM via `pkg_config`, same
 as the Linux branch - it just needs `PKG_CONFIG_PATH` pointed at this
 from-source install instead of a system package.

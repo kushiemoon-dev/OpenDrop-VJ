@@ -187,6 +187,25 @@ jobs:
           cmake --build /tmp/projectm-build --parallel
           cmake --install /tmp/projectm-build
 
+      - name: Stub opengl.pc for pkg-config
+        run: |
+          # projectM-4.pc declares `Requires: opengl`, but macOS has no
+          # opengl.pc (OpenGL is a system framework there, not a pkg-config
+          # package) - engine/build.rs already links `-framework OpenGL`
+          # itself, so this stub only needs to satisfy pkg-config's
+          # dependency resolution, found by running this for real in CI.
+          # Its own step, unconditional (not gated on the cache-hit check
+          # above): a cache hit restores a projectM install built by an
+          # older workflow revision that may predate this stub, so it must
+          # be (re)written every run regardless of cache status.
+          cat > /tmp/projectm-4.1.6-install/lib/pkgconfig/opengl.pc <<'PC'
+          Name: opengl
+          Description: Stub - macOS OpenGL is a system framework, not a pkg-config package
+          Version: 1.0
+          Cflags:
+          Libs:
+          PC
+
       - name: Cache NDI SDK
         id: cache-ndi
         uses: actions/cache@v4

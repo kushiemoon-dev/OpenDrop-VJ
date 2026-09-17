@@ -135,9 +135,9 @@ pub(crate) struct UiConfig {
     /// must supply one before this panel does anything.
     pub(crate) cloud_presets_api_url: Option<String>,
     /// Base URL of a self-hosted static CDN serving the Cloud Video panel's
-    /// `manifest.json` + clip files. `None`/empty means the feature is
-    /// disabled, same convention as `cloud_presets_api_url` above: no
-    /// working URL is committed anywhere, the user must supply their own.
+    /// `manifest.json` + clip files. Defaults to the project's own CDN
+    /// (read-only, rate-limited); editable/clearable in the panel like
+    /// `cloud_presets_api_url` above.
     pub(crate) cloud_video_api_url: Option<String>,
     /// On-disk shape of `AppState::keymap` (`HashMap<winit::keyboard::Key,
     /// CommandId>`); see `keymap.rs`'s module doc comment for why this is
@@ -168,7 +168,7 @@ impl Default for UiConfig {
             target_fps: 60,
             favorite_presets: HashSet::new(),
             cloud_presets_api_url: None,
-            cloud_video_api_url: None,
+            cloud_video_api_url: Some("https://loops.kushie.dev".to_string()),
             keymap: HashMap::new(),
         }
     }

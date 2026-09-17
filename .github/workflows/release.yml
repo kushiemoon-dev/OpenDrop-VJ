@@ -144,3 +144,86 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: gh release upload "$env:TAG" (Get-ChildItem "OpenDrop-Native-*-windows-x64.zip").FullName
+
+  macos-app:
+    name: macOS App
+    runs-on: macos-latest
+    needs: linux-appimage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache preset pack
+        id: cache-presets
+        uses: actions/cache@v4
+        with:
+          path: /tmp/opendrop-presets
+          key: macos-presets-cream-of-the-crop
+
+      - name: Fetch preset pack
+        if: steps.cache-presets.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop /tmp/opendrop-presets
+
+      - name: Cache projectM 4.1.6 (built from source)
+        id: cache-projectm
+        uses: actions/cache@v4
+        with:
+          path: /tmp/projectm-4.1.6-install
+          key: macos-projectm-4.1.6
+
+      - name: Build projectM 4.1.6 from source
+        if: steps.cache-projectm.outputs.cache-hit != 'true'
+        run: |
+          # Pinned to 4.1.6 for the same reason as Windows's vcpkg overlay
+          # port: Homebrew's projectm formula floats on upstream HEAD, and
+          # this app's LGPL attribution + version_is_4_1_6 test require this
+          # exact version. See packaging/macos/README.md.
+          git clone --branch v4.1.6 --depth 1 https://github.com/projectM-visualizer/projectm /tmp/projectm-src
+          cmake -S /tmp/projectm-src -B /tmp/projectm-build \
+            -DCMAKE_INSTALL_PREFIX=/tmp/projectm-4.1.6-install \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/projectm-build --parallel
+          cmake --install /tmp/projectm-build
+
+      - name: Cache NDI SDK
+        id: cache-ndi
+        uses: actions/cache@v4
+        with:
+          path: /Library/NDI SDK for Apple
+          key: macos-ndi-sdk-6
+
+      - name: Download and install NDI SDK
+        if: steps.cache-ndi.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/ndi-sdk-installer.pkg" "https://downloads.ndi.tv/SDK/NDI_SDK_Mac/Install_NDI_SDK_v6_Apple.pkg"
+          sudo installer -pkg "$RUNNER_TEMP/ndi-sdk-installer.pkg" -target /
+
+      - name: Locate NDI SDK for cargo build
+        run: |
+          # Installer layout isn't documented anywhere stable, same reasoning
+          # as the Windows job's search-instead-of-hardcode step.
+          header=$(find /Library /Applications -name "Processing.NDI.Lib.h" 2>/dev/null | head -n1)
+          if [[ -z "$header" ]]; then
+            echo "error: Processing.NDI.Lib.h not found under /Library or /Applications" >&2
+            exit 1
+          fi
+          sdk_dir=$(dirname "$(dirname "$header")")
+          echo "NDI_SDK_DIR=$sdk_dir" >> "$GITHUB_ENV"
+
+      - name: cargo build --release
+        env:
+          PKG_CONFIG_PATH: /tmp/projectm-4.1.6-install/lib/pkgconfig
+        run: cargo build --release --workspace
+
+      - name: Build .app bundle
+        env:
+          PRESETS_SRC: /tmp/opendrop-presets
+        run: packaging/macos/build-app.sh
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" ./OpenDrop-Native-*-macos-arm64.zip

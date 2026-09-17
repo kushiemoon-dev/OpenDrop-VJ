@@ -117,37 +117,40 @@ rm -rf "$ICONSET"
 
 # --- 3. Bundle the two non-system dylibs (policy documented above) ---
 #
-# The binary references both by install name (`otool -L`), not by a real
-# filesystem path - grafton-ndi/the projectM build link them via @rpath,
-# so the path `otool -L` prints can't be `cp`'d directly (found by running
-# this for real in CI: "cp: .../@rpath/libndi.dylib: No such file or
-# directory"). Resolve the real file separately, from where each SDK
-# actually installs it.
+# Matched by prefix, not exact filename: the binary's install names carry
+# each SDK's own SOVERSION (e.g. `libprojectM-4.4.dylib`, not
+# `libprojectM-4.dylib` - found by running this for real in CI), and
+# `otool -L` reports @rpath references, not real filesystem paths (also
+# found running this for real: "cp: .../@rpath/libndi.dylib: No such file
+# or directory"). Resolve the real file separately, by the exact name
+# `otool` reported, from where each SDK actually installs it.
 resolve_dylib_source() {
-    case "$1" in
-        libndi.dylib)
-            find "${NDI_SDK_DIR:?NDI_SDK_DIR must be set}" -name libndi.dylib -print -quit
+    local prefix="$1" soname="$2"
+    case "$prefix" in
+        libndi)
+            find "${NDI_SDK_DIR:?NDI_SDK_DIR must be set}" -name "$soname" -print -quit
             ;;
-        libprojectM-4.dylib)
-            find "${PROJECTM_INSTALL_PREFIX:?PROJECTM_INSTALL_PREFIX must be set}/lib" -name libprojectM-4.dylib -print -quit
+        libprojectM-4)
+            find "${PROJECTM_INSTALL_PREFIX:?PROJECTM_INSTALL_PREFIX must be set}/lib" -name "$soname" -print -quit
             ;;
         *)
-            echo "error: no source resolver defined for '$1'" >&2
+            echo "error: no source resolver defined for prefix '$prefix'" >&2
             ;;
     esac
 }
 
-BUNDLE_LIBS=(
-    libndi.dylib
-    libprojectM-4.dylib
+BUNDLE_LIB_PREFIXES=(
+    libndi
+    libprojectM-4
 )
-for soname in "${BUNDLE_LIBS[@]}"; do
-    load_name=$(otool -L "$BINARY" | awk -v s="$soname" '$1 ~ s { print $1; exit }')
+for prefix in "${BUNDLE_LIB_PREFIXES[@]}"; do
+    load_name=$(otool -L "$BINARY" | awk -v p="$prefix" '$1 ~ ("/" p) { print $1; exit }')
     if [[ -z "$load_name" ]]; then
-        echo "error: '$soname' not found in 'otool -L $BINARY' output" >&2
+        echo "error: no '$prefix*' entry found in 'otool -L $BINARY' output" >&2
         exit 1
     fi
-    real_path=$(resolve_dylib_source "$soname")
+    soname=$(basename "$load_name")
+    real_path=$(resolve_dylib_source "$prefix" "$soname")
     if [[ -z "$real_path" ]]; then
         echo "error: could not locate a real file for '$soname' on disk" >&2
         exit 1

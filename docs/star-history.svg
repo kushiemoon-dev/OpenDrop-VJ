@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 250" width="100%" font-family="monospace">
-<defs>
- <linearGradient id="l" x1="0" x2="1"><stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#e91e8c"/></linearGradient>
- <linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a855f7" stop-opacity=".35"/><stop offset="1" stop-color="#a855f7" stop-opacity="0"/></linearGradient>
-</defs>
-<rect width="800" height="250" rx="10" fill="#0d1117"/>
-<polygon points="40.0,210 40.0,201.9 52.9,193.8 53.2,185.7 120.9,177.6 127.0,169.5 217.9,161.4 243.3,153.3 291.1,145.2 508.0,137.1 599.6,129.0 619.2,121.0 630.9,112.9 665.5,104.8 665.7,96.7 671.2,88.6 679.6,80.5 682.7,72.4 709.0,64.3 724.7,56.2 744.1,48.1 760.0,40.0 760.0,210" fill="url(#f)"/>
-<polyline points="40.0,201.9 52.9,193.8 53.2,185.7 120.9,177.6 127.0,169.5 217.9,161.4 243.3,153.3 291.1,145.2 508.0,137.1 599.6,129.0 619.2,121.0 630.9,112.9 665.5,104.8 665.7,96.7 671.2,88.6 679.6,80.5 682.7,72.4 709.0,64.3 724.7,56.2 744.1,48.1 760.0,40.0" fill="none" stroke="url(#l)" stroke-width="2.5" stroke-linejoin="round"/>
-<text x="40" y="30" fill="#a855f7" font-size="16">&#9733; 21 stars</text>
-<text x="40" y="236" fill="#6b7280" font-size="11">2026-01-17</text>
-<text x="760" y="236" fill="#6b7280" font-size="11" text-anchor="end">2026-09-06</text>
-<text x="760" y="30" fill="#6b7280" font-size="12" text-anchor="end">Star History</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" font-family="monospace" viewBox="0 0 800 250"><defs><linearGradient id="l" x1="0" x2="1"><stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#e91e8c"/></linearGradient><linearGradient id="f" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#a855f7" stop-opacity=".35"/><stop offset="1" stop-color="#a855f7" stop-opacity="0"/></linearGradient></defs><rect width="800" height="250" fill="#0d1117" rx="10"/><polygon fill="url(#f)" points="40 210 40 201.9 52.9 193.8 53.2 185.7 120.9 177.6 127 169.5 217.9 161.4 243.3 153.3 291.1 145.2 508 137.1 599.6 129 619.2 121 630.9 112.9 665.5 104.8 665.7 96.7 671.2 88.6 679.6 80.5 682.7 72.4 709 64.3 724.7 56.2 744.1 48.1 760 40 760 210"/><polyline fill="none" stroke="url(#l)" stroke-linejoin="round" stroke-width="2.5" points="40 201.9 52.9 193.8 53.2 185.7 120.9 177.6 127 169.5 217.9 161.4 243.3 153.3 291.1 145.2 508 137.1 599.6 129 619.2 121 630.9 112.9 665.5 104.8 665.7 96.7 671.2 88.6 679.6 80.5 682.7 72.4 709 64.3 724.7 56.2 744.1 48.1 760 40"/><text x="40" y="30" fill="#a855f7" font-size="16">★ 21 stars</text><text x="40" y="236" fill="#6b7280" font-size="11">2026-01-17</text><text x="760" y="236" fill="#6b7280" font-size="11" text-anchor="end">2026-09-06</text><text x="760" y="30" fill="#6b7280" font-size="12" text-anchor="end">Star History</text></svg>

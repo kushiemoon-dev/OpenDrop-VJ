@@ -496,6 +496,7 @@ pub(crate) enum Panel {
     V4l2,
     Video,
     CloudPresets,
+    CloudVideo,
     About,
 }
 
@@ -535,6 +536,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::V4l2 => Panel::V4l2,
             config::PanelId::Video => Panel::Video,
             config::PanelId::CloudPresets => Panel::CloudPresets,
+            config::PanelId::CloudVideo => Panel::CloudVideo,
             config::PanelId::About => Panel::About,
         }
     }
@@ -574,6 +576,7 @@ impl From<Panel> for config::PanelId {
             Panel::V4l2 => config::PanelId::V4l2,
             Panel::Video => config::PanelId::Video,
             Panel::CloudPresets => config::PanelId::CloudPresets,
+            Panel::CloudVideo => config::PanelId::CloudVideo,
             Panel::About => config::PanelId::About,
         }
     }
@@ -827,6 +830,14 @@ struct AppState {
     /// Id + edit buffer of the cloud preset currently being renamed
     /// inline, if any; see `ui::ctx::SourcesCtx`'s field doc comment.
     cloud_presets_rename: Option<(String, String)>,
+    /// Handle to the dedicated CloudVideo thread, `latest()` gives the
+    /// current entries/listing-error/per-slug download snapshot,
+    /// `control_tx` sends List/Download. Fetch-only: no token, no keyring,
+    /// unlike `cloud_presets`.
+    cloud_video: opendrop_io::cloud_video::CloudVideoHandle,
+    /// The CloudVideo panel's own CDN-URL field, same empty-disables-the-
+    /// panel/mirrored-to-`UiConfig` convention as `cloud_presets_api_url`.
+    cloud_video_api_url: String,
     gl: Arc<glow::Context>,
     egui_glow: egui_glow::EguiGlow,
     refresh_interval: Duration,
@@ -1741,6 +1752,9 @@ fn ui_root(
                     sources.cloud_presets_secret_error,
                     sources.cloud_presets_rename,
                 );
+            }
+            Panel::CloudVideo => {
+                ui::cloud_video::show(ui, sources.cloud_video, sources.cloud_video_api_url);
             }
             Panel::About => {
                 ui::about::show(ui);
@@ -2784,6 +2798,8 @@ impl ApplicationHandler for App {
                 cloud_presets_token_input,
                 cloud_presets_secret_error,
                 cloud_presets_rename,
+                cloud_video,
+                cloud_video_api_url,
                 ..
             } = state;
             // Out-param for the preset-browser click path; see `ui_root`'s
@@ -2865,6 +2881,8 @@ impl ApplicationHandler for App {
                 cloud_presets_token_input,
                 cloud_presets_secret_error,
                 cloud_presets_rename,
+                cloud_video,
+                cloud_video_api_url,
             };
             let mut output_ctx = ui::ctx::OutputCtx {
                 refresh_interval,
@@ -3053,6 +3071,8 @@ impl ApplicationHandler for App {
             ui_config.kick_channel = state.kick_channel.clone();
             ui_config.cloud_presets_api_url =
                 if state.cloud_presets_api_url.trim().is_empty() { None } else { Some(state.cloud_presets_api_url.clone()) };
+            ui_config.cloud_video_api_url =
+                if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
@@ -3612,6 +3632,8 @@ fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String> {
         cloud_presets_token_input: String::new(),
         cloud_presets_secret_error: None,
         cloud_presets_rename: None,
+        cloud_video: opendrop_io::cloud_video::spawn(),
+        cloud_video_api_url: ui_config.cloud_video_api_url.clone().unwrap_or_default(),
         gl,
         egui_glow,
         refresh_interval,

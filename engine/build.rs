@@ -20,7 +20,7 @@ fn main() {
         .expect("failed to write bindings");
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 fn probe_projectm() -> Vec<PathBuf> {
     // Arch's projectM-4.pc emits a broken `Libs: -l:projectM-4` (missing the `lib`
     // prefix the actual `libprojectM-4.so` needs), so don't trust its cargo_metadata
@@ -35,6 +35,30 @@ fn probe_projectm() -> Vec<PathBuf> {
     }
     println!("cargo:rustc-link-lib=dylib=projectM-4");
     println!("cargo:rustc-link-lib=dylib=OpenGL");
+
+    projectm.include_paths
+}
+
+#[cfg(target_os = "macos")]
+fn probe_projectm() -> Vec<PathBuf> {
+    // No system package pins projectM to the 4.1.6 this app requires (see
+    // `app/src/ui/about.rs`'s LGPL attribution and `lib.rs`'s
+    // `version_is_4_1_6` test) on macOS, unlike Arch's `libprojectm` package
+    // on Linux - `packaging/macos/build-app.sh`'s CI caller builds 4.1.6
+    // from source and points `PKG_CONFIG_PATH` at its install prefix before
+    // invoking cargo, same pin strategy as Windows's vcpkg overlay port.
+    let projectm = pkg_config::Config::new()
+        .cargo_metadata(false)
+        .probe("projectM-4")
+        .expect("projectM-4.pc not found on PKG_CONFIG_PATH (see packaging/macos/README.md)");
+
+    for libdir in &projectm.link_paths {
+        println!("cargo:rustc-link-search=native={}", libdir.display());
+    }
+    println!("cargo:rustc-link-lib=dylib=projectM-4");
+    // macOS links system frameworks with `framework=`, not `dylib=` -
+    // linking OpenGL the Linux way here fails at link time.
+    println!("cargo:rustc-link-lib=framework=OpenGL");
 
     projectm.include_paths
 }

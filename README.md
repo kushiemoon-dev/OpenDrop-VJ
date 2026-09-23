@@ -31,6 +31,15 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 
 <img src="docs/readme-assets/screenshot-visualizer.png" alt="Live Milkdrop-style visualizer output" width="800">
 
+## Quick start
+
+1. Grab the build for your platform from the [latest release](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) (see [Packaging](#packaging) for the macOS caveat) and run it. No installer, no dependencies.
+2. Pick an audio input in the header bar. This drives the beat detection and audio-reactive presets.
+3. Open the preset browser and load something onto deck A. It starts animating immediately.
+4. Load a second preset onto deck B and drag the crossfader between them.
+
+That's the loop: decks, presets, crossfader. Everything else (MIDI/OSC mapping, NDI in/out, OBS, the phone remote, Cloud Presets...) lives in its own panel in the left-hand nav and is self-explanatory from there.
+
 ## Building
 
 ```sh
@@ -85,6 +94,7 @@ The CloudPresets (`ui::cloud_presets`, Upload button) and Video (`ui::video`, "+
 - Linux: AppImage, via `packaging/appimage/build-appimage.sh`.
 - Windows: portable zip, via `packaging/windows/build-portable.ps1`. See `packaging/windows/README.md` for the vcpkg/projectM setup this depends on.
 - macOS: `.app` bundle (arm64 only), via `packaging/macos/build-app.sh`. **Experimental**: the CI build succeeds but the app has never been run on a real Mac, and the bundle isn't signed or notarized. macOS will refuse to open it by default; right-click the app and choose Open, or run `xattr -dr com.apple.quarantine OpenDrop-Native.app` first.
+- Arch Linux: `PKGBUILD` at `packaging/aur/` (`opendrop-vj-bin`, wraps the release AppImage). Not published to the AUR yet.
 
 ## License
 

@@ -43,3 +43,9 @@ Cargo.lock.bak
 # Local CDN video clip source (179 MB of webm): content for loops.kushie.dev,
 # not app code.
 /cdn-video-loops/
+
+# makepkg build artifacts when testing packaging/aur/PKGBUILD locally.
+/packaging/aur/src/
+/packaging/aur/pkg/
+/packaging/aur/*.pkg.tar.zst
+/packaging/aur/*.AppImage

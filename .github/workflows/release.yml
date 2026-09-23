@@ -33,6 +33,20 @@ jobs:
         if: steps.cache-presets.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop /tmp/opendrop-presets
 
+      - name: Cache Ansorre preset pack
+        id: cache-presets-ansorre
+        uses: actions/cache@v4
+        with:
+          path: /tmp/opendrop-presets-ansorre
+          key: presets-ansorre
+
+      - name: Fetch Ansorre preset pack
+        if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre /tmp/opendrop-presets-ansorre
+
+      - name: Merge Ansorre presets into the pack
+        run: rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets/
+
       - name: Build AppImage
         env:
           PRESETS_SRC: /tmp/opendrop-presets
@@ -66,6 +80,20 @@ jobs:
       - name: Fetch preset pack
         if: steps.cache-presets.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop C:\opendrop-presets
+
+      - name: Cache Ansorre preset pack
+        id: cache-presets-ansorre
+        uses: actions/cache@v4
+        with:
+          path: C:\opendrop-presets-ansorre
+          key: windows-presets-ansorre
+
+      - name: Fetch Ansorre preset pack
+        if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre C:\opendrop-presets-ansorre
+
+      - name: Merge Ansorre presets into the pack
+        run: Copy-Item -Path "C:\opendrop-presets-ansorre\*" -Destination "C:\opendrop-presets\" -Recurse -Force -Exclude ".git", "README.md"
 
       - name: Cache vcpkg installed packages
         id: cache-vcpkg-projectm
@@ -165,6 +193,20 @@ jobs:
       - name: Fetch preset pack
         if: steps.cache-presets.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop /tmp/opendrop-presets
+
+      - name: Cache Ansorre preset pack
+        id: cache-presets-ansorre
+        uses: actions/cache@v4
+        with:
+          path: /tmp/opendrop-presets-ansorre
+          key: macos-presets-ansorre
+
+      - name: Fetch Ansorre preset pack
+        if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre /tmp/opendrop-presets-ansorre
+
+      - name: Merge Ansorre presets into the pack
+        run: rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets/
 
       - name: Cache projectM 4.1.6 (built from source)
         id: cache-projectm

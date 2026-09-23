@@ -1,0 +1,48 @@
+# Maintainer: kushiemoon-dev <122986913+kushiemoon-dev@users.noreply.github.com>
+pkgname=opendrop-vj-bin
+pkgver=0.1.4
+pkgrel=1
+pkgdesc="Native 4-deck Milkdrop VJ instrument, built on libprojectM (Linux release build)"
+arch=('x86_64')
+url="https://github.com/kushiemoon-dev/OpenDrop-VJ"
+license=('MIT')
+depends=('alsa-lib' 'pipewire' 'openssl' 'zlib' 'brotli' 'zstd' 'libglvnd' 'dbus' 'systemd-libs' 'gcc-libs')
+provides=('opendrop-vj')
+conflicts=('opendrop-vj')
+source=("https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v${pkgver}/OpenDrop-Native-${pkgver}-x86_64.AppImage")
+sha256sums=('1395d4c1ba395b0ab0cd25d159447edebe7db601dc6679e44a80e70cdc012d1b')
+
+package() {
+    cd "$srcdir"
+    chmod +x "OpenDrop-Native-${pkgver}-x86_64.AppImage"
+    # No FUSE dependency needed: --appimage-extract unpacks the embedded
+    # squashfs directly, it doesn't mount the AppImage as a filesystem.
+    "./OpenDrop-Native-${pkgver}-x86_64.AppImage" --appimage-extract >/dev/null
+
+    install -d "$pkgdir/opt/opendrop-vj"
+    cp -r squashfs-root/usr "$pkgdir/opt/opendrop-vj/usr"
+
+    # AppRun normally gets $APPDIR from the AppImage runtime before it
+    # runs; outside that runtime there is no such thing, so this wrapper
+    # sets it itself and otherwise does exactly what AppRun does (see
+    # packaging/appimage/build-appimage.sh in the source repo).
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/opendrop-vj" <<'EOF'
+#!/bin/sh
+export APPDIR="/opt/opendrop-vj"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
+exec "$APPDIR/usr/bin/opendrop-app" "$@"
+EOF
+
+    install -Dm644 "$pkgdir/opt/opendrop-vj/usr/share/applications/opendrop-native.desktop" \
+        "$pkgdir/usr/share/applications/opendrop-vj.desktop"
+    sed -i \
+        -e 's/^Exec=.*/Exec=opendrop-vj/' \
+        -e 's/^Icon=.*/Icon=opendrop-vj/' \
+        "$pkgdir/usr/share/applications/opendrop-vj.desktop"
+
+    install -Dm644 "$pkgdir/opt/opendrop-vj/usr/share/icons/hicolor/256x256/apps/opendrop-native.png" \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/opendrop-vj.png"
+
+    install -Dm644 "$pkgdir/opt/opendrop-vj/usr/share/opendrop/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

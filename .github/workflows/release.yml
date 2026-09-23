@@ -44,12 +44,21 @@ jobs:
         if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre /tmp/opendrop-presets-ansorre
 
-      - name: Merge Ansorre presets into the pack
-        run: rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets/
+      - name: Merge presets into a combined pack
+        # Merges into a fresh, uncached directory, never into /tmp/opendrop-presets
+        # itself: that path is cached under the presets-cream-of-the-crop key above,
+        # and actions/cache saves whatever is there at the end of the job, so writing
+        # the Ansorre merge into it would bake stale Ansorre content into next run's
+        # "cream" cache permanently (found the hard way after a first attempt at this
+        # step did exactly that).
+        run: |
+          mkdir -p /tmp/opendrop-presets-combined
+          rsync -a --exclude='.git' /tmp/opendrop-presets/ /tmp/opendrop-presets-combined/
+          rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets-combined/
 
       - name: Build AppImage
         env:
-          PRESETS_SRC: /tmp/opendrop-presets
+          PRESETS_SRC: /tmp/opendrop-presets-combined
         run: packaging/appimage/build-appimage.sh
 
       - name: Publish release
@@ -92,8 +101,16 @@ jobs:
         if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre C:\opendrop-presets-ansorre
 
-      - name: Merge Ansorre presets into the pack
-        run: Copy-Item -Path "C:\opendrop-presets-ansorre\*" -Destination "C:\opendrop-presets\" -Recurse -Force -Exclude ".git", "README.md"
+      - name: Merge presets into a combined pack
+        # See the equivalent step in the linux-appimage job: this can't merge
+        # into C:\opendrop-presets itself, that path is cached under
+        # windows-presets-cream-of-the-crop and gets saved as-is at the end
+        # of the job, so writing the Ansorre merge into it would bake stale
+        # Ansorre content into every future run's "cream" cache.
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\opendrop-presets-combined | Out-Null
+          Copy-Item -Path "C:\opendrop-presets\*" -Destination "C:\opendrop-presets-combined\" -Recurse -Force -Exclude ".git"
+          Copy-Item -Path "C:\opendrop-presets-ansorre\*" -Destination "C:\opendrop-presets-combined\" -Recurse -Force -Exclude ".git", "README.md"
 
       - name: Cache vcpkg installed packages
         id: cache-vcpkg-projectm
@@ -165,6 +182,8 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "NDI_SDK_DIR=$sdkDir"
 
       - name: Build Windows portable zip
+        env:
+          PRESETS_SRC: C:\opendrop-presets-combined
         run: packaging\windows\build-portable.ps1
 
       - name: Publish release asset
@@ -205,8 +224,13 @@ jobs:
         if: steps.cache-presets-ansorre.outputs.cache-hit != 'true'
         run: git clone --depth 1 https://github.com/kushiemoon-dev/opendrop-presets-ansorre /tmp/opendrop-presets-ansorre
 
-      - name: Merge Ansorre presets into the pack
-        run: rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets/
+      - name: Merge presets into a combined pack
+        # See the same step in the linux-appimage job for why this can't merge
+        # into /tmp/opendrop-presets itself.
+        run: |
+          mkdir -p /tmp/opendrop-presets-combined
+          rsync -a --exclude='.git' /tmp/opendrop-presets/ /tmp/opendrop-presets-combined/
+          rsync -a --exclude='.git' --exclude='README.md' /tmp/opendrop-presets-ansorre/ /tmp/opendrop-presets-combined/
 
       - name: Cache projectM 4.1.6 (built from source)
         id: cache-projectm
@@ -280,7 +304,7 @@ jobs:
 
       - name: Build .app bundle
         env:
-          PRESETS_SRC: /tmp/opendrop-presets
+          PRESETS_SRC: /tmp/opendrop-presets-combined
           PROJECTM_INSTALL_PREFIX: /tmp/projectm-4.1.6-install
         run: packaging/macos/build-app.sh
 

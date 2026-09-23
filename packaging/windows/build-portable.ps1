@@ -76,11 +76,12 @@ $License = Join-Path $RepoRoot "LICENSE"
 $InterOfl = Join-Path $RepoRoot "app\assets\fonts\Inter-OFL.txt"
 $JetBrainsMonoOfl = Join-Path $RepoRoot "app\assets\fonts\JetBrainsMono-OFL.txt"
 
-# Real directory on this build machine holding the 9795-file preset pack,
-# scp'd over from /srv/http/opendrop-presets on the Linux side (see
-# task-15-report.md). Not part of the repo and not fetched by this script;
-# there is no other source to read it from on this machine.
-$PresetsSrc = "C:\opendrop-presets"
+# Real directory on this build machine holding the preset pack. Not part of
+# the repo and not fetched by this script; there is no other source to read
+# it from on this machine. Same env-var override as the Linux/macOS build
+# scripts' PRESETS_SRC, defaulting to the same fixed path this always used
+# before the override existed (see task-15-report.md).
+$PresetsSrc = if ($env:PRESETS_SRC) { $env:PRESETS_SRC } else { "C:\opendrop-presets" }
 
 if (-not (Test-Path $PresetsSrc -PathType Container)) {
     Write-Error "Presets source directory not found: $PresetsSrc"

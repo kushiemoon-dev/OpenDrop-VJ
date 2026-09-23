@@ -84,6 +84,7 @@ The CloudPresets (`ui::cloud_presets`, Upload button) and Video (`ui::video`, "+
 
 - Linux: AppImage, via `packaging/appimage/build-appimage.sh`.
 - Windows: portable zip, via `packaging/windows/build-portable.ps1`. See `packaging/windows/README.md` for the vcpkg/projectM setup this depends on.
+- macOS: `.app` bundle (arm64 only), via `packaging/macos/build-app.sh`. **Experimental**: the CI build succeeds but the app has never been run on a real Mac, and the bundle isn't signed or notarized. macOS will refuse to open it by default; right-click the app and choose Open, or run `xattr -dr com.apple.quarantine OpenDrop-Native.app` first.
 
 ## License
 

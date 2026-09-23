@@ -31,6 +31,15 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 
 <img src="docs/readme-assets/screenshot-visualizer.png" alt="Live Milkdrop-style visualizer output" width="800">
 
+## Quick start
+
+1. Grab the build for your platform from the [latest release](https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/latest) (see [Packaging](#packaging) for the macOS caveat) and run it. No installer, no dependencies.
+2. Pick an audio input in the header bar. This drives the beat detection and audio-reactive presets.
+3. Open the preset browser and load something onto deck A. It starts animating immediately.
+4. Load a second preset onto deck B and drag the crossfader between them.
+
+That's the loop: decks, presets, crossfader. Everything else (MIDI/OSC mapping, NDI in/out, OBS, the phone remote, Cloud Presets...) lives in its own panel in the left-hand nav and is self-explanatory from there.
+
 ## Building
 
 ```sh

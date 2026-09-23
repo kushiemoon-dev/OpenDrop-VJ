@@ -39,3 +39,7 @@ Cargo.lock.bak
 # build-portable.ps1): the assembled flat folder and its zip.
 /OpenDrop-Native-*-windows-x64/
 /OpenDrop-Native-*-windows-x64.zip
+
+# Local CDN video clip source (179 MB of webm): content for loops.kushie.dev,
+# not app code.
+/cdn-video-loops/

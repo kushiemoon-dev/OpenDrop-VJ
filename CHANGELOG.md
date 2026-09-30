@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.5 (unreleased)
+
+### Fixes
+- The Linux AppImage is now built on glibc 2.35 (Ubuntu 22.04) and starts on systems without PipeWire or the libxkbcommon X11 library: copies of `libpipewire` and `libxkbcommon-x11` are bundled and only used when the system has none
+- The application is now shown as "OpenDrop VJ" in the desktop entry
+
 ## v0.1.4 (2026-09-23)
 
 ### New features

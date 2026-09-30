@@ -7,6 +7,8 @@
 #
 # Output: OpenDrop-Native-<version>-x86_64.AppImage at the repo root,
 # where <version> is read from app/Cargo.toml's [package].version.
+# A matching .AppImage.zsync file is written next to it when zsyncmake is
+# installed.
 #
 # Shared-library bundling policy (Linux AppImage):
 #   Bundled into usr/lib/ (copied from the real file `ldd` resolves to,
@@ -55,6 +57,9 @@ APPIMAGETOOL="$CACHE_DIR/appimagetool"
 # freshly cloned public pack instead); defaults to this machine's local one.
 PRESETS_SRC="${PRESETS_SRC:-/srv/http/opendrop-presets}"
 MAX_GLIBC="${MAX_GLIBC:-2.35}"
+# Embedded so AppImageUpdate can find newer releases; appimagetool writes the
+# matching .zsync file next to the AppImage when zsyncmake is installed.
+UPDATE_INFO="gh-releases-zsync|kushiemoon-dev|OpenDrop-VJ|latest|OpenDrop-Native-*-x86_64.AppImage.zsync"
 PIPEWIRE_PREFIX="/opt/pipewire"
 CARGO_TOML="$REPO_ROOT/app/Cargo.toml"
 
@@ -146,7 +151,9 @@ bundle_lib() {
             exit 1
         fi
     else
-        lib_path=$(/sbin/ldconfig -p | awk -v s="$soname" '$1 == s && $2 ~ /x86-64/ { print $NF; exit }')
+        # No early `exit` in awk: with pipefail, closing the pipe before ldconfig
+        # finishes writing kills the script with SIGPIPE and no message.
+        lib_path=$(/sbin/ldconfig -p | awk -v s="$soname" '$1 == s && $2 ~ /x86-64/ && !found { print $NF; found = 1 }')
         if [[ -z "$lib_path" ]]; then
             echo "error: '$soname' not found in 'ldconfig -p' output" >&2
             exit 1
@@ -253,10 +260,14 @@ echo "Running appimagetool ..."
 BUILD_LOG="$(mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
 
-if ! ARCH=x86_64 "$APPIMAGETOOL" --runtime-file "$RUNTIME_FILE" "$APPDIR" "$OUTPUT_PATH" >"$BUILD_LOG" 2>&1; then
+if ! command -v zsyncmake >/dev/null 2>&1; then
+    echo "warning: zsyncmake not found, the .zsync update file will not be produced" >&2
+fi
+
+if ! ARCH=x86_64 "$APPIMAGETOOL" -u "$UPDATE_INFO" --runtime-file "$RUNTIME_FILE" "$APPDIR" "$OUTPUT_PATH" >"$BUILD_LOG" 2>&1; then
     if grep -qi fuse "$BUILD_LOG"; then
         echo "appimagetool could not use FUSE directly, retrying with --appimage-extract-and-run ..." >&2
-        ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run --runtime-file "$RUNTIME_FILE" "$APPDIR" "$OUTPUT_PATH"
+        ARCH=x86_64 "$APPIMAGETOOL" --appimage-extract-and-run -u "$UPDATE_INFO" --runtime-file "$RUNTIME_FILE" "$APPDIR" "$OUTPUT_PATH"
     else
         cat "$BUILD_LOG" >&2
         exit 1

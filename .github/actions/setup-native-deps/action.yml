@@ -44,7 +44,7 @@ runs:
       run: |
         set -euo pipefail
         sudo mkdir -p /opt/pipewire
-        sudo chown "$USER" /opt/pipewire
+        sudo chown "$(id -un)" /opt/pipewire
         "${{ github.action_path }}/../../../packaging/appimage/build-pipewire.sh" \
           "${{ inputs.pipewire-version }}" /opt/pipewire
 

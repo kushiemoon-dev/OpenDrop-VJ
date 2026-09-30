@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.6 (2026-09-30)
+
+### Fixes
+- The Linux AppImage now embeds update information and is published with a `.zsync` file, so AppImageUpdate can find new releases
+- The Linux release job builds inside an Ubuntu 22.04 container instead of relying on the retiring `ubuntu-22.04` runner image, keeping the AppImage on glibc 2.35
+- The macOS app is now named "OpenDrop VJ"
+- The AUR package now depends on `libxkbcommon-x11`, which the application loads at runtime
+
 ## v0.1.5 (2026-09-30)
 
 ### Fixes

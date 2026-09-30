@@ -73,9 +73,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>OpenDrop-Native</string>
+    <string>OpenDrop VJ</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenDrop-Native</string>
+    <string>OpenDrop VJ</string>
     <key>CFBundleIdentifier</key>
     <string>dev.kushie.opendrop-native</string>
     <key>CFBundleVersion</key>
@@ -93,9 +93,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSCameraUsageDescription</key>
-    <string>OpenDrop-Native uses the camera for the Video panel's webcam input.</string>
+    <string>OpenDrop VJ uses the camera for the Video panel's webcam input.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>OpenDrop-Native uses the microphone for audio-reactive visuals.</string>
+    <string>OpenDrop VJ uses the microphone for audio-reactive visuals.</string>
 </dict>
 </plist>
 PLIST

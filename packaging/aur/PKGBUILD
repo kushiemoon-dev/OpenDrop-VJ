@@ -1,6 +1,6 @@
 # Maintainer: kushiemoon-dev <122986913+kushiemoon-dev@users.noreply.github.com>
 pkgname=opendrop-vj-bin
-pkgver=0.1.6
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Native 4-deck Milkdrop VJ instrument, built on libprojectM (Linux release build)"
 arch=('x86_64')

@@ -1,18 +1,14 @@
 # Changelog
 
-## v0.1.6 (2026-09-30)
-
-### Fixes
-- The Linux AppImage now embeds update information and is published with a `.zsync` file, so AppImageUpdate can find new releases
-- The Linux release job builds inside an Ubuntu 22.04 container instead of relying on the retiring `ubuntu-22.04` runner image, keeping the AppImage on glibc 2.35
-- The macOS app is now named "OpenDrop VJ"
-- The AUR package now depends on `libxkbcommon-x11`, which the application loads at runtime
-
 ## v0.1.5 (2026-09-30)
 
 ### Fixes
 - The Linux AppImage is now built on glibc 2.35 (Ubuntu 22.04) and starts on systems without PipeWire or the libxkbcommon X11 library: copies of `libpipewire` and `libxkbcommon-x11` are bundled and only used when the system has none
 - The application is now shown as "OpenDrop VJ" in the desktop entry
+- The Linux AppImage now embeds update information and is published with a `.zsync` file, so AppImageUpdate can find new releases
+- The Linux release job builds inside an Ubuntu 22.04 container instead of relying on the retiring `ubuntu-22.04` runner image, keeping the AppImage on glibc 2.35
+- The macOS app is now named "OpenDrop VJ"
+- The AUR package now depends on `libxkbcommon-x11`, which the application loads at runtime
 
 ## v0.1.4 (2026-09-23)
 

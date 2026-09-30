@@ -10,7 +10,7 @@ depends=('alsa-lib' 'pipewire' 'openssl' 'zlib' 'brotli' 'zstd' 'libglvnd' 'libx
 provides=('opendrop-vj')
 conflicts=('opendrop-vj')
 source=("https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v${pkgver}/OpenDrop-Native-${pkgver}-x86_64.AppImage")
-sha256sums=('25c56f35e85a51b110528a0c0f0228a63b6d338c7b2bc055494fb8ea15e61784')
+sha256sums=('593033f36d06042b7b097e0bc9e835be6e6b90fd09914063cd1288842162d51f')
 
 package() {
     cd "$srcdir"

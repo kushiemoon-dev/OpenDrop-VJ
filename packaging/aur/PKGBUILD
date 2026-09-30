@@ -1,16 +1,16 @@
 # Maintainer: kushiemoon-dev <122986913+kushiemoon-dev@users.noreply.github.com>
 pkgname=opendrop-vj-bin
-pkgver=0.1.4
+pkgver=0.1.5
 pkgrel=1
 pkgdesc="Native 4-deck Milkdrop VJ instrument, built on libprojectM (Linux release build)"
 arch=('x86_64')
 url="https://github.com/kushiemoon-dev/OpenDrop-VJ"
 license=('MIT')
-depends=('alsa-lib' 'pipewire' 'openssl' 'zlib' 'brotli' 'zstd' 'libglvnd' 'dbus' 'systemd-libs' 'gcc-libs')
+depends=('alsa-lib' 'pipewire' 'openssl' 'zlib' 'brotli' 'zstd' 'libglvnd' 'libxkbcommon-x11' 'dbus' 'systemd-libs' 'gcc-libs')
 provides=('opendrop-vj')
 conflicts=('opendrop-vj')
 source=("https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v${pkgver}/OpenDrop-Native-${pkgver}-x86_64.AppImage")
-sha256sums=('1395d4c1ba395b0ab0cd25d159447edebe7db601dc6679e44a80e70cdc012d1b')
+sha256sums=('593033f36d06042b7b097e0bc9e835be6e6b90fd09914063cd1288842162d51f')
 
 package() {
     cd "$srcdir"

@@ -18,6 +18,10 @@ build-appimage.sh`'s `BUNDLE_LIBS` already ships `libndi`/`libprojectM-4`/
 everything else linked (pipewire, alsa, openssl, zlib, brotli, zstd,
 libglvnd, dbus, systemd-libs, gcc-libs) is.
 
+The AppImage also carries fallback copies of `libpipewire` and
+`libxkbcommon-x11` for systems that lack them. This package doesn't use them,
+because it depends on the system `pipewire`.
+
 ## Testing a change locally
 
 ```sh

@@ -10,7 +10,7 @@ permissions:
 jobs:
   linux-appimage:
     name: Linux AppImage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -18,6 +18,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-ubuntu22
 
       - name: cargo build --release
         run: cargo build --release --workspace

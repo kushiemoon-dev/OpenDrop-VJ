@@ -21,9 +21,26 @@
 #   Bundling a driver-linked .so ties the AppImage to the exact driver of
 #   the build machine and breaks rendering on any other GPU driver. This
 #   is a well-known AppImage-with-OpenGL pitfall.
-#   Also not bundled (treated as base-system on a standard Arch/Hyprland/
-#   Wayland target): libpipewire, libasound, libdbus-1, libsystemd,
-#   libssl/libcrypto.
+#   Bundled as host-first fallbacks under usr/lib-fallback/<name>/, outside
+#   the default LD_LIBRARY_PATH. AppRun appends a fallback directory only when
+#   the host has no copy of the library (checked with `ldconfig -p`; without
+#   ldconfig, e.g. on NixOS, the fallback is used). LD_LIBRARY_PATH beats
+#   ld.so.cache, so putting these in usr/lib/ would shadow a newer host
+#   PipeWire with the bundled one and could break audio capture.
+#     - pipewire/: libpipewire-0.3.so.0 plus its SPA plugins (spa-0.2/) and
+#       modules (pipewire-0.3/) and default configuration (config/), built
+#       from source by build-pipewire.sh under /opt/pipewire. AppRun sets
+#       SPA_PLUGIN_DIR, PIPEWIRE_MODULE_DIR and PIPEWIRE_CONFIG_DIR to these
+#       only when the fallback is active and the user has not set them.
+#     - xkbcommon/: libxkbcommon-x11.so.0, libxkbcommon.so.0 and libxcb-xkb.so.1
+#       (a dependency of the x11 library that minimal X installs lack). winit
+#       loads the xkbcommon ones with dlopen (xkbcommon-dl crate), so `ldd`
+#       never lists them and they are resolved with `ldconfig -p` instead.
+#   Still not bundled (treated as base-system): libasound, libdbus-1,
+#   libsystemd, libssl/libcrypto.
+#   glibc ceiling: no ELF in the AppDir may reference a GLIBC symbol version
+#   above MAX_GLIBC (2.35, Ubuntu 22.04), measured like the AppImage catalogue
+#   test does (objdump -T, undefined symbols). The build fails otherwise.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +54,8 @@ APPIMAGETOOL="$CACHE_DIR/appimagetool"
 # Not part of the repo. Overridable via the environment (CI points this at a
 # freshly cloned public pack instead); defaults to this machine's local one.
 PRESETS_SRC="${PRESETS_SRC:-/srv/http/opendrop-presets}"
+MAX_GLIBC="${MAX_GLIBC:-2.35}"
+PIPEWIRE_PREFIX="/opt/pipewire"
 CARGO_TOML="$REPO_ROOT/app/Cargo.toml"
 
 if [[ ! -x "$BINARY" ]]; then
@@ -106,13 +125,46 @@ rm -rf "$APPDIR"
 mkdir -p \
     "$APPDIR/usr/bin" \
     "$APPDIR/usr/lib" \
+    "$APPDIR/usr/lib-fallback/pipewire" \
+    "$APPDIR/usr/lib-fallback/xkbcommon" \
     "$APPDIR/usr/share/applications" \
     "$APPDIR/usr/share/icons/hicolor/256x256/apps" \
     "$APPDIR/usr/share/opendrop/presets"
 
 cp "$BINARY" "$APPDIR/usr/bin/opendrop-app"
 
-# Bundle only the 4 libs from the policy above, resolving each SONAME to
+# bundle_lib <soname> <destdir> <ldd|ldconfig>: copy the real file behind
+# <soname> into <destdir>, plus a SONAME symlink when the names differ. The
+# path comes from `ldd` of the binary, or from `ldconfig -p` for libraries
+# the binary only loads with dlopen.
+bundle_lib() {
+    local soname="$1" destdir="$2" lookup="$3" lib_path real_path real_name
+    if [[ "$lookup" == ldd ]]; then
+        lib_path=$(ldd "$BINARY" | awk -v s="$soname" '$1 == s && $2 == "=>" { print $3 }')
+        if [[ -z "$lib_path" ]]; then
+            echo "error: '$soname' not found in 'ldd $BINARY' output" >&2
+            exit 1
+        fi
+    else
+        lib_path=$(/sbin/ldconfig -p | awk -v s="$soname" '$1 == s && $2 ~ /x86-64/ { print $NF; exit }')
+        if [[ -z "$lib_path" ]]; then
+            echo "error: '$soname' not found in 'ldconfig -p' output" >&2
+            exit 1
+        fi
+    fi
+    real_path=$(realpath "$lib_path")
+    if [[ "$soname" == libpipewire-* && "$real_path" != "$PIPEWIRE_PREFIX"/* ]]; then
+        echo "error: '$soname' resolves to $real_path, expected it under $PIPEWIRE_PREFIX (source build)" >&2
+        exit 1
+    fi
+    cp -L "$real_path" "$destdir/"
+    real_name=$(basename "$real_path")
+    if [[ "$real_name" != "$soname" ]]; then
+        ln -sf "$real_name" "$destdir/$soname"
+    fi
+}
+
+# Bundle the 4 libs into usr/lib/ from the policy above, resolving each SONAME to
 # the real file ldd reports (following the distro's dev symlink) so the
 # versioned file travels into the AppImage, then keeping a symlink under
 # the SONAME the binary actually needs at load time.
@@ -123,18 +175,18 @@ BUNDLE_LIBS=(
     libavahi-common.so.3
 )
 for soname in "${BUNDLE_LIBS[@]}"; do
-    lib_path=$(ldd "$BINARY" | awk -v s="$soname" '$1 == s && $2 == "=>" { print $3 }')
-    if [[ -z "$lib_path" ]]; then
-        echo "error: '$soname' not found in 'ldd $BINARY' output" >&2
-        exit 1
-    fi
-    real_path=$(realpath "$lib_path")
-    cp -L "$real_path" "$APPDIR/usr/lib/"
-    real_name=$(basename "$real_path")
-    if [[ "$real_name" != "$soname" ]]; then
-        ln -sf "$real_name" "$APPDIR/usr/lib/$soname"
-    fi
+    bundle_lib "$soname" "$APPDIR/usr/lib" ldd
 done
+
+bundle_lib libpipewire-0.3.so.0 "$APPDIR/usr/lib-fallback/pipewire" ldd
+cp -a "$PIPEWIRE_PREFIX/lib/spa-0.2" "$PIPEWIRE_PREFIX/lib/pipewire-0.3" "$APPDIR/usr/lib-fallback/pipewire/"
+# libpipewire reads client.conf from its compile-time prefix, which does not
+# exist on the target; without it the client context cannot be created.
+cp -a "$PIPEWIRE_PREFIX/share/pipewire" "$APPDIR/usr/lib-fallback/pipewire/config"
+
+bundle_lib libxkbcommon-x11.so.0 "$APPDIR/usr/lib-fallback/xkbcommon" ldconfig
+bundle_lib libxkbcommon.so.0 "$APPDIR/usr/lib-fallback/xkbcommon" ldconfig
+bundle_lib libxcb-xkb.so.1 "$APPDIR/usr/lib-fallback/xkbcommon" ldconfig
 
 cp "$SCRIPT_DIR/opendrop-native.desktop" "$APPDIR/usr/share/applications/opendrop-native.desktop"
 cp "$SCRIPT_DIR/icon-256.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/opendrop-native.png"
@@ -151,6 +203,22 @@ cat > "$APPDIR/AppRun" <<'EOF'
 # $APPDIR is set by the AppImage runtime itself before AppRun executes;
 # it must not be recomputed here.
 export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
+
+# Bundled copies of these libraries are fallbacks: used only when the host
+# has none, so a newer host PipeWire is never shadowed by the bundled one.
+host_has() { { /sbin/ldconfig -p 2>/dev/null || ldconfig -p 2>/dev/null; } | grep -qF "$1"; }
+add_fallback() { export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$1"; }
+
+if ! host_has libpipewire-0.3.so.0; then
+    add_fallback "$APPDIR/usr/lib-fallback/pipewire"
+    export SPA_PLUGIN_DIR="${SPA_PLUGIN_DIR:-$APPDIR/usr/lib-fallback/pipewire/spa-0.2}"
+    export PIPEWIRE_MODULE_DIR="${PIPEWIRE_MODULE_DIR:-$APPDIR/usr/lib-fallback/pipewire/pipewire-0.3}"
+    export PIPEWIRE_CONFIG_DIR="${PIPEWIRE_CONFIG_DIR:-$APPDIR/usr/lib-fallback/pipewire/config}"
+fi
+if ! host_has libxkbcommon-x11.so.0; then
+    add_fallback "$APPDIR/usr/lib-fallback/xkbcommon"
+fi
+
 exec "$APPDIR/usr/bin/opendrop-app" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
@@ -162,7 +230,24 @@ cp "$REPO_ROOT/LICENSE" "$APPDIR/usr/share/opendrop/LICENSE"
 cp "$REPO_ROOT/app/assets/fonts/Inter-OFL.txt" "$APPDIR/usr/share/opendrop/Inter-OFL.txt"
 cp "$REPO_ROOT/app/assets/fonts/JetBrainsMono-OFL.txt" "$APPDIR/usr/share/opendrop/JetBrainsMono-OFL.txt"
 
-# --- 3. Build the AppImage ---
+# --- 3. Enforce the glibc ceiling ---
+
+glibc_ceiling_failed=0
+while IFS= read -r -d '' f; do
+    file -b "$f" | grep -q 'ELF.*dynamic' || continue
+    ver=$(objdump -T "$f" | awk '/\*UND\*/' | grep -o 'GLIBC_[0-9]*\.[0-9]*' | sort -V | tail -1 || true)
+    [[ -n "$ver" ]] || continue
+    highest=$(printf '%s\n%s\n' "${ver#GLIBC_}" "$MAX_GLIBC" | sort -V | tail -1)
+    if [[ "$highest" != "$MAX_GLIBC" ]]; then
+        echo "error: ${f#"$APPDIR"/} references $ver, above the GLIBC_$MAX_GLIBC ceiling" >&2
+        glibc_ceiling_failed=1
+    fi
+done < <(find "$APPDIR" -type f -print0)
+if [[ "$glibc_ceiling_failed" -ne 0 ]]; then
+    exit 1
+fi
+
+# --- 4. Build the AppImage ---
 
 echo "Running appimagetool ..."
 BUILD_LOG="$(mktemp)"

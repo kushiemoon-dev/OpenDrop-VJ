@@ -1,14 +1,17 @@
 name: Set up native build dependencies
 description: >
-  Installs Mesa/EGL headers, builds libprojectM 4.1.6 from source (cached),
-  and downloads the NDI SDK (cached). Exports NDI_SDK_DIR, PKG_CONFIG_PATH,
-  and LD_LIBRARY_PATH for the rest of the job. Linux/x86_64 only, matches
+  Installs Mesa/EGL headers, builds libpipewire and libprojectM 4.1.6 from
+  source (cached), and downloads the NDI SDK (cached). Exports NDI_SDK_DIR,
+  PKG_CONFIG_PATH, and LD_LIBRARY_PATH for the rest of the job. Linux/x86_64 only, matches
   what app/io need to link (see engine/build.rs and io/Cargo.toml).
 
 inputs:
   projectm-version:
     description: libprojectM version to build (must match the headers this workspace binds against)
     default: "4.1.6"
+  pipewire-version:
+    description: libpipewire version to build (distro packages on Ubuntu 22.04 are too old for cpal's pipewire feature)
+    default: "0.3.65"
   ndi-sdk-major:
     description: NDI SDK major version to download
     default: "6"
@@ -25,14 +28,32 @@ runs:
           libglm-dev \
           libgles2-mesa-dev libegl1-mesa-dev libgl1-mesa-dev libglvnd-dev libopengl-dev \
           libgl1-mesa-dri libglx-mesa0 libegl1 libegl-mesa0 libgles2 \
-          libavahi-client-dev libpipewire-0.3-dev libasound2-dev libudev-dev
+          libavahi-client-dev libasound2-dev libudev-dev \
+          meson libxkbcommon0 libxkbcommon-x11-0
+
+    - name: Cache libpipewire
+      id: cache-pipewire
+      uses: actions/cache@v4
+      with:
+        path: /opt/pipewire
+        key: pipewire-${{ inputs.pipewire-version }}-ubuntu22-${{ runner.os }}
+
+    - name: Build libpipewire from source
+      if: steps.cache-pipewire.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo mkdir -p /opt/pipewire
+        sudo chown "$USER" /opt/pipewire
+        "${{ github.action_path }}/../../../packaging/appimage/build-pipewire.sh" \
+          "${{ inputs.pipewire-version }}" /opt/pipewire
 
     - name: Cache libprojectM
       id: cache-projectm
       uses: actions/cache@v4
       with:
         path: /opt/projectm
-        key: projectm-${{ inputs.projectm-version }}-${{ runner.os }}
+        key: projectm-${{ inputs.projectm-version }}-ubuntu22-${{ runner.os }}
 
     - name: Build libprojectM from source
       if: steps.cache-projectm.outputs.cache-hit != 'true'
@@ -86,6 +107,6 @@ runs:
       shell: bash
       run: |
         echo "NDI_SDK_DIR=/opt/ndi-sdk" >> "$GITHUB_ENV"
-        echo "PKG_CONFIG_PATH=/opt/projectm/lib/pkgconfig:/opt/projectm/lib64/pkgconfig" >> "$GITHUB_ENV"
-        echo "LD_LIBRARY_PATH=/opt/projectm/lib:/opt/ndi-sdk/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+        echo "PKG_CONFIG_PATH=/opt/pipewire/lib/pkgconfig:/opt/projectm/lib/pkgconfig:/opt/projectm/lib64/pkgconfig" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=/opt/pipewire/lib:/opt/projectm/lib:/opt/ndi-sdk/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
         echo "EGL_PLATFORM=surfaceless" >> "$GITHUB_ENV"

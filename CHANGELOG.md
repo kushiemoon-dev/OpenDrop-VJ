@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.5 (unreleased)
+## v0.1.5 (2026-09-30)
 
 ### Fixes
 - The Linux AppImage is now built on glibc 2.35 (Ubuntu 22.04) and starts on systems without PipeWire or the libxkbcommon X11 library: copies of `libpipewire` and `libxkbcommon-x11` are bundled and only used when the system has none

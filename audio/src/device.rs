@@ -64,10 +64,23 @@ pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
 /// device whose `description()` fails is skipped, not treated as an error.
 #[cfg(not(target_os = "windows"))]
 pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    host.input_devices()
-        .map(|devices| devices.filter_map(|d| d.description().ok().map(|desc| desc.name().to_owned())).collect())
-        .unwrap_or_default()
+    use cpal::traits::HostTrait;
+    host.input_devices().map(|devices| devices.filter_map(|d| device_label(&d)).collect()).unwrap_or_default()
+}
+
+/// Joins a device's human description with its unique node id, because a
+/// microphone and the monitor of the same card share one description and
+/// would otherwise be indistinguishable (and always resolve to the first).
+fn format_label(description: &str, id: &str) -> String {
+    format!("{description} [{id}]")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn device_label(d: &cpal::Device) -> Option<String> {
+    use cpal::traits::DeviceTrait;
+    let desc = d.description().ok()?;
+    let id = d.id().ok()?;
+    Some(format_label(desc.name(), id.id()))
 }
 
 /// Windows: lists loopback-capturable output devices, not input devices (see
@@ -85,8 +98,8 @@ pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
 /// fails (disconnected) is treated as a non-match, never as an error.
 #[cfg(not(target_os = "windows"))]
 pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
-    use cpal::traits::{DeviceTrait, HostTrait};
-    host.input_devices().ok()?.find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
+    use cpal::traits::HostTrait;
+    host.input_devices().ok()?.find(|d| device_label(d).as_deref() == Some(name))
 }
 
 /// Windows: matches against `output_devices()`, the same set `list_input_devices`
@@ -95,4 +108,16 @@ pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal
 pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
     use cpal::traits::{DeviceTrait, HostTrait};
     host.output_devices().ok()?.find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_label;
+
+    #[test]
+    fn same_description_with_different_ids_gives_distinct_labels() {
+        let mic = format_label("PCM2902 Audio Codec", "alsa_input.usb");
+        let monitor = format_label("PCM2902 Audio Codec", "alsa_output.usb.monitor");
+        assert_ne!(mic, monitor);
+    }
 }

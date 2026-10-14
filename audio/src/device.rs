@@ -71,6 +71,8 @@ pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
 /// Joins a device's human description with its unique node id, because a
 /// microphone and the monitor of the same card share one description and
 /// would otherwise be indistinguishable (and always resolve to the first).
+/// Only the capture path outside Windows uses it, plus the tests.
+#[cfg(any(not(target_os = "windows"), test))]
 fn format_label(description: &str, id: &str) -> String {
     format!("{description} [{id}]")
 }

@@ -376,7 +376,8 @@ fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
             if !is_primary_capture_node(&entry.path()) {
                 return None;
             }
-            let id = Path::new("/dev").join(entry.file_name()).to_string_lossy().into_owned();
+            // A Linux device path, built as text so the separator is `/` on every host.
+            let id = format!("/dev/{}", entry.file_name().to_string_lossy());
             let label = if name.is_empty() { id.clone() } else { format!("{name} ({id})") };
             Some(CameraDevice { id, label })
         })

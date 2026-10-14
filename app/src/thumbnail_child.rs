@@ -34,9 +34,9 @@ use crate::egl_headless;
 /// exit identically.
 const EXIT_RENDER_FAILED: i32 = 1;
 
-static PRESET_FAILED: AtomicBool = AtomicBool::new(false);
+pub(crate) static PRESET_FAILED: AtomicBool = AtomicBool::new(false);
 
-unsafe extern "C" fn on_preset_failed(_filename: *const c_char, message: *const c_char, _user_data: *mut c_void) {
+pub(crate) unsafe extern "C" fn on_preset_failed(_filename: *const c_char, message: *const c_char, _user_data: *mut c_void) {
     PRESET_FAILED.store(true, Ordering::SeqCst);
     let msg = unsafe { CStr::from_ptr(message) }.to_string_lossy();
     eprintln!("[render-thumbnail] preset failed: {msg}");
@@ -115,7 +115,7 @@ pub fn run_render_thumbnail(preset_path: &Path, out_path: &Path) -> ! {
 /// practice libprojectM 4.1.6 appears to touch only unpack state, so this is
 /// belt and braces, but "absolute reset" has to mean all of it to be worth
 /// claiming.
-fn read_back(gl: &glow::Context) -> Vec<u8> {
+pub(crate) fn read_back(gl: &glow::Context) -> Vec<u8> {
     let mut pixels = vec![0u8; (THUMB_W * THUMB_H * 4) as usize];
     opendrop_engine::gl_state::reset_read_framebuffer_to_fbo0(gl);
     unsafe {
@@ -147,7 +147,7 @@ fn read_back(gl: &glow::Context) -> Vec<u8> {
 /// collide. A leftover temp file (from a kill between write and rename) is
 /// never mistaken for a cache entry: `cache_path` only ever looks for
 /// `.rgba`.
-fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomically(dest: &Path, bytes: &[u8]) -> Result<(), String> {
     let dir = dest.parent().ok_or_else(|| format!("{} has no parent directory", dest.display()))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     let tmp = dest.with_extension(format!("tmp{}", std::process::id()));

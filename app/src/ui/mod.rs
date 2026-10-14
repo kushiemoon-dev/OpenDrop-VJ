@@ -15,6 +15,7 @@ pub mod keymap;
 #[cfg(feature = "link")]
 pub mod link;
 pub mod lfo;
+pub mod library;
 pub mod midi;
 pub mod ndi;
 pub mod osc;

@@ -183,6 +183,9 @@ impl ApplicationHandler for App {
                 if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.fps_override = state.fps_override;
+            ui_config.hide_flagged_presets = state.hide_flagged;
+            ui_config.track_presets = state.track_memory.presets_map().clone();
+            ui_config.track_auto_recall = state.track_auto_recall;
             ui_config.preset_tags = state.preset_annotations.tags_map().clone();
             ui_config.preset_notes = state.preset_annotations.notes_map().clone();
             ui_config.preset_history = state.preset_history.names().map(String::from).collect();

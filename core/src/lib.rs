@@ -1,3 +1,4 @@
+pub mod autopilot;
 pub mod beat_detector;
 pub mod beat_trigger;
 pub mod blend;
@@ -6,6 +7,7 @@ pub mod commands;
 pub mod lfo;
 pub mod overlay;
 pub mod playlist;
+pub mod preset_analysis;
 pub mod preset_annotations;
 pub mod preset_index;
 pub mod q_vars;
@@ -18,4 +20,5 @@ pub mod strobe;
 pub mod thumb_queue;
 pub mod time_params;
 pub mod timeline;
+pub mod track_memory;
 pub mod video;

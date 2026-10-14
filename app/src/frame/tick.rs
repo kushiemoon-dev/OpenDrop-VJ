@@ -3,6 +3,7 @@ use opendrop_core::show::{DeckBus, Show};
 use opendrop_engine::deck::{self};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use crate::frame::autopilot::run_autopilot;
 use crate::AppState;
 use opendrop_audio::AudioSnapshot;
 use opendrop_engine::compositor::LayerInput;
@@ -123,6 +124,8 @@ pub(crate) fn tick_show(state: &mut AppState, now: Instant) -> TickOutput {
         beats_this_tick += 1;
     }
     let beat_fired = beats_this_tick > 0;
+    state.energy_tracker.update((audio.energy_byte / 255.0) as f32, dt as f32);
+    run_autopilot(state, beats_this_tick);
     if beat_fired {
         state.last_beat_at = Some(now);
     }

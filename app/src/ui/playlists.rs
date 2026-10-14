@@ -316,6 +316,12 @@ mod tests {
             let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
             let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
             let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
+            let scan = crate::preset_scan::ScanHandle::new(Default::default());
+            let mut hide_flagged = false;
+            let path_by_name = std::collections::HashMap::new();
+            let mut autopilot = opendrop_core::autopilot::Autopilot::default();
+            let track_memory = opendrop_core::track_memory::TrackMemory::default();
+            let mut track_auto_recall = false;
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -326,6 +332,13 @@ mod tests {
                 favorite_presets: &mut favorite_presets,
                 favorites_only: &mut favorites_only,
                 preset_annotations: &mut preset_annotations,
+                scan: &scan,
+                hide_flagged: &mut hide_flagged,
+                autopilot: &mut autopilot,
+                track_memory: &track_memory,
+                track_auto_recall: &mut track_auto_recall,
+                energy_level: 0.0,
+                path_by_name: &path_by_name,
                 preset_history: &preset_history,
                 annotation_edit: &mut annotation_edit,
             };
@@ -347,6 +360,12 @@ mod tests {
                 let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
                 let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
                 let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
+                let scan = crate::preset_scan::ScanHandle::new(Default::default());
+                let mut hide_flagged = false;
+                let path_by_name = std::collections::HashMap::new();
+                let mut autopilot = opendrop_core::autopilot::Autopilot::default();
+                let track_memory = opendrop_core::track_memory::TrackMemory::default();
+                let mut track_auto_recall = false;
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -357,6 +376,13 @@ mod tests {
                     favorite_presets: &mut favorite_presets,
                     favorites_only: &mut favorites_only,
                     preset_annotations: &mut preset_annotations,
+                    scan: &scan,
+                    hide_flagged: &mut hide_flagged,
+                    autopilot: &mut autopilot,
+                    track_memory: &track_memory,
+                    track_auto_recall: &mut track_auto_recall,
+                    energy_level: 0.0,
+                    path_by_name: &path_by_name,
                     preset_history: &preset_history,
                     annotation_edit: &mut annotation_edit,
                 };
@@ -387,6 +413,12 @@ mod tests {
             let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
             let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
             let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
+            let scan = crate::preset_scan::ScanHandle::new(Default::default());
+            let mut hide_flagged = false;
+            let path_by_name = std::collections::HashMap::new();
+            let mut autopilot = opendrop_core::autopilot::Autopilot::default();
+            let track_memory = opendrop_core::track_memory::TrackMemory::default();
+            let mut track_auto_recall = false;
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -397,6 +429,13 @@ mod tests {
                 favorite_presets: &mut favorite_presets,
                 favorites_only: &mut favorites_only,
                 preset_annotations: &mut preset_annotations,
+                scan: &scan,
+                hide_flagged: &mut hide_flagged,
+                autopilot: &mut autopilot,
+                track_memory: &track_memory,
+                track_auto_recall: &mut track_auto_recall,
+                energy_level: 0.0,
+                path_by_name: &path_by_name,
                 preset_history: &preset_history,
                 annotation_edit: &mut annotation_edit,
             };

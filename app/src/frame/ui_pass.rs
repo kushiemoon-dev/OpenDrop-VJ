@@ -15,6 +15,7 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
     // either way.
     let t0 = state.t0;
     let last_vu_level = state.last_vu_level;
+    let energy_level = state.energy_tracker.level();
     // Status bar's fps/frame-ms readout, same by-value
     // copy-before-destructure convention as `last_vu_level` above,
     // since `ShellCtx::last_wall_ms` is a plain `Option<f64>`, not
@@ -57,6 +58,12 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         favorite_presets,
         favorites_only,
         preset_annotations,
+        scan,
+        hide_flagged,
+        autopilot,
+        track_memory,
+        track_auto_recall,
+        path_by_name,
         preset_history,
         annotation_edit,
         thumb_queue,
@@ -179,6 +186,13 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         favorite_presets,
         favorites_only,
         preset_annotations,
+        scan,
+        hide_flagged,
+        autopilot,
+        track_memory,
+        track_auto_recall,
+        energy_level,
+        path_by_name,
         preset_history,
         annotation_edit,
     };

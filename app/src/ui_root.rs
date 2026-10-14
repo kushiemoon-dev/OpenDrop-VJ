@@ -147,7 +147,21 @@ pub(crate) fn ui_root(
                     library.preset_annotations,
                     library.preset_history,
                     library.annotation_edit,
+                    ui::preset_notes::TrackSettings {
+                        memory: library.track_memory,
+                        auto_recall: library.track_auto_recall,
+                    },
                     library.load_request,
+                );
+            }
+            Panel::Library => {
+                ui::library::show(
+                    ui,
+                    library.scan,
+                    library.hide_flagged,
+                    library.path_by_name,
+                    library.autopilot,
+                    library.energy_level,
                 );
             }
             Panel::Playlists => {

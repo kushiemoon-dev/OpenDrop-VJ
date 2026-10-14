@@ -107,7 +107,7 @@ jobs:
       # (context creation is lost or shaders fail to compile). They run on
       # the Linux job instead.
       - name: cargo test
-        run: cargo test --workspace -- --skip gl_tests
+        run: cargo test --workspace --no-fail-fast -- --skip gl_tests
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

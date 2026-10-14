@@ -1,1 +1,10 @@
 pub(crate) mod drain;
+pub(crate) mod present;
+pub(crate) mod ui_pass;
+pub(crate) mod outputs;
+pub(crate) mod composite;
+pub(crate) mod deck_video_sync;
+pub(crate) mod sources;
+pub(crate) mod background;
+pub(crate) mod decks;
+pub(crate) mod tick;

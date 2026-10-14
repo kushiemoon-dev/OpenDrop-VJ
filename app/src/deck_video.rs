@@ -6,7 +6,7 @@ use std::time::Instant;
 /// may diverge from its DJ deck's latest reported `/{deck}/time` before
 /// the decoder is reseeked: a few hundred ms to half a second, picked by
 /// feel; not user-configurable.
-pub(crate) const RKBX_DRIFT_THRESHOLD_SECONDS: f64 = 0.35;
+const RKBX_DRIFT_THRESHOLD_SECONDS: f64 = 0.35;
 
 /// Whether estimated elapsed playback (`actual_elapsed` seconds) has
 /// drifted from the DJ deck's reported `dj_time` by more than the sync

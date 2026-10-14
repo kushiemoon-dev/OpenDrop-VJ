@@ -11,12 +11,12 @@ use crate::{preflight, AppState};
 /// `setTimeout(..., 120)` (`midi-connection-actions.ts:90`), but as a
 /// per-frame `Instant` deadline check instead of an async timer, since this
 /// thread has no async runtime.
-pub(crate) const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
+const MIDI_LED_FLASH_DURATION: Duration = Duration::from_millis(120);
 
 /// Max messages kept in `AppState::chat_log`: a bounded ring buffer,
 /// oldest dropped first, so the Streaming panel's chat display can't grow
 /// unbounded over a long-running session.
-pub(crate) const CHAT_LOG_CAP: usize = 50;
+const CHAT_LOG_CAP: usize = 50;
 
 /// Whether MIDI learn mode has finished for the command being learned: the
 /// snapshot's current mapping entry no longer equals what it was when

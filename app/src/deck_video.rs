@@ -43,7 +43,14 @@ pub(crate) fn create_frame_texture(
     slot: &mut Option<(glow::NativeTexture, u32, u32)>,
 ) {
     unsafe {
-        let tex = gl.create_texture().expect("glGenTextures failed for an incoming-frame texture");
+        let tex = match gl.create_texture() {
+            Ok(tex) => tex,
+            Err(e) => {
+                // Out of GPU objects: drop this frame, keep the previous texture.
+                eprintln!("[app] glGenTextures failed for an incoming-frame texture: {e}");
+                return;
+            }
+        };
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
         gl.tex_image_2d(
             glow::TEXTURE_2D,

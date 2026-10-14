@@ -462,16 +462,16 @@ impl From<BeatTriggerConfigWire> for BeatTriggerConfig {
 /// silently losing fields. Only ever compared for equality: there is no
 /// migration path to a different version yet, and inventing one before a
 /// second version exists would be speculative.
-const SHARE_WIRE_VERSION: u8 = 1;
+pub(crate) const SHARE_WIRE_VERSION: u8 = 1;
 
 #[derive(Serialize, Deserialize)]
-struct SharedSetWire {
+pub(crate) struct SharedSetWire {
     /// See [`SHARE_WIRE_VERSION`]. `serde(default)` so a payload predating
     /// this field (or one with the field stripped) decodes to `0` and is
     /// rejected by the same explicit version check with the same clear
     /// message, rather than by a raw "missing field" serde error.
     #[serde(default)]
-    version: u8,
+    pub(crate) version: u8,
     name: String,
     preset_a: String,
     preset_b: String,

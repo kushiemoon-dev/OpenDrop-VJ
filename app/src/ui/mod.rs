@@ -29,6 +29,7 @@ pub mod rkbx_link;
 pub mod share;
 pub mod shell;
 pub mod snapshot;
+pub mod spout;
 pub mod streaming;
 pub mod strobe;
 pub mod time;

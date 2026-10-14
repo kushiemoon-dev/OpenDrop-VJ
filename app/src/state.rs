@@ -84,6 +84,10 @@ pub(crate) struct AppState {
     /// Same as `ndi_composite_active`, one per deck: each element directly
     /// gates that deck's own readback.
     pub(crate) ndi_deck_active: [bool; deck::DECK_COUNT],
+    /// Spout output (Windows): the sender thread and the panel's toggles.
+    pub(crate) spout: opendrop_io::spout::SpoutHandle,
+    pub(crate) spout_composite_active: bool,
+    pub(crate) spout_deck_active: [bool; deck::DECK_COUNT],
     /// GL texture holding the most recently received NDI-in frame,
     /// composited as the topmost layer over the 4 decks. `None`
     /// until the first frame of an active receive arrives. Carries its own
@@ -97,6 +101,12 @@ pub(crate) struct AppState {
     /// toggle state, not `NdiSnapshot::receive_active` (which reflects
     /// whether the receiver actually started).
     pub(crate) ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
+    /// Spout input (Windows): the receive thread, the texture its frames are
+    /// uploaded into, and the sender picked in the panel (`None` follows the
+    /// active sender).
+    pub(crate) spout_in: opendrop_io::spout_in::SpoutInHandle,
+    pub(crate) spout_in_texture: Option<(glow::NativeTexture, u32, u32)>,
+    pub(crate) spout_in_selected: Option<String>,
     /// Whether `NdiControl::StartDiscovery` is the last message sent to the
     /// NDI thread (mirrors `ndi_composite_active`'s "own toggle state, not
     /// the thread's" convention): discovery only runs while the NDI-in

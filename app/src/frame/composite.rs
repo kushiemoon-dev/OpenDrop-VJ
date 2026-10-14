@@ -99,6 +99,14 @@ pub(crate) fn composite_frame(
             state.compositor.composite_layer(&state.gl, tex, &ndi_in_input, false);
         }
     }
+    // Spout-in layer, same pass and same rules as the NDI-in layer, gated on
+    // frames still arriving so a stopped sender does not leave a frozen image.
+    if state.spout_in.latest().connected {
+        if let Some((tex, _, _)) = state.spout_in_texture {
+            let spout_in_input = LayerInput { opacity: 1.0, composite: DEFAULT_SLOT_COMPOSITE, color: DEFAULT_COLOR_PARAMS };
+            state.compositor.composite_layer(&state.gl, tex, &spout_in_input, false);
+        }
+    }
     // Strobe flash: drawn
     // last, on top of every deck/NDI-in layer just composited
     // above, and still inside the `begin_frame`/`end_frame`

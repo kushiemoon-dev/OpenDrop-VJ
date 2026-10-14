@@ -3332,6 +3332,7 @@ dependencies = [
  "rusty_link",
  "serde",
  "serde_json",
+ "spout2-rs",
  "tokio",
  "tokio-tungstenite",
  "tower-http 0.7.0",
@@ -4468,6 +4469,24 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spout2-rs"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e3d5a4fafc4e72ae9a57e78d8a4b84e7580a7671b9729c26894fe2434c73bb4"
+dependencies = [
+ "spout2-sys",
+]
+
+[[package]]
+name = "spout2-sys"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "670dd837cb0132982b6113a6c553e99453b0f8ba3014bd697bd7236e1a9d88aa"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

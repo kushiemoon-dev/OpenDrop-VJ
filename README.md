@@ -6,7 +6,7 @@
 
 </div>
 
-A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC/Ableton Link control, NDI in/out, and a phone remote control, packaged as a native Rust/egui desktop app.
+A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC/Ableton Link control, NDI in/out, Spout in/out on Windows, and a phone remote control, packaged as a native Rust/egui desktop app.
 
 This is the native rewrite. The previous Electron/SvelteKit web app lives on the `legacy-web` branch.
 
@@ -17,7 +17,7 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 - Live Time/Q-var parameter injection into the running preset
 - Compositor: blend modes, luma/color keying, text and sprite overlays, strobe
 - Control surfaces: MIDI (learn-based mapping), OSC, a phone remote control served over WebSocket, and optional Ableton Link
-- Output: NDI in/out, v4l2loopback, OBS WebSocket scene control, Twitch/Kick chat
+- Output: NDI in/out, Spout in/out (Windows), v4l2loopback, OBS WebSocket scene control, Twitch/Kick chat
 - Cloud presets and shareable set links
 - Local video clip playback and camera capture via `ffmpeg`
 

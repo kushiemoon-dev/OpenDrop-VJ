@@ -30,6 +30,11 @@ pub fn show(ui: &mut egui::Ui) {
 
     ui.separator();
 
+    ui.label("Spout output (Windows) uses the Spout SDK, BSD 2-Clause.");
+    ui.hyperlink_to("Spout", "https://spout.zeal.co");
+
+    ui.separator();
+
     ui.label("Interface font: Inter.");
     ui.hyperlink_to("Inter", "https://github.com/rsms/inter");
     ui.label("Release used: v4.0");

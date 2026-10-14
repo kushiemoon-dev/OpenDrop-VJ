@@ -17,6 +17,8 @@ pub mod remote_ws;
 pub mod rkbx_link;
 pub mod secrets;
 pub mod session_codec;
+pub mod spout;
+pub mod spout_in;
 pub mod share_codec;
 pub mod twitch;
 pub mod v4l2loopback;

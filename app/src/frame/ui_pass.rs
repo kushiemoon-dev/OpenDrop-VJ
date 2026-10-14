@@ -62,6 +62,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         audio,
         input_devices,
         selected_input_device,
+        audio_gain_db,
+        audio_agc,
+        beat_sensitivity,
         refresh_interval,
         fps_override,
         ui_scale,
@@ -168,6 +171,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         audio,
         input_devices,
         selected_input_device,
+        audio_gain_db,
+        audio_agc,
+        beat_sensitivity,
         last_vu_level,
         registry,
         keymap,
@@ -250,6 +256,8 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
             &mut theme_request,
         );
     });
+    // The Audio panel's sensitivity slider takes effect immediately.
+    show.beat_detector.set_sensitivity(*beat_sensitivity);
     // A click on the Quality panel's scale pills takes effect on the next frame.
     if (egui_glow.egui_ctx.zoom_factor() - *ui_scale).abs() > f32::EPSILON {
         egui_glow.egui_ctx.set_zoom_factor(*ui_scale);

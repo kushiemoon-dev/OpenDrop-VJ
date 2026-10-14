@@ -143,7 +143,18 @@ pub(crate) fn ui_root(
                 ui::playlists::show(ui, perform.show, library);
             }
             Panel::Audio => {
-                ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);
+                ui::audio::show(
+                    ui,
+                    sources.audio,
+                    sources.input_devices,
+                    sources.selected_input_device,
+                    ui::audio::LevelSettings {
+                        gain_db: sources.audio_gain_db,
+                        agc: sources.audio_agc,
+                        beat_sensitivity: sources.beat_sensitivity,
+                    },
+                    sources.last_vu_level,
+                );
             }
             Panel::Quality => {
                 ui::quality::show(

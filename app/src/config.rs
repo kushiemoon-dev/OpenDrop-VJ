@@ -124,6 +124,15 @@ pub(crate) struct UiConfig {
     pub(crate) kick_channel: String,
     #[serde(with = "InvisibleModeWire")]
     pub(crate) invisible_mode: InvisibleMode,
+    /// Input gain applied to the captured audio, in dB.
+    #[serde(default)]
+    pub(crate) audio_gain_db: f32,
+    /// Automatic gain control on the captured audio.
+    #[serde(default)]
+    pub(crate) audio_agc: bool,
+    /// Beat detector sensitivity, 0 to 1.
+    #[serde(default = "default_beat_sensitivity")]
+    pub(crate) beat_sensitivity: f64,
     /// Frame-rate cap chosen in the Quality panel. `None` follows the
     /// control window's monitor refresh rate, which is what bootstrap
     /// derives when nothing was ever picked.
@@ -168,6 +177,9 @@ impl Default for UiConfig {
             twitch_channel: String::new(),
             kick_channel: String::new(),
             invisible_mode: InvisibleMode::Eco,
+            audio_gain_db: 0.0,
+            audio_agc: false,
+            beat_sensitivity: default_beat_sensitivity(),
             fps_override: None,
             favorite_presets: HashSet::new(),
             cloud_presets_api_url: None,
@@ -226,6 +238,10 @@ pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     if let Err(e) = std::fs::write(path, config_to_json(config)) {
         eprintln!("[config] failed to write config file {}: {e}", path.display());
     }
+}
+
+fn default_beat_sensitivity() -> f64 {
+    opendrop_core::beat_detector::DEFAULT_SENSITIVITY
 }
 
 /// Accepted range for the persisted UI zoom factor.
@@ -297,6 +313,9 @@ mod tests {
             twitch_channel: "kushiemoon".to_string(),
             kick_channel: "kushiemoon".to_string(),
             invisible_mode: InvisibleMode::Pause,
+            audio_gain_db: 6.0,
+            audio_agc: true,
+            beat_sensitivity: 0.8,
             fps_override: Some(45),
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
             cloud_presets_api_url: Some("https://presets-cloud.example.workers.dev".to_string()),

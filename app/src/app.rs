@@ -178,6 +178,9 @@ impl ApplicationHandler for App {
                 if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.fps_override = state.fps_override;
+            ui_config.audio_gain_db = state.audio_gain_db;
+            ui_config.audio_agc = state.audio_agc;
+            ui_config.beat_sensitivity = state.beat_sensitivity;
             session::save_now(state);
             ui_config.ui_scale = state.ui_scale;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);

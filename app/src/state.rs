@@ -254,6 +254,11 @@ pub(crate) struct AppState {
     /// set_device`. `None` means still on whichever device `spawn_capture`
     /// chose by default (`opendrop_audio::device::select_input_device`).
     pub(crate) selected_input_device: Option<String>,
+    /// Input gain in dB, applied to the capture thread by the Audio panel.
+    pub(crate) audio_gain_db: f32,
+    pub(crate) audio_agc: bool,
+    /// Beat detector sensitivity, 0 to 1; pushed to `Show` every frame.
+    pub(crate) beat_sensitivity: f64,
     /// RMS of the current tick's PCM snapshot (`opendrop_audio::analysis::
     /// vu_level`), computed once per tick by the beat-sync engine wiring and
     /// stored here so the Audio panel's VU meter can read it without

@@ -25,9 +25,8 @@ pub(crate) enum Panel {
     Output,
     Midi,
     // Separate variants with their own nav buttons (SOURCES section,
-    // `ui::shell::nav`), but both currently drive the same `ndi.rs` `show`
-    // call from `ui_root`, which renders the output toggles and the input
-    // selector together.
+    // `ui::shell::nav`): `NdiIn` renders `ui::ndi::show_in` and `NdiOut`
+    // renders `ui::ndi::show_out`.
     NdiIn,
     NdiOut,
     Osc,

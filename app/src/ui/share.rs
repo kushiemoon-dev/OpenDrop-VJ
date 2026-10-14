@@ -79,6 +79,14 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
             Err(e) => eprintln!("[app] share link encode failed: {e}"),
         }
     }
+
+    ui.separator();
+
+    widgets::micro_label(ui, "The show is saved automatically and restored at the next launch.");
+    if ui.button("Forget saved session").clicked() {
+        crate::session::forget_saved_session();
+    }
+    widgets::micro_label(ui, "Starts the next launch from a clean show.");
 }
 
 /// Name currently loaded on the first physical slot routed to `bus`, or

@@ -394,6 +394,9 @@ pub(crate) struct AppState {
     /// Picks presets by energy when switched on per bus, and the follower of
     /// the music's energy it steers by.
     pub(crate) autopilot: opendrop_core::autopilot::Autopilot,
+    /// Presets remembered per track, fed by rekordbox track changes.
+    pub(crate) track_memory: opendrop_core::track_memory::TrackMemory,
+    pub(crate) track_auto_recall: bool,
     pub(crate) energy_tracker: opendrop_core::autopilot::EnergyTracker,
     /// Presets played recently, newest first.
     pub(crate) preset_history: opendrop_core::preset_annotations::PresetHistory,

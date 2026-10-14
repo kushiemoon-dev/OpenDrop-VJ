@@ -10,6 +10,7 @@
 - OSC output: the OSC panel can send the crossfader, tempo, deck presets and the colour, composite and key settings to a controller such as TouchOSC, under the same `/opendrop/<command>` addresses the OSC input listens on
 - Library panel: an optional background scan renders every preset to find the black, frozen and very dim ones, with a switch to hide them from the preset browser. Nothing is deleted, and the scan can be cancelled and resumed
 - Energy auto-pilot (Library panel): optionally, every set number of beats and per deck bus, loads a scanned preset whose energy matches the music's. Off by default
+- Track memory: with rkbx_link connected, the presets played on each track are remembered and suggested the next time the track plays (Preset notes panel), with an optional automatic reload
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
 
 ### Fixes

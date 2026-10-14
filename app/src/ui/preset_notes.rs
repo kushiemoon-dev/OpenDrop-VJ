@@ -8,6 +8,7 @@
 //! annotations straight away.
 
 use opendrop_core::preset_annotations::{PresetAnnotations, PresetHistory};
+use opendrop_core::track_memory::TrackMemory;
 
 use crate::ui::widgets;
 
@@ -34,12 +35,19 @@ impl AnnotationEdit {
     }
 }
 
+/// What the panel needs to follow the current track.
+pub struct TrackSettings<'a> {
+    pub memory: &'a TrackMemory,
+    pub auto_recall: &'a mut bool,
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     current_preset: &str,
     annotations: &mut PresetAnnotations,
     history: &PresetHistory,
     edit: &mut AnnotationEdit,
+    track: TrackSettings<'_>,
     load_request: &mut Option<String>,
 ) {
     edit.sync(current_preset, annotations);
@@ -65,6 +73,25 @@ pub fn show(
             }
         });
     }
+
+    ui.separator();
+    ui.label("Played on this track before");
+    match track.memory.current() {
+        None => {
+            widgets::micro_label(ui, "No track reported. Connect rkbx_link to follow the track playing.");
+        }
+        Some(_) if track.memory.suggestions().is_empty() => {
+            widgets::micro_label(ui, "Nothing remembered for this track yet.");
+        }
+        Some(_) => {
+            for name in track.memory.suggestions().iter().take(RECENT_SHOWN) {
+                if ui.selectable_label(false, name).clicked() {
+                    *load_request = Some(name.clone());
+                }
+            }
+        }
+    }
+    ui.checkbox(track.auto_recall, "Reload the last preset automatically when a known track starts");
 
     ui.separator();
     ui.label("Recently played");
@@ -111,8 +138,10 @@ mod tests {
             history.record("Alpha");
             let mut edit = AnnotationEdit::default();
             let mut request = None;
-            show(ui, "", &mut annotations, &history, &mut edit, &mut request);
-            show(ui, "Alpha", &mut annotations, &history, &mut edit, &mut request);
+            let track = TrackMemory::default();
+            let mut auto_recall = false;
+            show(ui, "", &mut annotations, &history, &mut edit, TrackSettings { memory: &track, auto_recall: &mut auto_recall }, &mut request);
+            show(ui, "Alpha", &mut annotations, &history, &mut edit, TrackSettings { memory: &track, auto_recall: &mut auto_recall }, &mut request);
         });
     }
 }

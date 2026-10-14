@@ -579,6 +579,8 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
             crate::preset_scan::scan_file_path().map(|p| crate::preset_scan::load_table(&p)).unwrap_or_default(),
         ),
         hide_flagged: ui_config.hide_flagged_presets,
+        track_memory: opendrop_core::track_memory::TrackMemory::from_parts(ui_config.track_presets.clone()),
+        track_auto_recall: ui_config.track_auto_recall,
         autopilot: {
             let mut pilot = opendrop_core::autopilot::Autopilot::default();
             pilot.reseed(bootstrap_rng_seed);

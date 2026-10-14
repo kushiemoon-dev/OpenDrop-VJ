@@ -1,7 +1,9 @@
 use opendrop_engine::deck::{self};
 use std::time::Instant;
 use crate::deck_video::{desired_video_input, rkbx_drift_exceeds_threshold, tick_deck_video, RkbxSyncState};
+use crate::preset_load::request_preset_load;
 use crate::{video_clips, AppState};
+use opendrop_core::track_memory::TrackMemory;
 
 /// Deck video sources: applies rekordbox track changes to per-deck clips, then
 /// reconciles and uploads each deck's decoded video frame.
@@ -12,6 +14,7 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
     // match found leaves the mapped slot's current content
     // untouched.
     while let Ok(event) = state.rkbx_link.track_events.try_recv() {
+        on_track_changed(state, &event.artist, &event.title);
         let Some(slot) = state.show.rkbx_deck_mapping.get(event.deck).copied().flatten() else { continue };
         let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else { continue };
         let path = clip.path.clone();
@@ -79,5 +82,18 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
             &mut state.deck_video_frame_seq[slot],
             state.deck_video_texture[slot],
         );
+    }
+}
+
+/// A new track started: remembers it as the current one and, when asked to,
+/// brings back the preset last played on it. Runs for every reported track,
+/// whether or not a video clip matches it.
+fn on_track_changed(state: &mut AppState, artist: &str, title: &str) {
+    let key = TrackMemory::key(artist, title);
+    let first = state.track_memory.set_current_track(key).first().cloned();
+    if let (true, Some(preset)) = (state.track_auto_recall, first) {
+        if state.path_by_name.contains_key(&preset) {
+            request_preset_load(state, state.show.selected_slot, preset);
+        }
     }
 }

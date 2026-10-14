@@ -147,6 +147,10 @@ pub(crate) fn ui_root(
                     library.preset_annotations,
                     library.preset_history,
                     library.annotation_edit,
+                    ui::preset_notes::TrackSettings {
+                        memory: library.track_memory,
+                        auto_recall: library.track_auto_recall,
+                    },
                     library.load_request,
                 );
             }

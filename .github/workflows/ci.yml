@@ -28,3 +28,82 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-windows:
+    name: Test Suite (Windows)
+    runs-on: windows-latest
+    env:
+      VCPKG_ROOT: C:\vcpkg
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Same dependency setup and cache keys as release.yml's windows-portable
+      # job, so both workflows share the cached vcpkg tree and NDI SDK.
+      - name: Cache vcpkg installed packages
+        id: cache-vcpkg-projectm
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-projectm-4.1.6-angle-windows
+
+      - name: Install vcpkg dependencies (pinned projectM, ANGLE)
+        if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
+        run: |
+          vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+          vcpkg install angle:x64-windows zlib:x64-windows
+
+      - name: Cache NDI SDK
+        id: cache-ndi
+        uses: actions/cache@v4
+        with:
+          path: C:\Program Files\NDI
+          key: windows-ndi-sdk-6
+
+      - name: Download and install NDI SDK
+        if: steps.cache-ndi.outputs.cache-hit != 'true'
+        run: |
+          # See release.yml for why Defender is excluded and the install is
+          # time-boxed.
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP", "C:\Program Files\NDI" -ErrorAction SilentlyContinue
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\ndi-sdk-installer.exe" "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20SDK.exe"
+          $proc = Start-Process -FilePath "$env:RUNNER_TEMP\ndi-sdk-installer.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -PassThru
+          if (-not $proc.WaitForExit(300000)) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Error "NDI SDK installer did not exit within 5 minutes, treating as hung"
+            exit 1
+          }
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "NDI SDK installer exited with code $($proc.ExitCode)"
+            exit 1
+          }
+
+      - name: Locate NDI SDK and runtime DLLs
+        run: |
+          # .cargo/config.toml points NDI_SDK_DIR at the Linux shim unless
+          # the environment already sets it (see release.yml).
+          $header = Get-ChildItem -Path "C:\Program Files\NDI" -Recurse -Filter "Processing.NDI.Lib.h" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $header) {
+            Write-Error "Processing.NDI.Lib.h not found anywhere under C:\Program Files\NDI"
+            exit 1
+          }
+          $sdkDir = Split-Path (Split-Path $header.FullName -Parent) -Parent
+          Add-Content -Path $env:GITHUB_ENV -Value "NDI_SDK_DIR=$sdkDir"
+          # Test binaries load projectM, ANGLE and the NDI runtime from PATH.
+          Add-Content -Path $env:GITHUB_PATH -Value "C:\vcpkg\installed\x64-windows\bin"
+          $dll = Get-ChildItem -Path "C:\Program Files\NDI" -Recurse -Filter "Processing.NDI.Lib.x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($dll) { Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $dll.FullName -Parent) }
+
+      - name: cargo build
+        run: cargo build --workspace
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

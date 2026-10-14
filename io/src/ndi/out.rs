@@ -183,10 +183,17 @@ struct SlotSender {
     frame: VideoFrame,
 }
 
+/// grafton-ndi refuses a sender with both clocks off. We never send audio,
+/// so the audio clock is free to satisfy that rule, while the video clock
+/// stays off: it would make `send_video` sleep ~1 frame on the one thread
+/// shared by the composite, the decks and NDI receive.
+fn sender_options(name: &str) -> SenderOptions {
+    SenderOptions::builder(name).clock_video(false).clock_audio(true).build()
+}
+
 impl SlotSender {
     fn new(ndi: &NDI, name: &str, width: i32, height: i32) -> grafton_ndi::Result<Self> {
-        let options = SenderOptions::builder(name).clock_video(false).clock_audio(false).build();
-        let sender = GraftonSender::new(ndi, &options)?;
+        let sender = GraftonSender::new(ndi, &sender_options(name))?;
         let frame = VideoFrame::builder()
             .resolution(width, height)
             .pixel_format(PixelFormat::RGBA)
@@ -475,6 +482,17 @@ fn start_receive(ts: &mut ThreadState, source: NdiSource) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// grafton-ndi rejects a sender with neither clock enabled
+    /// (`InvalidConfiguration`), which silently broke every NDI output.
+    /// The video clock must stay off so one slow stream cannot stall the
+    /// single thread serving the composite and all decks.
+    #[test]
+    fn sender_options_satisfy_sdk_and_keep_video_unclocked() {
+        let options = sender_options("OpenDrop");
+        assert!(options.clock_audio || options.clock_video, "SDK needs at least one clock");
+        assert!(!options.clock_video, "video clock would block the shared sender thread");
+    }
 
     /// `ThreadState::new()`/a fresh `NdiSnapshot` must start fully
     /// inactive: no panics, no sender assumed.

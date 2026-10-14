@@ -59,9 +59,8 @@ impl PassTimer {
 
     /// Non-blocking readback of whichever query is about to be reused.
     ///
-    /// **Known pre-existing bug, deliberately not fixed here** (found during
-    /// Phase 8 Step 10's review, out of scope for that task and for the
-    /// Phase 8 fix wave): on the first `RING_LEN` frames this queries a
+    /// **Known pre-existing bug, deliberately not fixed here** (found in
+    /// review, out of scope for the change that exposed it): on the first `RING_LEN` frames this queries a
     /// `NativeQuery` that `create_query` allocated but no `glBeginQuery` has
     /// ever targeted, so `GL_QUERY_RESULT_AVAILABLE` raises
     /// `GL_INVALID_OPERATION` (a name is only a query *object* once first

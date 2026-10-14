@@ -44,7 +44,7 @@ pub fn show(
 ) {
     ui.label("Target FPS");
     ui.horizontal(|ui| {
-        // Minor #17: selected-state indication, matching the invisible-
+        // Selected-state indication, matching the invisible-
         // mode row's pill+interact pattern below, instead of plain buttons
         // that never showed which target was actually active. Rounded
         // rather than compared bit-exact against `refresh_interval` so it
@@ -91,7 +91,7 @@ pub fn show(
                     if ui.button("High").clicked() {
                         *mesh_size = Some(MESH_HIGH);
                     }
-                    // Minor #18: a mesh-size change only applies once
+                    // A mesh-size change only applies once
                     // `about_to_wait`'s per-deck loop actually renders this
                     // deck, which an invisible deck in `Pause` mode may not
                     // do for a while; previously silent, so a click could
@@ -112,7 +112,7 @@ mod tests {
 
     // `show` takes only plain fields (no external handle, unlike
     // `ui::audio`/`ui::output`/`ui::midi`), same testability tier as
-    // `ui::decks`/`ui::playlists`, anticipated already at Step 8.
+    // `ui::decks`/`ui::playlists`.
 
     // --- show(): the whole panel, airy (default) and dense -----------------
 

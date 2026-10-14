@@ -102,7 +102,7 @@ impl RemoteWsHandle {
 /// this crate's own `Cargo.toml` at *build* time via `CARGO_MANIFEST_DIR`.
 /// This bakes the build machine's absolute path into the binary: fine for
 /// dev (packaging-time path resolution is out of scope here, deferred to
-/// Phase 6), not meant to survive relocating the binary to a different
+/// packaging), not meant to survive relocating the binary to a different
 /// machine.
 fn assets_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/remote"))

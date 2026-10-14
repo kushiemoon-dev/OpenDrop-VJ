@@ -1,19 +1,18 @@
 //! GL state hygiene around code we don't control.
 //!
 //! `reset_read_framebuffer_to_fbo0` is a fix found during an early review:
-//! `projectm_opengl_render_frame()` (from step 5 on) leaves
+//! `projectm_opengl_render_frame()` leaves
 //! `READ_FRAMEBUFFER_BINDING` pointed at one of projectM's own internal
 //! FBOs and `READ_BUFFER` on `GL_COLOR_ATTACHMENT0`. `glCopyTexSubImage2D`
 //! reads from the *read* framebuffer, so without resetting both to an
 //! absolute known state first, the copy silently grabs projectM's
 //! intermediate buffer instead of the frame actually rendered to this
-//! context's own pbuffer (FBO 0). Measured on 6 real presets in the Phase
-//! 0 spike: up to 100% of pixels different, sometimes a different image
+//! context's own pbuffer (FBO 0). Measured on 6 real presets: up to 100% of pixels different, sometimes a different image
 //! entirely.
 //!
 //! The full save/restore around `render_frame` itself (the wider field set
 //! projectM can touch: program, VAO, blend state, viewport, scissor, …)
-//! lands in step 5, once there's an actual `render_frame` call to wrap.
+//! is implemented below.
 
 use glow::HasContext;
 
@@ -32,7 +31,7 @@ pub fn reset_read_framebuffer_to_fbo0(gl: &glow::Context) {
     }
 }
 
-/// The full GL state `render_frame` (step 5 on) saves and restores around
+/// The full GL state `render_frame` saves and restores around
 /// `projectm_opengl_render_frame`, a superset of what libprojectM 4.1.6
 /// actually touches, since that varies per preset. Restoring in *absolute*
 /// terms (back to exactly this snapshot), not incrementally.

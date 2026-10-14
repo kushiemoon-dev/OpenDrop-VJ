@@ -140,7 +140,7 @@ mod tests {
 
         #[test]
         fn includes_at_least_one_color_composite_time_and_qvar_target() {
-            // AC-9's minimum bar, at the panel-building level: the same 4
+            // Minimum bar, at the panel-building level: the same 4
             // families `core::show`'s `lfo_end_to_end_dispatch` tests
             // drive through the registry must actually be selectable here.
             let registry = create_default_registry();

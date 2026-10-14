@@ -20,15 +20,14 @@
 //! per-deck sections, not two independent ones.
 //!
 //! Reskinned: the whole panel is
-//! one of 3 permanently-dense zones (with the presets grid, Step
-//! 14, and the MIDI learn rows, Step 17). `widgets::dense` wraps the
+//! one of 3 permanently-dense zones (with the presets grid and the MIDI
+//! learn rows). `widgets::dense` wraps the
 //! entire body below, no user-facing toggle. `🔒` is replaced by a plain
-//! "LOCK" text label: no emoji in displayed text, even though Step 5's
+//! "LOCK" text label: no emoji in displayed text, even though the
 //! widened fallback chain would still render it. `⇄` (auto-crossfade) is
-//! NOT touched here: it already moved out of this file into the header's
-//! mini-transport at Step 10 (alongside the BPM/tap block) and still
-//! renders as the raw glyph in `ui::shell::header` today, out of this
-//! step's scope. Every `ui.selectable_label` pair (mode, beat-sync, trigger
+//! NOT touched here: it already lives in the header's
+//! mini-transport (alongside the BPM/tap block) and still
+//! renders as the raw glyph in `ui::shell::header`. Every `ui.selectable_label` pair (mode, beat-sync, trigger
 //! mode) is replaced with `widgets::pill`, colored `accent` when selected
 //! and `dim` otherwise, clicked via `Response::interact(Sense::click())`
 //! (the exact pattern `ui::decks::deck_card` already established for its own

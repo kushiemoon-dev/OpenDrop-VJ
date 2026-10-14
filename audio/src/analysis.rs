@@ -68,7 +68,7 @@ impl Analyser {
     }
 
     /// Advances the rolling window with freshly captured `mono_samples` (one
-    /// call per captured cpal block, see AC-5), runs one FFT + one
+    /// call per captured cpal block), runs one FFT + one
     /// smoothing pass, and returns this block's low-frequency energy.
     /// `mono_samples.len()` can be anything (the negotiated cpal block size,
     /// independent of FFT_SIZE).

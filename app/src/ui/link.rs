@@ -17,11 +17,8 @@
 //!
 //! Reskinned: the
 //! `label(if snapshot.enabled {...})` enabled/disabled row swaps for
-//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`
-//! (Steps 17-18). Not compile-verified in this sandbox (missing cmake for
-//! the `link` feature's native dependency): reviewed by careful reading
-//! only, same determination as Steps 9/10/17. The Tempo/Peers row and the
-//! Set-tempo row are untouched.
+//! `widgets::connection_row`, same substitution as `ui::midi`/`ui::ndi`.
+//! The Tempo/Peers row and the Set-tempo row are untouched.
 
 use opendrop_io::link::{LinkControl, LinkHandle};
 

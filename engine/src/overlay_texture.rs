@@ -212,7 +212,7 @@ mod tests {
     use super::*;
 
     /// The one font this crate's tests can rely on being present: the
-    /// UI font `app` already vendors (`app/assets/fonts/`, Phase 7 Step 2).
+    /// UI font `app` already vendors (`app/assets/fonts/`).
     /// Referenced across the crate boundary on purpose: duplicating an
     /// 862 KB .ttf into `engine/` just for tests would be worse.
     const TEST_FONT: &[u8] = include_bytes!("../../app/assets/fonts/Inter-Variable.ttf");

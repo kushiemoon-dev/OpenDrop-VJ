@@ -8,8 +8,8 @@
 # where <version> is read from app\Cargo.toml's [package].version.
 #
 # Runtime DLL bundling policy (Windows portable zip), determined by running
-# `dumpbin /dependents` on the real release exe and on each candidate DLL
-# (see task-15-report.md for the full output), not guessed:
+# `dumpbin /dependents` on the real release exe and on each candidate DLL,
+# not guessed:
 #   Bundled next to opendrop-app.exe (resolved from the build machine's
 #   real install locations, not committed to the repo):
 #     - Processing.NDI.Lib.x64.dll   (NDI SDK; grafton-ndi links statically
@@ -80,7 +80,7 @@ $JetBrainsMonoOfl = Join-Path $RepoRoot "app\assets\fonts\JetBrainsMono-OFL.txt"
 # the repo and not fetched by this script; there is no other source to read
 # it from on this machine. Same env-var override as the Linux/macOS build
 # scripts' PRESETS_SRC, defaulting to the same fixed path this always used
-# before the override existed (see task-15-report.md).
+# before the override existed.
 $PresetsSrc = if ($env:PRESETS_SRC) { $env:PRESETS_SRC } else { "C:\opendrop-presets" }
 
 if (-not (Test-Path $PresetsSrc -PathType Container)) {
@@ -131,7 +131,7 @@ $ZipPath = Join-Path $RepoRoot "$folderName.zip"
 
 # --- 3. Locate runtime DLLs on this build machine ---
 
-# NDI SDK: known path from Step 13 (task-13-report.md), verified fresh here
+# NDI SDK: known install path, verified fresh here
 # rather than trusted blindly, since SDK installer versions can lay out
 # subfolders differently. Falls back to a recursive search under
 # "C:\Program Files\NDI" if the known path has moved.
@@ -150,7 +150,7 @@ if (Test-Path $ndiKnownPath -PathType Leaf) {
 Write-Output "NDI DLL: $ndiDll"
 
 # vcpkg-installed DLLs (dynamic x64-windows triplet). VCPKG_ROOT is a
-# machine-wide env var set on this build machine (Step 12); fall back to
+# machine-wide env var set on this build machine; fall back to
 # the well-known default install path if unset.
 $vcpkgRoot = $env:VCPKG_ROOT
 if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
@@ -229,7 +229,7 @@ Copy-Item $InterOfl (Join-Path $OutDir "Inter-OFL.txt")
 Copy-Item $JetBrainsMonoOfl (Join-Path $OutDir "JetBrainsMono-OFL.txt")
 
 # Sibling-of-exe "presets" folder, flat layout, matches preset_dir_from's
-# Windows branch (app/src/main.rs), verified against real MSVC in Step 14.
+# Windows branch (app/src/paths.rs), verified against a real MSVC build.
 # robocopy (not Copy-Item) so the presets source's .git directory can be
 # excluded; robocopy exit codes are NOT standard Windows conventions, 0-7
 # all mean success (various "files copied" states), only 8+ is a real

@@ -8,8 +8,7 @@ This directory ships **empty on purpose**. The OpenDrop-VJ web app served
 ~46 `.webm` loops from a public CDN (`cdn-video-loops/` + its
 `manifest.json`); relocating those files into this repository is an asset
 task, not a code task, and is deliberately left as a manual step, the same
-treatment the "megapack Ansorre" preset pack gets (Phase 8 plan, Override
-5). An empty or missing folder is a normal, supported state: the Video
+treatment the "megapack Ansorre" preset pack gets. An empty or missing folder is a normal, supported state: the Video
 panel simply shows only the user's own clips.
 
 ## Where the app looks

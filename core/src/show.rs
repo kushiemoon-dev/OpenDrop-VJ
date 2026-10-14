@@ -573,7 +573,7 @@ impl Show {
     /// dispatch to. `None` for any `CommandId` outside
     /// `SNAPSHOT_CAPTURABLE_IDS`, whether because it has no real setter yet
     /// or because it is deliberately excluded: the `CommandId::Time*` and
-    /// `CommandId::Qvar*` families do have real setters (steps 8 and 9) and
+    /// `CommandId::Qvar*` families do have real setters and
     /// still return `None` here on purpose; see `SNAPSHOT_CAPTURABLE_IDS`
     /// for why.
     pub fn get_command_value(&self, id: CommandId) -> Option<f64> {
@@ -2595,7 +2595,7 @@ mod tests {
         }
     }
 
-    /// AC-9's minimum bar: an LFO must actually reach at least one Color,
+    /// Minimum bar: an LFO must actually reach at least one Color,
     /// one Composite, one Time, and one Qvar target end to end: tick the
     /// engine, dispatch the resulting `(CommandId, value01)` through the
     /// real registry (same path `app::about_to_wait` uses), assert `Show`

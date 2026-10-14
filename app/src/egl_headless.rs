@@ -60,7 +60,7 @@ pub fn init_egl() -> (Egl, egl::Display, egl::Config) {
     (inst, display, config)
 }
 
-// No `share` context param here (unlike the spike's general-purpose
+// No `share` context param here (unlike a general-purpose
 // version): neither child process ever has more than this one context.
 pub fn create_context(inst: &Egl, display: egl::Display, config: egl::Config) -> egl::Context {
     // projectM 4.2.0's GladLoader::CheckGLRequirements() hard-requires GLES

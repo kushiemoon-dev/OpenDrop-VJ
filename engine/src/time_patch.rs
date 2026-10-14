@@ -23,9 +23,9 @@
 //! | 7 | Stretch | `sx` and `sy` (both, scaled around 1) |
 //! | 8 | Wave | `wave_a` |
 //!
-//! Slots 9..=40 belong to Qvar's 32 watches ([`crate::qvar_patch`], Step 9),
-//! keeping the whole Time+Qvar allocation inside the 40 slots the spike
-//! sized for. Both families compete for the same one word per deck per
+//! Slots 9..=40 belong to Qvar's 32 watches ([`crate::qvar_patch`]),
+//! keeping the whole Time+Qvar allocation inside the 40 slots the
+//! mechanism was sized for. Both families compete for the same one word per deck per
 //! frame; `app` schedules them together in one round-robin rather than one
 //! each.
 //!
@@ -48,12 +48,12 @@
 //! Reaching `time` would mean renumbering every preset's own `per_frame_N`
 //! lines to open room at the front, a rewrite of every one of the 9795
 //! presets in the reference library on every load, for one slider, changing
-//! the placement the spike verified end to end. Out of proportion, so Speed
+//! the placement that was verified end to end. Out of proportion, so Speed
 //! stays host-side state: it is stored, persisted, and fully addressable by
 //! keyboard/MIDI/OSC/remote-ws/LFO like the other seven, it just has no
 //! visual effect on the projectM decks. Index 1 stays reserved for it so the
 //! param-to-slot mapping is a plain 1:1 and a future engine change has its
-//! slot waiting. See `.planning/TIME-QVAR-SPIKE.md` for the mechanism this builds on.
+//! slot waiting.
 
 use crate::preset_patch::{Apply, PatchTarget};
 use opendrop_core::time_params::DeckTimeParams;

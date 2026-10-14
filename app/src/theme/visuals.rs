@@ -1,6 +1,6 @@
-//! Pure functions translating a `Theme` (Step 3) into egui's real
+//! Pure functions translating a `Theme` into egui's real
 //! `Visuals`/`Style` types, testable without a `Context` or GL. Nothing
-//! here is applied to a `Context` yet: that wiring starts at Step 6.
+//! here is applied to a `Context`; bootstrap and the runtime theme switch do that.
 
 use egui::style::{HandleShape, Selection, WidgetVisuals, Widgets};
 use egui::{CornerRadius, Shadow, Stroke, Style, Visuals};
@@ -41,7 +41,7 @@ fn widgets(t: &Theme) -> Widgets {
 }
 
 /// Translate `t` into egui's `Visuals`. Pure: produces a value, applies
-/// nothing to a `Context` (that wiring is Step 6).
+/// nothing to a `Context`.
 pub fn visuals(t: &Theme) -> Visuals {
     // `window_corner_radius`/`menu_corner_radius` are the only other
     // `CornerRadius`-typed fields on `Visuals` outside the widgets grid;
@@ -69,8 +69,7 @@ pub fn visuals(t: &Theme) -> Visuals {
 }
 
 /// Translate `t` into egui's `Style`. Uses the airy (default) spacing
-/// scale; `dense` is an explicit scope wired later (Step 8
-/// `widgets::dense`).
+/// scale; `dense` is an explicit scope (`widgets::dense`).
 pub fn style(t: &Theme) -> Style {
     Style {
         visuals: visuals(t),
@@ -263,7 +262,7 @@ mod tests {
 
     #[test]
     fn style_uses_airy_spacing_by_default() {
-        // Dense is an explicit scope wired later (Step 8 widgets::dense).
+        // Dense is an explicit scope (`widgets::dense`).
         for id in ALL_THEME_IDS {
             let t = registry::get(id);
             assert_eq!(style(t).spacing.item_spacing, t.metrics.spacing_airy, "{id:?}");

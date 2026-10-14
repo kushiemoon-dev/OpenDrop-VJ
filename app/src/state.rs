@@ -391,6 +391,10 @@ pub(crate) struct AppState {
     /// Library scan results and the background scan that fills them.
     pub(crate) scan: crate::preset_scan::ScanHandle,
     pub(crate) hide_flagged: bool,
+    /// Picks presets by energy when switched on per bus, and the follower of
+    /// the music's energy it steers by.
+    pub(crate) autopilot: opendrop_core::autopilot::Autopilot,
+    pub(crate) energy_tracker: opendrop_core::autopilot::EnergyTracker,
     /// Presets played recently, newest first.
     pub(crate) preset_history: opendrop_core::preset_annotations::PresetHistory,
     /// Text being typed in the Preset notes panel.

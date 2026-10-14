@@ -151,7 +151,14 @@ pub(crate) fn ui_root(
                 );
             }
             Panel::Library => {
-                ui::library::show(ui, library.scan, library.hide_flagged, library.path_by_name);
+                ui::library::show(
+                    ui,
+                    library.scan,
+                    library.hide_flagged,
+                    library.path_by_name,
+                    library.autopilot,
+                    library.energy_level,
+                );
             }
             Panel::Playlists => {
                 ui::playlists::show(ui, perform.show, library);

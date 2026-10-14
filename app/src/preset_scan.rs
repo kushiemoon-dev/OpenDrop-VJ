@@ -28,6 +28,13 @@ pub(crate) fn scan_file_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("", "", "opendrop-native").map(|dirs| dirs.cache_dir().join("preset-scan.json"))
 }
 
+/// Where the children write their result before the app reads it: a directory
+/// inside the user's own cache, not `/tmp`, whose predictable names another
+/// local user could pre-create as symlinks.
+pub(crate) fn scan_scratch_dir() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "opendrop-native").map(|dirs| dirs.cache_dir().join("scan-tmp"))
+}
+
 /// `{ "<preset>": [mean_luma, motion] | null }`, `null` meaning the render
 /// failed.
 pub(crate) fn table_to_json(table: &ScanTable) -> String {
@@ -143,7 +150,18 @@ impl ScanHandle {
 
     /// Starts scanning `jobs` (name and file) that have no result yet, with
     /// `workers` children at a time. Does nothing while a scan is running.
-    pub(crate) fn start(&self, jobs: Vec<(String, PathBuf)>, workers: usize, program: PathBuf, save_to: Option<PathBuf>) {
+    pub(crate) fn start(
+        &self,
+        jobs: Vec<(String, PathBuf)>,
+        workers: usize,
+        program: PathBuf,
+        scratch_dir: PathBuf,
+        save_to: Option<PathBuf>,
+    ) {
+        if let Err(e) = std::fs::create_dir_all(&scratch_dir) {
+            eprintln!("[scan] cannot create {}: {e}", scratch_dir.display());
+            return;
+        }
         if self.shared.running.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -157,9 +175,11 @@ impl ScanHandle {
         std::thread::spawn(move || {
             let workers: Vec<_> = (0..workers.max(1))
                 .map(|worker| {
-                    let (shared, todo, next, program, save_to) =
-                        (shared.clone(), todo.clone(), next.clone(), program.clone(), save_to.clone());
-                    std::thread::spawn(move || scan_worker(worker, &shared, &todo, &next, &program, save_to.as_deref()))
+                    let (shared, todo, next, program, scratch_dir, save_to) =
+                        (shared.clone(), todo.clone(), next.clone(), program.clone(), scratch_dir.clone(), save_to.clone());
+                    std::thread::spawn(move || {
+                        scan_worker(worker, &shared, &todo, &next, &program, &scratch_dir, save_to.as_deref())
+                    })
                 })
                 .collect();
             for worker in workers {
@@ -180,9 +200,10 @@ fn scan_worker(
     todo: &[(String, PathBuf)],
     next: &AtomicUsize,
     program: &Path,
+    scratch_dir: &Path,
     save_to: Option<&Path>,
 ) {
-    let scratch = std::env::temp_dir().join(format!("opendrop-scan-{}-{worker}.txt", std::process::id()));
+    let scratch = scratch_dir.join(format!("{}-{worker}.txt", std::process::id()));
     while !shared.cancel.load(Ordering::Relaxed) {
         let index = next.fetch_add(1, Ordering::Relaxed);
         let Some((name, path)) = todo.get(index) else { break };
@@ -276,7 +297,8 @@ mod tests {
             ("a".to_string(), PathBuf::from("/nonexistent/a.milk")),
             ("b".to_string(), PathBuf::from("/nonexistent/b.milk")),
         ];
-        handle.start(jobs.clone(), 2, PathBuf::from("true"), None);
+        let scratch_dir = scratch("dir");
+        handle.start(jobs.clone(), 2, PathBuf::from("true"), scratch_dir.clone(), None);
         for _ in 0..200 {
             if !handle.progress().running {
                 break;
@@ -289,7 +311,7 @@ mod tests {
         handle.with_table(|t| assert!(t.is_flagged("a") && t.is_flagged("b")));
         assert!(handle.revision() >= 2);
 
-        handle.start(jobs, 2, PathBuf::from("true"), None);
+        handle.start(jobs, 2, PathBuf::from("true"), scratch_dir, None);
         for _ in 0..200 {
             if !handle.progress().running {
                 break;

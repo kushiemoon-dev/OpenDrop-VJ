@@ -579,6 +579,12 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
             crate::preset_scan::scan_file_path().map(|p| crate::preset_scan::load_table(&p)).unwrap_or_default(),
         ),
         hide_flagged: ui_config.hide_flagged_presets,
+        autopilot: {
+            let mut pilot = opendrop_core::autopilot::Autopilot::default();
+            pilot.reseed(bootstrap_rng_seed);
+            pilot
+        },
+        energy_tracker: Default::default(),
         preset_annotations: opendrop_core::preset_annotations::PresetAnnotations::from_parts(
             ui_config.preset_tags.clone(),
             ui_config.preset_notes.clone(),

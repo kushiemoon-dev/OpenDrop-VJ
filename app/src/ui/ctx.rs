@@ -121,6 +121,8 @@ pub(crate) struct LibraryCtx<'a> {
     pub(crate) preset_annotations: &'a mut opendrop_core::preset_annotations::PresetAnnotations,
     pub(crate) scan: &'a crate::preset_scan::ScanHandle,
     pub(crate) hide_flagged: &'a mut bool,
+    pub(crate) autopilot: &'a mut opendrop_core::autopilot::Autopilot,
+    pub(crate) energy_level: f32,
     pub(crate) path_by_name: &'a HashMap<String, PathBuf>,
     pub(crate) preset_history: &'a opendrop_core::preset_annotations::PresetHistory,
     pub(crate) annotation_edit: &'a mut crate::ui::preset_notes::AnnotationEdit,

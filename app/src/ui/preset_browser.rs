@@ -661,6 +661,7 @@ mod tests {
             let scan = crate::preset_scan::ScanHandle::new(Default::default());
             let mut hide_flagged = false;
             let path_by_name = std::collections::HashMap::new();
+            let mut autopilot = opendrop_core::autopilot::Autopilot::default();
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -673,6 +674,8 @@ mod tests {
                 preset_annotations: &mut preset_annotations,
                 scan: &scan,
                 hide_flagged: &mut hide_flagged,
+                autopilot: &mut autopilot,
+                energy_level: 0.0,
                 path_by_name: &path_by_name,
                 preset_history: &preset_history,
                 annotation_edit: &mut annotation_edit,
@@ -721,6 +724,7 @@ mod tests {
                 let scan = crate::preset_scan::ScanHandle::new(Default::default());
                 let mut hide_flagged = false;
                 let path_by_name = std::collections::HashMap::new();
+                let mut autopilot = opendrop_core::autopilot::Autopilot::default();
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -733,6 +737,8 @@ mod tests {
                     preset_annotations: &mut preset_annotations,
                     scan: &scan,
                     hide_flagged: &mut hide_flagged,
+                    autopilot: &mut autopilot,
+                    energy_level: 0.0,
                     path_by_name: &path_by_name,
                     preset_history: &preset_history,
                     annotation_edit: &mut annotation_edit,

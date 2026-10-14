@@ -4,14 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenDrop · VJ — 4-deck Milkdrop VJ instrument</title>
-<meta name="description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out. No Electron, no install step.">
+<meta name="description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC control, optional Ableton Link sync, NDI in/out, Spout on Windows. No Electron, no install step.">
 <link rel="canonical" href="https://opendrop.kushie.dev/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://opendrop.kushie.dev/">
 <meta property="og:title" content="OpenDrop · VJ — 4-deck Milkdrop VJ instrument">
-<meta property="og:description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out. No Electron, no install step.">
+<meta property="og:description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC control, optional Ableton Link sync, NDI in/out, Spout on Windows. No Electron, no install step.">
 <meta property="og:site_name" content="OpenDrop · VJ">
 <meta property="og:locale" content="en_US">
 <meta property="og:image" content="https://opendrop.kushie.dev/og-image.jpg">
@@ -20,14 +20,14 @@
 <meta property="og:image:alt" content="OpenDrop VJ: four decks composited live over a GPU-rendered Milkdrop visualizer">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="OpenDrop · VJ — 4-deck Milkdrop VJ instrument">
-<meta name="twitter:description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out.">
+<meta name="twitter:description" content="Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC control, optional Ableton Link sync, NDI in/out, Spout on Windows.">
 <meta name="twitter:image" content="https://opendrop.kushie.dev/og-image.jpg">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "OpenDrop VJ",
-  "description": "Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC/Ableton Link sync, NDI in/out.",
+  "description": "Native 4-deck Milkdrop VJ instrument for Linux, Windows, and macOS (experimental). GPU compositor, MIDI/OSC control, optional Ableton Link sync, NDI in/out, Spout on Windows.",
   "applicationCategory": "MultimediaApplication",
   "operatingSystem": "Linux, Windows, macOS",
   "offers": {
@@ -159,7 +159,7 @@
     <div class="op-scrim"></div>
     <div class="op-content">
       <h1 class="op-h1">A 4-deck<br><span class="l2">Milkdrop VJ</span><br>instrument.</h1>
-      <p class="op-sub">GPU compositor. <code>MIDI</code> &middot; <code>OSC</code> &middot; <code>Ableton&nbsp;Link</code>. NDI in/out. Native desktop for Linux, Windows, and macOS (experimental).</p>
+      <p class="op-sub">GPU compositor. <code>MIDI</code> &middot; <code>OSC</code> &middot; <code>Ableton&nbsp;Link</code> (optional build). NDI in/out, Spout on Windows. Native desktop for Linux, Windows, and macOS (experimental).</p>
     </div>
     <div class="op-hint">move &middot; click</div>
   </div>
@@ -173,7 +173,7 @@
       <div class="op-bars"><i style="--h:30%;--d:.1s"></i><i style="--h:40%;--d:.2s"></i><i style="--h:25%;--d:0s"></i><i style="--h:35%;--d:.3s"></i><i style="--h:28%;--d:.15s"></i></div></div>
     <div class="op-deck d"><div class="lbl">DECK <b>D</b><span>IDLE</span></div>
       <div class="op-bars"><i style="--h:20%;--d:.2s"></i><i style="--h:32%;--d:0s"></i><i style="--h:22%;--d:.3s"></i><i style="--h:38%;--d:.1s"></i><i style="--h:24%;--d:.25s"></i></div></div>
-    <div class="op-feat"><span>128 BPM</span><span>Ableton Link synced</span><span>NDI out &middot; 2 sinks</span></div>
+    <div class="op-feat"><span>128 BPM</span><span>Tempo synced</span><span>NDI out &middot; 2 sinks</span></div>
   </div>
 
   <section class="op-section glow-a">
@@ -204,8 +204,9 @@
     <div style="height:36px"></div>
     <div class="op-specs">
       <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#ff2ec4;--pd:0s"></span>GPU compositor</h3><div class="desc">Four decks composited in real time on the GPU. Blend modes, opacity, and crossfade curves, all live.</div></div>
-      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#2ee8ff;--pd:.4s"></span>MIDI / OSC / Ableton Link</h3><div class="desc">Map any controller. Sync tempo across your rig without touching a cable.</div></div>
-      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#ffcf2e;--pd:.8s"></span>NDI in / out</h3><div class="desc">Send and receive video over the network. Drops straight into OBS or a second machine.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#2ee8ff;--pd:.4s"></span>MIDI / OSC / Ableton Link</h3><div class="desc">Map any controller, and send the state back to it over OSC. Ableton Link tempo sync is available in an optional build.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#ffcf2e;--pd:.8s"></span>NDI and Spout</h3><div class="desc">Send and receive video over the network with NDI, and share frames with Resolume or OBS through Spout on Windows.</div></div>
+      <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#4bff9a;--pd:1.6s"></span>Find the right preset</h3><div class="desc">Tag and annotate presets, search by tag, and bring back what you played on a track. An optional library scan hides the black and frozen ones, and an optional auto-pilot matches presets to the music's energy.</div></div>
       <div class="op-spec-row"><h3 class="name"><span class="tick" style="--dc:#7a4bff;--pd:1.2s"></span>Native, cross-platform</h3><div class="desc">One binary for Linux, Windows, and macOS (experimental). No Electron, no browser, no install step beyond unzip.</div></div>
     </div>
   </section>

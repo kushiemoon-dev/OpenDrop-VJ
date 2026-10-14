@@ -361,6 +361,7 @@ pub fn list_cameras() -> Vec<CameraDevice> {
 /// The label always carries the device node (`Integrated Camera
 /// (/dev/video0)`), so two genuinely distinct cameras that happen to share
 /// a name stay distinguishable too.
+#[cfg(any(target_os = "linux", test))]
 fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
     let Ok(read_dir) = std::fs::read_dir(base) else { return Vec::new() };
     let mut entries: Vec<_> = read_dir.flatten().collect();
@@ -376,7 +377,8 @@ fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
             if !is_primary_capture_node(&entry.path()) {
                 return None;
             }
-            let id = Path::new("/dev").join(entry.file_name()).to_string_lossy().into_owned();
+            // A Linux device path, built as text so the separator is `/` on every host.
+            let id = format!("/dev/{}", entry.file_name().to_string_lossy());
             let label = if name.is_empty() { id.clone() } else { format!("{name} ({id})") };
             Some(CameraDevice { id, label })
         })
@@ -387,6 +389,7 @@ fn list_cameras_in(base: &Path) -> Vec<CameraDevice> {
 /// device's primary (index 0) node: see [`list_cameras_in`]'s doc comment.
 /// An unreadable or unparseable `index` counts as primary: "can't tell"
 /// must not hide a working camera.
+#[cfg(any(target_os = "linux", test))]
 fn is_primary_capture_node(dir: &Path) -> bool {
     match std::fs::read_to_string(dir.join("index")) {
         Ok(index) => index.trim() == "0",

@@ -483,6 +483,22 @@ fn start_receive(ts: &mut ThreadState, source: NdiSource) {
 mod tests {
     use super::*;
 
+    /// Against the real NDI runtime: our options are accepted, and the
+    /// all-clocks-off combination the sender used to be built with is not.
+    /// Ignored by default because it needs the NDI library installed.
+    #[test]
+    #[ignore = "needs the NDI runtime"]
+    fn the_real_sdk_accepts_our_sender_options_and_rejected_the_old_ones() {
+        let ndi = NDI::new().expect("NDI runtime should load");
+
+        let ours = GraftonSender::new(&ndi, &sender_options("OpenDrop SDK test"));
+        assert!(ours.is_ok(), "our options were rejected: {:?}", ours.err());
+
+        let old = SenderOptions::builder("OpenDrop SDK test old").clock_video(false).clock_audio(false).build();
+        let old = GraftonSender::new(&ndi, &old);
+        assert!(old.is_err(), "the SDK accepted a sender with no clock");
+    }
+
     /// grafton-ndi rejects a sender with neither clock enabled
     /// (`InvalidConfiguration`), which silently broke every NDI output.
     /// The video clock must stay off so one slow stream cannot stall the

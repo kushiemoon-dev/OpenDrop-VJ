@@ -59,6 +59,14 @@ impl PresetAnalysis {
         }
     }
 
+    /// The better of two measurements of the same preset, each metric taken
+    /// separately. A preset is judged on the most it showed under any of the
+    /// test signals, so one that only reacts to some kinds of audio is not
+    /// flagged for staying still under the others.
+    pub fn best_of(a: Self, b: Self) -> Self {
+        Self { mean_luma: a.mean_luma.max(b.mean_luma), motion: a.motion.max(b.motion) }
+    }
+
     /// How lively the preset looks, 0 (still) to 1 (very busy): the number
     /// the energy auto-pilot matches against the music.
     pub fn energy(&self) -> f32 {
@@ -216,6 +224,21 @@ mod tests {
         assert!(!busy.verdict().is_flagged());
         assert!(busy.energy() > calm.energy());
         assert_eq!(busy.energy(), 1.0, "the score saturates");
+    }
+
+    #[test]
+    fn the_best_of_two_measurements_takes_each_metric_at_its_highest() {
+        let quiet = PresetAnalysis { mean_luma: 5.0, motion: 0.1 };
+        let busy = PresetAnalysis { mean_luma: 90.0, motion: 14.0 };
+        let best = PresetAnalysis::best_of(quiet, busy);
+        assert_eq!(best, busy);
+        assert_eq!(PresetAnalysis::best_of(busy, quiet), busy);
+        let mixed = PresetAnalysis::best_of(
+            PresetAnalysis { mean_luma: 200.0, motion: 0.1 },
+            PresetAnalysis { mean_luma: 3.0, motion: 9.0 },
+        );
+        assert_eq!(mixed, PresetAnalysis { mean_luma: 200.0, motion: 9.0 });
+        assert_eq!(mixed.verdict(), PresetVerdict::Fine);
     }
 
     #[test]

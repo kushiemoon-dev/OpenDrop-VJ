@@ -24,9 +24,12 @@ pub fn projectm_version() -> (i32, i32, i32) {
 mod tests {
     use super::*;
 
+    /// Linux links the system libprojectM (4.1.6); the Windows build uses the
+    /// vcpkg overlay port, which pins 4.2.0 for its GLES 3.1 patch.
     #[test]
-    fn version_is_4_1_6() {
+    fn version_is_the_pinned_one_for_the_platform() {
+        let expected = if cfg!(windows) { "4.2.0" } else { "4.1.6" };
         let (major, minor, patch) = projectm_version();
-        assert_eq!(format!("{major}.{minor}.{patch}"), "4.1.6");
+        assert_eq!(format!("{major}.{minor}.{patch}"), expected);
     }
 }

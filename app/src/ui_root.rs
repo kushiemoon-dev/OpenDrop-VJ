@@ -223,7 +223,17 @@ pub(crate) fn ui_root(
                 ui::spout::show_out(ui, output.spout, output.spout_composite_active, output.spout_deck_active);
             }
             Panel::Osc => {
-                ui::osc::show(ui, sources.osc, sources.osc_port);
+                ui::osc::show(
+                    ui,
+                    sources.osc,
+                    sources.osc_port,
+                    ui::osc::OscOutSettings {
+                        sender: sources.osc_out,
+                        host: sources.osc_out_host,
+                        port: sources.osc_out_port,
+                        error: sources.osc_out_error,
+                    },
+                );
             }
             Panel::RkbxLink => {
                 ui::rkbx_link::show(ui, sources.rkbx_link, sources.rkbx_link_port, sources.rkbx_mapping_error, perform.show);

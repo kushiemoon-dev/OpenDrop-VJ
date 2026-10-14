@@ -495,6 +495,12 @@ pub(crate) struct AppState {
     /// once listening (see `ui::osc`'s doc comment). Defaults to 7000,
     /// matching the web app's `electron-features-store.svelte.ts` default.
     pub(crate) osc_port: u16,
+    /// OSC output: the live sender once started, and the destination typed in
+    /// the OSC panel.
+    pub(crate) osc_out: Option<opendrop_io::osc_out::OscOut>,
+    pub(crate) osc_out_host: String,
+    pub(crate) osc_out_port: u16,
+    pub(crate) osc_out_error: Option<String>,
     /// Handle to the dedicated rkbx_link OSC UDP listener thread for
     /// synchronized music-video playback, independent of `osc` above:
     /// `latest()` gives the current listening/port/per-DJ-deck-time

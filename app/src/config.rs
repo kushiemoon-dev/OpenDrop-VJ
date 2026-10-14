@@ -118,6 +118,12 @@ pub(crate) struct UiConfig {
     pub(crate) output_monitor: Option<String>,
     pub(crate) audio_input_device: Option<String>,
     pub(crate) osc_port: u16,
+    /// Where the OSC output sends the app's state. Output only starts when
+    /// asked to, so these are just the last values typed.
+    #[serde(default = "default_osc_out_host")]
+    pub(crate) osc_out_host: String,
+    #[serde(default = "default_osc_out_port")]
+    pub(crate) osc_out_port: u16,
     /// The rkbx_link OSC listener's port, independent of `osc_port` above.
     /// Defaults to `4460`, rkbx_link's own default `osc.destination` port.
     pub(crate) rkbx_link_port: u16,
@@ -183,6 +189,8 @@ impl Default for UiConfig {
             output_monitor: None,
             audio_input_device: None,
             osc_port: 7000,
+            osc_out_host: default_osc_out_host(),
+            osc_out_port: default_osc_out_port(),
             rkbx_link_port: 4460,
             obs_host: "localhost".to_string(),
             obs_port: 4455,
@@ -255,6 +263,14 @@ pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     }
 }
 
+fn default_osc_out_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_osc_out_port() -> u16 {
+    9000
+}
+
 fn default_beat_sensitivity() -> f64 {
     opendrop_core::beat_detector::DEFAULT_SENSITIVITY
 }
@@ -322,6 +338,8 @@ mod tests {
             output_monitor: Some("DP-2".to_string()),
             audio_input_device: Some("Focusrite".to_string()),
             osc_port: 9000,
+            osc_out_host: "192.168.1.60".to_string(),
+            osc_out_port: 9001,
             rkbx_link_port: 4461,
             obs_host: "192.168.1.50".to_string(),
             obs_port: 4444,

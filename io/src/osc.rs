@@ -5,8 +5,8 @@
 //! owns the `UdpSocket`, publishes continuous state via `ArcSwap`, and
 //! never panics on a bind/recv error.
 //!
-//! Input only: no OSC output, mirroring OpenDrop-VJ's `main.cjs:112-139`,
-//! which has none either.
+//! Input only: the matching output, which sends the app's state back to a
+//! controller, is `osc_out`.
 //!
 //! One deliberate departure from the later remote-WS feature (not yet
 //! built on this branch): the OSC port is always chosen by the user,

@@ -1,6 +1,7 @@
 pub(crate) mod drain;
 pub(crate) mod present;
 pub(crate) mod ui_pass;
+pub(crate) mod osc_feedback;
 pub(crate) mod outputs;
 pub(crate) mod composite;
 pub(crate) mod deck_video_sync;

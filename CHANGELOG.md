@@ -7,6 +7,7 @@
 - Audio panel: input gain (-12 to +24 dB), an automatic gain control for quiet or loud sources, and an adjustable beat detection sensitivity
 - Spout output on Windows: the composite and each deck can be shared as Spout senders ("OpenDrop", "OpenDrop Deck N") for Resolume, OBS and other receivers. A Spout sender from another application can also be received and composited as a layer
 - Preset notes panel: personal tags and a note per preset, searched by the preset browser, and a list of recently played presets that reloads on click
+- OSC output: the OSC panel can send the crossfader, tempo, deck presets and the colour, composite and key settings to a controller such as TouchOSC, under the same `/opendrop/<command>` addresses the OSC input listens on
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
 
 ### Fixes

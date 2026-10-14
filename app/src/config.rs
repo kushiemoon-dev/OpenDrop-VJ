@@ -88,6 +88,7 @@ pub(crate) enum PanelId {
     SpoutIn,
     SpoutOut,
     PresetNotes,
+    Library,
     Osc,
     RkbxLink,
     Overlays,
@@ -148,6 +149,9 @@ pub(crate) struct UiConfig {
     #[serde(default)]
     pub(crate) fps_override: Option<u32>,
     pub(crate) favorite_presets: HashSet<String>,
+    /// Hide the presets the library scan flagged from the browser.
+    #[serde(default)]
+    pub(crate) hide_flagged_presets: bool,
     /// Personal tags per preset name.
     #[serde(default)]
     pub(crate) preset_tags: BTreeMap<String, Vec<String>>,
@@ -202,6 +206,7 @@ impl Default for UiConfig {
             beat_sensitivity: default_beat_sensitivity(),
             fps_override: None,
             favorite_presets: HashSet::new(),
+            hide_flagged_presets: false,
             preset_tags: BTreeMap::new(),
             preset_notes: BTreeMap::new(),
             preset_history: Vec::new(),
@@ -351,6 +356,7 @@ mod tests {
             beat_sensitivity: 0.8,
             fps_override: Some(45),
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
+            hide_flagged_presets: true,
             preset_tags: BTreeMap::from([("Alpha Swirl Refract".to_string(), vec!["calm".to_string()])]),
             preset_notes: BTreeMap::from([("Alpha Swirl Refract".to_string(), "opener".to_string())]),
             preset_history: vec!["Beta Pulse Drift".to_string()],
@@ -424,6 +430,7 @@ mod tests {
             PanelId::SpoutIn,
             PanelId::SpoutOut,
             PanelId::PresetNotes,
+            PanelId::Library,
             PanelId::Osc,
             PanelId::RkbxLink,
             PanelId::RemoteWs,

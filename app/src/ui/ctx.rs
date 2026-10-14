@@ -119,6 +119,9 @@ pub(crate) struct LibraryCtx<'a> {
     pub(crate) favorite_presets: &'a mut HashSet<String>,
     pub(crate) favorites_only: &'a mut bool,
     pub(crate) preset_annotations: &'a mut opendrop_core::preset_annotations::PresetAnnotations,
+    pub(crate) scan: &'a crate::preset_scan::ScanHandle,
+    pub(crate) hide_flagged: &'a mut bool,
+    pub(crate) path_by_name: &'a HashMap<String, PathBuf>,
     pub(crate) preset_history: &'a opendrop_core::preset_annotations::PresetHistory,
     pub(crate) annotation_edit: &'a mut crate::ui::preset_notes::AnnotationEdit,
 }

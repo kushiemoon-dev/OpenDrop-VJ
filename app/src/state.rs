@@ -388,6 +388,9 @@ pub(crate) struct AppState {
     pub(crate) favorites_only: bool,
     /// Personal tags and notes, searched by the preset browser.
     pub(crate) preset_annotations: opendrop_core::preset_annotations::PresetAnnotations,
+    /// Library scan results and the background scan that fills them.
+    pub(crate) scan: crate::preset_scan::ScanHandle,
+    pub(crate) hide_flagged: bool,
     /// Presets played recently, newest first.
     pub(crate) preset_history: opendrop_core::preset_annotations::PresetHistory,
     /// Text being typed in the Preset notes panel.

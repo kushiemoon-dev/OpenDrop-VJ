@@ -8,6 +8,7 @@
 - Spout output on Windows: the composite and each deck can be shared as Spout senders ("OpenDrop", "OpenDrop Deck N") for Resolume, OBS and other receivers. A Spout sender from another application can also be received and composited as a layer
 - Preset notes panel: personal tags and a note per preset, searched by the preset browser, and a list of recently played presets that reloads on click
 - OSC output: the OSC panel can send the crossfader, tempo, deck presets and the colour, composite and key settings to a controller such as TouchOSC, under the same `/opendrop/<command>` addresses the OSC input listens on
+- Library panel: an optional background scan renders every preset to find the black, frozen and very dim ones, with a switch to hide them from the preset browser. Nothing is deleted, and the scan can be cancelled and resumed
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
 
 ### Fixes

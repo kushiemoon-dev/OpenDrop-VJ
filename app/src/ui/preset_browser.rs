@@ -41,6 +41,7 @@ use std::collections::{HashMap, HashSet};
 use crate::theme::easing::ease_out_kushie;
 use crate::theme::fonts::FAMILY_MONO;
 use crate::theme::tokens::Metrics;
+use crate::preset_scan::ScanHandle;
 use crate::ui::ctx::{LibraryCtx, PerformCtx};
 use crate::ui::widgets::{self, theme};
 
@@ -66,6 +67,8 @@ pub struct SearchCache {
     favorites_snapshot: HashSet<String>,
     /// Revision of the tags and notes the cached results were computed from.
     annotations_revision: u64,
+    hide_flagged: bool,
+    scan_revision: u64,
 }
 
 impl SearchCache {
@@ -76,15 +79,24 @@ impl SearchCache {
         favorites_only: bool,
         favorite_presets: &HashSet<String>,
         annotations: &PresetAnnotations,
+        hide_flagged: Option<&ScanHandle>,
     ) -> &[String] {
         let query_changed = self.query.as_deref() != Some(query);
         let filter_toggled = self.favorites_only != favorites_only;
         let favorites_changed = favorites_only && self.favorites_snapshot != *favorite_presets;
         let annotations_changed = !query.is_empty() && self.annotations_revision != annotations.revision();
-        if query_changed || filter_toggled || favorites_changed || annotations_changed {
+        let hide_toggled = self.hide_flagged != hide_flagged.is_some();
+        let scan_changed = hide_flagged.is_some_and(|scan| scan.revision() != self.scan_revision);
+        if query_changed || filter_toggled || favorites_changed || annotations_changed || hide_toggled || scan_changed {
             self.annotations_revision = annotations.revision();
+            self.hide_flagged = hide_flagged.is_some();
+            self.scan_revision = hide_flagged.map_or(0, ScanHandle::revision);
             let matched = search_annotated(&show.preset_catalog, query, annotations);
             let matched = if favorites_only { filter_favorites(matched, favorite_presets) } else { matched };
+            let matched = match hide_flagged {
+                Some(scan) => scan.with_table(|table| matched.into_iter().filter(|p| !table.is_flagged(&p.name)).collect()),
+                None => matched,
+            };
             self.results = matched.into_iter().map(|p| p.name.clone()).collect();
             self.query = Some(query.to_string());
             self.favorites_only = favorites_only;
@@ -220,6 +232,7 @@ pub fn show(ui: &mut egui::Ui, perform: &mut PerformCtx, library: &mut LibraryCt
             *library.favorites_only,
             library.favorite_presets,
             library.preset_annotations,
+            (*library.hide_flagged).then_some(library.scan),
         );
         let total_rows = results.len().div_ceil(per_row);
 
@@ -487,7 +500,7 @@ mod tests {
     fn search_cache_filters_by_case_insensitive_substring() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "alpha", false, &HashSet::new(), &PresetAnnotations::default());
+        let results = cache.resolve(&show, "alpha", false, &HashSet::new(), &PresetAnnotations::default(), None);
         assert_eq!(results, ["Alpha Swirl Refract".to_string()]);
     }
 
@@ -495,7 +508,7 @@ mod tests {
     fn search_cache_empty_query_returns_every_preset() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "", false, &HashSet::new(), &PresetAnnotations::default());
+        let results = cache.resolve(&show, "", false, &HashSet::new(), &PresetAnnotations::default(), None);
         assert_eq!(results.len(), 2);
     }
 
@@ -503,7 +516,7 @@ mod tests {
     fn search_cache_no_match_returns_empty() {
         let show = sample_show();
         let mut cache = SearchCache::default();
-        let results = cache.resolve(&show, "nonexistent", false, &HashSet::new(), &PresetAnnotations::default());
+        let results = cache.resolve(&show, "nonexistent", false, &HashSet::new(), &PresetAnnotations::default(), None);
         assert!(results.is_empty());
     }
 
@@ -512,7 +525,7 @@ mod tests {
         let show = sample_show();
         let mut cache = SearchCache::default();
         let favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
-        let results = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default());
+        let results = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default(), None);
         assert_eq!(results, ["Alpha Swirl Refract".to_string()]);
     }
 
@@ -521,7 +534,7 @@ mod tests {
         let show = sample_show();
         let mut cache = SearchCache::default();
         let favorites = HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]);
-        let results = cache.resolve(&show, "beta", true, &favorites, &PresetAnnotations::default());
+        let results = cache.resolve(&show, "beta", true, &favorites, &PresetAnnotations::default(), None);
         assert_eq!(results, ["Beta Pulse Drift".to_string()]);
     }
 
@@ -530,9 +543,9 @@ mod tests {
         let show = sample_show();
         let mut cache = SearchCache::default();
         let favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
-        let all = cache.resolve(&show, "", false, &favorites, &PresetAnnotations::default()).to_vec();
+        let all = cache.resolve(&show, "", false, &favorites, &PresetAnnotations::default(), None).to_vec();
         assert_eq!(all.len(), 2);
-        let favorites_only = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default());
+        let favorites_only = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default(), None);
         assert_eq!(favorites_only, ["Alpha Swirl Refract".to_string()]);
     }
 
@@ -541,11 +554,11 @@ mod tests {
         let show = sample_show();
         let mut cache = SearchCache::default();
         let mut annotations = PresetAnnotations::default();
-        assert!(cache.resolve(&show, "calm", false, &HashSet::new(), &annotations).is_empty());
+        assert!(cache.resolve(&show, "calm", false, &HashSet::new(), &annotations, None).is_empty());
 
         annotations.set_tags("Beta Pulse Drift", "calm, slow");
 
-        let results = cache.resolve(&show, "calm", false, &HashSet::new(), &annotations);
+        let results = cache.resolve(&show, "calm", false, &HashSet::new(), &annotations, None);
         assert_eq!(results, ["Beta Pulse Drift".to_string()]);
     }
 
@@ -554,10 +567,10 @@ mod tests {
         let show = sample_show();
         let mut cache = SearchCache::default();
         let mut favorites = HashSet::from(["Alpha Swirl Refract".to_string()]);
-        let first = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default()).to_vec();
+        let first = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default(), None).to_vec();
         assert_eq!(first, ["Alpha Swirl Refract".to_string()]);
         favorites.insert("Beta Pulse Drift".to_string());
-        let second = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default());
+        let second = cache.resolve(&show, "", true, &favorites, &PresetAnnotations::default(), None);
         assert_eq!(second.len(), 2);
     }
 
@@ -645,6 +658,9 @@ mod tests {
             let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
             let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
             let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
+            let scan = crate::preset_scan::ScanHandle::new(Default::default());
+            let mut hide_flagged = false;
+            let path_by_name = std::collections::HashMap::new();
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -655,6 +671,9 @@ mod tests {
                 favorite_presets: &mut favorite_presets,
                 favorites_only: &mut favorites_only,
                 preset_annotations: &mut preset_annotations,
+                scan: &scan,
+                hide_flagged: &mut hide_flagged,
+                path_by_name: &path_by_name,
                 preset_history: &preset_history,
                 annotation_edit: &mut annotation_edit,
             };
@@ -699,6 +718,9 @@ mod tests {
                 let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
                 let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
                 let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
+                let scan = crate::preset_scan::ScanHandle::new(Default::default());
+                let mut hide_flagged = false;
+                let path_by_name = std::collections::HashMap::new();
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -709,6 +731,9 @@ mod tests {
                     favorite_presets: &mut favorite_presets,
                     favorites_only: &mut favorites_only,
                     preset_annotations: &mut preset_annotations,
+                    scan: &scan,
+                    hide_flagged: &mut hide_flagged,
+                    path_by_name: &path_by_name,
                     preset_history: &preset_history,
                     annotation_edit: &mut annotation_edit,
                 };

@@ -14,6 +14,8 @@ mod panel;
 mod paths;
 mod preflight;
 mod preset_load;
+mod preset_scan;
+mod scan_child;
 mod session;
 mod state;
 mod theme;
@@ -62,6 +64,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--preflight-check" {
         preflight::run_preflight_check(Path::new(&args[2]));
+    }
+    if args.len() >= 4 && args[1] == "--analyze-preset" {
+        scan_child::run_analyze_preset(Path::new(&args[2]), Path::new(&args[3]));
     }
     if args.len() >= 4 && args[1] == "--render-thumbnail" {
         thumbnail_child::run_render_thumbnail(Path::new(&args[2]), Path::new(&args[3]));

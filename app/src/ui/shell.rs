@@ -319,6 +319,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
             // browsing presets is part of the live-performance workflow.
             nav_item(ui, shell.active_panel, Panel::PresetBrowser, "Presets", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::PresetNotes, "Preset Notes", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::Library, "Library", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Playlists, "Playlists", &mut active_rect);
 
             ui.add_space(12.0);

@@ -255,7 +255,7 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         .current_monitor()
         .and_then(|m| m.refresh_rate_millihertz())
         .unwrap_or(FALLBACK_REFRESH_MILLIHERTZ);
-    let refresh_interval = Duration::from_secs_f64(1000.0 / refresh_millihertz as f64);
+    let monitor_refresh_interval = Duration::from_secs_f64(1000.0 / refresh_millihertz as f64);
 
     let control = create_window_slot(&display, &gl_config, control_window)?;
     let output = create_window_slot(&display, &gl_config, output_window)?;
@@ -290,6 +290,13 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
     // `config::save_config`, so without this load that preference would be
     // written and then ignored on every restart.
     let ui_config = config::config_file_path().map(|p| config::load_config(&p)).unwrap_or_default();
+    let fps_override = ui_config.fps_override.map(config::sanitize_fps);
+    let refresh_interval = match fps_override {
+        Some(fps) => Duration::from_secs_f64(1.0 / f64::from(fps)),
+        None => monitor_refresh_interval,
+    };
+    let ui_scale = config::sanitize_ui_scale(ui_config.ui_scale);
+    egui_glow.egui_ctx.set_zoom_factor(ui_scale);
 
     // Wire the persisted (or default)
     // theme + fonts onto the bootstrap Context, once. `set_fonts` is only
@@ -492,6 +499,8 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         gl,
         egui_glow,
         refresh_interval,
+        fps_override,
+        ui_scale,
         next_frame_at: Instant::now(),
         t0: Instant::now(),
         audio: opendrop_audio::spawn_capture(),

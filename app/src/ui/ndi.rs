@@ -34,11 +34,9 @@
 //! every other row stay untouched.
 //!
 //! Split into `show_out`/`show_in`: `Panel::NdiIn`/`Panel::NdiOut` render
-//! their own distinct half, with no visual merging of the two: both nav
-//! entries called the same combined `show` until this fix. The seam
-//! between the two sections (output toggles vs. input connect/ComboBox)
-//! was already there, just not split into two callable functions; the
-//! trademark attribution footer is duplicated onto both, since either
+//! their own distinct half, with no visual merging of the two. The seam
+//! between the two sections is output toggles vs. input connect/ComboBox;
+//! the trademark attribution footer is duplicated onto both, since either
 //! panel might be the only one a viewer ever opens. Underlying business
 //! logic (`NdiControl` messages, snapshot resync) is unchanged.
 

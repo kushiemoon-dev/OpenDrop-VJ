@@ -226,6 +226,10 @@ pub(crate) struct AppState {
     pub(crate) gl: Arc<glow::Context>,
     pub(crate) egui_glow: egui_glow::EguiGlow,
     pub(crate) refresh_interval: Duration,
+    /// Frame-rate cap picked in the Quality panel; `None` follows the monitor.
+    pub(crate) fps_override: Option<u32>,
+    /// UI zoom factor applied to the control window's egui context.
+    pub(crate) ui_scale: f32,
     pub(crate) next_frame_at: Instant,
     /// Reference instant captured once at bootstrap. Every `now_ms` fed to
     /// `core`'s beat-sync engine (`BeatDetector::process_sample`,

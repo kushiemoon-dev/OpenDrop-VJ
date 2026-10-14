@@ -6,6 +6,7 @@ mod bootstrap;
 mod config;
 mod deck_video;
 mod egl_headless;
+mod fatal;
 mod frame;
 mod keymap;
 mod overlays;
@@ -65,9 +66,18 @@ fn main() {
         thumbnail_child::run_render_thumbnail(Path::new(&args[2]), Path::new(&args[3]));
     }
 
-    let event_loop = EventLoop::new().expect("failed to create winit event loop");
+    let event_loop = match EventLoop::new() {
+        Ok(event_loop) => event_loop,
+        Err(e) => {
+            fatal::report_fatal("OpenDrop could not open a window", &e.to_string());
+            std::process::exit(1);
+        }
+    };
     let mut app = App::default();
-    event_loop.run_app(&mut app).expect("event loop exited with an error");
+    if let Err(e) = event_loop.run_app(&mut app) {
+        fatal::report_fatal("OpenDrop stopped unexpectedly", &e.to_string());
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]

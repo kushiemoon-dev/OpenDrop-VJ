@@ -15,15 +15,29 @@ use crate::frame::outputs::feed_outputs;
 use crate::frame::present::present_frame;
 use crate::frame::sources::upload_source_frames;
 use crate::frame::tick::{tick_show, TickOutput};
+use crate::fatal::{describe_panic, report_fatal};
 use crate::frame::ui_pass::run_ui_pass;
 use crate::{bootstrap, config, keymap, App};
+
+fn fail_startup(event_loop: &ActiveEventLoop, detail: &str) {
+    report_fatal("OpenDrop could not initialise graphics", detail);
+    event_loop.exit();
+}
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_some() {
             return;
         }
-        self.state = Some(bootstrap(event_loop).expect("GL/EGL bootstrap failed"));
+        // Bootstrap reports most failures as `Err`, but a few GL/EGL steps
+        // can only panic (glutin's config picker cannot return an error), so
+        // both are turned into the same message box and a clean exit.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bootstrap(event_loop)));
+        match outcome {
+            Ok(Ok(state)) => self.state = Some(state),
+            Ok(Err(detail)) => return fail_startup(event_loop, &detail),
+            Err(payload) => return fail_startup(event_loop, &describe_panic(payload.as_ref())),
+        }
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now()));
     }
 
@@ -158,6 +172,8 @@ impl ApplicationHandler for App {
             ui_config.cloud_video_api_url =
                 if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
+            ui_config.fps_override = state.fps_override;
+            ui_config.ui_scale = state.ui_scale;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
 

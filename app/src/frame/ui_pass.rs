@@ -63,6 +63,8 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         input_devices,
         selected_input_device,
         refresh_interval,
+        fps_override,
+        ui_scale,
         invisible_mode,
         pending_mesh_size,
         selected_output_monitor,
@@ -201,6 +203,8 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
     };
     let mut output_ctx = ui::ctx::OutputCtx {
         refresh_interval,
+        fps_override,
+        ui_scale,
         invisible_mode,
         pending_mesh_size,
         event_loop,
@@ -246,6 +250,10 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
             &mut theme_request,
         );
     });
+    // A click on the Quality panel's scale pills takes effect on the next frame.
+    if (egui_glow.egui_ctx.zoom_factor() - *ui_scale).abs() > f32::EPSILON {
+        egui_glow.egui_ctx.set_zoom_factor(*ui_scale);
+    }
     if let Some(name) = preset_load_request {
         // Same pipeline as keyboard navigation and playlist/beat-sync
         // advances (`take_fired_presets`, above); never a direct

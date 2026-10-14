@@ -8,9 +8,8 @@
 //! `theme`, `active_panel`, `stage_mode`, `output_monitor`,
 //! `audio_input_device`, `osc_port`, `obs_host`, `obs_port`,
 //! `twitch_channel`, `kick_channel`, and `invisible_mode` are all restored
-//! at bootstrap and saved in `App::exiting`. `ui_scale`/`target_fps` are
-//! the two fields still unwired: no `AppState` counterpart exists yet to
-//! receive them.
+//! at bootstrap and saved in `App::exiting`, as are `ui_scale` and
+//! `fps_override`.
 //!
 //! Secrets (OBS/Twitch/Kick tokens) are never part of `UiConfig`, they
 //! stay in the OS keyring via `opendrop_io::secrets`
@@ -125,7 +124,11 @@ pub(crate) struct UiConfig {
     pub(crate) kick_channel: String,
     #[serde(with = "InvisibleModeWire")]
     pub(crate) invisible_mode: InvisibleMode,
-    pub(crate) target_fps: u32,
+    /// Frame-rate cap chosen in the Quality panel. `None` follows the
+    /// control window's monitor refresh rate, which is what bootstrap
+    /// derives when nothing was ever picked.
+    #[serde(default)]
+    pub(crate) fps_override: Option<u32>,
     pub(crate) favorite_presets: HashSet<String>,
     /// Base URL of the CloudPresets backend Worker (`workers/presets-
     /// cloud/` in the web app's repo, see the `legacy-web` branch). `None`/empty means the
@@ -165,7 +168,7 @@ impl Default for UiConfig {
             twitch_channel: String::new(),
             kick_channel: String::new(),
             invisible_mode: InvisibleMode::Eco,
-            target_fps: 60,
+            fps_override: None,
             favorite_presets: HashSet::new(),
             cloud_presets_api_url: None,
             cloud_video_api_url: Some("https://loops.kushie.dev".to_string()),
@@ -225,9 +228,58 @@ pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     }
 }
 
+/// Accepted range for the persisted UI zoom factor.
+const UI_SCALE_RANGE: (f32, f32) = (0.75, 2.0);
+/// Accepted range for a persisted frame-rate cap.
+const FPS_RANGE: (u32, u32) = (15, 240);
+
+/// A hand-edited or corrupted `ui.json` must not be able to make the UI
+/// unreadable: out-of-range zoom is clamped and a non-finite one resets to 1.
+pub(crate) fn sanitize_ui_scale(scale: f32) -> f32 {
+    if scale.is_finite() {
+        scale.clamp(UI_SCALE_RANGE.0, UI_SCALE_RANGE.1)
+    } else {
+        1.0
+    }
+}
+
+pub(crate) fn sanitize_fps(fps: u32) -> u32 {
+    fps.clamp(FPS_RANGE.0, FPS_RANGE.1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_scale_is_clamped_and_non_finite_values_reset() {
+        assert_eq!(sanitize_ui_scale(1.25), 1.25);
+        assert_eq!(sanitize_ui_scale(0.1), 0.75);
+        assert_eq!(sanitize_ui_scale(50.0), 2.0);
+        assert_eq!(sanitize_ui_scale(f32::NAN), 1.0);
+        assert_eq!(sanitize_ui_scale(f32::INFINITY), 1.0);
+    }
+
+    #[test]
+    fn fps_is_clamped_to_a_sane_range() {
+        assert_eq!(sanitize_fps(60), 60);
+        assert_eq!(sanitize_fps(0), 15);
+        assert_eq!(sanitize_fps(10_000), 240);
+    }
+
+    #[test]
+    fn config_files_written_before_the_fps_override_still_load() {
+        let mut value = serde_json::to_value(UiConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("fps_override");
+        object.insert("target_fps".to_string(), serde_json::json!(60));
+        object.insert("obs_port".to_string(), serde_json::json!(4999));
+
+        let restored = config_from_json(&value.to_string());
+
+        assert_eq!(restored.obs_port, 4999, "an old file must not reset the other fields");
+        assert_eq!(restored.fps_override, None);
+    }
 
     #[test]
     fn json_round_trip_preserves_every_field() {
@@ -245,7 +297,7 @@ mod tests {
             twitch_channel: "kushiemoon".to_string(),
             kick_channel: "kushiemoon".to_string(),
             invisible_mode: InvisibleMode::Pause,
-            target_fps: 144,
+            fps_override: Some(45),
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
             cloud_presets_api_url: Some("https://presets-cloud.example.workers.dev".to_string()),
             cloud_video_api_url: Some("https://loops.example.com".to_string()),

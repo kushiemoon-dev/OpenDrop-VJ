@@ -172,6 +172,8 @@ impl ApplicationHandler for App {
             ui_config.cloud_video_api_url =
                 if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
+            ui_config.fps_override = state.fps_override;
+            ui_config.ui_scale = state.ui_scale;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);
 

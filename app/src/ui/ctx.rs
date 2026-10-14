@@ -196,6 +196,8 @@ pub(crate) struct SourcesCtx<'a> {
 /// toggles, the Output panel's monitor picker, and the Quality panel.
 pub(crate) struct OutputCtx<'a> {
     pub(crate) refresh_interval: &'a mut Duration,
+    pub(crate) fps_override: &'a mut Option<u32>,
+    pub(crate) ui_scale: &'a mut f32,
     pub(crate) invisible_mode: &'a mut InvisibleMode,
     pub(crate) pending_mesh_size: &'a mut [Option<(usize, usize)>; deck::DECK_COUNT],
     pub(crate) event_loop: &'a ActiveEventLoop,

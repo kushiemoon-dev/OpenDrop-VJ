@@ -146,7 +146,14 @@ pub(crate) fn ui_root(
                 ui::audio::show(ui, sources.audio, sources.input_devices, sources.selected_input_device, sources.last_vu_level);
             }
             Panel::Quality => {
-                ui::quality::show(ui, output.refresh_interval, output.invisible_mode, output.pending_mesh_size);
+                ui::quality::show(
+                    ui,
+                    output.refresh_interval,
+                    output.fps_override,
+                    output.ui_scale,
+                    output.invisible_mode,
+                    output.pending_mesh_size,
+                );
             }
             Panel::Color => {
                 ui::color::show(ui, &mut perform.show.color_params_a, &mut perform.show.color_params_b);

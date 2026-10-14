@@ -39,6 +39,8 @@ const MESH_HIGH: (usize, usize) = (64, 48);
 pub fn show(
     ui: &mut egui::Ui,
     refresh_interval: &mut Duration,
+    fps_override: &mut Option<u32>,
+    ui_scale: &mut f32,
     invisible_mode: &mut InvisibleMode,
     pending_mesh_size: &mut [Option<(usize, usize)>; deck::DECK_COUNT],
 ) {
@@ -57,6 +59,20 @@ pub fn show(
             let color = if current_fps == fps { t.palette.accent } else { t.palette.dim };
             if widgets::pill(ui, &fps.to_string(), color).interact(egui::Sense::click()).clicked() {
                 *refresh_interval = Duration::from_secs_f64(1.0 / fps as f64);
+                *fps_override = Some(fps);
+            }
+        }
+    });
+
+    ui.separator();
+
+    ui.label("UI scale");
+    ui.horizontal(|ui| {
+        let t = theme(ui);
+        for (scale, label) in [(1.0_f32, "100%"), (1.25, "125%"), (1.5, "150%")] {
+            let color = if (*ui_scale - scale).abs() < 0.01 { t.palette.accent } else { t.palette.dim };
+            if widgets::pill(ui, label, color).interact(egui::Sense::click()).clicked() {
+                *ui_scale = scale;
             }
         }
     });
@@ -120,9 +136,11 @@ mod tests {
     fn show_does_not_panic() {
         themed_test_ui(|ui| {
             let mut refresh_interval = Duration::from_secs_f64(1.0 / 60.0);
+            let mut fps_override = None;
+            let mut ui_scale = 1.0_f32;
             let mut invisible_mode = InvisibleMode::Eco;
             let mut pending_mesh_size = [None; deck::DECK_COUNT];
-            show(ui, &mut refresh_interval, &mut invisible_mode, &mut pending_mesh_size);
+            show(ui, &mut refresh_interval, &mut fps_override, &mut ui_scale, &mut invisible_mode, &mut pending_mesh_size);
         });
     }
 
@@ -131,9 +149,11 @@ mod tests {
         themed_test_ui(|ui| {
             widgets::dense(ui, |ui| {
                 let mut refresh_interval = Duration::from_secs_f64(1.0 / 60.0);
+                let mut fps_override = None;
+                let mut ui_scale = 1.0_f32;
                 let mut invisible_mode = InvisibleMode::Eco;
                 let mut pending_mesh_size = [None; deck::DECK_COUNT];
-                show(ui, &mut refresh_interval, &mut invisible_mode, &mut pending_mesh_size);
+                show(ui, &mut refresh_interval, &mut fps_override, &mut ui_scale, &mut invisible_mode, &mut pending_mesh_size);
             });
         });
     }
@@ -148,9 +168,11 @@ mod tests {
             for fps in [30u32, 45, 60] {
                 for mode in [InvisibleMode::Eco, InvisibleMode::Pause, InvisibleMode::Off] {
                     let mut refresh_interval = Duration::from_secs_f64(1.0 / fps as f64);
+                    let mut fps_override = None;
+                    let mut ui_scale = 1.0_f32;
                     let mut invisible_mode = mode;
                     let mut pending_mesh_size = [None; deck::DECK_COUNT];
-                    show(ui, &mut refresh_interval, &mut invisible_mode, &mut pending_mesh_size);
+                    show(ui, &mut refresh_interval, &mut fps_override, &mut ui_scale, &mut invisible_mode, &mut pending_mesh_size);
                 }
             }
         });
@@ -161,9 +183,11 @@ mod tests {
         themed_test_ui(|ui| {
             // 75fps: none of the 30/45/60 pills match `current_fps`.
             let mut refresh_interval = Duration::from_secs_f64(1.0 / 75.0);
+            let mut fps_override = None;
+            let mut ui_scale = 1.0_f32;
             let mut invisible_mode = InvisibleMode::Pause;
             let mut pending_mesh_size = [Some((32, 24)); deck::DECK_COUNT];
-            show(ui, &mut refresh_interval, &mut invisible_mode, &mut pending_mesh_size);
+            show(ui, &mut refresh_interval, &mut fps_override, &mut ui_scale, &mut invisible_mode, &mut pending_mesh_size);
         });
     }
 }

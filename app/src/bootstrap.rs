@@ -575,6 +575,12 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         preset_search_cache: ui::preset_browser::SearchCache::default(),
         favorite_presets: ui_config.favorite_presets.clone(),
         favorites_only: false,
+        preset_annotations: opendrop_core::preset_annotations::PresetAnnotations::from_parts(
+            ui_config.preset_tags.clone(),
+            ui_config.preset_notes.clone(),
+        ),
+        preset_history: opendrop_core::preset_annotations::PresetHistory::from_names(ui_config.preset_history.clone()),
+        annotation_edit: Default::default(),
         failed_thumbnails: HashSet::new(),
         thumb_queue: Vec::new(),
         thumbnail_textures: HashMap::new(),

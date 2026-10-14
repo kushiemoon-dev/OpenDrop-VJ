@@ -313,6 +313,9 @@ mod tests {
             let mut load_request = None;
             let mut favorite_presets = HashSet::new();
             let mut favorites_only = false;
+            let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
+            let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
+            let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -322,6 +325,9 @@ mod tests {
                 load_request: &mut load_request,
                 favorite_presets: &mut favorite_presets,
                 favorites_only: &mut favorites_only,
+                preset_annotations: &mut preset_annotations,
+                preset_history: &preset_history,
+                annotation_edit: &mut annotation_edit,
             };
             show(ui, &mut state, &mut library);
         });
@@ -338,6 +344,9 @@ mod tests {
                 let mut load_request = None;
                 let mut favorite_presets = HashSet::new();
                 let mut favorites_only = false;
+                let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
+                let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
+                let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
                 let mut library = LibraryCtx {
                     preset_search_query: &mut search_query,
                     search_cache: &mut search_cache,
@@ -347,6 +356,9 @@ mod tests {
                     load_request: &mut load_request,
                     favorite_presets: &mut favorite_presets,
                     favorites_only: &mut favorites_only,
+                    preset_annotations: &mut preset_annotations,
+                    preset_history: &preset_history,
+                    annotation_edit: &mut annotation_edit,
                 };
                 show(ui, &mut state, &mut library);
             });
@@ -372,6 +384,9 @@ mod tests {
             let mut load_request = None;
             let mut favorite_presets = HashSet::new();
             let mut favorites_only = false;
+            let mut preset_annotations = opendrop_core::preset_annotations::PresetAnnotations::default();
+            let preset_history = opendrop_core::preset_annotations::PresetHistory::default();
+            let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
             let mut library = LibraryCtx {
                 preset_search_query: &mut search_query,
                 search_cache: &mut search_cache,
@@ -381,6 +396,9 @@ mod tests {
                 load_request: &mut load_request,
                 favorite_presets: &mut favorite_presets,
                 favorites_only: &mut favorites_only,
+                preset_annotations: &mut preset_annotations,
+                preset_history: &preset_history,
+                annotation_edit: &mut annotation_edit,
             };
             show(ui, &mut state, &mut library);
         });

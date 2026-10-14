@@ -139,6 +139,17 @@ pub(crate) fn ui_root(
             Panel::PresetBrowser => {
                 ui::preset_browser::show(ui, perform, library);
             }
+            Panel::PresetNotes => {
+                let current = &perform.deck_preset_names[perform.show.selected_slot];
+                ui::preset_notes::show(
+                    ui,
+                    current,
+                    library.preset_annotations,
+                    library.preset_history,
+                    library.annotation_edit,
+                    library.load_request,
+                );
+            }
             Panel::Playlists => {
                 ui::playlists::show(ui, perform.show, library);
             }

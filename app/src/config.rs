@@ -16,7 +16,7 @@
 //! (see `app/src/ui/streaming.rs`'s `save_secret_field`/
 //! `clear_secret_button`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,7 @@ pub(crate) enum PanelId {
     NdiOut,
     SpoutIn,
     SpoutOut,
+    PresetNotes,
     Osc,
     RkbxLink,
     Overlays,
@@ -141,6 +142,15 @@ pub(crate) struct UiConfig {
     #[serde(default)]
     pub(crate) fps_override: Option<u32>,
     pub(crate) favorite_presets: HashSet<String>,
+    /// Personal tags per preset name.
+    #[serde(default)]
+    pub(crate) preset_tags: BTreeMap<String, Vec<String>>,
+    /// Personal note per preset name.
+    #[serde(default)]
+    pub(crate) preset_notes: BTreeMap<String, String>,
+    /// Presets played recently, newest first.
+    #[serde(default)]
+    pub(crate) preset_history: Vec<String>,
     /// Base URL of the CloudPresets backend Worker (`workers/presets-
     /// cloud/` in the web app's repo, see the `legacy-web` branch). `None`/empty means the
     /// feature is disabled, same convention as the web app's
@@ -184,6 +194,9 @@ impl Default for UiConfig {
             beat_sensitivity: default_beat_sensitivity(),
             fps_override: None,
             favorite_presets: HashSet::new(),
+            preset_tags: BTreeMap::new(),
+            preset_notes: BTreeMap::new(),
+            preset_history: Vec::new(),
             cloud_presets_api_url: None,
             cloud_video_api_url: Some("https://loops.kushie.dev".to_string()),
             keymap: HashMap::new(),
@@ -320,6 +333,9 @@ mod tests {
             beat_sensitivity: 0.8,
             fps_override: Some(45),
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
+            preset_tags: BTreeMap::from([("Alpha Swirl Refract".to_string(), vec!["calm".to_string()])]),
+            preset_notes: BTreeMap::from([("Alpha Swirl Refract".to_string(), "opener".to_string())]),
+            preset_history: vec!["Beta Pulse Drift".to_string()],
             cloud_presets_api_url: Some("https://presets-cloud.example.workers.dev".to_string()),
             cloud_video_api_url: Some("https://loops.example.com".to_string()),
             keymap: HashMap::from([(r#"{"Named":"Tab"}"#.to_string(), "deck-switch".to_string())]),
@@ -389,6 +405,7 @@ mod tests {
             PanelId::NdiOut,
             PanelId::SpoutIn,
             PanelId::SpoutOut,
+            PanelId::PresetNotes,
             PanelId::Osc,
             PanelId::RkbxLink,
             PanelId::RemoteWs,

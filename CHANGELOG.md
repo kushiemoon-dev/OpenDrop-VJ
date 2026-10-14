@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### New features
+- The show is saved automatically (on exit and every 30 seconds) and restored at the next launch: mix and crossfader, colour and composite settings, snapshots, timeline, overlays, playlists, strobe, LFO routing, and the preset on each deck. A "Forget saved session" button in the Share panel starts the next launch clean
+- Audio panel: input gain (-12 to +24 dB), an automatic gain control for quiet or loud sources, and an adjustable beat detection sensitivity
+- Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
+
+### Fixes
+- NDI output now starts: the sender was rejected with "At least one of clock_video or clock_audio must be true"
+- Microphones are told apart from monitors in the audio input list
+- A graphics initialisation failure now shows an error message and exits cleanly instead of crashing without any message
+- A failed texture allocation or pixel readback drops that frame instead of crashing
+
+### Internal
+- The test suite also runs on Windows in CI
+- The application entry point is split into focused modules
+
 ## v0.1.5 (2026-09-30)
 
 ### Fixes

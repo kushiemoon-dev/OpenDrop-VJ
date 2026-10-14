@@ -418,7 +418,15 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
     // the receiving end, stored on `AppState`.
     let (chat_tx, chat_events) = mpsc::channel();
 
+    let audio = opendrop_audio::spawn_capture();
+    let audio_gain_db = ui_config.audio_gain_db;
+    let audio_agc = ui_config.audio_agc;
+    let beat_sensitivity = ui_config.beat_sensitivity;
+    audio.set_gain_db(audio_gain_db);
+    audio.set_agc(audio_agc);
+
     let mut show = Show::default();
+    show.beat_detector.set_sensitivity(beat_sensitivity);
     // `core` is zero-I/O and has no clock of
     // its own, so its playlist engines start from a fixed, hardcoded RNG
     // seed; shuffle mode would otherwise replay the exact same sequence
@@ -504,7 +512,7 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         ui_scale,
         next_frame_at: Instant::now(),
         t0: Instant::now(),
-        audio: opendrop_audio::spawn_capture(),
+        audio,
         // Enumerated once here at bootstrap and cached; the Audio
         // panel never calls `list_input_devices()` itself: the list
         // doesn't change mid-session.
@@ -512,6 +520,9 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         // Panel settings restored from the same `ui_config` loaded above,
         // not just navigation state.
         selected_input_device: ui_config.audio_input_device.clone(),
+        audio_gain_db,
+        audio_agc,
+        beat_sensitivity,
         last_vu_level: 0.0,
         deck_next_render_at: [Instant::now(); deck::DECK_COUNT],
         invisible_mode: ui_config.invisible_mode,

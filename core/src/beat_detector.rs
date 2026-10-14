@@ -9,7 +9,14 @@ pub struct BeatDetector {
     beat_intervals: std::collections::VecDeque<f64>, // cap 8
     last_beat_time_ms: f64, // 0.0 initial, like bpm.ts's lastBeatTime
     bpm: f64,               // 0.0 until the first valid commit, never reset after
+    /// How far above the rolling average a sample must rise to count as a
+    /// beat. See [`BeatDetector::set_sensitivity`].
+    threshold_ratio: f64,
 }
+
+/// Threshold ratio at the default sensitivity (the original detector's value).
+const DEFAULT_THRESHOLD_RATIO: f64 = 1.35;
+pub const DEFAULT_SENSITIVITY: f64 = 0.5;
 
 pub struct BeatDetectionResult {
     pub beat_triggered: bool,
@@ -24,6 +31,16 @@ impl BeatDetector {
             beat_intervals: std::collections::VecDeque::new(),
             last_beat_time_ms: 0.0,
             bpm: 0.0,
+            threshold_ratio: DEFAULT_THRESHOLD_RATIO,
+        }
+    }
+
+    /// 0.0 (needs a strong peak) to 1.0 (reacts to small ones). The default,
+    /// 0.5, keeps the original 1.35x threshold; out-of-range or non-finite
+    /// values are clamped or ignored.
+    pub fn set_sensitivity(&mut self, sensitivity: f64) {
+        if sensitivity.is_finite() {
+            self.threshold_ratio = 1.55 - 0.4 * sensitivity.clamp(0.0, 1.0);
         }
     }
 
@@ -44,7 +61,7 @@ impl BeatDetector {
         let avg = self.avg();
 
         let mut beat_triggered = false;
-        if energy > avg * 1.35 && avg > 8.0 && now_ms - self.last_beat_time_ms > 300.0 {
+        if energy > avg * self.threshold_ratio && avg > 8.0 && now_ms - self.last_beat_time_ms > 300.0 {
             let interval = now_ms - self.last_beat_time_ms;
             self.last_beat_time_ms = now_ms;
             beat_triggered = true;
@@ -76,6 +93,40 @@ impl Default for BeatDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A steady bed of energy 20 with a 26 spike (1.3x the average): a beat
+    /// only for a detector tuned more sensitive than the default 1.35x.
+    fn beats_for_modest_spikes(sensitivity: f64) -> usize {
+        let mut d = BeatDetector::new();
+        d.set_sensitivity(sensitivity);
+        let mut beats = 0;
+        for i in 0..400 {
+            let energy = if i % 40 == 39 { 26.0 } else { 20.0 };
+            // The first 43 samples fill the rolling window, so only count after that.
+            if d.process_sample(energy, i as f64 * 20.0).beat_triggered && i >= 100 {
+                beats += 1;
+            }
+        }
+        beats
+    }
+
+    #[test]
+    fn higher_sensitivity_catches_beats_the_default_misses() {
+        assert_eq!(beats_for_modest_spikes(DEFAULT_SENSITIVITY), 0);
+        assert!(beats_for_modest_spikes(1.0) > 0);
+        assert_eq!(beats_for_modest_spikes(0.0), 0);
+    }
+
+    #[test]
+    fn sensitivity_ignores_non_finite_values_and_clamps_the_range() {
+        let mut d = BeatDetector::new();
+        d.set_sensitivity(f64::NAN);
+        assert_eq!(d.threshold_ratio, DEFAULT_THRESHOLD_RATIO);
+        d.set_sensitivity(50.0);
+        assert!((d.threshold_ratio - 1.15).abs() < 1e-9);
+        d.set_sensitivity(-3.0);
+        assert!((d.threshold_ratio - 1.55).abs() < 1e-9);
+    }
 
     mod rolling_average_convergence {
         use super::*;

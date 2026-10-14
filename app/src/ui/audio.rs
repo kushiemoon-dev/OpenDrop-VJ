@@ -1,4 +1,5 @@
-//! Audio panel: input-device dropdown with hot-swap + VU meter.
+//! Audio panel: input-device dropdown with hot-swap, input gain, automatic
+//! gain control, beat sensitivity and a VU meter.
 //!
 //! Takes individual fields, not `&mut AppState`, same reasoning as the
 //! other panels (`ui::decks`, `ui::playlists`, `ui::preset_browser`): the
@@ -17,11 +18,20 @@ use opendrop_audio::AudioHandle;
 
 use crate::ui::widgets;
 
+/// The input-level settings this panel edits. Gain and AGC are pushed to the
+/// capture thread here; the beat sensitivity is read back by the frame loop.
+pub struct LevelSettings<'a> {
+    pub gain_db: &'a mut f32,
+    pub agc: &'a mut bool,
+    pub beat_sensitivity: &'a mut f64,
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     audio: &AudioHandle,
     input_devices: &Vec<String>,
     selected_input_device: &mut Option<String>,
+    levels: LevelSettings<'_>,
     last_vu_level: f64,
 ) {
     ui.horizontal(|ui| {
@@ -41,6 +51,23 @@ pub fn show(
                     }
                 });
         }
+    });
+
+    ui.separator();
+
+    ui.horizontal(|ui| {
+        ui.label("Input gain");
+        let (min, max) = opendrop_audio::gain::GAIN_DB_RANGE;
+        if ui.add(egui::Slider::new(levels.gain_db, min..=max).suffix(" dB")).changed() {
+            audio.set_gain_db(*levels.gain_db);
+        }
+    });
+    if ui.checkbox(levels.agc, "Auto gain (levels quiet and loud sources)").changed() {
+        audio.set_agc(*levels.agc);
+    }
+    ui.horizontal(|ui| {
+        ui.label("Beat sensitivity");
+        ui.add(egui::Slider::new(levels.beat_sensitivity, 0.0..=1.0));
     });
 
     ui.separator();

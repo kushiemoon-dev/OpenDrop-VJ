@@ -6,7 +6,7 @@
 
 </div>
 
-A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC/Ableton Link control, NDI in/out, Spout in/out on Windows, and a phone remote control, packaged as a native Rust/egui desktop app.
+A 4-deck Milkdrop VJ instrument built on [libprojectM](https://github.com/projectM-visualizer/projectm): GPU compositor, MIDI/OSC (in and out)/Ableton Link control, NDI in/out, Spout in/out on Windows, and a phone remote control, packaged as a native Rust/egui desktop app.
 
 This is the native rewrite. The previous Electron/SvelteKit web app lives on the `legacy-web` branch.
 

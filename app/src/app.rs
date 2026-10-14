@@ -11,6 +11,7 @@ use crate::frame::composite::composite_frame;
 use crate::frame::deck_video_sync::sync_deck_video;
 use crate::frame::decks::render_decks;
 use crate::frame::drain::drain_inputs;
+use crate::frame::osc_feedback::publish_osc_state;
 use crate::frame::outputs::feed_outputs;
 use crate::frame::present::present_frame;
 use crate::frame::sources::upload_source_frames;
@@ -147,6 +148,8 @@ impl ApplicationHandler for App {
 
             present_frame(state, now, lowest_active);
 
+            publish_osc_state(state);
+
             session::autosave_if_due(state, now);
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(state.next_frame_at));
@@ -167,6 +170,8 @@ impl ApplicationHandler for App {
             ui_config.output_monitor = state.selected_output_monitor.clone();
             ui_config.audio_input_device = state.selected_input_device.clone();
             ui_config.osc_port = state.osc_port;
+            ui_config.osc_out_host = state.osc_out_host.clone();
+            ui_config.osc_out_port = state.osc_out_port;
             ui_config.rkbx_link_port = state.rkbx_link_port;
             ui_config.obs_host = state.obs_host.clone();
             ui_config.obs_port = state.obs_port;

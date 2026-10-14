@@ -8,7 +8,7 @@
 use crate::commands::CommandId;
 use crate::rng::Xorshift64;
 
-const LFO_SLOTS: usize = 4;
+pub const LFO_SLOTS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LfoShape {

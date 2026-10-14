@@ -386,6 +386,12 @@ pub(crate) struct AppState {
     /// persisted; matches `preset_search_query`'s own bootstrap-only reset
     /// (`:2265`, always `String::new()`): always starts `false` on launch.
     pub(crate) favorites_only: bool,
+    /// Personal tags and notes, searched by the preset browser.
+    pub(crate) preset_annotations: opendrop_core::preset_annotations::PresetAnnotations,
+    /// Presets played recently, newest first.
+    pub(crate) preset_history: opendrop_core::preset_annotations::PresetHistory,
+    /// Text being typed in the Preset notes panel.
+    pub(crate) annotation_edit: crate::ui::preset_notes::AnnotationEdit,
     /// Presets whose thumbnail render failed once already. Both
     /// `thumbnails::pump_thumbnail_queue` (writer) and the preset-browser
     /// panel (reader) consult it, so a failure can't turn into a per-tick

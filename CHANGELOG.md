@@ -6,6 +6,7 @@
 - The show is saved automatically (on exit and every 30 seconds) and restored at the next launch: mix and crossfader, colour and composite settings, snapshots, timeline, overlays, playlists, strobe, LFO routing, and the preset on each deck. A "Forget saved session" button in the Share panel starts the next launch clean
 - Audio panel: input gain (-12 to +24 dB), an automatic gain control for quiet or loud sources, and an adjustable beat detection sensitivity
 - Spout output on Windows: the composite and each deck can be shared as Spout senders ("OpenDrop", "OpenDrop Deck N") for Resolume, OBS and other receivers. A Spout sender from another application can also be received and composited as a layer
+- Preset notes panel: personal tags and a note per preset, searched by the preset browser, and a list of recently played presets that reloads on click
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
 
 ### Fixes

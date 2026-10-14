@@ -22,6 +22,7 @@ pub mod overlays;
 pub mod output;
 pub mod playlists;
 pub mod preset_browser;
+pub mod preset_notes;
 pub mod quality;
 pub mod qvar;
 pub mod remote;

@@ -86,6 +86,7 @@ pub(crate) fn drain_inputs(state: &mut AppState) {
                             state.preset_errors.insert(slot, e);
                         } else {
                             state.preset_errors.remove(&slot);
+                            state.preset_history.record(&name);
                             state.deck_preset_names[slot] = name;
                             // A slot in video mode switches back to preset mode the moment a
                             // preset actually lands on it.

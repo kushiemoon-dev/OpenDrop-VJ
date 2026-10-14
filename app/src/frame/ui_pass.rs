@@ -56,6 +56,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         preset_search_cache,
         favorite_presets,
         favorites_only,
+        preset_annotations,
+        preset_history,
+        annotation_edit,
         thumb_queue,
         thumbnail_textures,
         failed_thumbnails,
@@ -171,6 +174,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         load_request: &mut preset_load_request,
         favorite_presets,
         favorites_only,
+        preset_annotations,
+        preset_history,
+        annotation_edit,
     };
     let mut sources_ctx = ui::ctx::SourcesCtx {
         audio,

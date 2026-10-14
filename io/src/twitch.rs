@@ -50,8 +50,7 @@ use crate::secrets;
 pub struct TwitchSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (no OAuth token registered, or a
-    /// keyring lookup failure). AC-12:
-    /// this used to be an `eprintln!` only, invisible to a GUI user.
+    /// keyring lookup failure). This used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.
     pub last_error: Option<String>,
@@ -202,7 +201,7 @@ async fn async_run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<Twi
                         }
                     }
                     Err(e) => {
-                        // AC-12: this
+                        // This
                         // refusal used to be an `eprintln!` only, invisible
                         // to a GUI user: now also surfaced via
                         // `TwitchSnapshot::last_error`.

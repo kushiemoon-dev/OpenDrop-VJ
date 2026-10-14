@@ -112,8 +112,7 @@ const DISCOVERY_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ap
 pub struct KickSnapshot {
     pub connected: bool,
     /// Set when `Connect` is refused (missing bearer/xsrf/cookies, or a
-    /// keyring lookup failure). AC-12:
-    /// this used to be an `eprintln!` only, invisible to a GUI user.
+    /// keyring lookup failure). This used to be an `eprintln!` only, invisible to a GUI user.
     /// Rendered in the Streaming panel. Cleared by a subsequent successful
     /// `Connect` or by `Disconnect`.
     pub last_error: Option<String>,
@@ -247,7 +246,7 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                         }
                     },
                     Err(e) => {
-                        // AC-12: this
+                        // This
                         // refusal used to be an `eprintln!` only, invisible
                         // to a GUI user: now also surfaced via
                         // `KickSnapshot::last_error`.

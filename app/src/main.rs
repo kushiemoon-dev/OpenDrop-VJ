@@ -25,7 +25,7 @@ pub(crate) use panel::Panel;
 use bootstrap::{bootstrap, WindowSlot};
 use state::{App, AppState, InvisibleMode};
 
-/// ponytail: paced off the control window's monitor only, read once at
+/// Known limit: paced off the control window's monitor only, read once at
 /// bootstrap. A VJ setup can have control and output on different-refresh
 /// monitors; revisit if that ever causes visible judder on the output side.
 const FALLBACK_REFRESH_MILLIHERTZ: u32 = 60_000;

@@ -47,7 +47,7 @@ use crate::ui::preset_browser::SearchCache;
 use crate::{InvisibleMode, Panel};
 
 /// Nav chrome: which panel is active, the Stage toggle, and the status
-/// bar's frame-timing readout (Step 10). The mini-transport (crossfader,
+/// bar's frame-timing readout. The mini-transport (crossfader,
 /// BPM, tap) stays out
 /// of this struct on purpose: it lives on `Show` (`PerformCtx::show`, the
 /// single owner of that business object; see this module's doc comment),
@@ -75,7 +75,7 @@ pub(crate) struct ShellCtx<'a> {
     pub(crate) last_wall_ms: Option<f64>,
     /// Whether the Stage bottom bar's preset drawer (`Panel::bottom("od_
     /// presets_drawer").show_collapsible`) is open, Stage-mode-only UI
-    /// state (Step 11), toggled by a `ghost_button` in `status_bar_stage`,
+    /// state, toggled by a `ghost_button` in `status_bar_stage`,
     /// not by `stage_mode` itself.
     pub(crate) presets_drawer_open: &'a mut bool,
 }

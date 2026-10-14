@@ -167,10 +167,10 @@ fn editor(ui: &mut egui::Ui, show: &mut Show, id: &str, index: usize) {
             }
         });
         // Honest about the vendored font set: `app/assets/fonts/` carries
-        // Inter and JetBrains Mono only (Phase 7 Step 2), so three of the
+        // Inter and JetBrains Mono only so three of the
         // five families in the ported `FontFamily` enum have no face of
         // their own to render with. Bundling a serif/display/comic face is
-        // a vendoring + licensing decision, not this step's call.
+        // a vendoring + licensing decision.
         widgets::micro_label(ui, "Serif, Impact, and Comic all render with the Sans font (no dedicated face bundled).");
 
         widgets::micro_label(ui, "Color");

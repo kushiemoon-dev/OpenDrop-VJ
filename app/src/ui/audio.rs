@@ -7,10 +7,10 @@
 //! of just the fields it touches.
 //!
 //! `input_devices` is enumerated once at bootstrap via `opendrop_audio::
-//! list_input_devices()` (Step 8) and cached on `AppState`. This panel
+//! list_input_devices()` and cached on `AppState`. This panel
 //! never calls it itself, so picking a device never re-scans the device
 //! list. `last_vu_level` is `opendrop_audio::analysis::vu_level`, computed
-//! once per tick by `about_to_wait` (Step 18); this panel only reads it,
+//! once per tick by the show tick (`frame::tick`); this panel only reads it,
 //! never runs a second `vu_level` pass over the same PCM.
 
 use opendrop_audio::AudioHandle;
@@ -47,7 +47,7 @@ pub fn show(
 
     ui.horizontal(|ui| {
         ui.label("VU");
-        // `vu_meter` (Step 8, `widgets.rs`) clamps to [0, 1] and colors
+        // `vu_meter` (`widgets.rs`) clamps to [0, 1] and colors
         // itself internally, so no clamp is needed here. `last_vu_level`
         // is read as-is, not recomputed. It sizes itself to
         // `ui.available_width()`, which is the full-width usage it was

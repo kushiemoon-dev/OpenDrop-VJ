@@ -1,8 +1,7 @@
 //! Pure font data: embeds the 2
-//! variable-weight fonts vendored at Step 2 and registers 6 weight-alias
+//! vendored variable-weight fonts and registers 6 weight-alias
 //! `FontFamily::Name`s over them, plus the `text_styles` size map driven by
-//! `TypeScale` (Step 3). Nothing here is applied to a `Context` yet (that
-//! wiring starts at Step 6).
+//! `TypeScale`. Nothing here touches a `Context`; bootstrap applies it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -83,19 +82,18 @@ pub fn font_definitions() -> FontDefinitions {
     defs
 }
 
-/// Size + family map for every `TextStyle` known at this step: egui's 5
+/// Size + family map for every `TextStyle` the app uses: egui's 5
 /// built-ins (`Heading`/`Body`/`Button`/`Small`/`Monospace`) plus the 5
-/// custom `TextStyle::Name`s that `widgets.rs` (Step 8) will reference
+/// custom `TextStyle::Name`s that `widgets.rs` references
 /// (`Display`/`Section`/`Strong`/`Micro`/`Numeric`). Sizes come from
-/// `TypeScale` (Step 3); families follow the app's mockups
-/// (`.superpowers/brainstorm/4045861-1788117215/content/{shell,compare,decks-v2}.html`):
+/// `TypeScale`; families follow the app's design mockups:
 /// prose stays on Inter (`ui*`), chrome/labels/numeric readouts use
 /// JetBrains Mono (`mono`) for alignment and a technical feel.
 ///
-/// Lives here rather than in `visuals::style()` (Step 4) because `TypeScale`
-/// (Step 3) documents its 10 fields as "Point sizes for the 10 `TextStyle`
-/// names Step 5's `text_styles` maps" and this keeps every font-related
-/// decision in one file, not split across two.
+/// Lives here rather than in `visuals::style()` because `TypeScale`
+/// documents its 10 fields as the point sizes of the 10 `TextStyle`
+/// names this function maps, and this keeps every font-related decision in
+/// one file, not split across two.
 pub fn text_styles(theme: &Theme) -> BTreeMap<TextStyle, FontId> {
     let ts = theme.type_scale;
     let ui = |size: f32| FontId::new(size, FontFamily::Name(FAMILY_UI.into()));
@@ -209,8 +207,8 @@ mod tests {
     // render those glyphs today via those chains. Measured, not assumed:
     // neither glyph is fully covered by egui's builtin fonts as of egui
     // 0.36.1 (`⇄` isn't in any of them; `🔒` is only in `Monospace`'s
-    // chain, via `Hack`); a pre-existing gap Step 15 owns, not one this
-    // step introduces or is responsible for closing.
+    // chain, via `Hack`); a known gap in egui's builtin fonts, not one this
+    // module is responsible for closing.
 
     #[test]
     fn fallback_queue_does_not_regress_builtin_glyph_coverage() {

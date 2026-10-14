@@ -8,7 +8,7 @@
 //!
 //! Ported from an earlier prototype's `check_single_preset` (a
 //! pattern already proven there), with two differences: `opendrop_engine::
-//! ffi` instead of the spike's local `mod ffi`, and a smaller resolution:
+//! ffi` instead of a local `mod ffi`, and a smaller resolution:
 //! a validation check has no visual-quality requirement. The EGL bootstrap
 //! itself lives in `egl_headless`, shared with the `--render-thumbnail`
 //! child.
@@ -74,7 +74,7 @@ pub enum PreflightVerdict {
 /// `about_to_wait`'s non-blocking drain.
 pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc::Sender<(usize, String, PreflightVerdict)>) {
     std::thread::spawn(move || {
-        // Minor #11: fallible, not `.expect()`. A panic here would drop
+        // Fallible, not `.expect()`. A panic here would drop
         // `result_tx` without ever sending on it, leaving this slot stuck
         // in `pending_validations` forever (the UI shows "Validating…"
         // indefinitely, since nothing else ever clears it).
@@ -106,7 +106,7 @@ pub fn spawn_preflight(path: PathBuf, slot: usize, name: String, result_tx: mpsc
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(e) => {
-                    // Minor #10: still attempt to reap the child on this
+                    // Still attempt to reap the child on this
                     // error path too, same as the timeout branch above,
                     // instead of leaking it.
                     let _ = child.kill();

@@ -1,6 +1,6 @@
 //! `ease_out_kushie`: pure approximation of CSS `cubic-bezier(0.16, 1, 0.3,
 //! 1)`, the "ease-out-expo"-ish curve used for the redesign's hover/active
-//! transitions (`animate_bool_with_time_and_easing`, Step 22). Solved via
+//! transitions (`animate_bool_with_time_and_easing`). Solved via
 //! Newton-Raphson on the bezier's x-component rather than a closed form:
 //! a cubic bezier's `y` isn't an explicit function of `x`, only of the
 //! shared parameter `u`, so `x(u)` must be inverted numerically first.

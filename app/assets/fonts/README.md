@@ -1,6 +1,6 @@
 # Variable Weight Fonts
 
-This directory contains vendored variable-weight fonts for OpenDrop-Native's UI redesign (Phase 7).
+This directory contains vendored variable-weight fonts for OpenDrop-Native's UI.
 
 Both fonts are distributed under the SIL Open Font License v1.1 (OFL 1.1) with no Reserved Font Names, permitting free use, modification, and redistribution.
 
@@ -54,4 +54,4 @@ Both fonts are distributed under the SIL Open Font License v1.1. See `Inter-OFL.
 
 ## Integration
 
-These fonts are vendored for use in the OpenDrop-Native UI. Reference via `include_bytes!()` macro when implementing custom font loading in Rust (planned for Phase 7, Step 5+).
+These fonts are vendored for use in the OpenDrop-Native UI. Reference via `include_bytes!()` macro for custom font loading in Rust.

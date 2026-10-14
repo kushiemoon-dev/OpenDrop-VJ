@@ -8,9 +8,8 @@
 //!    in GL's bottom-left convention. Nothing in this pipeline flips rows.
 //!  - 14 uniforms, not 13 as first counted.
 //!
-//! compositor.ts's 5th layer, the video background, was out of scope for
-//! Phase 2 (no video decode path existed then) and arrived later
-//! as [`Compositor::composite_video_layer`],
+//! compositor.ts's 5th layer, the video background, was added after
+//! the deck layers as [`Compositor::composite_video_layer`],
 //! which reuses the deck shader above rather than adding a program of its
 //! own, exactly as the TS source does. Its frames come from a CPU-side
 //! decoder, so they *would* need the dropped row flip; that flip happens

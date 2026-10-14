@@ -47,7 +47,7 @@ pub struct ObsSnapshot {
     /// Empty while not connected.
     pub scenes: Vec<String>,
     /// Set when the OBS password keyring lookup fails during `Connect`
-    /// (AC-12: this used to be an `eprintln!` only, invisible to a GUI
+    /// (this used to be an `eprintln!` only, invisible to a GUI
     /// user). Rendered in the
     /// Streaming panel. Cleared by a subsequent successful `Connect` or by
     /// `Disconnect`; carried through this same `Connect` attempt's outcome
@@ -167,7 +167,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                     old.disconnect().await;
                 }
                 let secret_result = secrets::get_secret(secrets::OBS_PASSWORD);
-                // Captured (not just logged) per AC-12: a keyring lookup
+                // Captured (not just logged): a keyring lookup
                 // failure used to be an `eprintln!` only, invisible to a
                 // GUI user launched from a desktop environment. Still
                 // lenient (the connect attempt below proceeds without a password either way), but now

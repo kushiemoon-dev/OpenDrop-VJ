@@ -97,7 +97,7 @@ unsafe extern "C" fn on_preset_load_failed(_filename: *const c_char, message: *c
 impl Deck {
     /// Loads a preset straight from its file, unpatched.
     ///
-    /// **This has no callers in the app any more**: since Step 8, every live
+    /// **This has no callers in the app any more**: every live
     /// load goes through [`Deck::load_preset_patched`], because the
     /// `set_param` side channel is sticky instance state that corrupts any
     /// unpatched preset loaded onto a deck that has ever been modulated (see
@@ -133,7 +133,7 @@ impl Deck {
     /// output of `preset_patch::patch_preset`. Same context rule as
     /// `load_preset`, this deck's context must be current.
     ///
-    /// **This bypasses Phase 4's preflight validation.** Preflight validates
+    /// **This bypasses the preflight validation.** Preflight validates
     /// a preset *file* in an isolated child process before it can reach a
     /// live deck, but text arriving here has been through `patch_preset`
     /// since it was read, so what actually gets compiled was never seen by
@@ -157,15 +157,14 @@ impl Deck {
     /// passage point for loading a preset that [`Deck::set_param`] will
     /// modulate.
     ///
-    /// **Why every load on a modulated deck must come through here** (spike
-    /// report §5.2): the word written by `set_param` is projectM *instance*
+    /// **Why every load on a modulated deck must come through here**: the word written by `set_param` is projectM *instance*
     /// state that survives preset loads, so an unpatched preset loaded onto
     /// a deck that has ever been modulated reads a ~10^7 code word as its
     /// own `fps` and its framerate-dependent physics is destroyed, with
     /// nothing to restore it. Routing every load through this function makes
     /// that unrepresentable rather than merely documented.
     ///
-    /// Preflight (Phase 4) still validates the file, unpatched, exactly as
+    /// Preflight still validates the file, unpatched, exactly as
     /// before. See [`Deck::load_preset_data`] on why the patch step itself
     /// is treated as trusted.
     ///

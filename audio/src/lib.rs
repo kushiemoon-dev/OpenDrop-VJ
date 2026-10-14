@@ -5,9 +5,9 @@ pub mod device;
 pub use analysis::AnalyserConfig;
 
 /// Latest captured PCM chunk (interleaved stereo, always even length) + the
-/// latest low-frequency energy computed by that same FFT block (AC-5: one
-/// FFT feeds both). `energy_byte` isn't consumed yet in Phase 3 (wiring to
-/// `core::beat_detector` is Phase 4+) but must be published now anyway (AC-7).
+/// latest low-frequency energy computed by that same FFT block (one
+/// FFT feeds both). `energy_byte` is published with every chunk so
+/// `core::beat_detector` can consume it.
 pub struct AudioSnapshot {
     pub pcm: Vec<f32>,
     pub energy_byte: f64,
@@ -15,7 +15,7 @@ pub struct AudioSnapshot {
 
 /// Silent (zero-filled) stereo buffer until a real block has been captured,
 /// or forever if capture fails at startup: never a crash, never a fallback
-/// to `synth_audio_chunk` (AC-4).
+/// to `synth_audio_chunk`.
 const SILENT_PLACEHOLDER_FRAMES: usize = 480;
 /// `pub(crate)`, not private: also published by `capture::run` on a failed
 /// device hot-swap, not just here at
@@ -30,7 +30,7 @@ pub struct AudioHandle {
 }
 
 impl AudioHandle {
-    /// Never blocks: an atomic load of the current Arc (AC-7).
+    /// Never blocks: an atomic load of the current Arc.
     pub fn latest(&self) -> std::sync::Arc<AudioSnapshot> {
         self.snapshot.load_full()
     }
@@ -46,8 +46,7 @@ impl AudioHandle {
 /// Spawns the dedicated capture thread and returns immediately. Infallible
 /// by construction: any failure (no device, open refused) is logged once
 /// internally and leaves `AudioHandle::latest()` returning silence
-/// indefinitely, never a panic, never a `Result` for the caller to handle
-/// (AC-4).
+/// indefinitely, never a panic, never a `Result` for the caller to handle.
 pub fn spawn_capture() -> AudioHandle {
     let snapshot = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(silent_snapshot()));
     let (device_tx, device_rx) = std::sync::mpsc::channel();

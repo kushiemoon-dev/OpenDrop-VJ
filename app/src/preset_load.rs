@@ -286,7 +286,7 @@ mod tests {
         }
     }
 
-    /// Steps 8 and 9: the per-frame push loop's scheduling half: which
+    /// The per-frame push loop's scheduling half: which
     /// single parameter gets the one word this deck's side channel carries
     /// this frame, across the Time multipliers and the Qvar watches that
     /// share it.

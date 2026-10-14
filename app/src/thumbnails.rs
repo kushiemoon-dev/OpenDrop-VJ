@@ -224,7 +224,7 @@ pub fn pump_thumbnail_queue(
             }
             RenderPoll::TimedOut => {
                 failed.insert(pending.job.name.clone());
-                // Minor #12: best-effort cleanup of the temp file the
+                // Best-effort cleanup of the temp file the
                 // child may have been mid-write on when SIGKILLed:
                 // `write_atomically` names it `<hash>.tmp<pid>` next to
                 // the final `.rgba` path, so both are derivable here. May

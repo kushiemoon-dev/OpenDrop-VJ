@@ -22,10 +22,10 @@
 //! Unlike Color and Composite, these values are not consumed by this app's
 //! own GPU compositor: they are written into each deck's *running projectM
 //! preset*. Values ride the one-word-per-deck-per-frame side channel shared
-//! with the Time panel (`main.rs`'s `next_param_to_push`); adding or
+//! with the Time panel (`preset_load::next_param_to_push`); adding or
 //! removing a watch instead re-patches and reloads that deck's preset, which
 //! restarts its animation. See `engine::qvar_patch` for why that asymmetry
-//! exists and `.planning/TIME-QVAR-SPIKE.md` for the channel itself.
+//! exists and the channel itself.
 
 use crate::ui::widgets;
 use opendrop_core::q_vars::{

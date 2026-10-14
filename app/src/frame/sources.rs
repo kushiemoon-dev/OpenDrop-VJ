@@ -1,7 +1,7 @@
 use glow::HasContext;
 use glutin::prelude::*;
 use std::sync::mpsc;
-use crate::deck_video::{create_frame_texture, create_ndi_in_texture, desired_video_input};
+use crate::deck_video::{create_frame_texture, create_ndi_in_texture, desired_video_input, upload_rgba_frame};
 use crate::AppState;
 
 /// Drains `rx` completely, returning only the most recently received item
@@ -75,6 +75,12 @@ pub(crate) fn upload_source_frames(state: &mut AppState, ndi_active: bool) {
         } else {
             create_ndi_in_texture(&state.gl, &frame, &mut state.ndi_in_texture);
         }
+    }
+
+    // Spout input: the newest frame goes into its own texture, drawn as a
+    // layer next to the NDI one.
+    if let Some(frame) = drain_to_latest(&state.spout_in.frame_rx) {
+        upload_rgba_frame(&state.gl, frame.width, frame.height, &frame.data, &mut state.spout_in_texture);
     }
 
     // Video layer, the decode half. Two steps, in this

@@ -325,6 +325,7 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
             nav_item(ui, shell.active_panel, Panel::Audio, "Audio", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Midi, "MIDI", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::NdiIn, "NDI In", &mut active_rect);
+            nav_item(ui, shell.active_panel, Panel::SpoutIn, "Spout In", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Osc, "OSC", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::RkbxLink, "rkbx_link", &mut active_rect);
             nav_item(ui, shell.active_panel, Panel::Overlays, "Overlays", &mut active_rect);

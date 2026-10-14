@@ -30,6 +30,44 @@ pub(crate) fn create_ndi_in_texture(
     create_frame_texture(gl, frame.width, frame.height, &frame.data, slot);
 }
 
+/// Puts an RGBA frame into `slot`'s texture: updated in place when the size
+/// is unchanged, recreated when it differs (or on the first frame). A frame
+/// whose length does not match its size is dropped.
+pub(crate) fn upload_rgba_frame(
+    gl: &glow::Context,
+    width: u32,
+    height: u32,
+    data: &[u8],
+    slot: &mut Option<(glow::NativeTexture, u32, u32)>,
+) {
+    if data.len() != width as usize * height as usize * 4 {
+        eprintln!("[app] dropping incoming frame with unexpected size: {} bytes for {width}x{height}", data.len());
+        return;
+    }
+    if let Some((tex, w, h)) = *slot {
+        if (w, h) == (width, height) {
+            unsafe {
+                gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+                gl.tex_sub_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    0,
+                    0,
+                    width as i32,
+                    height as i32,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(Some(data)),
+                );
+            }
+            return;
+        }
+        unsafe { gl.delete_texture(tex) };
+        *slot = None;
+    }
+    create_frame_texture(gl, width, height, data, slot);
+}
+
 /// The shared body of the above: allocate an RGBA8 texture of exactly
 /// `width`x`height`, upload `data` into it, and record it (with its size)
 /// in `slot`. It is factored out of `create_ndi_in_texture` so the

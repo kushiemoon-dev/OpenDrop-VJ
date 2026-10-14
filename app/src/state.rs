@@ -101,6 +101,12 @@ pub(crate) struct AppState {
     /// toggle state, not `NdiSnapshot::receive_active` (which reflects
     /// whether the receiver actually started).
     pub(crate) ndi_in_selected_source: Option<opendrop_io::ndi::NdiSource>,
+    /// Spout input (Windows): the receive thread, the texture its frames are
+    /// uploaded into, and the sender picked in the panel (`None` follows the
+    /// active sender).
+    pub(crate) spout_in: opendrop_io::spout_in::SpoutInHandle,
+    pub(crate) spout_in_texture: Option<(glow::NativeTexture, u32, u32)>,
+    pub(crate) spout_in_selected: Option<String>,
     /// Whether `NdiControl::StartDiscovery` is the last message sent to the
     /// NDI thread (mirrors `ndi_composite_active`'s "own toggle state, not
     /// the thread's" convention): discovery only runs while the NDI-in

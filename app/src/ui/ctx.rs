@@ -138,6 +138,8 @@ pub(crate) struct SourcesCtx<'a> {
     pub(crate) midi: &'a opendrop_io::midi::MidiHandle,
     pub(crate) midi_learning: &'a mut Option<(CommandId, Option<MidiTriggerKey>)>,
     pub(crate) ndi_in_selected_source: &'a mut Option<opendrop_io::ndi::NdiSource>,
+    pub(crate) spout_in: &'a opendrop_io::spout_in::SpoutInHandle,
+    pub(crate) spout_in_selected: &'a mut Option<String>,
     pub(crate) osc: &'a opendrop_io::osc::OscHandle,
     pub(crate) osc_port: &'a mut u16,
     pub(crate) rkbx_link: &'a opendrop_io::rkbx_link::RkbxLinkHandle,

@@ -13,6 +13,7 @@ pub mod midi;
 pub mod ndi;
 pub mod obs;
 pub mod osc;
+pub mod osc_out;
 pub mod remote_ws;
 pub mod rkbx_link;
 pub mod secrets;

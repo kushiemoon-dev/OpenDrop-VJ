@@ -40,3 +40,7 @@ how the already-installed package is found by
 
 See commit `30ff1ab` ("build(windows): pin vcpkg projectm to 4.1.6 via
 overlay port") for the full history of why this pin exists.
+
+## Package manager manifests
+
+`packaging/scoop/` and `packaging/winget/` hold templates for a Scoop manifest and the three winget manifests of the portable zip. `packaging/render-manifests.sh <version>` downloads the published release zip, hashes it and fills them in, writing plain files under `dist-manifests/`. It only runs once the release assets exist and it submits nothing: the Scoop file can be committed or used as a bucket entry, and the winget folder is what a pull request to `microsoft/winget-pkgs` carries.

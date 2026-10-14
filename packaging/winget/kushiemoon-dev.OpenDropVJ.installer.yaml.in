@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: kushiemoon-dev.OpenDropVJ
+PackageVersion: @VERSION@
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: OpenDrop-Native-@VERSION@-windows-x64\opendrop-app.exe
+    PortableCommandAlias: opendrop-vj
+Commands:
+  - opendrop-vj
+ReleaseDate: @RELEASE_DATE@
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v@VERSION@/OpenDrop-Native-@VERSION@-windows-x64.zip
+    InstallerSha256: @SHA256_UPPER@
+ManifestType: installer
+ManifestVersion: 1.6.0

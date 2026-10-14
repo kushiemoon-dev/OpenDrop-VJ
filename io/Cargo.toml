@@ -48,6 +48,11 @@ tower-http = { version = "0.7", features = ["fs"] }
 # auth/rate-limit behavior, chosen over the generic `irc` crate.
 twitch-irc = "6.1"
 
+# Spout output (`io::spout`): Windows only. The crate vendors the Spout2 SDK
+# (BSD-2-Clause) and needs the MSVC toolchain; elsewhere it compiles to a stub.
+[target.'cfg(windows)'.dependencies]
+spout2-rs = { version = "0.1.1", default-features = false, features = ["dx"] }
+
 [features]
 # Ableton Link support (`io::link`). OFF by default: enabling it pulls
 # in `rusty_link`, which wraps a GPL-2.0-or-later C++ library; the

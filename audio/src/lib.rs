@@ -1,6 +1,7 @@
 pub mod analysis;
 mod capture;
 pub mod device;
+pub mod gain;
 
 pub use analysis::AnalyserConfig;
 
@@ -27,6 +28,7 @@ pub(crate) fn silent_snapshot() -> AudioSnapshot {
 pub struct AudioHandle {
     snapshot: std::sync::Arc<arc_swap::ArcSwap<AudioSnapshot>>,
     device_tx: std::sync::mpsc::Sender<String>,
+    gain: std::sync::Arc<gain::GainSettings>,
 }
 
 impl AudioHandle {
@@ -41,6 +43,16 @@ impl AudioHandle {
     pub fn set_device(&self, name: String) {
         let _ = self.device_tx.send(name);
     }
+
+    /// Input gain in dB, applied to the captured audio before analysis.
+    pub fn set_gain_db(&self, db: f32) {
+        self.gain.set_gain_db(db);
+    }
+
+    /// Automatic gain control on or off.
+    pub fn set_agc(&self, enabled: bool) {
+        self.gain.set_agc(enabled);
+    }
 }
 
 /// Spawns the dedicated capture thread and returns immediately. Infallible
@@ -50,8 +62,9 @@ impl AudioHandle {
 pub fn spawn_capture() -> AudioHandle {
     let snapshot = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(silent_snapshot()));
     let (device_tx, device_rx) = std::sync::mpsc::channel();
-    capture::spawn(snapshot.clone(), device_rx);
-    AudioHandle { snapshot, device_tx }
+    let gain = std::sync::Arc::new(gain::GainSettings::default());
+    capture::spawn(snapshot.clone(), device_rx, gain.clone());
+    AudioHandle { snapshot, device_tx, gain }
 }
 
 /// Lists the labels of every available input device, for UI device pickers.

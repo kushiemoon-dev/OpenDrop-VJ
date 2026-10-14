@@ -2,20 +2,21 @@
 //! and publishes each captured block's PCM + energy via `arc-swap`.
 
 use crate::analysis::{Analyser, AnalyserConfig};
+use crate::gain::{GainSettings, GainStage};
 use crate::AudioSnapshot;
 use arc_swap::ArcSwap;
 use cpal::Sample;
 use std::sync::Arc;
 
-pub(crate) fn spawn(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>) {
-    std::thread::spawn(move || run(snapshot, rx));
+pub(crate) fn spawn(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>, gain: Arc<GainSettings>) {
+    std::thread::spawn(move || run(snapshot, rx, gain));
 }
 
 /// Opens the given device and starts playback, keeping the returned
 /// `cpal::Stream` alive keeps the callback running on cpal's own internal
 /// thread. `None` on any failure (already logged internally).
-fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Option<cpal::Stream> {
-    match build_stream(device, snapshot) {
+fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>, gain: Arc<GainSettings>) -> Option<cpal::Stream> {
+    match build_stream(device, snapshot, gain) {
         Ok(stream) => {
             use cpal::traits::StreamTrait;
             if let Err(e) = stream.play() {
@@ -35,10 +36,10 @@ fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -
 /// set_device`) and reopens the stream on the named device each time one
 /// arrives, without restarting this thread. Exits when `rx` closes (the
 /// `AudioHandle`, and its `device_tx`, was dropped).
-fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>) {
+fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<String>, gain: Arc<GainSettings>) {
     let host = cpal::default_host();
     let mut current_stream = match crate::device::select_input_device(&host) {
-        Some(device) => open_and_play(&device, snapshot.clone()),
+        Some(device) => open_and_play(&device, snapshot.clone(), gain.clone()),
         None => {
             eprintln!("[audio] no input device available, visuals will not react to system audio");
             None
@@ -46,7 +47,7 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
     };
     while let Ok(name) = rx.recv() {
         drop(current_stream.take()); // Drop stops the old cpal stream before opening the new one
-        current_stream = crate::device::select_input_device_by_name(&host, &name).and_then(|d| open_and_play(&d, snapshot.clone()));
+        current_stream = crate::device::select_input_device_by_name(&host, &name).and_then(|d| open_and_play(&d, snapshot.clone(), gain.clone()));
         if current_stream.is_none() {
             // The old stream is already
             // dropped above, but without this `AudioHandle::latest()`
@@ -64,7 +65,7 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
     // rx.recv() returned Err: sender (AudioHandle) dropped, process shutting down.
 }
 
-fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) -> Result<cpal::Stream, String> {
+fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>, gain: Arc<GainSettings>) -> Result<cpal::Stream, String> {
     use cpal::traits::DeviceTrait;
     use cpal::SampleFormat;
     // On Windows `device` is an output device opened in loopback (see
@@ -77,14 +78,15 @@ fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) ->
     let supported = device.default_input_config().map_err(|e| e.to_string())?;
     let channels = supported.channels() as usize;
     let sample_format = supported.sample_format();
+    let sample_rate = supported.sample_rate();
     let config: cpal::StreamConfig = supported.into();
     let analyser = Analyser::new(AnalyserConfig::default());
     let err_fn = |e| eprintln!("[audio] stream error: {e}");
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_input_stream(config, on_block::<f32>(channels, analyser, snapshot), err_fn, None),
-        SampleFormat::I16 => device.build_input_stream(config, on_block::<i16>(channels, analyser, snapshot), err_fn, None),
-        SampleFormat::I32 => device.build_input_stream(config, on_block::<i32>(channels, analyser, snapshot), err_fn, None),
-        SampleFormat::I8 => device.build_input_stream(config, on_block::<i8>(channels, analyser, snapshot), err_fn, None),
+        SampleFormat::F32 => device.build_input_stream(config, on_block::<f32>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),
+        SampleFormat::I16 => device.build_input_stream(config, on_block::<i16>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),
+        SampleFormat::I32 => device.build_input_stream(config, on_block::<i32>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),
+        SampleFormat::I8 => device.build_input_stream(config, on_block::<i8>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),
         other => return Err(format!("unsupported sample format: {other}")),
     };
     stream.map_err(|e| e.to_string())
@@ -92,15 +94,19 @@ fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>) ->
 
 fn on_block<T>(
     channels: usize,
+    sample_rate: u32,
     mut analyser: Analyser,
     snapshot: Arc<ArcSwap<AudioSnapshot>>,
+    gain: Arc<GainSettings>,
 ) -> impl FnMut(&[T], &cpal::InputCallbackInfo) + Send + 'static
 where
     f32: cpal::FromSample<T>,
     T: cpal::Sample + Copy,
 {
+    let mut stage = GainStage::default();
     move |data: &[T], _| {
-        let as_f32: Vec<f32> = data.iter().map(|&s| f32::from_sample(s)).collect();
+        let mut as_f32: Vec<f32> = data.iter().map(|&s| f32::from_sample(s)).collect();
+        stage.process(&gain, &mut as_f32, sample_rate, channels);
         let mono = downmix_to_mono(&as_f32, channels);
         let energy_byte = analyser.process(&mono);
         let pcm = normalize_to_stereo(&as_f32, channels);

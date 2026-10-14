@@ -29,6 +29,7 @@ pub(crate) enum Panel {
     // renders `ui::ndi::show_out`.
     NdiIn,
     NdiOut,
+    SpoutOut,
     Osc,
     RkbxLink,
     Overlays,
@@ -69,6 +70,7 @@ impl From<config::PanelId> for Panel {
             config::PanelId::Midi => Panel::Midi,
             config::PanelId::NdiIn => Panel::NdiIn,
             config::PanelId::NdiOut => Panel::NdiOut,
+            config::PanelId::SpoutOut => Panel::SpoutOut,
             config::PanelId::Osc => Panel::Osc,
             config::PanelId::RkbxLink => Panel::RkbxLink,
             config::PanelId::Overlays => Panel::Overlays,
@@ -109,6 +111,7 @@ impl From<Panel> for config::PanelId {
             Panel::Midi => config::PanelId::Midi,
             Panel::NdiIn => config::PanelId::NdiIn,
             Panel::NdiOut => config::PanelId::NdiOut,
+            Panel::SpoutOut => config::PanelId::SpoutOut,
             Panel::Osc => config::PanelId::Osc,
             Panel::RkbxLink => config::PanelId::RkbxLink,
             Panel::Overlays => config::PanelId::Overlays,

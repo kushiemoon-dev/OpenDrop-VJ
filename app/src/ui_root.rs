@@ -205,6 +205,9 @@ pub(crate) fn ui_root(
             Panel::NdiOut => {
                 ui::ndi::show_out(ui, output.ndi, output.ndi_composite_active, output.ndi_deck_active);
             }
+            Panel::SpoutOut => {
+                ui::spout::show_out(ui, output.spout, output.spout_composite_active, output.spout_deck_active);
+            }
             Panel::Osc => {
                 ui::osc::show(ui, sources.osc, sources.osc_port);
             }

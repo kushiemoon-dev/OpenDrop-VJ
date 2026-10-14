@@ -84,6 +84,10 @@ pub(crate) struct AppState {
     /// Same as `ndi_composite_active`, one per deck: each element directly
     /// gates that deck's own readback.
     pub(crate) ndi_deck_active: [bool; deck::DECK_COUNT],
+    /// Spout output (Windows): the sender thread and the panel's toggles.
+    pub(crate) spout: opendrop_io::spout::SpoutHandle,
+    pub(crate) spout_composite_active: bool,
+    pub(crate) spout_deck_active: [bool; deck::DECK_COUNT],
     /// GL texture holding the most recently received NDI-in frame,
     /// composited as the topmost layer over the 4 decks. `None`
     /// until the first frame of an active receive arrives. Carries its own

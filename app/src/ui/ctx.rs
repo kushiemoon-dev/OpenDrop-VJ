@@ -209,6 +209,9 @@ pub(crate) struct OutputCtx<'a> {
     pub(crate) ndi: &'a opendrop_io::ndi::NdiHandle,
     pub(crate) ndi_composite_active: &'a mut bool,
     pub(crate) ndi_deck_active: &'a mut [bool; deck::DECK_COUNT],
+    pub(crate) spout: &'a opendrop_io::spout::SpoutHandle,
+    pub(crate) spout_composite_active: &'a mut bool,
+    pub(crate) spout_deck_active: &'a mut [bool; deck::DECK_COUNT],
 }
 
 /// Streaming panel state: OBS, Twitch, Kick, and the shared chat log.

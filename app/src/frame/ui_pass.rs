@@ -79,6 +79,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         ndi,
         ndi_composite_active,
         ndi_deck_active,
+        spout,
+        spout_composite_active,
+        spout_deck_active,
         ndi_in_selected_source,
         osc,
         osc_port,
@@ -219,6 +222,9 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         ndi,
         ndi_composite_active,
         ndi_deck_active,
+        spout,
+        spout_composite_active,
+        spout_deck_active,
     };
     let mut stream_ctx = ui::ctx::StreamCtx {
         obs,

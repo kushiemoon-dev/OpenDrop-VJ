@@ -102,8 +102,12 @@ jobs:
       - name: cargo build
         run: cargo build --workspace
 
+      # The headless GL tests (`gl_tests`) need a working OpenGL ES context,
+      # which GitHub's GPU-less Windows runners cannot provide through ANGLE
+      # (context creation is lost or shaders fail to compile). They run on
+      # the Linux job instead.
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace -- --skip gl_tests
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

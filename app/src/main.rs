@@ -14,6 +14,7 @@ mod panel;
 mod paths;
 mod preflight;
 mod preset_load;
+mod session;
 mod state;
 mod theme;
 mod thumbnail_child;

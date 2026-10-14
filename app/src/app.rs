@@ -17,7 +17,7 @@ use crate::frame::sources::upload_source_frames;
 use crate::frame::tick::{tick_show, TickOutput};
 use crate::fatal::{describe_panic, report_fatal};
 use crate::frame::ui_pass::run_ui_pass;
-use crate::{bootstrap, config, keymap, App};
+use crate::{bootstrap, config, keymap, session, App};
 
 fn fail_startup(event_loop: &ActiveEventLoop, detail: &str) {
     report_fatal("OpenDrop could not initialise graphics", detail);
@@ -34,7 +34,10 @@ impl ApplicationHandler for App {
         // both are turned into the same message box and a clean exit.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bootstrap(event_loop)));
         match outcome {
-            Ok(Ok(state)) => self.state = Some(state),
+            Ok(Ok(mut state)) => {
+                session::restore(&mut state);
+                self.state = Some(state);
+            }
             Ok(Err(detail)) => return fail_startup(event_loop, &detail),
             Err(payload) => return fail_startup(event_loop, &describe_panic(payload.as_ref())),
         }
@@ -143,6 +146,8 @@ impl ApplicationHandler for App {
             run_ui_pass(state, event_loop);
 
             present_frame(state, now, lowest_active);
+
+            session::autosave_if_due(state, now);
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(state.next_frame_at));
     }
@@ -173,6 +178,7 @@ impl ApplicationHandler for App {
                 if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.fps_override = state.fps_override;
+            session::save_now(state);
             ui_config.ui_scale = state.ui_scale;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);

@@ -500,6 +500,7 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         egui_glow,
         refresh_interval,
         fps_override,
+        last_session_save: Instant::now(),
         ui_scale,
         next_frame_at: Instant::now(),
         t0: Instant::now(),

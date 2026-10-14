@@ -228,6 +228,8 @@ pub(crate) struct AppState {
     pub(crate) refresh_interval: Duration,
     /// Frame-rate cap picked in the Quality panel; `None` follows the monitor.
     pub(crate) fps_override: Option<u32>,
+    /// When the session file was last written; drives the periodic save.
+    pub(crate) last_session_save: Instant,
     /// UI zoom factor applied to the control window's egui context.
     pub(crate) ui_scale: f32,
     pub(crate) next_frame_at: Instant,

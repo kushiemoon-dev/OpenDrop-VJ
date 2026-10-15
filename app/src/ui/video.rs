@@ -54,6 +54,13 @@ pub enum VideoPanelTarget {
     Deck(usize),
 }
 
+/// The user's track to clip links and the track rekordbox last reported, for
+/// the per-clip link button of a deck's clip list.
+pub struct TrackLinks<'a> {
+    pub current_track: Option<&'a str>,
+    pub links: &'a mut std::collections::BTreeMap<String, String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
@@ -69,6 +76,7 @@ pub fn show(
     target: &mut VideoPanelTarget,
     spout_senders: &[String],
     spout_pick: &mut Option<String>,
+    track_links: TrackLinks,
 ) {
     target_selector_row(ui, target);
     ui.separator();
@@ -112,7 +120,7 @@ pub fn show(
             crate::ui::ndi::attribution_footer(ui);
 
             ui.separator();
-            clip_library(ui, &mut show.video, clips, local_error, external_feed, false);
+            clip_library(ui, &mut show.video, clips, local_error, external_feed, false, None);
         }
         VideoPanelTarget::Deck(slot) => {
             ui.heading(format!("Deck {slot} video ({})", clips.len()));
@@ -123,7 +131,7 @@ pub fn show(
             ui.separator();
             spout_row(ui, video, spout_senders, spout_pick);
             ui.separator();
-            clip_library(ui, video, clips, local_error, external_feed, true);
+            clip_library(ui, video, clips, local_error, external_feed, true, Some(track_links));
         }
     }
 }
@@ -398,6 +406,7 @@ fn clip_library(
     local_error: &mut Option<String>,
     external_feed: bool,
     auto_enable_on_pick: bool,
+    mut track_links: Option<TrackLinks>,
 ) {
     ui.horizontal(|ui| {
         if ui.button("+ Video").clicked() {
@@ -436,6 +445,9 @@ fn clip_library(
                             video.enabled = true;
                         }
                     }
+                    if let Some(tl) = track_links.as_mut() {
+                        link_button(ui, tl, &clip.key);
+                    }
                     if !clip.builtin && ui.small_button("✕").on_hover_text("Delete this clip").clicked() {
                         to_delete = Some(index);
                     }
@@ -446,6 +458,35 @@ fn clip_library(
 
     if let Some(index) = to_delete {
         delete_clip_at(video, clips, index, local_error);
+    }
+}
+
+/// Links `clip_key` to the track rekordbox is playing, or removes that link.
+/// Off while no track has been reported.
+fn link_button(ui: &mut egui::Ui, tl: &mut TrackLinks, clip_key: &str) {
+    let linked_here = tl.current_track.is_some_and(|t| tl.links.get(t).is_some_and(|c| c == clip_key));
+    let linked_to_any = tl.links.values().any(|c| c == clip_key);
+    let label = if linked_here { "🔗" } else if linked_to_any { "⛓" } else { "🔗?" };
+    let hover = match (tl.current_track, linked_here) {
+        (None, _) => "Play a track in rekordbox first, then link this clip to it",
+        (Some(_), true) => "Linked to the current track: click to unlink",
+        (Some(_), false) => "Play this clip when the current rekordbox track plays",
+    };
+    let response = ui.add_enabled(tl.current_track.is_some(), egui::Button::new(label).small()).on_hover_text(hover);
+    if response.clicked() {
+        if let Some(track) = tl.current_track {
+            toggle_link(tl.links, track, clip_key);
+        }
+    }
+}
+
+/// Links `track` to `clip_key`, replacing any earlier clip, or removes the
+/// link when it already points there.
+fn toggle_link(links: &mut std::collections::BTreeMap<String, String>, track: &str, clip_key: &str) {
+    if links.get(track).is_some_and(|c| c == clip_key) {
+        links.remove(track);
+    } else {
+        links.insert(track.to_string(), clip_key.to_string());
     }
 }
 
@@ -525,6 +566,7 @@ mod tests {
         ndi_request: Option<VideoNdiRequest>,
         target: VideoPanelTarget,
         spout_pick: Option<String>,
+        links: std::collections::BTreeMap<String, String>,
     }
 
     impl PanelState {
@@ -541,6 +583,7 @@ mod tests {
                 ndi_request: None,
                 target: VideoPanelTarget::Global,
                 spout_pick: None,
+                links: std::collections::BTreeMap::new(),
             }
         }
 
@@ -559,6 +602,7 @@ mod tests {
                 &mut self.target,
                 &[],
                 &mut self.spout_pick,
+                TrackLinks { current_track: Some("a - song"), links: &mut self.links },
             );
         }
     }
@@ -627,6 +671,17 @@ mod tests {
             state.show.video.current_clip_index = 99;
             state.render(ui);
         });
+    }
+
+    #[test]
+    fn toggling_a_link_adds_replaces_and_removes_it() {
+        let mut links = std::collections::BTreeMap::new();
+        toggle_link(&mut links, "a - song", "/c1.webm");
+        assert_eq!(links.get("a - song").map(String::as_str), Some("/c1.webm"));
+        toggle_link(&mut links, "a - song", "/c2.webm");
+        assert_eq!(links.get("a - song").map(String::as_str), Some("/c2.webm"));
+        toggle_link(&mut links, "a - song", "/c2.webm");
+        assert!(links.is_empty());
     }
 
     #[test]

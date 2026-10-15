@@ -32,6 +32,7 @@ pub(crate) fn save_ui_config(state: &AppState, theme: Option<theme::registry::Th
     ui_config.invisible_mode = state.invisible_mode;
     ui_config.fps_override = state.fps_override;
     ui_config.hide_flagged_presets = state.hide_flagged;
+    ui_config.video_links = state.video_links.clone();
     ui_config.preset_dir = non_empty(&state.preset_dir_setting);
     ui_config.texture_dir = non_empty(&state.texture_dir_setting);
     ui_config.check_for_updates = state.check_for_updates;

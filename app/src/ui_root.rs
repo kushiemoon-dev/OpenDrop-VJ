@@ -315,6 +315,7 @@ pub(crate) fn ui_root(
                     sources.video_panel_target,
                     &spout_senders,
                     sources.spout_in_selected,
+                    ui::video::TrackLinks { current_track: library.track_memory.current(), links: sources.video_links },
                 );
             }
             Panel::CloudPresets => {

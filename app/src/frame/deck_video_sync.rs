@@ -16,7 +16,7 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
     while let Ok(event) = state.rkbx_link.track_events.try_recv() {
         on_track_changed(state, &event.artist, &event.title);
         let Some(slot) = state.show.rkbx_deck_mapping.get(event.deck).copied().flatten() else { continue };
-        let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else {
+        let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &state.video_links, &event.artist, &event.title) else {
             // The new track has no clip: the old one must not keep following it.
             state.rkbx_sync[slot] = None;
             continue;

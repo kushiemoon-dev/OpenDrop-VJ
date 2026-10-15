@@ -186,6 +186,9 @@ pub(crate) struct AppState {
     /// pointless I/O, same reasoning as `input_devices`' bootstrap-only
     /// enumeration.
     pub(crate) video_clips: Vec<crate::video_clips::VideoClip>,
+    /// Clips the user linked to a track (track key to clip key), played on
+    /// the mapped deck when rekordbox reports that track.
+    pub(crate) video_links: std::collections::BTreeMap<String, String>,
     /// Cameras enumerated once at bootstrap (`video_capture::list_cameras`,
     /// a pure sysfs scan on Linux, empty elsewhere), for the Video panel's
     /// device dropdown.

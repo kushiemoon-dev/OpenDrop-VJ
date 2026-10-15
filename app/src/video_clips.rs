@@ -20,7 +20,10 @@
 //! what the decoder needs. It is what `core::video`'s
 //! `selected_clip_keys`/`current_clip_index` are expressed against.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use opendrop_core::track_memory::TrackMemory;
 
 /// Extensions offered in the import dialog and recognised by the scan.
 /// Nothing is decoded here: ffmpeg is what will actually open the file,
@@ -67,12 +70,21 @@ pub(crate) fn scan_clips() -> Vec<VideoClip> {
     clips
 }
 
-/// Resolves an rkbx_link-reported track to a clip in `clips`:
+/// Resolves an rkbx_link-reported track to a clip in `clips`: a clip the user
+/// linked to that track (`links`, track key to clip key) wins; otherwise
 /// `"{artist} - {title}"` (trimmed, case-insensitive) compared against the
 /// clip's filename stem (`VideoClip::name`). `None` if nothing matches:
 /// the caller leaves the mapped visual deck's current content untouched
 /// in that case, never clearing or replacing it.
-pub(crate) fn match_clip_by_track<'a>(clips: &'a [VideoClip], artist: &str, title: &str) -> Option<&'a VideoClip> {
+pub(crate) fn match_clip_by_track<'a>(
+    clips: &'a [VideoClip],
+    links: &BTreeMap<String, String>,
+    artist: &str,
+    title: &str,
+) -> Option<&'a VideoClip> {
+    if let Some(clip) = TrackMemory::key(artist, title).and_then(|key| links.get(&key)).and_then(|clip_key| clips.iter().find(|c| &c.key == clip_key)) {
+        return Some(clip);
+    }
     let query = format!("{} - {}", artist.trim(), title.trim()).to_lowercase();
     clips.iter().find(|c| c.name.trim().to_lowercase() == query)
 }
@@ -189,13 +201,31 @@ mod tests {
     #[test]
     fn matches_a_clip_by_artist_and_title_case_and_whitespace_insensitively() {
         let clips = vec![clip_from_path(PathBuf::from("/loops/Daft Punk - One More Time.webm"), false)];
-        assert_eq!(match_clip_by_track(&clips, "  DAFT PUNK  ", "one more time").map(|c| &c.name), Some(&"Daft Punk - One More Time".to_string()));
+        assert_eq!(match_clip_by_track(&clips, &BTreeMap::new(), "  DAFT PUNK  ", "one more time").map(|c| &c.name), Some(&"Daft Punk - One More Time".to_string()));
     }
 
     #[test]
     fn no_match_returns_none() {
         let clips = vec![clip_from_path(PathBuf::from("/loops/Someone - Something.webm"), false)];
-        assert_eq!(match_clip_by_track(&clips, "Nobody", "Nothing"), None);
+        assert_eq!(match_clip_by_track(&clips, &BTreeMap::new(), "Nobody", "Nothing"), None);
+    }
+
+    #[test]
+    fn a_linked_clip_wins_over_the_filename_and_a_stale_link_is_ignored() {
+        let clips = vec![
+            clip_from_path(PathBuf::from("/loops/Daft Punk - One More Time.webm"), false),
+            clip_from_path(PathBuf::from("/loops/tunnel.webm"), false),
+        ];
+        let key = TrackMemory::key("Daft Punk", "One More Time").unwrap();
+        let linked = BTreeMap::from([(key.clone(), "/loops/tunnel.webm".to_string())]);
+        assert_eq!(match_clip_by_track(&clips, &linked, "daft punk", "ONE MORE TIME").map(|c| c.name.as_str()), Some("tunnel"));
+
+        let stale = BTreeMap::from([(key, "/loops/deleted.webm".to_string())]);
+        assert_eq!(
+            match_clip_by_track(&clips, &stale, "Daft Punk", "One More Time").map(|c| c.name.as_str()),
+            Some("Daft Punk - One More Time"),
+            "a link to a removed clip falls back to the filename"
+        );
     }
 
     #[test]

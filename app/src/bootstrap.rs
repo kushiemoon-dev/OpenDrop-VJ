@@ -504,6 +504,7 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         // Scanned once here (see the field's doc comment); the panel's
         // Rescan button is the only thing that re-reads either directory.
         video_clips: video_clips::scan_clips(),
+        video_links: ui_config.video_links.clone(),
         video_cameras,
         video_camera_device,
         video_local_error: None,

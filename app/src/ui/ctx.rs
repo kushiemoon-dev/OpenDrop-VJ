@@ -190,6 +190,7 @@ pub(crate) struct SourcesCtx<'a> {
     /// panel takes a `VideoCaptureSnapshot`, and `main.rs` (its only other
     /// reader) owns the handle.
     pub(crate) video_clips: &'a mut Vec<crate::video_clips::VideoClip>,
+    pub(crate) video_links: &'a mut std::collections::BTreeMap<String, String>,
     pub(crate) video_cameras: &'a Vec<opendrop_io::video_capture::CameraDevice>,
     pub(crate) video_camera_device: &'a mut String,
     pub(crate) video_local_error: &'a mut Option<String>,

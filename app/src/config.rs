@@ -168,6 +168,9 @@ pub(crate) struct UiConfig {
     /// still wins over it.
     #[serde(default)]
     pub(crate) texture_dir: Option<String>,
+    /// Track key to the key of the video clip linked to it.
+    #[serde(default)]
+    pub(crate) video_links: BTreeMap<String, String>,
     /// Hide the presets the library scan flagged from the browser.
     #[serde(default)]
     pub(crate) hide_flagged_presets: bool,
@@ -240,6 +243,7 @@ impl Default for UiConfig {
             hide_flagged_presets: false,
             preset_dir: None,
             texture_dir: None,
+            video_links: BTreeMap::new(),
             track_presets: BTreeMap::new(),
             track_order: Vec::new(),
             track_auto_recall: false,
@@ -410,6 +414,7 @@ mod tests {
             hide_flagged_presets: true,
             preset_dir: Some("/music/presets".to_string()),
             texture_dir: Some("/music/textures".to_string()),
+            video_links: BTreeMap::from([("a - song".to_string(), "/loops/a.webm".to_string())]),
             track_presets: BTreeMap::from([("a - song".to_string(), vec!["Alpha Swirl Refract".to_string()])]),
             track_order: vec!["a - song".to_string()],
             track_auto_recall: true,

@@ -69,6 +69,9 @@ pub(crate) struct TickOutput {
 /// Advances the show by one tick: beat clock and sync, playlists, snapshot recall,
 /// timeline, LFOs and the video layer's audio reaction.
 pub(crate) fn tick_show(state: &mut AppState, now: Instant) -> TickOutput {
+    // The auto-pilot replaces the automatic advance of the buses it drives.
+    state.show.autopilot_a = state.autopilot.enabled_a;
+    state.show.autopilot_b = state.autopilot.enabled_b;
     let layer_inputs = layer_inputs_from_show(&state.show);
 
     // Each deck context injects one PCM chunk, renders one projectM

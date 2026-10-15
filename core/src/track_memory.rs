@@ -19,9 +19,32 @@ pub struct TrackMemory {
 }
 
 impl TrackMemory {
-    pub fn from_parts(presets: BTreeMap<String, Vec<String>>) -> Self {
-        let order = presets.keys().cloned().collect();
-        Self { presets, order, current: None }
+    /// Rebuilds a memory from what was saved: the presets per track and the
+    /// tracks from least to most recently seen. Tracks missing from `order`
+    /// (a file from before the order was kept) count as the oldest, and the
+    /// caps are applied, since a file may have been edited.
+    pub fn from_parts(mut presets: BTreeMap<String, Vec<String>>, order: Vec<String>) -> Self {
+        let mut ordered: VecDeque<String> = VecDeque::new();
+        let unlisted: Vec<String> = presets.keys().filter(|k| !order.contains(k)).cloned().collect();
+        for key in unlisted.into_iter().chain(order) {
+            if presets.contains_key(&key) && !ordered.contains(&key) {
+                ordered.push_back(key);
+            }
+        }
+        while ordered.len() > MAX_TRACKS {
+            if let Some(oldest) = ordered.pop_front() {
+                presets.remove(&oldest);
+            }
+        }
+        for list in presets.values_mut() {
+            list.truncate(MAX_PRESETS_PER_TRACK);
+        }
+        Self { presets, order: ordered, current: None }
+    }
+
+    /// Track keys from least to most recently seen, for saving.
+    pub fn order(&self) -> impl Iterator<Item = &String> {
+        self.order.iter()
     }
 
     pub fn presets_map(&self) -> &BTreeMap<String, Vec<String>> {
@@ -150,9 +173,35 @@ mod tests {
     }
 
     #[test]
+    fn the_recency_order_survives_a_save_and_a_restore() {
+        let mut memory = TrackMemory::default();
+        for name in ["zebra", "mango", "alpha"] {
+            memory.set_current_track(Some(name.to_string()));
+            memory.record_preset("p");
+        }
+        let saved_order: Vec<String> = memory.order().cloned().collect();
+        assert_eq!(saved_order, ["zebra", "mango", "alpha"], "oldest first, not alphabetical");
+
+        let restored = TrackMemory::from_parts(memory.presets_map().clone(), saved_order);
+        assert_eq!(restored.order().cloned().collect::<Vec<_>>(), ["zebra", "mango", "alpha"]);
+    }
+
+    #[test]
+    fn restoring_applies_the_caps_and_ignores_unknown_order_entries() {
+        let mut presets: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for i in 0..(MAX_TRACKS + 3) {
+            presets.insert(format!("track {i:04}"), (0..(MAX_PRESETS_PER_TRACK + 5)).map(|p| format!("p{p}")).collect());
+        }
+        let restored = TrackMemory::from_parts(presets, vec!["not a track".to_string()]);
+        assert_eq!(restored.presets_map().len(), MAX_TRACKS);
+        assert!(restored.presets_map().values().all(|l| l.len() == MAX_PRESETS_PER_TRACK));
+        assert!(!restored.presets_map().contains_key("track 0000"), "the oldest are dropped first");
+    }
+
+    #[test]
     fn a_restored_memory_can_suggest_for_a_known_track() {
         let stored = BTreeMap::from([("a - song".to_string(), vec!["x".to_string()])]);
-        let mut memory = TrackMemory::from_parts(stored);
+        let mut memory = TrackMemory::from_parts(stored, Vec::new());
         assert_eq!(memory.set_current_track(key("A", "Song")), ["x"]);
     }
 }

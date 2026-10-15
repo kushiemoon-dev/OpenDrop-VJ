@@ -25,6 +25,9 @@ pub(crate) fn run_autopilot(state: &mut AppState, beats: u32) {
             continue;
         }
         let Some(slot) = state.show.deck_bus_slot_for(deck) else { continue };
+        if state.show.slot_locked(slot) {
+            continue; // a locked bus keeps its preset
+        }
         let candidates = state.scan.with_table(|table| usable_candidates(table, state.path_by_name.keys()));
         let borrowed: Vec<(&str, f32)> = candidates.iter().map(|(name, energy)| (name.as_str(), *energy)).collect();
         let recent: Vec<&str> = state.preset_history.names().take(RECENT_TO_AVOID).collect();

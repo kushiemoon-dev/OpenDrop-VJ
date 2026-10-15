@@ -92,6 +92,11 @@ pub struct Show {
     pub playlists: PlaylistStore,
     pub lock_a: bool,
     pub lock_b: bool,
+    /// Set while the energy auto-pilot picks the presets of that bus. It then
+    /// replaces the automatic advance: beat sync, volume peak triggers and the
+    /// playlist timer leave the bus alone. Manual navigation is unaffected.
+    pub autopilot_a: bool,
+    pub autopilot_b: bool,
     pub clock: Clock,
     pub beat_detector: BeatDetector,
     pub beat_sync_a: bool,
@@ -244,6 +249,8 @@ impl Default for Show {
             playlists,
             lock_a: false,
             lock_b: false,
+            autopilot_a: false,
+            autopilot_b: false,
             clock: Clock::new(),
             beat_detector: BeatDetector::new(),
             beat_sync_a: false,
@@ -377,6 +384,17 @@ impl Show {
         Ok(())
     }
 
+    /// Whether automatic changes (auto-pilot, track recall) must leave `slot`
+    /// alone because the deck bus it feeds is locked. An unassigned slot has no
+    /// lock to respect.
+    pub fn slot_locked(&self, slot: usize) -> bool {
+        match self.deck_bus.get(slot) {
+            Some(DeckBus::A) => self.lock_a,
+            Some(DeckBus::B) => self.lock_b,
+            _ => false,
+        }
+    }
+
     /// Resolves a bus letter to the first physical slot assigned to it.
     pub fn deck_bus_slot_for(&self, deck: Deck) -> Option<usize> {
         self.deck_bus.iter().position(|&b| match deck {
@@ -451,7 +469,17 @@ impl Show {
 
     /// Advances the deck's playlist if it has items, otherwise falls back to
     /// cycling the full preset catalog via `navigate_preset`.
+    fn autopilot_on(&self, deck: Deck) -> bool {
+        match deck {
+            Deck::A => self.autopilot_a,
+            Deck::B => self.autopilot_b,
+        }
+    }
+
     fn advance_or_navigate(&mut self, deck: Deck) {
+        if self.autopilot_on(deck) {
+            return;
+        }
         let has_items = match deck {
             Deck::A => !self.playlists.a_items.is_empty(),
             Deck::B => !self.playlists.b_items.is_empty(),
@@ -476,7 +504,8 @@ impl Show {
     pub fn tick_playlists(&mut self, dt_ms: f64) {
         let interval_ms = self.playlists.interval_sec * 1000.0;
         for (deck, synced) in [(Deck::A, self.beat_sync_a), (Deck::B, self.beat_sync_b)] {
-            self.playlists.set_beat_sync_interval(deck, if synced { f64::INFINITY } else { interval_ms });
+            let own_timer = !synced && !self.autopilot_on(deck);
+            self.playlists.set_beat_sync_interval(deck, if own_timer { interval_ms } else { f64::INFINITY });
         }
         self.playlists.tick(dt_ms);
     }
@@ -527,7 +556,7 @@ impl Show {
     }
 
     /// Manual BPM if set, otherwise the detected BPM (`0.0` if neither is
-    /// available: the UI shows "—" on `0.0`, port of the ternary in
+    /// available: the UI shows "-" on `0.0`, port of the ternary in
     /// `SidebarPlaylist.svelte:113`).
     pub fn current_bpm(&self) -> f64 {
         if self.manual_bpm > 0.0 {

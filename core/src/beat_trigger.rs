@@ -27,7 +27,9 @@ pub fn should_trigger_on_beat(beat_count: i64, config: BeatTriggerConfig) -> boo
     if config.mode != BeatTriggerMode::Beat {
         return false;
     }
-    (beat_count + config.offset as i64) % config.beats_per_change as i64 == 0
+    // A zero here (a hand-edited file) must not panic with a division by zero.
+    let period = i64::from(config.beats_per_change.max(1));
+    (beat_count + config.offset as i64) % period == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,6 +101,13 @@ pub fn apply_beat_trigger_patch(current: BeatTriggerConfig, patch: BeatTriggerCo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_zero_period_does_not_panic_and_behaves_like_every_beat() {
+        let config = BeatTriggerConfig { mode: BeatTriggerMode::Beat, beats_per_change: 0, offset: 0, sensitivity: 0.5 };
+        assert!(should_trigger_on_beat(7, config));
+        assert!(should_trigger_on_beat(0, config));
+    }
 
     #[test]
     fn default_beat_trigger_config_returns_mode_beat_threshold_8_offset_0_sensitivity_0_5() {

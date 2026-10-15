@@ -234,7 +234,7 @@ fn bpm_tap(ui: &mut egui::Ui, show: &mut Show, t0: Instant) {
     });
 }
 
-/// The BPM readout alone: bare number (or `—` if unknown), mono font, with
+/// The BPM readout alone: bare number (or `-` if unknown), mono font, with
 /// the light accent glow described on `bpm_tap`. Split out of `bpm_tap`
 /// so `status_bar_stage` can show
 /// just the number, without the Tap/Clear/beats-per-change/auto-crossfade
@@ -247,7 +247,7 @@ fn bpm_readout(ui: &mut egui::Ui, show: &Show) {
     // directly next to "Tap"/"Clear" already makes it unambiguous, and
     // dropping the 3-letter suffix was part of closing the header
     // overflow; see `header`'s own doc comment.
-    let bpm_text = if bpm == 0.0 { "—".to_string() } else { format!("{bpm:.0}") };
+    let bpm_text = if bpm == 0.0 { "-".to_string() } else { format!("{bpm:.0}") };
     let font = egui::FontId::new(t.type_scale.numeric, egui::FontFamily::Name(FAMILY_MONO.into()));
     let galley = ui.painter().layout_no_wrap(bpm_text, font, t.palette.text);
     let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
@@ -451,6 +451,13 @@ pub fn status_bar(
 
     widgets::dense(ui, |ui| {
         ui.horizontal(|ui| {
+            // A newer release exists: say so, discreetly, and link to it. First
+            // in the row, because the connection pills fill the rest of the
+            // width and would push it out of view.
+            if let Some(notice) = &shell.update_notice {
+                ui.hyperlink_to(format!("Update {}", notice.version), &notice.url);
+                sep(ui);
+            }
             let (fps_text, frame_text) = match shell.last_wall_ms {
                 Some(ms) if ms > 0.0 => (format!("{:.0}FPS", 1000.0 / ms), format!("{ms:.1}MS")),
                 _ => ("--FPS".to_string(), "--MS".to_string()),
@@ -492,12 +499,6 @@ pub fn status_bar(
             // through any context struct, only `AppState` itself.
             let loading = !perform.pending_validations.is_empty() || !library.thumb_queue.is_empty();
             status_dot(ui, "LOAD", loading);
-
-            // A newer release exists: say so, discreetly, and link to it.
-            if let Some(notice) = &shell.update_notice {
-                sep(ui);
-                ui.hyperlink_to(format!("Update {} available", notice.version), &notice.url);
-            }
         });
     });
 }

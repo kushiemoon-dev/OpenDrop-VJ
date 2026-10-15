@@ -21,6 +21,8 @@
 - Microphones are told apart from monitors in the audio input list
 - A graphics initialisation failure now shows an error message and exits cleanly instead of crashing without any message
 - A failed texture allocation or pixel readback drops that frame instead of crashing
+- A share link or saved session with an invalid beat trigger no longer crashes the app
+- A configuration file that cannot be read is kept aside as `ui.json.bad` instead of being replaced by defaults on exit, and the file is written atomically
 
 ### Internal
 - The test suite also runs on Windows in CI

@@ -1,5 +1,5 @@
 //! Keymap panel: one row per registered command showing its currently
-//! assigned key (or "—"), a Learn button, and a Clear button, plus a
+//! assigned key (or "-"), a Learn button, and a Clear button, plus a
 //! reset-to-defaults action: port of `SidebarKeymap.svelte`.
 //!
 //! Same Learn/Clear row shape as `ui::midi`, but the capture side is
@@ -62,7 +62,7 @@ pub fn show(ui: &mut egui::Ui, keymap: &mut HashMap<Key, CommandId>, keymap_lear
                         }
                     }
                     let assigned = assigned_key.map(format_key);
-                    ui.label(assigned.as_deref().unwrap_or("—"));
+                    ui.label(assigned.as_deref().unwrap_or("-"));
 
                     let is_learning = *keymap_learning == Some(cmd.id);
                     let learn_label = if is_learning { "press a key…" } else { "Learn" };

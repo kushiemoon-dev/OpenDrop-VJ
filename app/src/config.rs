@@ -166,6 +166,9 @@ pub(crate) struct UiConfig {
     /// Presets played on each track (by artist and title), newest first.
     #[serde(default)]
     pub(crate) track_presets: BTreeMap<String, Vec<String>>,
+    /// Tracks of `track_presets` from least to most recently seen.
+    #[serde(default)]
+    pub(crate) track_order: Vec<String>,
     /// Reload the first remembered preset when a known track starts.
     #[serde(default)]
     pub(crate) track_auto_recall: bool,
@@ -228,6 +231,7 @@ impl Default for UiConfig {
             known_release: None,
             hide_flagged_presets: false,
             track_presets: BTreeMap::new(),
+            track_order: Vec::new(),
             track_auto_recall: false,
             preset_tags: BTreeMap::new(),
             preset_notes: BTreeMap::new(),
@@ -253,6 +257,7 @@ pub(crate) fn config_to_json(config: &UiConfig) -> String {
     serde_json::to_string_pretty(config).unwrap_or_else(|_| "{}".to_string())
 }
 
+#[cfg(test)]
 /// JSON string -> `UiConfig`. Malformed JSON or a missing/unrecognized
 /// field degrades to `UiConfig::default()` rather than erroring: a stale
 /// or corrupt config file must never stop the app from starting.
@@ -264,8 +269,19 @@ pub(crate) fn config_from_json(json: &str) -> UiConfig {
 /// doesn't exist yet or can't be read/parsed (logged once, never a
 /// panic).
 pub(crate) fn load_config(path: &Path) -> UiConfig {
-    match std::fs::read_to_string(path) {
-        Ok(json) => config_from_json(&json),
+    match std::fs::read(path) {
+        Ok(bytes) => match String::from_utf8(bytes).ok().and_then(|json| serde_json::from_str(&json).ok()) {
+            Some(config) => config,
+            None => {
+                // Keep the unreadable file: the defaults used instead are saved
+                // over it on exit, which would otherwise erase the tags, notes,
+                // history and favourites it holds.
+                let aside = path.with_extension("json.bad");
+                eprintln!("[config] ignoring {}: not valid config; kept as {}", path.display(), aside.display());
+                let _ = std::fs::rename(path, aside);
+                UiConfig::default()
+            }
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => UiConfig::default(),
         Err(e) => {
             eprintln!("[config] failed to read config file {}: {e}, using defaults", path.display());
@@ -279,13 +295,9 @@ pub(crate) fn load_config(path: &Path) -> UiConfig {
 /// the ability to persist UI state shouldn't take down the app.
 pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     let Some(path) = path else { return };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("[config] failed to create config dir {}: {e}, config not saved", parent.display());
-            return;
-        }
-    }
-    if let Err(e) = std::fs::write(path, config_to_json(config)) {
+    // Through a temporary file and a rename, so a crash mid-write cannot leave
+    // a truncated file that the next launch would discard.
+    if let Err(e) = crate::session::write_atomically(path, &config_to_json(config)) {
         eprintln!("[config] failed to write config file {}: {e}", path.display());
     }
 }
@@ -387,6 +399,7 @@ mod tests {
             known_release: Some(("v0.3.0".to_string(), "https://example.com/r".to_string())),
             hide_flagged_presets: true,
             track_presets: BTreeMap::from([("a - song".to_string(), vec!["Alpha Swirl Refract".to_string()])]),
+            track_order: vec!["a - song".to_string()],
             track_auto_recall: true,
             preset_tags: BTreeMap::from([("Alpha Swirl Refract".to_string(), vec!["calm".to_string()])]),
             preset_notes: BTreeMap::from([("Alpha Swirl Refract".to_string(), "opener".to_string())]),
@@ -423,6 +436,33 @@ mod tests {
         let path = std::env::temp_dir().join("opendrop-native-test-config-does-not-exist.json");
         let _ = std::fs::remove_file(&path);
         assert_eq!(load_config(&path), UiConfig::default());
+    }
+
+    #[test]
+    fn an_unparseable_file_is_kept_aside_instead_of_being_overwritten_by_defaults() {
+        let dir = std::env::temp_dir().join(format!("opendrop-config-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ui.json");
+        std::fs::write(&path, "{ \"theme\": oops").unwrap();
+
+        let config = load_config(&path);
+
+        assert_eq!(config, UiConfig::default());
+        assert!(!path.exists());
+        assert_eq!(std::fs::read_to_string(path.with_extension("json.bad")).unwrap(), "{ \"theme\": oops");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saving_leaves_no_temporary_file_behind() {
+        let dir = std::env::temp_dir().join(format!("opendrop-config-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("ui.json");
+        save_config(Some(&path), &UiConfig::default());
+        assert!(path.exists());
+        assert!(!path.with_extension("json.tmp").exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

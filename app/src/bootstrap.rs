@@ -588,7 +588,10 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         last_update_check: ui_config.last_update_check,
         update_notice: crate::update::notice_for(ui_config.check_for_updates, &ui_config.known_release),
         known_release: ui_config.known_release.clone(),
-        track_memory: opendrop_core::track_memory::TrackMemory::from_parts(ui_config.track_presets.clone()),
+        track_memory: opendrop_core::track_memory::TrackMemory::from_parts(
+            ui_config.track_presets.clone(),
+            ui_config.track_order.clone(),
+        ),
         track_auto_recall: ui_config.track_auto_recall,
         autopilot: {
             let mut pilot = opendrop_core::autopilot::Autopilot::default();

@@ -68,7 +68,7 @@ pub fn show(
     ui.heading("Auto-pilot");
     widgets::micro_label(
         ui,
-        "Every so many beats, picks a scanned preset whose energy matches the music's. Off by default, per deck bus.",
+        "Every so many beats, picks a scanned preset whose energy matches the music's. Off by default, per deck bus. While on, it replaces that bus's beat sync, volume peak and playlist timer advances.",
     );
     let usable = scanned > flagged;
     ui.add_enabled_ui(usable, |ui| {

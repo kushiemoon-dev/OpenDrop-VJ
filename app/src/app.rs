@@ -190,6 +190,7 @@ impl ApplicationHandler for App {
             ui_config.last_update_check = state.last_update_check;
             ui_config.known_release = state.known_release.clone();
             ui_config.track_presets = state.track_memory.presets_map().clone();
+            ui_config.track_order = state.track_memory.order().cloned().collect();
             ui_config.track_auto_recall = state.track_auto_recall;
             ui_config.preset_tags = state.preset_annotations.tags_map().clone();
             ui_config.preset_notes = state.preset_annotations.notes_map().clone();
@@ -198,6 +199,9 @@ impl ApplicationHandler for App {
             ui_config.audio_agc = state.audio_agc;
             ui_config.beat_sensitivity = state.beat_sensitivity;
             session::save_now(state);
+            if let (Some(path), true) = (crate::preset_scan::scan_file_path(), state.scan.with_table(|t| !t.is_empty())) {
+                state.scan.save(&path);
+            }
             ui_config.ui_scale = state.ui_scale;
             ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
             config::save_config(config_path.as_deref(), &ui_config);

@@ -222,9 +222,9 @@ fn thumbnail_overlay(ui: &egui::Ui, rect: egui::Rect, is_active: bool) {
 /// is a static visual layout only.
 fn meta_line(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        widgets::micro_label(ui, "—");
+        widgets::micro_label(ui, "-");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            widgets::micro_label(ui, "—");
+            widgets::micro_label(ui, "-");
         });
     });
 }

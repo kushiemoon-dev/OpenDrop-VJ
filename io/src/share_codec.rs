@@ -450,7 +450,10 @@ impl From<BeatTriggerConfig> for BeatTriggerConfigWire {
 
 impl From<BeatTriggerConfigWire> for BeatTriggerConfig {
     fn from(w: BeatTriggerConfigWire) -> Self {
-        Self { mode: w.mode.into(), beats_per_change: w.beats_per_change, offset: w.offset, sensitivity: w.sensitivity }
+        // A file or link is untrusted input: re-apply the limits the UI enforces.
+        let beats_per_change = opendrop_core::beat_trigger::clamp_beats_per_change(i64::from(w.beats_per_change));
+        let offset = opendrop_core::beat_trigger::clamp_offset(i64::from(w.offset), beats_per_change);
+        Self { mode: w.mode.into(), beats_per_change, offset, sensitivity: w.sensitivity }
     }
 }
 

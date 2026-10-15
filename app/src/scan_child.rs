@@ -19,11 +19,14 @@ use crate::thumbnail_child::{on_preset_failed, read_back, write_atomically, PRES
 /// Exit code for "no usable result": the preset was rejected or the result
 /// could not be written. The parent treats every non-zero exit alike.
 const EXIT_FAILED: i32 = 1;
-/// Frames sampled after the warm-up, one every `SAMPLE_EVERY` frames.
-const SAMPLES: usize = 8;
+/// Frames are sampled every `SAMPLE_EVERY` frames from `FIRST_SAMPLE_FRAME`
+/// on. Sampling starts early on purpose: some presets are lit only at first
+/// and fade once their audio settles, and they must be seen while lit.
 const SAMPLE_EVERY: usize = 6;
-/// Frames the music-like signal runs before sampling starts.
-const MUSIC_WARMUP_FRAMES: usize = 12;
+const FIRST_SAMPLE_FRAME: usize = 12;
+/// How long each of the two audio signals runs.
+const NOISE_PHASE_FRAMES: usize = WARMUP_FRAMES + 1 + 48;
+const MUSIC_PHASE_FRAMES: usize = 60;
 
 /// Sample rate and length of the audio handed to projectM each frame, the
 /// same ~10ms stereo chunk the app injects.
@@ -75,11 +78,11 @@ fn pulsing_noise_pcm(base: &[f32], frame: usize) -> Vec<f32> {
 unsafe fn render_phase(
     handle: opendrop_engine::ffi::projectm_handle,
     gl: &glow::Context,
-    warmup: usize,
+    total_frames: usize,
     pcm_for: &dyn Fn(usize) -> Vec<f32>,
 ) -> Option<PresetAnalysis> {
-    let mut frames: Vec<Vec<f32>> = Vec::with_capacity(SAMPLES);
-    for frame in 0..warmup + SAMPLES * SAMPLE_EVERY {
+    let mut frames: Vec<Vec<f32>> = Vec::new();
+    for frame in 0..total_frames {
         let pcm = pcm_for(frame);
         unsafe {
             opendrop_engine::ffi::projectm_pcm_add_float(
@@ -92,7 +95,7 @@ unsafe fn render_phase(
             opendrop_engine::ffi::projectm_opengl_render_frame(handle);
             opendrop_engine::gl_state::restore(gl, &before);
         }
-        if frame >= warmup && (frame - warmup).is_multiple_of(SAMPLE_EVERY) {
+        if frame >= FIRST_SAMPLE_FRAME && (frame - FIRST_SAMPLE_FRAME).is_multiple_of(SAMPLE_EVERY) {
             let pixels = read_back(gl);
             frames.push(downsample_luma(&pixels, THUMB_W as usize, THUMB_H as usize));
         }
@@ -123,9 +126,8 @@ pub fn run_analyze_preset(preset_path: &Path, out_path: &Path) -> ! {
         let Ok(c_path) = CString::new(preset_path.to_string_lossy().as_bytes()) else { std::process::exit(EXIT_FAILED) };
         opendrop_engine::ffi::projectm_load_preset_file(handle, c_path.as_ptr(), false);
 
-        let noisy = render_phase(handle, &gl, WARMUP_FRAMES + 1, &|f| pulsing_noise_pcm(&noise, f));
-        // The second signal follows on from the first, so a short warm-up is enough.
-        let musical = render_phase(handle, &gl, MUSIC_WARMUP_FRAMES, &synth_music_pcm);
+        let noisy = render_phase(handle, &gl, NOISE_PHASE_FRAMES, &|f| pulsing_noise_pcm(&noise, f));
+        let musical = render_phase(handle, &gl, MUSIC_PHASE_FRAMES, &synth_music_pcm);
         (noisy, musical)
     };
 

@@ -38,6 +38,46 @@ mod on_beat {
         names.iter().map(|n| PresetMeta { name: n.to_string(), category: "Other".to_string() }).collect()
     }
 
+    fn every_beat_trigger() -> BeatTriggerConfig {
+        BeatTriggerConfig { mode: crate::beat_trigger::BeatTriggerMode::Beat, beats_per_change: 1, offset: 0, sensitivity: 0.5 }
+    }
+
+    #[test]
+    fn beat_sync_advances_a_bus_unless_the_autopilot_owns_it() {
+        let make = |autopilot_a: bool| Show {
+            beat_sync_a: true,
+            beat_trigger_a: every_beat_trigger(),
+            preset_catalog: catalog(&["a", "b", "c"]),
+            autopilot_a,
+            ..Default::default()
+        };
+
+        let mut plain = make(false);
+        plain.on_beat();
+        assert!(!plain.take_fired_presets().is_empty(), "beat sync advances a bus on its own");
+
+        let mut piloted = make(true);
+        piloted.on_beat();
+        assert!(piloted.take_fired_presets().is_empty(), "the auto-pilot replaces the beat advance");
+    }
+
+    #[test]
+    fn the_playlist_timer_stands_down_for_a_piloted_bus() {
+        let fired_after_a_minute = |autopilot_a: bool| {
+            let mut show = Show { autopilot_a, ..Default::default() };
+            show.playlists.interval_sec = 1.0;
+            show.playlists.add_to_playlist(Deck::A, "x".to_string());
+            show.playlists.add_to_playlist(Deck::A, "y".to_string());
+            show.playlists.toggle_playlist(Deck::A);
+            show.tick_playlists(0.0); // applies the interval for this state
+            let _ = show.take_fired_presets(); // anything fired by starting the playlist
+            show.tick_playlists(60_000.0);
+            show.take_fired_presets().len()
+        };
+        assert!(fired_after_a_minute(false) > 0, "a playing playlist advances on its own timer");
+        assert_eq!(fired_after_a_minute(true), 0, "no timer advance while the auto-pilot owns the bus");
+    }
+
     #[test]
     fn auto_xfade_does_not_toggle_before_the_configured_beat_count() {
         let mut show = Show { auto_xfade: true, beats_per_change: 4, ..Default::default() };

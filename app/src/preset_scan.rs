@@ -62,33 +62,54 @@ pub(crate) fn load_table(path: &Path) -> ScanTable {
     std::fs::read_to_string(path).map(|json| table_from_json(&json)).unwrap_or_default()
 }
 
-fn save_table(path: &Path, table: &ScanTable) {
-    if let Err(e) = crate::session::write_atomically(path, &table_to_json(table)) {
+/// Writes already serialized results. Serializing happens under the lock but
+/// the disk write does not, so the render thread, which reads the same table
+/// every frame, is never held up by a slow disk.
+fn save_json(path: &Path, json: &str) {
+    if let Err(e) = crate::session::write_atomically(path, json) {
         eprintln!("[scan] failed to save {}: {e}", path.display());
     }
 }
 
-/// Runs one analysis child to completion and reads its result. `None` for a
-/// failed, crashed or timed-out child.
-fn run_analysis(mut command: Command, out_path: &Path, timeout: Duration) -> Option<PresetAnalysis> {
-    let mut child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()?;
+/// How one analysis ended.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Outcome {
+    /// A measurement.
+    Measured(PresetAnalysis),
+    /// The renderer rejected the preset or crashed on it: it will do so again,
+    /// so it is remembered as failed.
+    Rejected,
+    /// The child could not be started or took too long, which can just mean
+    /// the machine was busy. Nothing is remembered, so a later scan tries again.
+    Inconclusive,
+}
+
+/// Runs one analysis child to completion and reads its result.
+fn run_analysis(mut command: Command, out_path: &Path, timeout: Duration, cancel: &AtomicBool) -> Outcome {
+    let Ok(mut child) = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
+        return Outcome::Inconclusive;
+    };
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() >= timeout => {
+            // Cancelling does not wait for the preset being measured.
+            Ok(None) if started.elapsed() >= timeout || cancel.load(Ordering::Relaxed) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(out_path);
-                return None;
+                return Outcome::Inconclusive;
             }
             Ok(None) => std::thread::sleep(POLL),
-            Err(_) => return None,
+            Err(_) => return Outcome::Inconclusive,
         }
     };
     let analysis = if status.success() { std::fs::read_to_string(out_path).ok().and_then(|t| PresetAnalysis::from_line(&t)) } else { None };
     let _ = std::fs::remove_file(out_path);
-    analysis
+    match analysis {
+        Some(analysis) => Outcome::Measured(analysis),
+        None => Outcome::Rejected,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,6 +165,12 @@ impl ScanHandle {
         f(&self.shared.table.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
+    /// Writes the results now, for the moment the app quits mid-scan.
+    pub(crate) fn save(&self, path: &Path) {
+        let json = table_to_json(&self.shared.table.lock().unwrap_or_else(|e| e.into_inner()));
+        save_json(path, &json);
+    }
+
     pub(crate) fn cancel(&self) {
         self.shared.cancel.store(true, Ordering::Relaxed);
     }
@@ -186,8 +213,8 @@ impl ScanHandle {
                 let _ = worker.join();
             }
             if let Some(path) = save_to.as_deref() {
-                let table = shared.table.lock().unwrap_or_else(|e| e.into_inner());
-                save_table(path, &table);
+                let json = table_to_json(&shared.table.lock().unwrap_or_else(|e| e.into_inner()));
+                save_json(path, &json);
             }
             shared.running.store(false, Ordering::SeqCst);
         });
@@ -209,16 +236,20 @@ fn scan_worker(
         let Some((name, path)) = todo.get(index) else { break };
         let mut command = Command::new(program);
         command.arg("--analyze-preset").arg(path).arg(&scratch);
-        let result = run_analysis(command, &scratch, CHILD_TIMEOUT);
+        let outcome = run_analysis(command, &scratch, CHILD_TIMEOUT, &shared.cancel);
         let done = {
             let mut table = shared.table.lock().unwrap_or_else(|e| e.into_inner());
-            table.record(name, result);
+            match outcome {
+                Outcome::Measured(analysis) => table.record(name, Some(analysis)),
+                Outcome::Rejected => table.record(name, None),
+                Outcome::Inconclusive => {}
+            }
             shared.revision.fetch_add(1, Ordering::Relaxed);
             shared.done.fetch_add(1, Ordering::Relaxed) + 1
         };
         if let (true, Some(path)) = (done % SAVE_EVERY == 0, save_to) {
-            let table = shared.table.lock().unwrap_or_else(|e| e.into_inner());
-            save_table(path, &table);
+            let json = table_to_json(&shared.table.lock().unwrap_or_else(|e| e.into_inner()));
+            save_json(path, &json);
         }
     }
 }
@@ -264,8 +295,8 @@ mod tests {
         let out = scratch("ok");
         let mut command = script(&format!("echo '42.5 3.25' > {}", out.display()));
         command.env("X", "1");
-        let analysis = run_analysis(command, &out, Duration::from_secs(5)).expect("a result");
-        assert_eq!(analysis, PresetAnalysis { mean_luma: 42.5, motion: 3.25 });
+        let outcome = run_analysis(command, &out, Duration::from_secs(5), &AtomicBool::new(false));
+        assert_eq!(outcome, Outcome::Measured(PresetAnalysis { mean_luma: 42.5, motion: 3.25 }));
         assert!(!out.exists(), "the scratch file is cleaned up");
     }
 
@@ -273,18 +304,28 @@ mod tests {
     #[test]
     fn a_failing_or_garbled_child_yields_no_result() {
         let out = scratch("fail");
-        assert!(run_analysis(script("exit 3"), &out, Duration::from_secs(5)).is_none());
+        assert_eq!(run_analysis(script("exit 3"), &out, Duration::from_secs(5), &AtomicBool::new(false)), Outcome::Rejected);
         let garbled = script(&format!("echo 'hello' > {}", out.display()));
-        assert!(run_analysis(garbled, &out, Duration::from_secs(5)).is_none());
+        assert_eq!(run_analysis(garbled, &out, Duration::from_secs(5), &AtomicBool::new(false)), Outcome::Rejected);
     }
 
     #[cfg(unix)]
     #[test]
-    fn a_child_that_hangs_is_killed_at_the_timeout() {
+    fn a_child_that_hangs_is_killed_and_not_held_against_the_preset() {
         let out = scratch("hang");
         let started = Instant::now();
-        assert!(run_analysis(script("sleep 30"), &out, Duration::from_millis(200)).is_none());
+        assert_eq!(run_analysis(script("sleep 30"), &out, Duration::from_millis(200), &AtomicBool::new(false)), Outcome::Inconclusive);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_kills_the_running_child_at_once() {
+        let out = scratch("cancel");
+        let cancel = AtomicBool::new(true);
+        let started = Instant::now();
+        assert_eq!(run_analysis(script("sleep 30"), &out, Duration::from_secs(30), &cancel), Outcome::Inconclusive);
+        assert!(started.elapsed() < Duration::from_secs(5), "did not wait for the child");
     }
 
     #[cfg(unix)]
@@ -292,7 +333,7 @@ mod tests {
     fn a_scan_records_every_job_skips_known_ones_and_reports_progress() {
         let handle = ScanHandle::new(ScanTable::default());
         handle.with_table(|t| assert!(t.is_empty()));
-        // `true` exits 0 without writing a result, so every job is recorded as failed.
+        // `true` exits 0 without writing a result: the renderer "rejected" them, so both are recorded as failed.
         let jobs = vec![
             ("a".to_string(), PathBuf::from("/nonexistent/a.milk")),
             ("b".to_string(), PathBuf::from("/nonexistent/b.milk")),

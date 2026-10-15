@@ -50,8 +50,8 @@ pub(crate) fn save_session(path: &Path, session: &Session) {
 /// (hand-edited, or written by a newer build) is moved aside to
 /// `session.json.bad` so the next save does not overwrite it unseen.
 pub(crate) fn load_session(path: &Path) -> Option<Session> {
-    let json = std::fs::read_to_string(path).ok()?;
-    match decode_session(&json) {
+    let bytes = std::fs::read(path).ok()?;
+    match String::from_utf8(bytes).map_err(|e| e.to_string()).and_then(|json| decode_session(&json).map_err(|e| e.to_string())) {
         Ok(session) => Some(session),
         Err(e) => {
             let aside = path.with_extension("json.bad");

@@ -667,3 +667,20 @@ mod get_command_value {
             .any(|id| matches!(id, CommandId::Qvar1_0 | CommandId::Qvar7_2 | CommandId::Qvar32_3)));
     }
 }
+
+
+mod slot_locked {
+    use super::*;
+
+    #[test]
+    fn a_slot_follows_the_lock_of_the_bus_it_feeds() {
+        let mut show = Show { deck_bus: [DeckBus::A, DeckBus::B, DeckBus::Off, DeckBus::A], lock_a: true, ..Show::default() };
+        assert!(show.slot_locked(0));
+        assert!(!show.slot_locked(1));
+        assert!(show.slot_locked(3));
+        show.lock_b = true;
+        assert!(show.slot_locked(1));
+        assert!(!show.slot_locked(2), "an unassigned slot has no lock");
+        assert!(!show.slot_locked(99), "an out of range slot is not locked");
+    }
+}

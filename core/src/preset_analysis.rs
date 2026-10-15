@@ -22,7 +22,9 @@ const MOTION_FOR_FULL_ENERGY: f32 = 18.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PresetAnalysis {
-    /// Mean brightness over all sampled frames, 0 to 255.
+    /// Mean brightness of the brightest sampled frame, 0 to 255. The brightest
+    /// rather than the average, so a preset that lights up and then fades is
+    /// judged on how it looked when lit.
     pub mean_luma: f32,
     /// Mean absolute per-pixel change between consecutive sampled frames.
     pub motion: f32,
@@ -174,7 +176,7 @@ pub fn analyze_frames(frames: &[Vec<f32>]) -> Option<PresetAnalysis> {
         return None;
     }
     let cells = (SAMPLE_W * SAMPLE_H) as f32;
-    let mean_luma = usable.iter().map(|f| f.iter().sum::<f32>() / cells).sum::<f32>() / usable.len() as f32;
+    let mean_luma = usable.iter().map(|f| f.iter().sum::<f32>() / cells).fold(0.0_f32, f32::max);
     let motion = usable
         .windows(2)
         .map(|pair| pair[0].iter().zip(pair[1].iter()).map(|(a, b)| (a - b).abs()).sum::<f32>() / cells)
@@ -207,6 +209,13 @@ mod tests {
         let a = analyze_frames(&[flat(120.0), flat(120.0), flat(120.0)]).unwrap();
         assert_eq!(a.verdict(), PresetVerdict::Frozen);
         assert_eq!(a.energy(), 0.0);
+    }
+
+    #[test]
+    fn a_preset_that_lights_up_and_then_fades_is_judged_on_its_bright_moment() {
+        let a = analyze_frames(&[flat(200.0), flat(4.0), flat(3.0)]).unwrap();
+        assert!(a.mean_luma >= 200.0);
+        assert_eq!(a.verdict(), PresetVerdict::Fine);
     }
 
     #[test]

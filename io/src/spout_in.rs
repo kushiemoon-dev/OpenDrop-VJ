@@ -151,6 +151,23 @@ fn run(
     }
 }
 
+/// DXGI formats whose bytes are laid out blue, green, red, alpha. Most Spout
+/// senders share `B8G8R8A8_UNORM` (87); 88 is the `X` variant and 91 the sRGB one.
+#[cfg(any(windows, test))]
+fn is_bgra_format(dxgi_format: u32) -> bool {
+    matches!(dxgi_format, 87 | 88 | 91)
+}
+
+/// Swaps red and blue in tightly packed 4-byte pixels, in place. The Spout
+/// SDK hands pixels back in the shared texture's own channel order, and the
+/// compositor expects RGBA.
+#[cfg(any(windows, test))]
+fn swap_red_blue(pixels: &mut [u8]) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use super::SpoutSource;
@@ -184,6 +201,10 @@ mod platform {
                 return Ok(None);
             }
             if self.receiver.is_frame_new() {
+                if super::is_bgra_format(self.receiver.sender_format()) {
+                    let len = self.width as usize * self.height as usize * 4;
+                    super::swap_red_blue(&mut buf[..len]);
+                }
                 Ok(Some((self.width, self.height)))
             } else {
                 Ok(None)
@@ -269,6 +290,25 @@ mod tests {
 
         handle.control_tx.send(SpoutInControl::Stop).unwrap();
         assert!(wait_for(|| !handle.latest().active));
+    }
+
+    #[test]
+    fn bgra_senders_are_recognised_and_rgba_ones_are_not() {
+        assert!(is_bgra_format(87), "B8G8R8A8_UNORM, Spout's default");
+        assert!(is_bgra_format(88));
+        assert!(is_bgra_format(91));
+        assert!(!is_bgra_format(28), "R8G8B8A8_UNORM");
+        assert!(!is_bgra_format(10), "R16G16B16A16_FLOAT");
+    }
+
+    #[test]
+    fn swapping_red_and_blue_leaves_green_and_alpha_alone() {
+        let mut pixels = vec![1, 2, 3, 4, 10, 20, 30, 40];
+        swap_red_blue(&mut pixels);
+        assert_eq!(pixels, vec![3, 2, 1, 4, 30, 20, 10, 40]);
+        let mut tail = vec![1, 2, 3, 4, 9, 9];
+        swap_red_blue(&mut tail);
+        assert_eq!(tail, vec![3, 2, 1, 4, 9, 9], "a trailing partial pixel is untouched");
     }
 
     #[test]

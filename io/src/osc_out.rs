@@ -9,12 +9,37 @@
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use rosc::{encoder, OscMessage, OscPacket};
 
 /// Re-exported so callers can build values without depending on `rosc`.
 pub use rosc::OscType;
+
+/// How long a host name lookup may take before Start gives up.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// An address literal needs no lookup. A name is resolved on a helper thread
+/// and waited for at most [`RESOLVE_TIMEOUT`], so a mistyped host cannot
+/// freeze the interface for as long as the system resolver takes to fail.
+fn resolve(host: &str, port: u16) -> Result<SocketAddr, String> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
+    let (tx, rx) = mpsc::channel();
+    let name = host.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send((name.as_str(), port).to_socket_addrs().map(|mut addrs| addrs.next()));
+    });
+    match rx.recv_timeout(RESOLVE_TIMEOUT) {
+        Ok(Ok(Some(addr))) => Ok(addr),
+        Ok(Ok(None)) => Err(format!("no address for {host}:{port}")),
+        Ok(Err(e)) => Err(format!("cannot resolve {host}:{port}: {e}")),
+        Err(_) => Err(format!("resolving {host} took too long")),
+    }
+}
 
 pub struct OscOut {
     socket: UdpSocket,
@@ -25,11 +50,7 @@ impl OscOut {
     /// Resolves `host:port` and opens a UDP socket aimed at it. Nothing is
     /// sent until [`publish`](Self::publish) is called.
     pub fn connect(host: &str, port: u16) -> Result<Self, String> {
-        let target = (host, port)
-            .to_socket_addrs()
-            .map_err(|e| format!("cannot resolve {host}:{port}: {e}"))?
-            .next()
-            .ok_or_else(|| format!("no address for {host}:{port}"))?;
+        let target = resolve(host, port)?;
         let bind = if target.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
         let socket = UdpSocket::bind(bind).map_err(|e| format!("cannot open a UDP socket: {e}"))?;
         socket.connect(target).map_err(|e| format!("cannot reach {target}: {e}"))?;
@@ -117,6 +138,13 @@ mod tests {
         assert_eq!(first.publish(&values), 1);
         let mut second = OscOut::connect("127.0.0.1", port).unwrap();
         assert_eq!(second.publish(&values), 1);
+    }
+
+    #[test]
+    fn an_address_literal_resolves_without_a_lookup_and_localhost_resolves() {
+        assert_eq!(resolve("192.168.1.60", 9000).unwrap(), "192.168.1.60:9000".parse().unwrap());
+        assert_eq!(resolve("::1", 9000).unwrap().port(), 9000);
+        assert!(resolve("localhost", 9000).is_ok());
     }
 
     #[test]

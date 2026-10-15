@@ -92,8 +92,9 @@ fn on_track_changed(state: &mut AppState, artist: &str, title: &str) {
     let key = TrackMemory::key(artist, title);
     let first = state.track_memory.set_current_track(key).first().cloned();
     if let (true, Some(preset)) = (state.track_auto_recall, first) {
-        if state.path_by_name.contains_key(&preset) {
-            request_preset_load(state, state.show.selected_slot, preset);
+        let slot = state.show.selected_slot;
+        if state.path_by_name.contains_key(&preset) && !state.show.slot_locked(slot) {
+            request_preset_load(state, slot, preset);
         }
     }
 }

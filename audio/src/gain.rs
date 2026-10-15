@@ -86,7 +86,11 @@ impl GainStage {
         if self.envelope < AGC_SILENCE_FLOOR {
             return 1.0;
         }
-        (AGC_TARGET_PEAK / self.envelope).clamp(AGC_MIN_GAIN, AGC_MAX_GAIN)
+        let wanted = (AGC_TARGET_PEAK / self.envelope).clamp(AGC_MIN_GAIN, AGC_MAX_GAIN);
+        // Fade the correction in over the first octave above the floor, so the
+        // gain never jumps from 1x to its full value as room noise crosses it.
+        let ramp = ((self.envelope - AGC_SILENCE_FLOOR) / AGC_SILENCE_FLOOR).clamp(0.0, 1.0);
+        1.0 + (wanted - 1.0) * ramp
     }
 }
 
@@ -148,6 +152,23 @@ mod tests {
         }
         assert!(peak(&last) > 0.2, "peak was {}", peak(&last));
         assert!(peak(&last) <= 0.5 + 0.05);
+    }
+
+    #[test]
+    fn the_agc_gain_does_not_jump_across_the_silence_floor() {
+        let settled_gain = |amplitude: f32| {
+            let mut stage = GainStage::default();
+            let block = tone(amplitude, 480);
+            let mut gain = 1.0;
+            for _ in 0..400 {
+                gain = stage.agc_gain(&block, RATE, 2);
+            }
+            gain
+        };
+        let below = settled_gain(0.0048);
+        let above = settled_gain(0.0053);
+        assert!((above - below).abs() < 0.6, "gain went from {below} to {above}");
+        assert!(settled_gain(0.05) > above, "louder than the floor still gets the full correction");
     }
 
     #[test]

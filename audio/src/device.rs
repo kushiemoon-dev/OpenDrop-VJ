@@ -21,6 +21,7 @@
 //! (confirmed in the vendored comment in
 //! `cpal-0.18.2/src/host/wasapi/mod.rs`), so the output device itself is the
 //! capture source there, picked straight from `output_devices()`.
+//! Microphones are listed too, from `input_devices()`, marked with a suffix.
 #[cfg(not(target_os = "windows"))]
 const DEFAULT_SINK_ALIAS: &str = "default_sink";
 
@@ -85,14 +86,39 @@ fn device_label(d: &cpal::Device) -> Option<String> {
     Some(format_label(desc.name(), id.id()))
 }
 
-/// Windows: lists loopback-capturable output devices, not input devices (see
-/// module doc).
+/// Windows marks a microphone with this suffix. Output devices (captured as
+/// loopback) keep their bare name, so a choice saved by an earlier version
+/// still resolves.
+#[cfg(any(target_os = "windows", test))]
+const MIC_SUFFIX: &str = " (microphone)";
+
+#[cfg(any(target_os = "windows", test))]
+fn microphone_label(name: &str) -> String {
+    format!("{name}{MIC_SUFFIX}")
+}
+
+/// `(device name, is a microphone)` for a label from `list_input_devices`.
+#[cfg(any(target_os = "windows", test))]
+fn parse_label(label: &str) -> (&str, bool) {
+    match label.strip_suffix(MIC_SUFFIX) {
+        Some(name) => (name, true),
+        None => (label, false),
+    }
+}
+
+/// Windows: the output devices (captured as loopback, what is playing) and
+/// the microphones, which are marked with a suffix (see module doc).
 #[cfg(target_os = "windows")]
 pub fn list_input_devices(host: &cpal::Host) -> Vec<String> {
     use cpal::traits::{DeviceTrait, HostTrait};
-    host.output_devices()
-        .map(|devices| devices.filter_map(|d| d.description().ok().map(|desc| desc.name().to_owned())).collect())
-        .unwrap_or_default()
+    let name_of = |d: cpal::Device| d.description().ok().map(|desc| desc.name().to_owned());
+    let mut labels: Vec<String> = host.output_devices().map(|devices| devices.filter_map(name_of).collect()).unwrap_or_default();
+    labels.extend(
+        host.input_devices()
+            .map(|devices| devices.filter_map(name_of).map(|name| microphone_label(&name)).collect::<Vec<_>>())
+            .unwrap_or_default(),
+    );
+    labels
 }
 
 /// Selects an input device by its exact `list_input_devices` label, for
@@ -104,17 +130,34 @@ pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal
     host.input_devices().ok()?.find(|d| device_label(d).as_deref() == Some(name))
 }
 
-/// Windows: matches against `output_devices()`, the same set `list_input_devices`
-/// lists on this platform (see module doc).
+/// Windows: matches against the same two sets `list_input_devices` lists
+/// (see module doc).
 #[cfg(target_os = "windows")]
 pub fn select_input_device_by_name(host: &cpal::Host, name: &str) -> Option<cpal::Device> {
     use cpal::traits::{DeviceTrait, HostTrait};
-    host.output_devices().ok()?.find(|d| d.description().map(|desc| desc.name() == name).unwrap_or(false))
+    let (device_name, microphone) = parse_label(name);
+    let matches = |d: &cpal::Device| d.description().map(|desc| desc.name() == device_name).unwrap_or(false);
+    if microphone {
+        host.input_devices().ok()?.find(matches)
+    } else {
+        host.output_devices().ok()?.find(matches)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::format_label;
+    use super::{format_label, microphone_label, parse_label};
+
+    #[test]
+    fn a_microphone_label_round_trips_and_an_output_label_stays_bare() {
+        assert_eq!(parse_label(&microphone_label("Microphone (Realtek)")), ("Microphone (Realtek)", true));
+        assert_eq!(parse_label("Speakers (Realtek)"), ("Speakers (Realtek)", false));
+    }
+
+    #[test]
+    fn a_mic_and_an_output_with_the_same_name_get_different_labels() {
+        assert_ne!(microphone_label("USB Audio"), "USB Audio");
+    }
 
     #[test]
     fn same_description_with_different_ids_gives_distinct_labels() {

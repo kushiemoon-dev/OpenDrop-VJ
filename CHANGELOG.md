@@ -11,6 +11,9 @@
 - Library panel: an optional background scan renders every preset to find the black, frozen and very dim ones, with a switch to hide them from the preset browser. Nothing is deleted, and the scan can be cancelled and resumed
 - Energy auto-pilot (Library panel): optionally, every set number of beats and per deck bus, loads a scanned preset whose energy matches the music's. Off by default
 - Track memory: with rkbx_link connected, the presets played on each track are remembered and suggested the next time the track plays (Preset notes panel), with an optional automatic reload
+- Update notice: the app checks GitHub for a newer release when it starts (at most every twelve hours, switchable off in the About panel) and mentions it in the status bar. It never downloads, installs or blocks anything
+- Support tab in the About panel and a Sponsor button on GitHub
+- The About panel shows the application version
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
 
 ### Fixes

@@ -149,6 +149,17 @@ pub(crate) struct UiConfig {
     #[serde(default)]
     pub(crate) fps_override: Option<u32>,
     pub(crate) favorite_presets: HashSet<String>,
+    /// Ask GitHub for the latest release at startup (at most every twelve
+    /// hours) and say so when it is newer. Informational only.
+    #[serde(default = "default_true")]
+    pub(crate) check_for_updates: bool,
+    /// Unix time of the last successful check, 0 if none.
+    #[serde(default)]
+    pub(crate) last_update_check: u64,
+    /// Tag and page of the newest release seen, so a pending update stays
+    /// visible between checks.
+    #[serde(default)]
+    pub(crate) known_release: Option<(String, String)>,
     /// Hide the presets the library scan flagged from the browser.
     #[serde(default)]
     pub(crate) hide_flagged_presets: bool,
@@ -212,6 +223,9 @@ impl Default for UiConfig {
             beat_sensitivity: default_beat_sensitivity(),
             fps_override: None,
             favorite_presets: HashSet::new(),
+            check_for_updates: true,
+            last_update_check: 0,
+            known_release: None,
             hide_flagged_presets: false,
             track_presets: BTreeMap::new(),
             track_auto_recall: false,
@@ -274,6 +288,10 @@ pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     if let Err(e) = std::fs::write(path, config_to_json(config)) {
         eprintln!("[config] failed to write config file {}: {e}", path.display());
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_osc_out_host() -> String {
@@ -364,6 +382,9 @@ mod tests {
             beat_sensitivity: 0.8,
             fps_override: Some(45),
             favorite_presets: HashSet::from(["Alpha Swirl Refract".to_string(), "Beta Pulse Drift".to_string()]),
+            check_for_updates: false,
+            last_update_check: 1_760_000_000,
+            known_release: Some(("v0.3.0".to_string(), "https://example.com/r".to_string())),
             hide_flagged_presets: true,
             track_presets: BTreeMap::from([("a - song".to_string(), vec!["Alpha Swirl Refract".to_string()])]),
             track_auto_recall: true,

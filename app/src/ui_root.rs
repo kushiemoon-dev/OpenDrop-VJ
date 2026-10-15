@@ -326,7 +326,7 @@ pub(crate) fn ui_root(
                 ui::cloud_video::show(ui, sources.cloud_video, sources.cloud_video_api_url);
             }
             Panel::About => {
-                ui::about::show(ui);
+                ui::about::show(ui, shell.check_for_updates, shell.update_notice.as_ref());
             }
         }
     });

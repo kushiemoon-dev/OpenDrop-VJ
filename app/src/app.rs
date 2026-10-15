@@ -18,7 +18,7 @@ use crate::frame::sources::upload_source_frames;
 use crate::frame::tick::{tick_show, TickOutput};
 use crate::fatal::{describe_panic, report_fatal};
 use crate::frame::ui_pass::run_ui_pass;
-use crate::{bootstrap, config, keymap, session, App};
+use crate::{bootstrap, config, keymap, session, update, App};
 
 fn fail_startup(event_loop: &ActiveEventLoop, detail: &str) {
     report_fatal("OpenDrop could not initialise graphics", detail);
@@ -150,6 +150,8 @@ impl ApplicationHandler for App {
 
             publish_osc_state(state);
 
+            update::poll(state);
+
             session::autosave_if_due(state, now);
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(state.next_frame_at));
@@ -184,6 +186,9 @@ impl ApplicationHandler for App {
             ui_config.invisible_mode = state.invisible_mode;
             ui_config.fps_override = state.fps_override;
             ui_config.hide_flagged_presets = state.hide_flagged;
+            ui_config.check_for_updates = state.check_for_updates;
+            ui_config.last_update_check = state.last_update_check;
+            ui_config.known_release = state.known_release.clone();
             ui_config.track_presets = state.track_memory.presets_map().clone();
             ui_config.track_auto_recall = state.track_auto_recall;
             ui_config.preset_tags = state.preset_annotations.tags_map().clone();

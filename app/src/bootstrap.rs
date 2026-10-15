@@ -579,6 +579,15 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
             crate::preset_scan::scan_file_path().map(|p| crate::preset_scan::load_table(&p)).unwrap_or_default(),
         ),
         hide_flagged: ui_config.hide_flagged_presets,
+        update_check: crate::update::start_if_due(
+            ui_config.check_for_updates,
+            crate::update::now_unix(),
+            ui_config.last_update_check,
+        ),
+        check_for_updates: ui_config.check_for_updates,
+        last_update_check: ui_config.last_update_check,
+        update_notice: crate::update::notice_for(ui_config.check_for_updates, &ui_config.known_release),
+        known_release: ui_config.known_release.clone(),
         track_memory: opendrop_core::track_memory::TrackMemory::from_parts(ui_config.track_presets.clone()),
         track_auto_recall: ui_config.track_auto_recall,
         autopilot: {

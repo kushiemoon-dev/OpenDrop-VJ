@@ -391,6 +391,13 @@ pub(crate) struct AppState {
     /// Library scan results and the background scan that fills them.
     pub(crate) scan: crate::preset_scan::ScanHandle,
     pub(crate) hide_flagged: bool,
+    /// Update notice: the running check, whether checks are on, when the last
+    /// one succeeded, the newest release seen and the notice derived from it.
+    pub(crate) update_check: Option<opendrop_io::update_check::UpdateCheckHandle>,
+    pub(crate) check_for_updates: bool,
+    pub(crate) last_update_check: u64,
+    pub(crate) known_release: Option<(String, String)>,
+    pub(crate) update_notice: Option<opendrop_core::update::ReleaseNotice>,
     /// Picks presets by energy when switched on per bus, and the follower of
     /// the music's energy it steers by.
     pub(crate) autopilot: opendrop_core::autopilot::Autopilot,

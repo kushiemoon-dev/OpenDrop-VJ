@@ -78,6 +78,11 @@ pub(crate) struct ShellCtx<'a> {
     /// state, toggled by a `ghost_button` in `status_bar_stage`,
     /// not by `stage_mode` itself.
     pub(crate) presets_drawer_open: &'a mut bool,
+    /// Newer release to mention in the status bar and About panel, copied by
+    /// value out of `AppState` like `last_wall_ms`.
+    pub(crate) update_notice: Option<opendrop_core::update::ReleaseNotice>,
+    /// The About panel's switch for the startup update check.
+    pub(crate) check_for_updates: &'a mut bool,
 }
 
 /// Live performance state: the `Show` business object plus per-deck UI

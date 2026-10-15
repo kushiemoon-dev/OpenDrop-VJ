@@ -13,10 +13,12 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 ## Features
 
 - 4 decks with crossfader, playlists, snapshots, and a preset browser backed by libprojectM
-- Beat detection, per-slot LFO, and beat-triggered modulation
+- Your show comes back where you left it: the mix, snapshots, timeline, overlays, playlists and each deck's preset are saved as you play and restored at launch
+- Beat detection with adjustable sensitivity, input gain and automatic gain control, per-slot LFO, and beat-triggered modulation
+- Preset tools: tags and notes you can search, a history of what you played, the presets you played on each track, an optional library scan that hides black and frozen presets, and an optional auto-pilot that matches presets to the music's energy
 - Live Time/Q-var parameter injection into the running preset
 - Compositor: blend modes, luma/color keying, text and sprite overlays, strobe
-- Control surfaces: MIDI (learn-based mapping), OSC, a phone remote control served over WebSocket, and optional Ableton Link
+- Control surfaces: MIDI (learn-based mapping), OSC in and out, a phone remote control served over WebSocket, and optional Ableton Link
 - Output: NDI in/out, Spout in/out (Windows), v4l2loopback, OBS WebSocket scene control, Twitch/Kick chat
 - Cloud presets and shareable set links
 - Local video clip playback and camera capture via `ffmpeg`
@@ -39,6 +41,14 @@ This is the native rewrite. The previous Electron/SvelteKit web app lives on the
 4. Load a second preset onto deck B and drag the crossfader between them.
 
 That's the loop: decks, presets, crossfader. Everything else (MIDI/OSC mapping, NDI in/out, OBS, the phone remote, Cloud Presets...) lives in its own panel in the left-hand nav and is self-explanatory from there.
+
+## Update check
+
+At startup the app asks GitHub for the latest release, at most once every twelve hours, and mentions a newer one in the status bar and the About panel. It never downloads or installs anything, and the check can be switched off in the About panel.
+
+## Support
+
+OpenDrop VJ is free and open source. If it is useful to you, you can support its development on [Ko-fi](https://ko-fi.com/kushiemoon). Entirely optional: every feature stays available either way.
 
 ## Building
 

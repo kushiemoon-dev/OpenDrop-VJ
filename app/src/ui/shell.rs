@@ -308,7 +308,12 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         // it lets the area shrink below `available_height` when the list
         // fits, which is what leaves room for "About" to still pin at the
         // bottom via its own `bottom_up` block afterward, unchanged.
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        // The area is capped above the pinned "About" row (see
+        // `nav_scroll_height`): a list longer than the panel would otherwise
+        // take the whole height and draw its last rows under "About".
+        let row = nav_row_height(ui);
+        let scroll_height = nav_scroll_height(ui.available_height(), row, ui.spacing().item_spacing.y);
+        egui::ScrollArea::vertical().max_height(scroll_height).show(ui, |ui| {
             widgets::section(ui, "Perform");
             nav_item(ui, shell.active_panel, Panel::Decks, "Decks", &mut active_rect);
             // `PresetBrowser` isn't part of the PERFORM/SOURCES/OUTPUTS/
@@ -387,6 +392,20 @@ pub fn nav(ui: &mut egui::Ui, shell: &mut ShellCtx) {
         let rail = egui::Rect::from_min_size(egui::pos2(rect.left(), y), egui::vec2(2.0, rect.height()));
         ui.painter().rect_filled(rail, egui::CornerRadius::ZERO, t.palette.accent);
     }
+}
+
+/// Height of one nav row: what `selectable_label` lays out, the larger of the
+/// minimum interactive height and the text height plus its padding.
+fn nav_row_height(ui: &egui::Ui) -> f32 {
+    let spacing = ui.spacing();
+    spacing.interact_size.y.max(ui.text_style_height(&egui::TextStyle::Button) + 2.0 * spacing.button_padding.y)
+}
+
+/// Height the scrolling part of the nav may use: everything except the
+/// pinned "About" row and the gap above it, but never less than one row so
+/// a very short panel still shows something.
+fn nav_scroll_height(available: f32, row: f32, gap: f32) -> f32 {
+    (available - row - gap).max(row)
 }
 
 /// One nav row: a `selectable_label`. When active, records its rect into
@@ -473,6 +492,12 @@ pub fn status_bar(
             // through any context struct, only `AppState` itself.
             let loading = !perform.pending_validations.is_empty() || !library.thumb_queue.is_empty();
             status_dot(ui, "LOAD", loading);
+
+            // A newer release exists: say so, discreetly, and link to it.
+            if let Some(notice) = &shell.update_notice {
+                sep(ui);
+                ui.hyperlink_to(format!("Update {} available", notice.version), &notice.url);
+            }
         });
     });
 }
@@ -597,4 +622,16 @@ fn status_dot(ui: &mut egui::Ui, label: &str, active: bool) {
 fn sep(ui: &mut egui::Ui) {
     let t = theme(ui);
     ui.label(egui::RichText::new("·").color(t.palette.dim));
+}
+
+#[cfg(test)]
+mod nav_layout_tests {
+    use super::nav_scroll_height;
+
+    #[test]
+    fn the_nav_scroll_area_leaves_room_for_the_pinned_row() {
+        assert_eq!(nav_scroll_height(500.0, 24.0, 4.0), 472.0);
+        assert_eq!(nav_scroll_height(30.0, 24.0, 4.0), 24.0, "never below one row");
+        assert_eq!(nav_scroll_height(0.0, 24.0, 4.0), 24.0);
+    }
 }

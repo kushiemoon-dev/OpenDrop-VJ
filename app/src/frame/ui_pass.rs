@@ -16,6 +16,7 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
     let t0 = state.t0;
     let last_vu_level = state.last_vu_level;
     let energy_level = state.energy_tracker.level();
+    let update_notice = state.update_notice.clone();
     // Status bar's fps/frame-ms readout, same by-value
     // copy-before-destructure convention as `last_vu_level` above,
     // since `ShellCtx::last_wall_ms` is a plain `Option<f64>`, not
@@ -60,6 +61,7 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         preset_annotations,
         scan,
         hide_flagged,
+        check_for_updates,
         autopilot,
         track_memory,
         track_auto_recall,
@@ -163,7 +165,14 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
     // `_ctx` suffix only where the destructure already bound a
     // same-named `WindowSlot` (`control`, `output`) that's still
     // needed below for `egui_glow.run`/`&output.window`.
-    let mut shell_ctx = ui::ctx::ShellCtx { active_panel, stage_mode, last_wall_ms, presets_drawer_open };
+    let mut shell_ctx = ui::ctx::ShellCtx {
+        active_panel,
+        stage_mode,
+        last_wall_ms,
+        presets_drawer_open,
+        update_notice,
+        check_for_updates,
+    };
     let mut perform_ctx = ui::ctx::PerformCtx {
         show,
         deck_tex_ids,

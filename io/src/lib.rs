@@ -22,5 +22,6 @@ pub mod spout;
 pub mod spout_in;
 pub mod share_codec;
 pub mod twitch;
+pub mod update_check;
 pub mod v4l2loopback;
 pub mod video_capture;

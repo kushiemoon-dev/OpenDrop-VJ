@@ -20,5 +20,6 @@ pub mod strobe;
 pub mod thumb_queue;
 pub mod time_params;
 pub mod timeline;
+pub mod update;
 pub mod track_memory;
 pub mod video;

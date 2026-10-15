@@ -20,6 +20,7 @@ mod session;
 mod state;
 mod theme;
 mod thumbnail_child;
+mod update;
 mod thumbnails;
 mod ui;
 mod ui_root;

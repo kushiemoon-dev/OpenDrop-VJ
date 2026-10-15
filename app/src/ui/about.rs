@@ -1,7 +1,8 @@
-//! About panel: third-party attribution required by projectM's LGPL-2.1
-//! license. This app links libprojectM dynamically
-//! (`engine/build.rs`, via pkg-config against the system `libprojectm`
-//! package on Linux, the pinned vcpkg overlay port on Windows), which keeps the resulting MIT binary free of LGPL
+//! About panel: the application version and update notice, a Support tab,
+//! and the third-party attribution required by projectM's LGPL-2.1 license.
+//! This app links libprojectM dynamically (`engine/build.rs`, via pkg-config
+//! against the system `libprojectm` package on Linux, the pinned vcpkg
+//! overlay port on Windows), which keeps the resulting MIT binary free of LGPL
 //! contamination: the documented, wiki-endorsed usage for LGPL as a
 //! closed/permissively-licensed app's shared-library dependency. The
 //! license's condition in return is that this attribution exist: the
@@ -14,6 +15,21 @@
 //!
 //! Takes no fields. This panel has no mutable state, unlike every other
 //! panel in this app.
+
+use opendrop_core::update::ReleaseNotice;
+
+use crate::ui::widgets;
+
+/// Where supporters can contribute. Also the `ko_fi` entry of
+/// `.github/FUNDING.yml`, which drives the Sponsor button on GitHub.
+const KOFI_URL: &str = "https://ko-fi.com/kushiemoon";
+
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Tab {
+    #[default]
+    About,
+    Support,
+}
 
 const PROJECTM_REPO: &str = "https://github.com/projectM-visualizer/projectm";
 
@@ -37,10 +53,57 @@ fn app_version_label() -> String {
     format!("OpenDrop VJ {}", env!("CARGO_PKG_VERSION"))
 }
 
-pub fn show(ui: &mut egui::Ui) {
-    ui.label(app_version_label());
+/// About panel: credits and licences, the update notice, and a Support tab.
+/// `check_for_updates` is the startup-check switch and `notice` a newer
+/// release when there is one; both are informational, nothing is installed.
+pub fn show(ui: &mut egui::Ui, check_for_updates: &mut bool, notice: Option<&ReleaseNotice>) {
+    let tab_id = egui::Id::new("about_tab");
+    let mut tab: Tab = ui.data_mut(|d| d.get_temp(tab_id).unwrap_or_default());
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut tab, Tab::About, "About");
+        ui.selectable_value(&mut tab, Tab::Support, "Support");
+    });
+    ui.data_mut(|d| d.insert_temp(tab_id, tab));
     ui.separator();
 
+    match tab {
+        Tab::About => {
+            show_updates(ui, check_for_updates, notice);
+            ui.separator();
+            show_credits(ui);
+        }
+        Tab::Support => show_support(ui),
+    }
+}
+
+fn show_updates(ui: &mut egui::Ui, check_for_updates: &mut bool, notice: Option<&ReleaseNotice>) {
+    ui.label(format!("You are running {}.", app_version_label()));
+    match notice {
+        Some(notice) => {
+            ui.hyperlink_to(format!("Version {} is available", notice.version), &notice.url);
+        }
+        None if *check_for_updates => {
+            ui.label("No newer release known.");
+        }
+        None => {
+            ui.label("Update checks are off.");
+        }
+    }
+    ui.checkbox(check_for_updates, "Check for a new release when the app starts");
+    widgets::micro_label(
+        ui,
+        "One request to GitHub at most every twelve hours. Nothing is downloaded or installed for you.",
+    );
+}
+
+fn show_support(ui: &mut egui::Ui) {
+    ui.heading("Support OpenDrop VJ");
+    ui.label("OpenDrop VJ is free and open source. If it is useful to you, you can support its development.");
+    ui.hyperlink_to("Support me on Ko-fi", KOFI_URL);
+    widgets::micro_label(ui, "Entirely optional: every feature stays available either way.");
+}
+
+fn show_credits(ui: &mut egui::Ui) {
     let version = opendrop_engine::projectm_version();
     ui.label("Visuals rendered by projectM, dynamically linked.");
     ui.hyperlink_to("projectM", PROJECTM_REPO);
@@ -124,9 +187,29 @@ mod tests {
     }
 
     #[test]
-    fn show_does_not_panic() {
+    fn show_does_not_panic_with_and_without_a_notice() {
         themed_test_ui(|ui| {
-            show(ui);
+            let mut check = true;
+            show(ui, &mut check, None);
+            let notice = ReleaseNotice { version: "9.9.9".to_string(), url: "https://example.com".to_string() };
+            show(ui, &mut check, Some(&notice));
+            check = false;
+            show(ui, &mut check, None);
+        });
+    }
+
+    #[test]
+    fn the_ko_fi_link_matches_the_github_funding_file() {
+        let funding = include_str!("../../../.github/FUNDING.yml");
+        let account = KOFI_URL.trim_start_matches("https://ko-fi.com/");
+        assert!(funding.lines().any(|l| l.trim() == format!("ko_fi: {account}")), "keep KOFI_URL and FUNDING.yml in step");
+    }
+
+    #[test]
+    fn the_support_tab_renders() {
+        themed_test_ui(|ui| {
+            show_support(ui);
+            show_updates(ui, &mut true, None);
         });
     }
 }

@@ -63,6 +63,8 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
     // bus/opacity: a deck-video slot's decode/beat-cut/warp must
     // never gate on visibility; the projectM `InvisibleMode`
     // throttle just below only applies to preset-mode slots.
+    crate::deck_spout::sync(state);
+
     for slot in 0..deck::DECK_COUNT {
         let mut desired_slot = desired_video_input(&state.show.deck_video[slot], &state.video_clips, false);
         // Apply the sync's seek offset when this slot's

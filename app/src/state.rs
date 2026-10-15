@@ -172,6 +172,10 @@ pub(crate) struct AppState {
     /// no "first frame"/resize case to handle. Filled in place by
     /// `tick_deck_video`.
     pub(crate) deck_video_texture: [glow::NativeTexture; 4],
+    /// Spout receivers of the deck slots whose video is fed by a sender, and
+    /// the sender each was last started on (`""` is the active one).
+    pub(crate) deck_spout: [Option<opendrop_io::spout_in::SpoutInHandle>; 4],
+    pub(crate) deck_spout_started: [Option<String>; 4],
     /// `egui::TextureId` for each deck's video-decode texture, registered once
     /// at bootstrap alongside `deck_tex_ids`. The deck card shows this
     /// instead of `deck_tex_ids[i]` while that slot is in video mode

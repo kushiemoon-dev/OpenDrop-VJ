@@ -173,7 +173,8 @@ pub(crate) fn desired_video_input(
     ndi_active: bool,
 ) -> Option<opendrop_io::video_capture::VideoInput> {
     use opendrop_io::video_capture::VideoInput;
-    if !video.enabled || ndi_active {
+    // A Spout source feeds the slot from its own receiver, not from ffmpeg.
+    if !video.enabled || ndi_active || video.spout_source.is_some() {
         return None;
     }
     if let Some(device) = video.live_device.as_ref() {
@@ -246,6 +247,16 @@ mod tests {
         use crate::video_clips;
         use opendrop_core::video::VideoState;
         use opendrop_io::video_capture::VideoInput;
+
+        #[test]
+        fn a_spout_source_leaves_the_decoder_stopped() {
+            let mut v = VideoState::default();
+            v.enabled = true;
+            v.set_spout_source("Resolume Output".to_string());
+            assert_eq!(desired_video_input(&v, &clips(&["a"]), false), None);
+            v.clear_spout_source();
+            assert!(desired_video_input(&v, &clips(&["a"]), false).is_some());
+        }
 
         fn clips(names: &[&str]) -> Vec<video_clips::VideoClip> {
             names

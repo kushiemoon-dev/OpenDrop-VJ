@@ -477,6 +477,8 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         ndi_in_texture: None,
         ndi_in_selected_source: None,
         spout_in: opendrop_io::spout_in::spawn(),
+        deck_spout: std::array::from_fn(|_| None),
+        deck_spout_started: std::array::from_fn(|_| None),
         spout_in_texture: None,
         spout_in_selected: None,
         ndi_discovery_active: false,

@@ -67,6 +67,8 @@ pub fn show(
     ndi_selected_source: &mut Option<NdiSource>,
     ndi_request: &mut Option<VideoNdiRequest>,
     target: &mut VideoPanelTarget,
+    spout_senders: &[String],
+    spout_pick: &mut Option<String>,
 ) {
     target_selector_row(ui, target);
     ui.separator();
@@ -114,10 +116,13 @@ pub fn show(
         VideoPanelTarget::Deck(slot) => {
             ui.heading(format!("Deck {slot} video ({})", clips.len()));
             let video = &mut show.deck_video[slot];
-            advance_row(ui, video, false);
-            reactive_row(ui, video, false);
+            let external_feed = video.external_feed_active(false);
+            advance_row(ui, video, external_feed);
+            reactive_row(ui, video, external_feed);
             ui.separator();
-            clip_library(ui, video, clips, local_error, false, true);
+            spout_row(ui, video, spout_senders, spout_pick);
+            ui.separator();
+            clip_library(ui, video, clips, local_error, external_feed, true);
         }
     }
 }
@@ -226,6 +231,39 @@ fn toggle_pill(ui: &mut egui::Ui, label: &str, value: &mut bool, enabled: bool, 
 /// primary capture node, so a device that doesn't follow that convention
 /// would otherwise be both absent from the list and unreachable. The
 /// dropdown, when there is one, just writes into the same field.
+/// Feeds a deck slot from a Spout sender instead of a clip. The receiver
+/// itself lives in `deck_spout`; this row only sets the slot's source.
+fn spout_row(ui: &mut egui::Ui, video: &mut VideoState, senders: &[String], pick: &mut Option<String>) {
+    ui.add_enabled_ui(cfg!(windows), |ui| {
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(video.spout_source.is_none(), |ui| {
+                egui::ComboBox::from_id_salt("od_video_deck_spout_sender")
+                    .selected_text(pick.as_deref().unwrap_or("(active sender)"))
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(pick.is_none(), "(active sender)").clicked() {
+                            *pick = None;
+                        }
+                        for name in senders {
+                            if ui.selectable_label(pick.as_deref() == Some(name.as_str()), name).clicked() {
+                                *pick = Some(name.clone());
+                            }
+                        }
+                    });
+            });
+            if video.spout_source.is_some() {
+                if ui.button("Stop Spout").clicked() {
+                    video.clear_spout_source();
+                }
+            } else if ui.button("Use Spout").clicked() {
+                video.set_spout_source(pick.clone().unwrap_or_default());
+            }
+        });
+    });
+    if !cfg!(windows) {
+        widgets::micro_label(ui, "Spout is available on Windows only.");
+    }
+}
+
 fn camera_row(
     ui: &mut egui::Ui,
     show: &mut Show,
@@ -485,6 +523,7 @@ mod tests {
         ndi_selected_source: Option<NdiSource>,
         ndi_request: Option<VideoNdiRequest>,
         target: VideoPanelTarget,
+        spout_pick: Option<String>,
     }
 
     impl PanelState {
@@ -500,6 +539,7 @@ mod tests {
                 ndi_selected_source: None,
                 ndi_request: None,
                 target: VideoPanelTarget::Global,
+                spout_pick: None,
             }
         }
 
@@ -516,6 +556,8 @@ mod tests {
                 &mut self.ndi_selected_source,
                 &mut self.ndi_request,
                 &mut self.target,
+                &[],
+                &mut self.spout_pick,
             );
         }
     }

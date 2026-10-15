@@ -114,6 +114,10 @@ pub struct VideoState {
     pub live_device: Option<String>,
     /// Human-readable name of that camera, for the panel's button label.
     pub live_label: String,
+    /// A Spout sender feeding this state (a deck slot's own video), or `None`
+    /// for the clip library. `Some("")` means whichever sender is active.
+    /// Takes precedence over the clip library, like a camera does.
+    pub spout_source: Option<String>,
     /// Internal cut-advance counter: `playback-store.svelte.ts`'s
     /// module-level `beatCount`, private for the same reason it was
     /// non-reactive there: nothing renders it.
@@ -136,6 +140,7 @@ impl Default for VideoState {
             playback_rate: 1.0,
             live_device: None,
             live_label: String::new(),
+            spout_source: None,
             beat_count: 0,
         }
     }
@@ -158,7 +163,7 @@ impl VideoState {
     /// and `onVideoAudioTick` both bail out on it, and so does everything
     /// below.
     pub fn external_feed_active(&self, ndi_active: bool) -> bool {
-        self.live_device.is_some() || ndi_active
+        self.live_device.is_some() || self.spout_source.is_some() || ndi_active
     }
 
     pub fn toggle_clip_selection(&mut self, key: &str) {
@@ -245,6 +250,23 @@ impl VideoState {
         self.live_device = Some(device);
         self.live_label = label;
         self.enabled = true;
+    }
+
+    /// Feeds this state from a Spout sender (empty name: the active one).
+    /// Like picking a camera, choosing a source is itself the intent to see
+    /// it, so it switches the video on; it also drops any live camera, since
+    /// only one external feed can drive a layer.
+    pub fn set_spout_source(&mut self, sender: String) {
+        self.spout_source = Some(sender);
+        self.live_device = None;
+        self.live_label.clear();
+        self.enabled = true;
+    }
+
+    /// Drops the Spout source and falls back to the clip library. Leaves
+    /// `enabled` untouched.
+    pub fn clear_spout_source(&mut self) {
+        self.spout_source = None;
     }
 
     /// Drops the live camera and falls back to the clip library. Leaves
@@ -560,6 +582,34 @@ mod tests {
             let s = VideoState { react_flash: true, react_hue: true, ..VideoState::default() };
             let p = s.layer_color_params(true);
             assert_eq!((p.saturate, p.contrast, p.invert), (0.5, 0.5, 0.0));
+        }
+    }
+
+    mod spout_source {
+        use super::*;
+
+        #[test]
+        fn choosing_a_sender_enables_the_video_and_counts_as_an_external_feed() {
+            let mut s = VideoState::default();
+            assert!(!s.enabled && !s.external_feed_active(false));
+            s.set_spout_source("Resolume Output".to_string());
+            assert!(s.enabled);
+            assert_eq!(s.spout_source.as_deref(), Some("Resolume Output"));
+            assert!(s.external_feed_active(false));
+        }
+
+        #[test]
+        fn a_spout_source_replaces_a_camera_and_clearing_it_returns_to_the_clips() {
+            let mut s = VideoState::default();
+            s.set_live_camera("/dev/video0".to_string(), "Cam".to_string());
+            s.set_spout_source(String::new());
+            assert_eq!(s.live_device, None, "only one external feed at a time");
+            assert_eq!(s.spout_source.as_deref(), Some(""), "empty means the active sender");
+
+            s.clear_spout_source();
+            assert_eq!(s.spout_source, None);
+            assert!(!s.external_feed_active(false));
+            assert!(s.enabled, "clearing does not switch the video off");
         }
     }
 

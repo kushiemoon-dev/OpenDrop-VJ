@@ -298,6 +298,7 @@ pub(crate) fn ui_root(
                 // struct than every `&mut` this call takes, and the `Arc`
                 // only has to outlive this one call.
                 let ndi_snapshot = output.ndi.latest();
+                let spout_senders = sources.spout_in.latest().senders.clone();
                 ui::video::show(
                     ui,
                     perform.show,
@@ -310,6 +311,8 @@ pub(crate) fn ui_root(
                     sources.ndi_in_selected_source,
                     sources.video_ndi_request,
                     sources.video_panel_target,
+                    &spout_senders,
+                    sources.spout_in_selected,
                 );
             }
             Panel::CloudPresets => {

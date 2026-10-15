@@ -4,6 +4,7 @@ use winit::event_loop::EventLoop;
 mod app;
 mod bootstrap;
 mod config;
+mod deck_spout;
 mod deck_video;
 mod egl_headless;
 mod fatal;

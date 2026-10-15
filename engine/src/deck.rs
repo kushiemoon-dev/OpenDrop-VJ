@@ -369,7 +369,10 @@ pub fn create_one_deck_context(
     if handle.is_null() {
         return Err(format!("projectm_create() returned NULL in {debug_label} context"));
     }
-    unsafe { ffi::projectm_set_window_size(handle, w as usize, h as usize) };
+    unsafe {
+        ffi::projectm_set_window_size(handle, w as usize, h as usize);
+        crate::texture_dir::apply_texture_dir(handle);
+    }
 
     let render_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} render_timer: {e}"))?;
     let copy_timer = PassTimer::new(&gl).map_err(|e| format!("{debug_label} copy_timer: {e}"))?;

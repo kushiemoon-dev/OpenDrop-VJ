@@ -20,14 +20,67 @@ fn worker_count() -> usize {
     std::thread::available_parallelism().map_or(1, |n| (n.get() / 2).clamp(1, 4))
 }
 
+/// Where the presets and the textures they use live. Saved as soon as one is
+/// changed; the new folders are read at the next launch.
+fn folders_section(ui: &mut egui::Ui, preset_dir: &mut String, texture_dir: &mut String) {
+    ui.heading("Folders");
+    let mut changed = false;
+    changed |= folder_row(ui, "Presets", preset_dir);
+    changed |= folder_row(ui, "Textures", texture_dir);
+    if changed {
+        persist_folders(preset_dir, texture_dir);
+    }
+    widgets::micro_label(
+        ui,
+        "Restart OpenDrop to use a new folder. Blank uses the default. OPENDROP_PRESET_DIR and OPENDROP_TEXTURE_DIR override these.",
+    );
+}
+
+/// One label, a text box, Browse and Clear. Returns whether the value changed.
+fn folder_row(ui: &mut egui::Ui, label: &str, value: &mut String) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let response = ui.add(egui::TextEdit::singleline(value).desired_width(260.0));
+        changed |= response.lost_focus() && response.changed();
+        if ui.button("Browse").clicked() {
+            if let Some(folder) = rfd::FileDialog::new().set_title(format!("{label} folder")).pick_folder() {
+                *value = folder.to_string_lossy().into_owned();
+                changed = true;
+            }
+        }
+        if ui.add_enabled(!value.is_empty(), egui::Button::new("Clear")).clicked() {
+            value.clear();
+            changed = true;
+        }
+    });
+    changed
+}
+
+/// Read-modify-write of just the two folder fields, so nothing else saved in
+/// `ui.json` is touched.
+fn persist_folders(preset_dir: &str, texture_dir: &str) {
+    let path = crate::config::config_file_path();
+    let mut config = path.as_deref().map(crate::config::load_config).unwrap_or_default();
+    config.preset_dir = crate::ui_persist::non_empty(preset_dir);
+    config.texture_dir = crate::ui_persist::non_empty(texture_dir);
+    crate::config::save_config(path.as_deref(), &config);
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ui: &mut egui::Ui,
     scan: &ScanHandle,
     hide_flagged: &mut bool,
+    preset_dir: &mut String,
+    texture_dir: &mut String,
     path_by_name: &HashMap<String, PathBuf>,
     autopilot: &mut Autopilot,
     energy_level: f32,
 ) {
+    folders_section(ui, preset_dir, texture_dir);
+    ui.separator();
+
     ui.heading("Library scan");
     widgets::micro_label(
         ui,
@@ -105,9 +158,10 @@ mod tests {
             let scan = ScanHandle::new(table);
             let mut hide = false;
             let mut pilot = Autopilot::default();
-            show(ui, &scan, &mut hide, &HashMap::new(), &mut pilot, 0.4);
+            let (mut presets, mut textures) = (String::new(), String::new());
+            show(ui, &scan, &mut hide, &mut presets, &mut textures, &HashMap::new(), &mut pilot, 0.4);
             let paths = HashMap::from([("a".to_string(), PathBuf::from("/x/a.milk"))]);
-            show(ui, &scan, &mut hide, &paths, &mut pilot, 0.4);
+            show(ui, &scan, &mut hide, &mut presets, &mut textures, &paths, &mut pilot, 0.4);
         });
     }
 

@@ -160,6 +160,14 @@ pub(crate) struct UiConfig {
     /// visible between checks.
     #[serde(default)]
     pub(crate) known_release: Option<(String, String)>,
+    /// Folder of `.milk` presets chosen in the app. `OPENDROP_PRESET_DIR`
+    /// still wins over it.
+    #[serde(default)]
+    pub(crate) preset_dir: Option<String>,
+    /// Folder of textures the presets refer to by name. `OPENDROP_TEXTURE_DIR`
+    /// still wins over it.
+    #[serde(default)]
+    pub(crate) texture_dir: Option<String>,
     /// Hide the presets the library scan flagged from the browser.
     #[serde(default)]
     pub(crate) hide_flagged_presets: bool,
@@ -230,6 +238,8 @@ impl Default for UiConfig {
             last_update_check: 0,
             known_release: None,
             hide_flagged_presets: false,
+            preset_dir: None,
+            texture_dir: None,
             track_presets: BTreeMap::new(),
             track_order: Vec::new(),
             track_auto_recall: false,
@@ -398,6 +408,8 @@ mod tests {
             last_update_check: 1_760_000_000,
             known_release: Some(("v0.3.0".to_string(), "https://example.com/r".to_string())),
             hide_flagged_presets: true,
+            preset_dir: Some("/music/presets".to_string()),
+            texture_dir: Some("/music/textures".to_string()),
             track_presets: BTreeMap::from([("a - song".to_string(), vec!["Alpha Swirl Refract".to_string()])]),
             track_order: vec!["a - song".to_string()],
             track_auto_recall: true,

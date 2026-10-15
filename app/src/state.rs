@@ -395,6 +395,10 @@ pub(crate) struct AppState {
     /// Library scan results and the background scan that fills them.
     pub(crate) scan: crate::preset_scan::ScanHandle,
     pub(crate) hide_flagged: bool,
+    /// Preset and texture folders as typed in the Library panel; saved to
+    /// `ui.json` and used at the next launch.
+    pub(crate) preset_dir_setting: String,
+    pub(crate) texture_dir_setting: String,
     /// Update notice: the running check, whether checks are on, when the last
     /// one succeeded, the newest release seen and the notice derived from it.
     pub(crate) update_check: Option<opendrop_io::update_check::UpdateCheckHandle>,

@@ -32,6 +32,8 @@ pub(crate) fn save_ui_config(state: &AppState, theme: Option<theme::registry::Th
     ui_config.invisible_mode = state.invisible_mode;
     ui_config.fps_override = state.fps_override;
     ui_config.hide_flagged_presets = state.hide_flagged;
+    ui_config.preset_dir = non_empty(&state.preset_dir_setting);
+    ui_config.texture_dir = non_empty(&state.texture_dir_setting);
     ui_config.check_for_updates = state.check_for_updates;
     ui_config.last_update_check = state.last_update_check;
     ui_config.known_release = state.known_release.clone();
@@ -47,4 +49,22 @@ pub(crate) fn save_ui_config(state: &AppState, theme: Option<theme::registry::Th
     ui_config.ui_scale = state.ui_scale;
     ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
     config::save_config(config_path.as_deref(), &ui_config);
+}
+
+/// A setting typed into a text box: blank means "not set".
+pub(crate) fn non_empty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_setting_is_not_set() {
+        assert_eq!(non_empty(""), None);
+        assert_eq!(non_empty("  \t"), None);
+        assert_eq!(non_empty(" /music/presets "), Some("/music/presets".to_string()));
+    }
 }

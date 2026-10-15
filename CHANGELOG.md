@@ -15,8 +15,11 @@
 - Support tab in the About panel and a Sponsor button on GitHub
 - The About panel shows the application version
 - Quality panel: UI scale (100, 125, 150 percent); the UI scale and the chosen frame-rate cap are now restored at startup
+- Library panel: choose the folder of presets and the folder of textures the presets use, saved and applied at the next launch. When no preset folder is found at startup the app asks for one instead of stopping
+- About panel: a Log tab shows the errors the app reported, with copy and clear. They are also written to opendrop.log next to the settings file, and panics are recorded there
 
 ### Fixes
+- A video clip following a rekordbox deck stays on that deck: beat cuts and the speed warp no longer move it away after the first track, and a track with no matching clip stops the previous clip from following it
 - NDI output now starts: the sender was rejected with "At least one of clock_video or clock_audio must be true"
 - Microphones are told apart from monitors in the audio input list
 - A graphics initialisation failure now shows an error message and exits cleanly instead of crashing without any message

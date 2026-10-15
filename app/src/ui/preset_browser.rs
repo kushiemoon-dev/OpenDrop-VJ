@@ -660,6 +660,7 @@ mod tests {
             let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
             let scan = crate::preset_scan::ScanHandle::new(Default::default());
             let mut hide_flagged = false;
+            let (mut preset_dir_setting, mut texture_dir_setting) = (String::new(), String::new());
             let path_by_name = std::collections::HashMap::new();
             let mut autopilot = opendrop_core::autopilot::Autopilot::default();
             let track_memory = opendrop_core::track_memory::TrackMemory::default();
@@ -676,6 +677,8 @@ mod tests {
                 preset_annotations: &mut preset_annotations,
                 scan: &scan,
                 hide_flagged: &mut hide_flagged,
+                preset_dir_setting: &mut preset_dir_setting,
+                texture_dir_setting: &mut texture_dir_setting,
                 autopilot: &mut autopilot,
                 track_memory: &track_memory,
                 track_auto_recall: &mut track_auto_recall,
@@ -727,6 +730,7 @@ mod tests {
                 let mut annotation_edit = crate::ui::preset_notes::AnnotationEdit::default();
                 let scan = crate::preset_scan::ScanHandle::new(Default::default());
                 let mut hide_flagged = false;
+                let (mut preset_dir_setting, mut texture_dir_setting) = (String::new(), String::new());
                 let path_by_name = std::collections::HashMap::new();
                 let mut autopilot = opendrop_core::autopilot::Autopilot::default();
                 let track_memory = opendrop_core::track_memory::TrackMemory::default();
@@ -743,6 +747,8 @@ mod tests {
                     preset_annotations: &mut preset_annotations,
                     scan: &scan,
                     hide_flagged: &mut hide_flagged,
+                    preset_dir_setting: &mut preset_dir_setting,
+                    texture_dir_setting: &mut texture_dir_setting,
                     autopilot: &mut autopilot,
                     track_memory: &track_memory,
                     track_auto_recall: &mut track_auto_recall,

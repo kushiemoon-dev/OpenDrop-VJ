@@ -97,6 +97,13 @@ fn install_error_log() {
     if let Some(dir) = config::config_file_path().and_then(|p| p.parent().map(Path::to_path_buf)) {
         opendrop_core::error_log::set_file(dir.join("opendrop.log"));
     }
+    // Helper processes inherit this, so thumbnails and scans see the same textures.
+    if let Some(dir) = paths::texture_dir_env_value(
+        std::env::var_os(opendrop_engine::texture_dir::TEXTURE_DIR_ENV),
+        config::config_file_path().map(|p| config::load_config(&p)).and_then(|c| c.texture_dir),
+    ) {
+        std::env::set_var(opendrop_engine::texture_dir::TEXTURE_DIR_ENV, dir);
+    }
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         opendrop_core::error_log::record(&format!("[panic] {info}"));

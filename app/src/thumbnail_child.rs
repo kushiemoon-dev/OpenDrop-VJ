@@ -62,6 +62,7 @@ pub fn run_render_thumbnail(preset_path: &Path, out_path: &Path) -> ! {
     let pcm = synthetic_pcm();
     unsafe {
         opendrop_engine::ffi::projectm_set_window_size(handle, THUMB_W as usize, THUMB_H as usize);
+        opendrop_engine::texture_dir::apply_texture_dir(handle);
         opendrop_engine::ffi::projectm_set_preset_switch_failed_event_callback(handle, Some(on_preset_failed), std::ptr::null_mut());
         let c_path = CString::new(preset_path.to_string_lossy().as_bytes()).expect("preset path is not a valid C string");
         opendrop_engine::ffi::projectm_load_preset_file(handle, c_path.as_ptr(), false);

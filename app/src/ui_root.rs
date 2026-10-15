@@ -159,6 +159,8 @@ pub(crate) fn ui_root(
                     ui,
                     library.scan,
                     library.hide_flagged,
+                    library.preset_dir_setting,
+                    library.texture_dir_setting,
                     library.path_by_name,
                     library.autopilot,
                     library.energy_level,

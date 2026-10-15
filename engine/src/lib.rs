@@ -9,6 +9,7 @@ pub mod qvar_patch;
 pub mod readback;
 pub mod thumbnail;
 pub mod time_patch;
+pub mod texture_dir;
 pub mod timing;
 
 /// (major, minor, patch) of the linked libprojectM: proves bindgen + linking work.

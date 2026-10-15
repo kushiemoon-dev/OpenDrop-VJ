@@ -193,7 +193,10 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
     // `--render-thumbnail` child process (see `thumbnails`' module doc), so
     // this process holds exactly the 4 deck contexts plus the main one.
 
-    let preset_root = preset_dir()?;
+    let preset_root = match preset_dir() {
+        Ok(dir) => dir,
+        Err(missing) => ask_for_preset_folder().ok_or(missing)?,
+    };
     let presets = pick_distinct_presets(&preset_root, deck::DECK_COUNT);
     if presets.len() < deck::DECK_COUNT {
         return Err(format!(
@@ -581,6 +584,8 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
             crate::preset_scan::scan_file_path().map(|p| crate::preset_scan::load_table(&p)).unwrap_or_default(),
         ),
         hide_flagged: ui_config.hide_flagged_presets,
+        preset_dir_setting: ui_config.preset_dir.clone().unwrap_or_default(),
+        texture_dir_setting: ui_config.texture_dir.clone().unwrap_or_default(),
         update_check: crate::update::start_if_due(
             ui_config.check_for_updates,
             crate::update::now_unix(),
@@ -652,4 +657,15 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         chat_log: VecDeque::new(),
         streaming_secret_save_error: None,
     })
+}
+
+/// No preset folder is configured and none is packaged: ask for one and
+/// remember it, instead of stopping with an error the user cannot act on.
+fn ask_for_preset_folder() -> Option<PathBuf> {
+    let folder = rfd::FileDialog::new().set_title("Choose the folder with your .milk presets").pick_folder()?;
+    let path = crate::config::config_file_path();
+    let mut config = path.as_deref().map(crate::config::load_config).unwrap_or_default();
+    config.preset_dir = Some(folder.to_string_lossy().into_owned());
+    crate::config::save_config(path.as_deref(), &config);
+    Some(folder)
 }

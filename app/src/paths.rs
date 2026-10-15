@@ -2,8 +2,14 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn preset_dir() -> Result<PathBuf, String> {
+    let configured = crate::config::config_file_path()
+        .map(|path| crate::config::load_config(&path))
+        .and_then(|config| config.preset_dir)
+        .filter(|dir| !dir.trim().is_empty())
+        .map(PathBuf::from);
     preset_dir_from(
         std::env::var_os("OPENDROP_PRESET_DIR"),
+        configured,
         std::env::var_os("APPDIR"),
         std::env::current_exe().ok(),
     )
@@ -13,16 +19,27 @@ pub(crate) fn preset_dir() -> Result<PathBuf, String> {
 /// testable without mutating process-global environment state.
 ///
 /// Resolution order: `OPENDROP_PRESET_DIR` wins unconditionally if set; then
-/// a platform-specific packaged location, only if it actually exists on
+/// the folder chosen in the app, if it exists; then a platform-specific packaged location, only if it actually exists on
 /// disk; else the same error `cargo run` has always raised for a missing
 /// dev override.
 fn preset_dir_from(
     env_override: Option<OsString>,
+    configured: Option<PathBuf>,
     appdir: Option<OsString>,
     exe_path: Option<PathBuf>,
 ) -> Result<PathBuf, String> {
     if let Some(raw) = env_override {
         return Ok(PathBuf::from(raw));
+    }
+
+    // The folder chosen in the app. One that has gone missing (a drive that
+    // is not mounted) falls through to the packaged presets instead of
+    // stopping the app.
+    if let Some(dir) = configured {
+        if dir.is_dir() {
+            return Ok(dir);
+        }
+        opendrop_core::log_error!("[app] the preset folder {} does not exist, using the default", dir.display());
     }
 
     // Linux: AppImage's own runtime sets APPDIR at launch (not something
@@ -57,6 +74,15 @@ fn preset_dir_from(
          OPENDROP_PRESET_DIR=/srv/http/opendrop-presets cargo run -p opendrop-app"
             .to_string(),
     )
+}
+
+/// What `OPENDROP_TEXTURE_DIR` should hold: the variable if already set,
+/// else the folder chosen in the app. `None` leaves it unset.
+pub(crate) fn texture_dir_env_value(current: Option<OsString>, configured: Option<String>) -> Option<String> {
+    if current.is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    configured.map(|dir| dir.trim().to_string()).filter(|dir| !dir.is_empty())
 }
 
 /// Display name for a preset file: its path relative to `preset_dir`, with
@@ -265,6 +291,7 @@ mod tests {
 
             let dir = preset_dir_from(
                 os("/explicit/override"),
+                None,
                 Some(appdir.path.clone().into_os_string()),
                 Some(exe_dir.path.join("opendrop-app")),
             );
@@ -277,7 +304,7 @@ mod tests {
             let presets = appdir.path.join("usr/share/opendrop/presets");
             std::fs::create_dir_all(&presets).unwrap();
 
-            let dir = preset_dir_from(None, Some(appdir.path.clone().into_os_string()), None);
+            let dir = preset_dir_from(None, None, Some(appdir.path.clone().into_os_string()), None);
             assert_eq!(dir, Ok(presets));
         }
 
@@ -287,7 +314,7 @@ mod tests {
             // appdir.path itself exists, but usr/share/opendrop/presets under
             // it does not: must never fall back to a silent bogus path.
 
-            let dir = preset_dir_from(None, Some(appdir.path.clone().into_os_string()), None);
+            let dir = preset_dir_from(None, None, Some(appdir.path.clone().into_os_string()), None);
             assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
         }
 
@@ -298,7 +325,7 @@ mod tests {
             let presets = exe_dir.path.join("presets");
             std::fs::create_dir_all(&presets).unwrap();
 
-            let dir = preset_dir_from(None, None, Some(exe_dir.path.join("opendrop-app.exe")));
+            let dir = preset_dir_from(None, None, None, Some(exe_dir.path.join("opendrop-app.exe")));
             assert_eq!(dir, Ok(presets));
         }
 
@@ -307,15 +334,46 @@ mod tests {
         fn windows_exe_without_a_sibling_presets_dir_is_an_error() {
             let exe_dir = ScratchDir::new("windows-exe-no-sibling");
 
-            let dir = preset_dir_from(None, None, Some(exe_dir.path.join("opendrop-app.exe")));
+            let dir = preset_dir_from(None, None, None, Some(exe_dir.path.join("opendrop-app.exe")));
             assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
+        }
+
+        #[test]
+        fn the_texture_variable_is_set_from_the_app_only_when_free() {
+            assert_eq!(texture_dir_env_value(None, Some(" /t ".to_string())), Some("/t".to_string()));
+            assert_eq!(texture_dir_env_value(os("/own"), Some("/t".to_string())), None);
+            assert_eq!(texture_dir_env_value(None, Some("  ".to_string())), None);
+            assert_eq!(texture_dir_env_value(None, None), None);
+        }
+
+        #[test]
+        fn a_chosen_folder_beats_the_packaged_presets_but_not_the_env_override() {
+            let chosen = ScratchDir::new("chosen");
+            let appdir = ScratchDir::new("chosen-appdir");
+            std::fs::create_dir_all(appdir.path.join("usr/share/opendrop/presets")).unwrap();
+
+            let dir = preset_dir_from(None, Some(chosen.path.clone()), Some(appdir.path.clone().into_os_string()), None);
+            assert_eq!(dir, Ok(chosen.path.clone()));
+
+            let dir = preset_dir_from(os("/explicit/override"), Some(chosen.path.clone()), None, None);
+            assert_eq!(dir, Ok(PathBuf::from("/explicit/override")));
+        }
+
+        #[test]
+        fn a_chosen_folder_that_no_longer_exists_falls_back_to_the_packaged_presets() {
+            let appdir = ScratchDir::new("missing-chosen-appdir");
+            let presets = appdir.path.join("usr/share/opendrop/presets");
+            std::fs::create_dir_all(&presets).unwrap();
+
+            let dir = preset_dir_from(None, Some(PathBuf::from("/no/such/folder")), Some(appdir.path.clone().into_os_string()), None);
+            assert_eq!(dir, Ok(presets));
         }
 
         #[test]
         fn nothing_set_is_an_error_with_the_unchanged_dev_message() {
             // Regression coverage for the current `cargo run` dev behavior:
             // same message, now returned instead of panicking.
-            let dir = preset_dir_from(None, None, None);
+            let dir = preset_dir_from(None, None, None, None);
             assert_eq!(dir, Err(MISSING_ENV_MESSAGE.to_string()));
         }
     }

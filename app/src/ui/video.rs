@@ -109,6 +109,7 @@ pub fn show(
 
             ui.separator();
             ndi_row(ui, ndi, ndi_selected_source, ndi_request);
+            crate::ui::ndi::attribution_footer(ui);
 
             ui.separator();
             clip_library(ui, &mut show.video, clips, local_error, external_feed, false);

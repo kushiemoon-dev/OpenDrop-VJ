@@ -2,7 +2,7 @@ use std::sync::Arc;
 use winit::event_loop::ActiveEventLoop;
 use crate::preset_load::request_preset_load;
 use crate::ui_root::ui_root;
-use crate::{config, theme, ui, AppState};
+use crate::{theme, ui, AppState};
 
 /// Runs the egui pass for the control window and applies the requests the panels
 /// recorded during it (preset load, video NDI toggle, theme change).
@@ -357,14 +357,8 @@ pub(crate) fn run_ui_pass(state: &mut AppState, event_loop: &ActiveEventLoop) {
         // rendering the old theme's palette after this switch.
         state.egui_glow.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(theme::THEME_ID_KEY), new_id));
 
-        // Persist immediately (see `config.rs`): read-modify-
-        // write just the `theme` field so this doesn't clobber
-        // `active_panel`/`stage_mode`/the other already-persisted
-        // fields, which are wired at other call sites (bootstrap
-        // and `App::exiting`).
-        let config_path = config::config_file_path();
-        let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
-        ui_config.theme = new_id;
-        config::save_config(config_path.as_deref(), &ui_config);
+        // Persist immediately, with every other UI setting, so a crash
+        // after the switch loses nothing.
+        crate::ui_persist::save_ui_config(state, Some(new_id));
     }
 }

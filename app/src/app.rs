@@ -18,7 +18,7 @@ use crate::frame::sources::upload_source_frames;
 use crate::frame::tick::{tick_show, TickOutput};
 use crate::fatal::{describe_panic, report_fatal};
 use crate::frame::ui_pass::run_ui_pass;
-use crate::{bootstrap, config, keymap, session, update, App};
+use crate::{bootstrap, session, ui_persist, update, App};
 
 fn fail_startup(event_loop: &ActiveEventLoop, detail: &str) {
     report_fatal("OpenDrop could not initialise graphics", detail);
@@ -159,52 +159,11 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(state) = &mut self.state {
-            // Persist `active_panel`/`stage_mode` on exit, and also immediately
-            // on every runtime theme change. Same read-modify-write idiom as
-            // the runtime theme-switch handler, so this never clobbers `theme`
-            // (or any other already-persisted field) saved elsewhere. Also
-            // owns the 8 already-UI-controlled fields below, not just
-            // `active_panel`/`stage_mode`.
-            let config_path = config::config_file_path();
-            let mut ui_config = config_path.as_deref().map(config::load_config).unwrap_or_default();
-            ui_config.active_panel = state.active_panel.into();
-            ui_config.stage_mode = state.stage_mode;
-            ui_config.output_monitor = state.selected_output_monitor.clone();
-            ui_config.audio_input_device = state.selected_input_device.clone();
-            ui_config.osc_port = state.osc_port;
-            ui_config.osc_out_host = state.osc_out_host.clone();
-            ui_config.osc_out_port = state.osc_out_port;
-            ui_config.rkbx_link_port = state.rkbx_link_port;
-            ui_config.obs_host = state.obs_host.clone();
-            ui_config.obs_port = state.obs_port;
-            ui_config.twitch_channel = state.twitch_channel.clone();
-            ui_config.kick_channel = state.kick_channel.clone();
-            ui_config.cloud_presets_api_url =
-                if state.cloud_presets_api_url.trim().is_empty() { None } else { Some(state.cloud_presets_api_url.clone()) };
-            ui_config.cloud_video_api_url =
-                if state.cloud_video_api_url.trim().is_empty() { None } else { Some(state.cloud_video_api_url.clone()) };
-            ui_config.invisible_mode = state.invisible_mode;
-            ui_config.fps_override = state.fps_override;
-            ui_config.hide_flagged_presets = state.hide_flagged;
-            ui_config.check_for_updates = state.check_for_updates;
-            ui_config.last_update_check = state.last_update_check;
-            ui_config.known_release = state.known_release.clone();
-            ui_config.track_presets = state.track_memory.presets_map().clone();
-            ui_config.track_order = state.track_memory.order().cloned().collect();
-            ui_config.track_auto_recall = state.track_auto_recall;
-            ui_config.preset_tags = state.preset_annotations.tags_map().clone();
-            ui_config.preset_notes = state.preset_annotations.notes_map().clone();
-            ui_config.preset_history = state.preset_history.names().map(String::from).collect();
-            ui_config.audio_gain_db = state.audio_gain_db;
-            ui_config.audio_agc = state.audio_agc;
-            ui_config.beat_sensitivity = state.beat_sensitivity;
+            ui_persist::save_ui_config(state, None);
             session::save_now(state);
             if let (Some(path), true) = (crate::preset_scan::scan_file_path(), state.scan.with_table(|t| !t.is_empty())) {
                 state.scan.save(&path);
             }
-            ui_config.ui_scale = state.ui_scale;
-            ui_config.keymap = keymap::keymap_to_wire(&state.keymap);
-            config::save_config(config_path.as_deref(), &ui_config);
 
             state.egui_glow.destroy();
         }

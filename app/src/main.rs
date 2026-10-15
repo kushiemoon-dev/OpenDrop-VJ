@@ -24,6 +24,7 @@ mod thumbnail_child;
 mod update;
 mod thumbnails;
 mod ui;
+mod ui_persist;
 mod ui_root;
 mod video_clips;
 

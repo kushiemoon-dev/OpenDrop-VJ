@@ -198,6 +198,14 @@ fn vu_level_tier(level: f32) -> VuTier {
     }
 }
 
+/// The part of `track` a meter at `level` fills; `level` is clamped to
+/// `0.0..=1.0`, so a hot input never paints past the track.
+fn vu_fill_rect(track: egui::Rect, level: f32) -> egui::Rect {
+    let mut fill = track;
+    fill.set_width(track.width() * level.clamp(0.0, 1.0));
+    fill
+}
+
 /// A horizontal level meter: an `ink`-filled track with a fill proportional
 /// to `level` (clamped to `0.0..=1.0`), colored `ok`/`warn`/`error` past
 /// fixed thresholds, bordered with `border`.
@@ -211,8 +219,7 @@ pub fn vu_meter(ui: &mut egui::Ui, level: f32) -> egui::Response {
         let corner_radius = egui::CornerRadius::from(t.metrics.radius_sm);
         ui.painter().rect_filled(rect, corner_radius, t.palette.ink);
 
-        let mut fill_rect = rect;
-        fill_rect.set_width(rect.width() * level);
+        let fill_rect = vu_fill_rect(rect, level);
         let fill_color = match vu_level_tier(level) {
             VuTier::Error => t.palette.error,
             VuTier::Warn => t.palette.warn,
@@ -440,7 +447,7 @@ mod tests {
     fn connection_row_differs_between_connected_and_offline() {
         themed_test_ui(|ui| {
             let connected = connection_row(ui, "midi", true);
-            let offline = connection_row(ui, "osc", false);
+            let offline = connection_row(ui, "midi", false);
             assert_ne!(connected.rect.width(), offline.rect.width());
         });
     }
@@ -453,6 +460,15 @@ mod tests {
         assert_eq!(vu_level_tier(0.9), VuTier::Warn); // boundary: not > 0.9
         assert_eq!(vu_level_tier(0.91), VuTier::Error);
         assert_eq!(vu_level_tier(1.0), VuTier::Error);
+    }
+
+    #[test]
+    fn vu_fill_is_clamped_to_the_track() {
+        let track = egui::Rect::from_min_size(egui::pos2(10.0, 0.0), egui::vec2(100.0, 8.0));
+        assert_eq!(vu_fill_rect(track, -1.0).width(), 0.0);
+        assert_eq!(vu_fill_rect(track, 0.5).width(), 50.0);
+        assert_eq!(vu_fill_rect(track, 2.0).width(), 100.0);
+        assert_eq!(vu_fill_rect(track, 2.0).min, track.min);
     }
 
     #[test]

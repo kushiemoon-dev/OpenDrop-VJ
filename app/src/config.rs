@@ -8,7 +8,7 @@
 //! `theme`, `active_panel`, `stage_mode`, `output_monitor`,
 //! `audio_input_device`, `osc_port`, `obs_host`, `obs_port`,
 //! `twitch_channel`, `kick_channel`, and `invisible_mode` are all restored
-//! at bootstrap and saved in `App::exiting`, as are `ui_scale` and
+//! at bootstrap and saved by `ui_persist::save_ui_config` (on exit and on a theme change), as are `ui_scale` and
 //! `fps_override`.
 //!
 //! Secrets (OBS/Twitch/Kick tokens) are never part of `UiConfig`, they

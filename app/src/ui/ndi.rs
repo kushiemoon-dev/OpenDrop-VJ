@@ -139,7 +139,7 @@ pub fn show_in(ui: &mut egui::Ui, ndi: &NdiHandle, selected_source: &mut Option<
 /// Mandatory NDI trademark attribution, shared by
 /// both halves above so it's present regardless of which of the two panels
 /// a viewer opens.
-fn attribution_footer(ui: &mut egui::Ui) {
+pub(crate) fn attribution_footer(ui: &mut egui::Ui) {
     ui.separator();
     ui.hyperlink_to("ndi.video", "https://ndi.video");
     ui.label("NDI® is a registered trademark of Vizrt NDI AB");

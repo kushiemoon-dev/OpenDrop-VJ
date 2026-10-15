@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-10-15)
 
 ### New features
 - The show is saved automatically (on exit and every 30 seconds) and restored at the next launch: mix and crossfader, colour and composite settings, snapshots, timeline, overlays, playlists, strobe, LFO routing, and the preset on each deck. A "Forget saved session" button in the Share panel starts the next launch clean

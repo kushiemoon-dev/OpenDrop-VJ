@@ -29,6 +29,7 @@ enum Tab {
     #[default]
     About,
     Support,
+    Log,
 }
 
 const PROJECTM_REPO: &str = "https://github.com/projectM-visualizer/projectm";
@@ -53,7 +54,8 @@ fn app_version_label() -> String {
     format!("OpenDrop VJ {}", env!("CARGO_PKG_VERSION"))
 }
 
-/// About panel: credits and licences, the update notice, and a Support tab.
+/// About panel: credits and licences, the update notice, a Support tab and
+/// the error Log tab.
 /// `check_for_updates` is the startup-check switch and `notice` a newer
 /// release when there is one; both are informational, nothing is installed.
 pub fn show(ui: &mut egui::Ui, check_for_updates: &mut bool, notice: Option<&ReleaseNotice>) {
@@ -62,6 +64,7 @@ pub fn show(ui: &mut egui::Ui, check_for_updates: &mut bool, notice: Option<&Rel
     ui.horizontal(|ui| {
         ui.selectable_value(&mut tab, Tab::About, "About");
         ui.selectable_value(&mut tab, Tab::Support, "Support");
+        ui.selectable_value(&mut tab, Tab::Log, "Log");
     });
     ui.data_mut(|d| d.insert_temp(tab_id, tab));
     ui.separator();
@@ -73,6 +76,7 @@ pub fn show(ui: &mut egui::Ui, check_for_updates: &mut bool, notice: Option<&Rel
             show_credits(ui);
         }
         Tab::Support => show_support(ui),
+        Tab::Log => crate::ui::error_log::show(ui),
     }
 }
 

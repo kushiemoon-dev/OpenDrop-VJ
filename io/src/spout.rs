@@ -129,7 +129,7 @@ fn run(rx: Receiver<Message>, state: Arc<ArcSwap<SpoutSnapshot>>, factory: SinkF
                         snapshot.last_error = None;
                     }
                     Err(e) => {
-                        eprintln!("[spout] failed to start '{name}': {e}");
+                        opendrop_core::log_error!("[spout] failed to start '{name}': {e}");
                         sinks[i] = None;
                         snapshot.last_error = Some(e);
                     }
@@ -146,7 +146,7 @@ fn run(rx: Receiver<Message>, state: Arc<ArcSwap<SpoutSnapshot>>, factory: SinkF
                 // flipped, or the sender failed to start) is discarded.
                 let Some(sink) = sinks[i].as_mut() else { continue };
                 if let Err(e) = sink.send(&rgba, width, height) {
-                    eprintln!("[spout] dropping stream: {e}");
+                    opendrop_core::log_error!("[spout] dropping stream: {e}");
                     sinks[i] = None;
                     snapshot.last_error = Some(e);
                 }

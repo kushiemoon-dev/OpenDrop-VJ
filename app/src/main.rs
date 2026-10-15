@@ -50,7 +50,7 @@ unsafe extern "C" fn log_projectm_message(
     _user_data: *mut std::os::raw::c_void,
 ) {
     let msg = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy();
-    eprintln!("[projectM level={log_level}] {msg}");
+    opendrop_core::log_error!("[projectM level={log_level}] {msg}");
 }
 
 fn main() {
@@ -75,6 +75,8 @@ fn main() {
         thumbnail_child::run_render_thumbnail(Path::new(&args[2]), Path::new(&args[3]));
     }
 
+    install_error_log();
+
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(e) => {
@@ -87,6 +89,19 @@ fn main() {
         fatal::report_fatal("OpenDrop stopped unexpectedly", &e.to_string());
         std::process::exit(1);
     }
+}
+
+/// Starts the log file next to `ui.json` and records panics in it, so a crash
+/// leaves a trace even when nobody sees the terminal.
+fn install_error_log() {
+    if let Some(dir) = config::config_file_path().and_then(|p| p.parent().map(Path::to_path_buf)) {
+        opendrop_core::error_log::set_file(dir.join("opendrop.log"));
+    }
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        opendrop_core::error_log::record(&format!("[panic] {info}"));
+        default_hook(info);
+    }));
 }
 
 #[cfg(test)]

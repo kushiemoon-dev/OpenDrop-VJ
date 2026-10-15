@@ -125,13 +125,13 @@ fn bind(socket: &mut Option<UdpSocket>, port: u16, state: &Arc<ArcSwap<OscSnapsh
             // Bounds how long `recv_from` blocks below so the run loop can
             // still service `Stop`/`Start` control messages promptly.
             if let Err(e) = sock.set_read_timeout(Some(POLL_TICK)) {
-                eprintln!("opendrop-io: OSC set_read_timeout failed: {e}");
+                opendrop_core::log_error!("opendrop-io: OSC set_read_timeout failed: {e}");
             }
             *socket = Some(sock);
             publish(state, true, port);
         }
         Err(e) => {
-            eprintln!("opendrop-io: OSC bind on port {port} failed: {e}");
+            opendrop_core::log_error!("opendrop-io: OSC bind on port {port} failed: {e}");
             *socket = None;
             publish(state, false, 0);
         }
@@ -167,7 +167,7 @@ fn run(state: Arc<ArcSwap<OscSnapshot>>, events_tx: Sender<(CommandId, f64)>, co
                 // A real recv error (e.g. the interface went away). Log
                 // once, drop the socket, and report not-listening: never
                 // panic, per the task's error-handling requirement.
-                eprintln!("opendrop-io: OSC recv error, stopping: {e}");
+                opendrop_core::log_error!("opendrop-io: OSC recv error, stopping: {e}");
                 socket = None;
                 publish(&state, false, 0);
                 continue;

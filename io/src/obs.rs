@@ -129,7 +129,7 @@ fn run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsControl>) {
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: obs failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: obs failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -174,7 +174,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                 // surfaced via `ObsSnapshot::last_error` regardless of
                 // whether that attempt goes on to succeed or fail.
                 let keyring_error = secret_result.as_ref().err().map(|e| {
-                    eprintln!("opendrop-io: obs password lookup failed, connecting without a password: {e}");
+                    opendrop_core::log_error!("opendrop-io: obs password lookup failed, connecting without a password: {e}");
                     format!("OBS password lookup failed, connecting without a password: {e}")
                 });
                 let password = password_for_connect(secret_result);
@@ -186,14 +186,14 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                             publish_connected(&state, names, keyring_error);
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: obs GetSceneList failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: obs GetSceneList failed: {e}");
                             publish_idle(&state, keyring_error);
                             // new_client drops here: its own Drop impl
                             // aborts the background read task.
                         }
                     },
                     Err(e) => {
-                        eprintln!("opendrop-io: obs connect failed: {e}");
+                        opendrop_core::log_error!("opendrop-io: obs connect failed: {e}");
                         publish_idle(&state, keyring_error);
                     }
                 }
@@ -208,7 +208,7 @@ async fn async_run(state: Arc<ArcSwap<ObsSnapshot>>, control_rx: Receiver<ObsCon
                 // `None`: not connected, no-op, mirrors OscControl::Stop while idle.
                 if let Some(c) = client.as_ref() {
                     if let Err(e) = c.scenes().set_current_program_scene(name.as_str()).await {
-                        eprintln!("opendrop-io: obs SetCurrentProgramScene failed: {e}");
+                        opendrop_core::log_error!("opendrop-io: obs SetCurrentProgramScene failed: {e}");
                         client = None; // drop() aborts the background task, see above
                         publish_idle(&state, None);
                     }

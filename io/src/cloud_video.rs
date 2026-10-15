@@ -174,7 +174,7 @@ fn run(state: Arc<ArcSwap<CloudVideoSnapshot>>, control_rx: Receiver<CloudVideoC
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: cloud_video failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: cloud_video failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -204,7 +204,7 @@ async fn async_run(state: Arc<ArcSwap<CloudVideoSnapshot>>, control_rx: Receiver
                             s.listing_error = None;
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_video list failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_video list failed: {e}");
                             s.listing_error = Some(e);
                         }
                     }
@@ -220,7 +220,7 @@ async fn async_run(state: Arc<ArcSwap<CloudVideoSnapshot>>, control_rx: Receiver
                         Ok(DownloadOutcome::Downloaded(_)) => SlugDownloadState::Done,
                         Ok(DownloadOutcome::AlreadyDownloaded) => SlugDownloadState::AlreadyDownloaded,
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_video download failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_video download failed: {e}");
                             SlugDownloadState::Failed(e)
                         }
                     };

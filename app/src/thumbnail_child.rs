@@ -39,7 +39,7 @@ pub(crate) static PRESET_FAILED: AtomicBool = AtomicBool::new(false);
 pub(crate) unsafe extern "C" fn on_preset_failed(_filename: *const c_char, message: *const c_char, _user_data: *mut c_void) {
     PRESET_FAILED.store(true, Ordering::SeqCst);
     let msg = unsafe { CStr::from_ptr(message) }.to_string_lossy();
-    eprintln!("[render-thumbnail] preset failed: {msg}");
+    opendrop_core::log_error!("[render-thumbnail] preset failed: {msg}");
 }
 
 /// Renders `preset_path`'s thumbnail into `out_path` and exits: 0 once the
@@ -95,7 +95,7 @@ pub fn run_render_thumbnail(preset_path: &Path, out_path: &Path) -> ! {
     match write_atomically(out_path, &flipped) {
         Ok(()) => std::process::exit(0),
         Err(e) => {
-            eprintln!("[render-thumbnail] {e}");
+            opendrop_core::log_error!("[render-thumbnail] {e}");
             std::process::exit(EXIT_RENDER_FAILED);
         }
     }

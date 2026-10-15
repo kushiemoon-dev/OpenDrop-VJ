@@ -39,10 +39,10 @@ pub(crate) fn save_session(path: &Path, session: &Session) {
     match encode_session(session) {
         Ok(json) => {
             if let Err(e) = write_atomically(path, &json) {
-                eprintln!("[session] failed to write {}: {e}", path.display());
+                opendrop_core::log_error!("[session] failed to write {}: {e}", path.display());
             }
         }
-        Err(e) => eprintln!("[session] {e}"),
+        Err(e) => opendrop_core::log_error!("[session] {e}"),
     }
 }
 
@@ -55,7 +55,7 @@ pub(crate) fn load_session(path: &Path) -> Option<Session> {
         Ok(session) => Some(session),
         Err(e) => {
             let aside = path.with_extension("json.bad");
-            eprintln!("[session] ignoring {}: {e}; kept as {}", path.display(), aside.display());
+            opendrop_core::log_error!("[session] ignoring {}: {e}; kept as {}", path.display(), aside.display());
             let _ = std::fs::rename(path, aside);
             None
         }

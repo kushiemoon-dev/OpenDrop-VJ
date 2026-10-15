@@ -47,7 +47,7 @@ fn handle_connect(ts: &mut ThreadState) {
             ts.device_names = list_port_names(&input);
         }
         Err(_) => {
-            eprintln!("[midi] MIDI backend unavailable: no controller I/O this session");
+            opendrop_core::log_error!("[midi] MIDI backend unavailable: no controller I/O this session");
             ts.device_names = Vec::new();
         }
     }
@@ -81,11 +81,11 @@ fn handle_select_port(ts: &mut ThreadState, name: String, midi_tx: &Sender<RawMi
     ts.clock_bpm = 0.0;
 
     let Ok(input) = midir::MidiInput::new(CLIENT_NAME) else {
-        eprintln!("[midi] failed to init MIDI input client while selecting '{name}'");
+        opendrop_core::log_error!("[midi] failed to init MIDI input client while selecting '{name}'");
         return;
     };
     let Some(port) = find_port_by_name(&input, &name) else {
-        eprintln!("[midi] input port '{name}' not found (unplugged?)");
+        opendrop_core::log_error!("[midi] input port '{name}' not found (unplugged?)");
         return;
     };
 
@@ -108,7 +108,7 @@ fn handle_select_port(ts: &mut ThreadState, name: String, midi_tx: &Sender<RawMi
                 ts.hotplug_epoch = ts.hotplug_epoch.wrapping_add(1);
             }
         }
-        Err(e) => eprintln!("[midi] failed to connect to input port '{name}': {}", e.kind()),
+        Err(e) => opendrop_core::log_error!("[midi] failed to connect to input port '{name}': {}", e.kind()),
     }
 }
 
@@ -134,7 +134,7 @@ fn handle_push_led(ts: &mut ThreadState, id: CommandId, on: bool) {
     let Some((_, output)) = ts.output_conn.as_mut() else { return };
     let velocity = if on { 127 } else { 0 };
     if let Err(e) = output.send(&[status, key.number, velocity]) {
-        eprintln!("[midi] LED feedback send failed: {e}");
+        opendrop_core::log_error!("[midi] LED feedback send failed: {e}");
         ts.output_conn = None; // let check_hotplug retry the reconnect
     }
 }

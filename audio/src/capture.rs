@@ -20,13 +20,13 @@ fn open_and_play(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>, g
         Ok(stream) => {
             use cpal::traits::StreamTrait;
             if let Err(e) = stream.play() {
-                eprintln!("[audio] failed to start capture stream: {e}, visuals will not react to system audio");
+                opendrop_core::log_error!("[audio] failed to start capture stream: {e}, visuals will not react to system audio");
                 return None;
             }
             Some(stream)
         }
         Err(e) => {
-            eprintln!("[audio] failed to open input device: {e}, visuals will not react to system audio");
+            opendrop_core::log_error!("[audio] failed to open input device: {e}, visuals will not react to system audio");
             None
         }
     }
@@ -41,7 +41,7 @@ fn run(snapshot: Arc<ArcSwap<AudioSnapshot>>, rx: std::sync::mpsc::Receiver<Stri
     let mut current_stream = match crate::device::select_input_device(&host) {
         Some(device) => open_and_play(&device, snapshot.clone(), gain.clone()),
         None => {
-            eprintln!("[audio] no input device available, visuals will not react to system audio");
+            opendrop_core::log_error!("[audio] no input device available, visuals will not react to system audio");
             None
         }
     };
@@ -81,7 +81,7 @@ fn build_stream(device: &cpal::Device, snapshot: Arc<ArcSwap<AudioSnapshot>>, ga
     let sample_rate = supported.sample_rate();
     let config: cpal::StreamConfig = supported.into();
     let analyser = Analyser::new(AnalyserConfig::default());
-    let err_fn = |e| eprintln!("[audio] stream error: {e}");
+    let err_fn = |e| opendrop_core::log_error!("[audio] stream error: {e}");
     let stream = match sample_format {
         SampleFormat::F32 => device.build_input_stream(config, on_block::<f32>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),
         SampleFormat::I16 => device.build_input_stream(config, on_block::<i16>(channels, sample_rate, analyser, snapshot, gain), err_fn, None),

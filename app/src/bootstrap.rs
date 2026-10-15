@@ -229,7 +229,7 @@ pub(crate) fn bootstrap(event_loop: &ActiveEventLoop) -> Result<AppState, String
         ) {
             Ok(()) => println!("[app] deck {i} preset: {}", presets[i].display()),
             Err(e) => {
-                eprintln!("[app] deck {i} bootstrap preset {} failed to load: {e}", presets[i].display());
+                opendrop_core::log_error!("[app] deck {i} bootstrap preset {} failed to load: {e}", presets[i].display());
                 preset_errors.insert(i, e);
             }
         }

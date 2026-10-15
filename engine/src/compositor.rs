@@ -530,7 +530,7 @@ impl Compositor {
                 let tex = match gl.create_texture() {
                     Ok(tex) => tex,
                     Err(e) => {
-                        eprintln!("[engine] overlay backdrop texture creation failed: {e}");
+                        opendrop_core::log_error!("[engine] overlay backdrop texture creation failed: {e}");
                         return None;
                     }
                 };

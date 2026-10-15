@@ -41,7 +41,7 @@ pub fn select_input_device(host: &cpal::Host) -> Option<cpal::Device> {
     if let Some(device) = monitor {
         return Some(device);
     }
-    eprintln!("[audio] no \"{DEFAULT_SINK_ALIAS}\" (system-output monitor) input device, falling back to the default input device");
+    opendrop_core::log_error!("[audio] no \"{DEFAULT_SINK_ALIAS}\" (system-output monitor) input device, falling back to the default input device");
     host.default_input_device()
 }
 

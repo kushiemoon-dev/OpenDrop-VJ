@@ -21,7 +21,7 @@ pub(crate) fn describe_panic(payload: &(dyn Any + Send)) -> String {
 /// Logs `detail` to stderr and shows it to the user. Blocks until the dialog
 /// is dismissed; if no dialog backend is available the stderr line remains.
 pub(crate) fn report_fatal(summary: &str, detail: &str) {
-    eprintln!("[app] {summary}: {detail}");
+    opendrop_core::log_error!("[app] {summary}: {detail}");
     rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title(DIALOG_TITLE)

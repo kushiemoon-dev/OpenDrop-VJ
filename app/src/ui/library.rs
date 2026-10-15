@@ -49,8 +49,8 @@ pub fn show(
                     let jobs = path_by_name.iter().map(|(name, path)| (name.clone(), path.clone())).collect();
                     scan.start(jobs, worker_count(), program, scratch_dir, scan_file_path());
                 }
-                (Err(e), _) => eprintln!("[scan] cannot locate the executable: {e}"),
-                (_, None) => eprintln!("[scan] no cache directory available, scan not started"),
+                (Err(e), _) => opendrop_core::log_error!("[scan] cannot locate the executable: {e}"),
+                (_, None) => opendrop_core::log_error!("[scan] no cache directory available, scan not started"),
             }
         }
     });

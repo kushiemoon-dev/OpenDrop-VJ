@@ -124,7 +124,7 @@ fn run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<TwitchControl>,
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: twitch failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: twitch failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -194,7 +194,7 @@ async fn async_run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<Twi
                                 publish_connected(&state);
                             }
                             Err(e) => {
-                                eprintln!("opendrop-io: twitch join failed: {e}");
+                                opendrop_core::log_error!("opendrop-io: twitch join failed: {e}");
                                 publish_idle(&state, None);
                                 // new_client (and incoming) drop here.
                             }
@@ -205,7 +205,7 @@ async fn async_run(state: Arc<ArcSwap<TwitchSnapshot>>, control_rx: Receiver<Twi
                         // refusal used to be an `eprintln!` only, invisible
                         // to a GUI user: now also surfaced via
                         // `TwitchSnapshot::last_error`.
-                        eprintln!("opendrop-io: twitch connect refused: {e}");
+                        opendrop_core::log_error!("opendrop-io: twitch connect refused: {e}");
                         publish_idle(&state, Some(e));
                     }
                 }

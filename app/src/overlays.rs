@@ -83,7 +83,7 @@ pub(crate) fn sync_overlay_textures(
         let texture = match build_overlay_texture(gl, overlay, asset) {
             Ok(built) => Some(built),
             Err(e) => {
-                eprintln!("[app] overlay '{}' ({}): {e}", overlay.name, overlay.id);
+                opendrop_core::log_error!("[app] overlay '{}' ({}): {e}", overlay.name, overlay.id);
                 None
             }
         };

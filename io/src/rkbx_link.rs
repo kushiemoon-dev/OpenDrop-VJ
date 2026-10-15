@@ -146,7 +146,7 @@ fn run(state: Arc<ArcSwap<RkbxLinkSnapshot>>, track_tx: Sender<RkbxTrackChanged>
             }
             Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(e) => {
-                eprintln!("opendrop-io: rkbx_link recv error, stopping: {e}");
+                opendrop_core::log_error!("opendrop-io: rkbx_link recv error, stopping: {e}");
                 socket = None;
                 deck_time = [None; MAX_DJ_DECKS];
                 publish(&state, false, 0, deck_time);
@@ -179,13 +179,13 @@ fn bind(socket: &mut Option<UdpSocket>, port: u16, state: &Arc<ArcSwap<RkbxLinkS
     match UdpSocket::bind(("0.0.0.0", port)) {
         Ok(sock) => {
             if let Err(e) = sock.set_read_timeout(Some(POLL_TICK)) {
-                eprintln!("opendrop-io: rkbx_link set_read_timeout failed: {e}");
+                opendrop_core::log_error!("opendrop-io: rkbx_link set_read_timeout failed: {e}");
             }
             *socket = Some(sock);
             publish(state, true, port, *deck_time);
         }
         Err(e) => {
-            eprintln!("opendrop-io: rkbx_link bind on port {port} failed: {e}");
+            opendrop_core::log_error!("opendrop-io: rkbx_link bind on port {port} failed: {e}");
             *socket = None;
             publish(state, false, 0, [None; MAX_DJ_DECKS]);
         }

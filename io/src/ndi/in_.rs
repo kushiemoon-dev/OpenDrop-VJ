@@ -105,7 +105,7 @@ pub(super) fn open_finder(ndi: &NDI) -> Option<Finder> {
     match Finder::new(ndi, &FinderOptions::default()) {
         Ok(finder) => Some(finder),
         Err(e) => {
-            eprintln!("[ndi] failed to start source discovery: {e}. NDI input unavailable.");
+            opendrop_core::log_error!("[ndi] failed to start source discovery: {e}. NDI input unavailable.");
             None
         }
     }
@@ -149,7 +149,7 @@ impl ActiveReceive {
         match GraftonReceiver::new(ndi, &options) {
             Ok(receiver) => Some(ActiveReceive { receiver, frame_tx }),
             Err(e) => {
-                eprintln!("[ndi] failed to start receiver: {e}");
+                opendrop_core::log_error!("[ndi] failed to start receiver: {e}");
                 None
             }
         }
@@ -174,7 +174,7 @@ impl ActiveReceive {
                 });
             }
             Ok(None) => {}
-            Err(e) => eprintln!("[ndi] receive error: {e}"),
+            Err(e) => opendrop_core::log_error!("[ndi] receive error: {e}"),
         }
     }
 }

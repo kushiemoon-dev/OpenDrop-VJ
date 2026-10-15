@@ -229,7 +229,7 @@ fn save_secret_field(ui: &mut egui::Ui, label: &str, input: &mut String, key: &s
             match opendrop_io::secrets::set_secret(key, input) {
                 Ok(()) => *error = None,
                 Err(e) => {
-                    eprintln!("opendrop-app: failed to save secret '{key}': {e}");
+                    opendrop_core::log_error!("opendrop-app: failed to save secret '{key}': {e}");
                     *error = Some(format!("Failed to save secret '{label}': {e}"));
                 }
             }
@@ -253,7 +253,7 @@ fn clear_secret_button(ui: &mut egui::Ui, label: &str, key: &str, error: &mut Op
         match opendrop_io::secrets::clear_secret(key) {
             Ok(()) => *error = None,
             Err(e) => {
-                eprintln!("opendrop-app: failed to clear secret '{key}': {e}");
+                opendrop_core::log_error!("opendrop-app: failed to clear secret '{key}': {e}");
                 *error = Some(format!("Failed to clear secret '{label}': {e}"));
             }
         }

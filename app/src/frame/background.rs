@@ -32,7 +32,7 @@ pub(crate) fn service_background_work(state: &mut AppState) {
             &mut state.thumbnail_order,
             &mut state.failed_thumbnails,
         ) {
-            eprintln!("[app] thumbnail pump failed: {e}");
+            opendrop_core::log_error!("[app] thumbnail pump failed: {e}");
         }
     }
 

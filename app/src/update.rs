@@ -39,7 +39,7 @@ pub(crate) fn settle(result: &Result<LatestRelease, String>, known: &mut Option<
             *known = Some((release.tag.clone(), release.url.clone()));
             *last_check = now;
         }
-        Err(e) => eprintln!("[update] {e}"),
+        Err(e) => opendrop_core::log_error!("[update] {e}"),
     }
 }
 

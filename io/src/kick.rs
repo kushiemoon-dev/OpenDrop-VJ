@@ -183,7 +183,7 @@ fn run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickControl>, cha
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: kick failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: kick failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -236,12 +236,12 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                                 publish_connected(&state);
                             }
                             Err(e) => {
-                                eprintln!("opendrop-io: kick websocket connect failed: {e}");
+                                opendrop_core::log_error!("opendrop-io: kick websocket connect failed: {e}");
                                 publish_idle(&state, None);
                             }
                         },
                         Err(e) => {
-                            eprintln!("opendrop-io: kick channel discovery failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: kick channel discovery failed: {e}");
                             publish_idle(&state, None);
                         }
                     },
@@ -250,7 +250,7 @@ async fn async_run(state: Arc<ArcSwap<KickSnapshot>>, control_rx: Receiver<KickC
                         // refusal used to be an `eprintln!` only, invisible
                         // to a GUI user: now also surfaced via
                         // `KickSnapshot::last_error`.
-                        eprintln!("opendrop-io: kick connect refused: {e}");
+                        opendrop_core::log_error!("opendrop-io: kick connect refused: {e}");
                         publish_idle(&state, Some(e));
                     }
                 }
@@ -375,7 +375,7 @@ async fn run_ws(mut ws: KickWs, chatroom_id: u64, chat_tx: Sender<ChatMessage>, 
     })
     .to_string();
     if let Err(e) = ws.send(Message::text(subscribe)).await {
-        eprintln!("opendrop-io: kick pusher subscribe failed: {e}");
+        opendrop_core::log_error!("opendrop-io: kick pusher subscribe failed: {e}");
         publish_idle(&state, None);
         return;
     }
@@ -389,7 +389,7 @@ async fn run_ws(mut ws: KickWs, chatroom_id: u64, chat_tx: Sender<ChatMessage>, 
             }
             Ok(_) => {} // ping/pong/binary/close frames: no handler for these, matches the JS reference only acting on parsed chat events
             Err(e) => {
-                eprintln!("opendrop-io: kick websocket read error: {e}");
+                opendrop_core::log_error!("opendrop-io: kick websocket read error: {e}");
                 break;
             }
         }

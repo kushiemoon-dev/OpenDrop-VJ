@@ -180,7 +180,7 @@ impl FfmpegPipe {
     /// if ffmpeg is slow to consume: see the module doc comment.
     fn write_frame(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         if bytes.len() != EXPECTED_FRAME_LEN {
-            eprintln!("[v4l2] dropping frame with unexpected size: {} bytes, expected {EXPECTED_FRAME_LEN}", bytes.len());
+            opendrop_core::log_error!("[v4l2] dropping frame with unexpected size: {} bytes, expected {EXPECTED_FRAME_LEN}", bytes.len());
             return Ok(());
         }
         self.stdin.write_all(bytes)
@@ -214,7 +214,7 @@ fn handle_control(pipe: &mut Option<FfmpegPipe>, ctrl: V4l2Control, state: &Arc<
             match FfmpegPipe::spawn(&device) {
                 Ok(p) => *pipe = Some(p),
                 Err(e) => {
-                    eprintln!("[v4l2] failed to spawn ffmpeg for {}: {e}", device.display());
+                    opendrop_core::log_error!("[v4l2] failed to spawn ffmpeg for {}: {e}", device.display());
                     *pipe = None;
                 }
             }
@@ -239,7 +239,7 @@ fn drain(rx: &Receiver<Vec<u8>>, pipe: &mut Option<FfmpegPipe>, state: &Arc<ArcS
     };
     while let Ok(bytes) = rx.try_recv() {
         if let Err(e) = p.write_frame(&bytes) {
-            eprintln!("[v4l2] ffmpeg stdin write failed, stopping: {e}");
+            opendrop_core::log_error!("[v4l2] ffmpeg stdin write failed, stopping: {e}");
             *pipe = None;
             publish(state, false);
             while rx.try_recv().is_ok() {} // keep draining with no consumer, see doc comment
@@ -285,7 +285,7 @@ fn run(state: Arc<ArcSwap<V4l2Snapshot>>, compositor_rx: Receiver<Vec<u8>>, cont
         // externally, etc.): try_wait never blocks.
         if let Some(p) = pipe.as_mut() {
             if !p.is_alive() {
-                eprintln!("[v4l2] ffmpeg exited unexpectedly");
+                opendrop_core::log_error!("[v4l2] ffmpeg exited unexpectedly");
                 pipe = None;
                 publish(&state, false);
             }

@@ -3,6 +3,7 @@ pub mod beat_detector;
 pub mod beat_trigger;
 pub mod blend;
 pub mod clock;
+pub mod error_log;
 pub mod commands;
 pub mod lfo;
 pub mod overlay;

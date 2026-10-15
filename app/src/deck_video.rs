@@ -41,7 +41,7 @@ pub(crate) fn upload_rgba_frame(
     slot: &mut Option<(glow::NativeTexture, u32, u32)>,
 ) {
     if data.len() != width as usize * height as usize * 4 {
-        eprintln!("[app] dropping incoming frame with unexpected size: {} bytes for {width}x{height}", data.len());
+        opendrop_core::log_error!("[app] dropping incoming frame with unexpected size: {} bytes for {width}x{height}", data.len());
         return;
     }
     if let Some((tex, w, h)) = *slot {
@@ -85,7 +85,7 @@ pub(crate) fn create_frame_texture(
             Ok(tex) => tex,
             Err(e) => {
                 // Out of GPU objects: drop this frame, keep the previous texture.
-                eprintln!("[app] glGenTextures failed for an incoming-frame texture: {e}");
+                opendrop_core::log_error!("[app] glGenTextures failed for an incoming-frame texture: {e}");
                 return;
             }
         };

@@ -67,7 +67,7 @@ pub(crate) fn load_table(path: &Path) -> ScanTable {
 /// every frame, is never held up by a slow disk.
 fn save_json(path: &Path, json: &str) {
     if let Err(e) = crate::session::write_atomically(path, json) {
-        eprintln!("[scan] failed to save {}: {e}", path.display());
+        opendrop_core::log_error!("[scan] failed to save {}: {e}", path.display());
     }
 }
 
@@ -186,7 +186,7 @@ impl ScanHandle {
         save_to: Option<PathBuf>,
     ) {
         if let Err(e) = std::fs::create_dir_all(&scratch_dir) {
-            eprintln!("[scan] cannot create {}: {e}", scratch_dir.display());
+            opendrop_core::log_error!("[scan] cannot create {}: {e}", scratch_dir.display());
             return;
         }
         if self.shared.running.swap(true, Ordering::SeqCst) {

@@ -25,7 +25,7 @@ pub(crate) fn upload_source_frames(state: &mut AppState, ndi_active: bool) {
     // composite FBO belongs to the context, not the surface) before
     // touching the compositor or either window.
     if let Err(e) = state.main_ctx.make_current(&state.control.surface) {
-        eprintln!("[app] failed to reacquire main context: {e}");
+        opendrop_core::log_error!("[app] failed to reacquire main context: {e}");
     }
 
     // NDI-in: drains `frame_rx` to its newest frame per
@@ -45,7 +45,7 @@ pub(crate) fn upload_source_frames(state: &mut AppState, ndi_active: bool) {
     if let Some(frame) = drain_to_latest(&state.ndi.frame_rx) {
         let expected_len = frame.width as usize * frame.height as usize * 4;
         if frame.data.len() != expected_len {
-            eprintln!(
+            opendrop_core::log_error!(
                 "[app] dropping NDI-in frame with unexpected size: {} bytes, expected {expected_len} for {}x{}",
                 frame.data.len(),
                 frame.width,
@@ -117,7 +117,7 @@ pub(crate) fn upload_source_frames(state: &mut AppState, ndi_active: bool) {
         if frame.seq == state.video_frame_seq {
             // already uploaded
         } else if frame.data.len() != expected_len {
-            eprintln!(
+            opendrop_core::log_error!(
                 "[app] dropping video frame with unexpected size: {} bytes, expected {expected_len} for {}x{}",
                 frame.data.len(),
                 frame.width,

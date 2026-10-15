@@ -7,3 +7,4 @@ edition = "2021"
 cpal = { version = "0.18.2", features = ["pipewire"] }
 rustfft = "6.4"
 arc-swap = "1.9"
+opendrop-core = { path = "../core" }

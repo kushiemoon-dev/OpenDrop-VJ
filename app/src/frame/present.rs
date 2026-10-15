@@ -15,12 +15,12 @@ pub(crate) fn present_frame(state: &mut AppState, now: Instant, lowest_active: O
         &mut state.blit_control_timer,
         &mut state.egui_glow,
     ) {
-        eprintln!("[app] control window render failed: {e}");
+        opendrop_core::log_error!("[app] control window render failed: {e}");
     }
     if let Err(e) =
         state.output.render_and_swap(&state.main_ctx, &state.gl, &state.compositor, &mut state.blit_output_timer)
     {
-        eprintln!("[app] output window render failed: {e}");
+        opendrop_core::log_error!("[app] output window render failed: {e}");
     }
     // Wall-clock swap-to-swap time is the ground truth for frame
     // time: the GPU pass timers below measure execution time in

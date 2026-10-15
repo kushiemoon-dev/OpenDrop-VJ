@@ -9,7 +9,7 @@ pub fn install(gl: &mut glow::Context, label: &'static str) {
         gl.enable(glow::DEBUG_OUTPUT);
         gl.enable(glow::DEBUG_OUTPUT_SYNCHRONOUS);
         gl.debug_message_callback(move |source, msg_type, id, severity, message| {
-            eprintln!(
+            opendrop_core::log_error!(
                 "[gl:{label}] source=0x{source:x} type=0x{msg_type:x} id={id} severity=0x{severity:x}: {message}"
             );
         });

@@ -33,7 +33,7 @@ pub(crate) fn render_decks(state: &mut AppState, now: Instant, audio: &opendrop_
             continue;
         }
         if let Err(e) = state.decks[i].context.make_current(&state.decks[i].surface) {
-            eprintln!("[app] deck {i} make_current failed: {e}");
+            opendrop_core::log_error!("[app] deck {i} make_current failed: {e}");
             continue;
         }
         // Applied here, not before make_current above: `set_mesh_size`

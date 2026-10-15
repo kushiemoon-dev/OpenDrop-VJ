@@ -76,7 +76,7 @@ pub fn show(ui: &mut egui::Ui, show: &Show, deck_preset_names: &[String; 4], tra
 
         match opendrop_io::share_codec::encode_shared_set(&set) {
             Ok(link) => ui.ctx().copy_text(link),
-            Err(e) => eprintln!("[app] share link encode failed: {e}"),
+            Err(e) => opendrop_core::log_error!("[app] share link encode failed: {e}"),
         }
     }
 

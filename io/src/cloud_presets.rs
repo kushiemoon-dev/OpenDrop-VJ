@@ -295,7 +295,7 @@ fn run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiver<CloudPres
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: cloud_presets failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: cloud_presets failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -328,7 +328,7 @@ async fn async_run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiv
                             s.last_error = None;
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_presets list failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_presets list failed: {e}");
                             s.last_error = Some(e);
                         }
                     }
@@ -352,7 +352,7 @@ async fn async_run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiv
                             }
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_presets upload failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_presets upload failed: {e}");
                             s.last_error = Some(e);
                         }
                     }
@@ -372,7 +372,7 @@ async fn async_run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiv
                             }
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_presets rename failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_presets rename failed: {e}");
                             s.last_error = Some(e);
                         }
                     }
@@ -392,7 +392,7 @@ async fn async_run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiv
                             }
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_presets delete failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_presets delete failed: {e}");
                             s.last_error = Some(e);
                         }
                     }
@@ -409,7 +409,7 @@ async fn async_run(state: Arc<ArcSwap<CloudPresetsSnapshot>>, control_rx: Receiv
                             s.last_error = None;
                         }
                         Err(e) => {
-                            eprintln!("opendrop-io: cloud_presets download failed: {e}");
+                            opendrop_core::log_error!("opendrop-io: cloud_presets download failed: {e}");
                             s.last_error = Some(e);
                         }
                     }

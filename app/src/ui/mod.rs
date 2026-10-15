@@ -2,6 +2,7 @@
 
 pub mod about;
 pub mod audio;
+pub mod error_log;
 pub mod cloud_presets;
 pub mod cloud_video;
 pub mod color;

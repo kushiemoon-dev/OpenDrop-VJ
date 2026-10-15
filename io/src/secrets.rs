@@ -116,7 +116,7 @@ mod tests {
                 assert_eq!(get_secret(test_key).unwrap(), None);
             }
             Err(e) => {
-                eprintln!("note: skipping keyring round-trip, no backend available ({e})");
+                opendrop_core::log_error!("note: skipping keyring round-trip, no backend available ({e})");
             }
         }
     }

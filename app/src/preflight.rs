@@ -31,7 +31,7 @@ static PRESET_FAILED: AtomicBool = AtomicBool::new(false);
 unsafe extern "C" fn on_preset_failed(_filename: *const c_char, message: *const c_char, _user_data: *mut c_void) {
     PRESET_FAILED.store(true, Ordering::SeqCst);
     let msg = unsafe { CStr::from_ptr(message) }.to_string_lossy();
-    eprintln!("[preflight] preset failed: {msg}");
+    opendrop_core::log_error!("[preflight] preset failed: {msg}");
 }
 
 /// Runs entirely inside a `--preflight-check` child process: load one

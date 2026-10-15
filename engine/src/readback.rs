@@ -108,7 +108,7 @@ impl FrameReadback {
             match gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) {
                 Ok(fence) => self.fences[slot] = Some(fence),
                 // No fence means `poll` never reports this slot: the frame is dropped.
-                Err(e) => eprintln!("[readback] fence_sync failed, dropping frame: {e}"),
+                Err(e) => opendrop_core::log_error!("[readback] fence_sync failed, dropping frame: {e}"),
             }
         }
         self.write_idx = (self.write_idx + 1) % RING_LEN;

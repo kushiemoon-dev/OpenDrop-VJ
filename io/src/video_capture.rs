@@ -543,7 +543,7 @@ fn start_source(
         }
         Err(e) => {
             let msg = format!("failed to start ffmpeg for {input:?}: {e}");
-            eprintln!("[video] {msg}");
+            opendrop_core::log_error!("[video] {msg}");
             publish(state, false, Some(msg));
         }
     }
@@ -609,7 +609,7 @@ fn run(
         // unplugged, killed externally): `try_wait` never blocks.
         if let Some(src) = source.as_mut() {
             if !src.is_alive() {
-                eprintln!("[video] ffmpeg exited unexpectedly");
+                opendrop_core::log_error!("[video] ffmpeg exited unexpectedly");
                 source = None;
                 frame.store(None);
                 publish(&state, false, Some("the video source stopped unexpectedly".to_string()));

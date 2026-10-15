@@ -139,7 +139,7 @@ fn run(state: Arc<ArcSwap<RemoteWsSnapshot>>, events_tx: Sender<(CommandId, f64)
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("opendrop-io: remote-ws failed to build tokio runtime: {e}");
+            opendrop_core::log_error!("opendrop-io: remote-ws failed to build tokio runtime: {e}");
             return;
         }
     };
@@ -187,7 +187,7 @@ async fn serve_until_stopped(
         let listener = match tokio::net::TcpListener::bind(("0.0.0.0", 0)).await {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("opendrop-io: remote-ws bind failed: {e}");
+                opendrop_core::log_error!("opendrop-io: remote-ws bind failed: {e}");
                 publish_idle(state);
                 return;
             }
@@ -195,7 +195,7 @@ async fn serve_until_stopped(
         let port = match listener.local_addr() {
             Ok(addr) => addr.port(),
             Err(e) => {
-                eprintln!("opendrop-io: remote-ws local_addr failed: {e}");
+                opendrop_core::log_error!("opendrop-io: remote-ws local_addr failed: {e}");
                 publish_idle(state);
                 return;
             }
@@ -241,7 +241,7 @@ async fn serve_until_stopped(
             }
             result = axum::serve(listener, app) => {
                 if let Err(e) = result {
-                    eprintln!("opendrop-io: remote-ws serve error: {e}");
+                    opendrop_core::log_error!("opendrop-io: remote-ws serve error: {e}");
                 }
                 publish_idle(state);
                 let _ = shutdown_tx.send(());

@@ -209,7 +209,7 @@ impl SlotSender {
     /// logged and the frame dropped rather than panicking.
     fn send(&mut self, bytes: Vec<u8>) {
         if let Err(e) = self.frame.replace_data(bytes) {
-            eprintln!("[ndi] dropping frame with unexpected size: {e}");
+            opendrop_core::log_error!("[ndi] dropping frame with unexpected size: {e}");
             return;
         }
         self.sender.send_video(&self.frame);
@@ -346,7 +346,7 @@ fn run(
                 }
                 Err(e) => {
                     if !ts.discovery_error_logged {
-                        eprintln!("[ndi] source discovery failed: {e}");
+                        opendrop_core::log_error!("[ndi] source discovery failed: {e}");
                         ts.discovery_error_logged = true;
                     }
                     ts.sources.clear();
@@ -421,7 +421,7 @@ fn ensure_ndi(ts: &mut ThreadState) -> bool {
             true
         }
         Err(e) => {
-            eprintln!("[ndi] failed to initialize the NDI runtime: {e}. NDI is unavailable.");
+            opendrop_core::log_error!("[ndi] failed to initialize the NDI runtime: {e}. NDI is unavailable.");
             false
         }
     }
@@ -436,7 +436,7 @@ fn start_composite(ts: &mut ThreadState, name: &str) {
     match SlotSender::new(ndi, name, COMP_W, COMP_H) {
         Ok(s) => ts.composite = Some(s),
         Err(e) => {
-            eprintln!("[ndi] failed to start composite sender '{name}': {e}");
+            opendrop_core::log_error!("[ndi] failed to start composite sender '{name}': {e}");
             ts.composite = None;
         }
     }
@@ -444,7 +444,7 @@ fn start_composite(ts: &mut ThreadState, name: &str) {
 
 fn start_deck(ts: &mut ThreadState, slot: usize, name: &str) {
     if !is_valid_deck_slot(slot) {
-        eprintln!("[ndi] ignoring StartDeck for out-of-range slot {slot}");
+        opendrop_core::log_error!("[ndi] ignoring StartDeck for out-of-range slot {slot}");
         return;
     }
     if !ensure_ndi(ts) {
@@ -455,7 +455,7 @@ fn start_deck(ts: &mut ThreadState, slot: usize, name: &str) {
     match SlotSender::new(ndi, name, DECK_W, DECK_H) {
         Ok(s) => ts.decks[slot] = Some(s),
         Err(e) => {
-            eprintln!("[ndi] failed to start deck {slot} sender '{name}': {e}");
+            opendrop_core::log_error!("[ndi] failed to start deck {slot} sender '{name}': {e}");
             ts.decks[slot] = None;
         }
     }

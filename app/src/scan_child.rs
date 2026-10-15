@@ -142,7 +142,7 @@ pub fn run_analyze_preset(preset_path: &Path, out_path: &Path) -> ! {
     match write_atomically(out_path, analysis.to_line().as_bytes()) {
         Ok(()) => std::process::exit(0),
         Err(e) => {
-            eprintln!("[analyze-preset] {e}");
+            opendrop_core::log_error!("[analyze-preset] {e}");
             std::process::exit(EXIT_FAILED);
         }
     }

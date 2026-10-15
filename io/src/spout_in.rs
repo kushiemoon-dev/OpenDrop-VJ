@@ -103,7 +103,7 @@ fn run(
                         snapshot.last_error = None;
                     }
                     Err(e) => {
-                        eprintln!("[spout-in] failed to start: {e}");
+                        opendrop_core::log_error!("[spout-in] failed to start: {e}");
                         source = None;
                         snapshot.active = false;
                         snapshot.last_error = Some(e);
@@ -127,7 +127,7 @@ fn run(
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    eprintln!("[spout-in] receive failed: {e}");
+                    opendrop_core::log_error!("[spout-in] receive failed: {e}");
                     source = None;
                     snapshot.active = false;
                     snapshot.last_error = Some(e);

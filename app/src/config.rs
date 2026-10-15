@@ -277,14 +277,14 @@ pub(crate) fn load_config(path: &Path) -> UiConfig {
                 // over it on exit, which would otherwise erase the tags, notes,
                 // history and favourites it holds.
                 let aside = path.with_extension("json.bad");
-                eprintln!("[config] ignoring {}: not valid config; kept as {}", path.display(), aside.display());
+                opendrop_core::log_error!("[config] ignoring {}: not valid config; kept as {}", path.display(), aside.display());
                 let _ = std::fs::rename(path, aside);
                 UiConfig::default()
             }
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => UiConfig::default(),
         Err(e) => {
-            eprintln!("[config] failed to read config file {}: {e}, using defaults", path.display());
+            opendrop_core::log_error!("[config] failed to read config file {}: {e}, using defaults", path.display());
             UiConfig::default()
         }
     }
@@ -298,7 +298,7 @@ pub(crate) fn save_config(path: Option<&Path>, config: &UiConfig) {
     // Through a temporary file and a rename, so a crash mid-write cannot leave
     // a truncated file that the next launch would discard.
     if let Err(e) = crate::session::write_atomically(path, &config_to_json(config)) {
-        eprintln!("[config] failed to write config file {}: {e}", path.display());
+        opendrop_core::log_error!("[config] failed to write config file {}: {e}", path.display());
     }
 }
 

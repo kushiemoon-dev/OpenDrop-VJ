@@ -118,6 +118,10 @@ pub struct VideoState {
     /// for the clip library. `Some("")` means whichever sender is active.
     /// Takes precedence over the clip library, like a camera does.
     pub spout_source: Option<String>,
+    /// Set by the app while a DJ deck's playback position drives this clip.
+    /// A synced clip must neither cut away on the beat nor change speed, or
+    /// it would stop matching the deck.
+    pub deck_synced: bool,
     /// Internal cut-advance counter: `playback-store.svelte.ts`'s
     /// module-level `beatCount`, private for the same reason it was
     /// non-reactive there: nothing renders it.
@@ -141,6 +145,7 @@ impl Default for VideoState {
             live_device: None,
             live_label: String::new(),
             spout_source: None,
+            deck_synced: false,
             beat_count: 0,
         }
     }
@@ -157,13 +162,14 @@ pub fn active_clip_indices(all_keys: &[String], selected: &[String]) -> Vec<usiz
 }
 
 impl VideoState {
-    /// Whether an external single feed (live camera or a running NDI
-    /// receive) is driving the layer instead of the clip library. Such a
+    /// Whether an external single feed (live camera, Spout sender, DJ deck
+    /// sync or a running NDI receive) is driving the layer instead of the
+    /// clip library. Such a
     /// feed is one stream, not a cycling library: the web's `onVideoBeat`
     /// and `onVideoAudioTick` both bail out on it, and so does everything
     /// below.
     pub fn external_feed_active(&self, ndi_active: bool) -> bool {
-        self.live_device.is_some() || self.spout_source.is_some() || ndi_active
+        self.live_device.is_some() || self.spout_source.is_some() || self.deck_synced || ndi_active
     }
 
     pub fn toggle_clip_selection(&mut self, key: &str) {
@@ -582,6 +588,34 @@ mod tests {
             let s = VideoState { react_flash: true, react_hue: true, ..VideoState::default() };
             let p = s.layer_color_params(true);
             assert_eq!((p.saturate, p.contrast, p.invert), (0.5, 0.5, 0.0));
+        }
+    }
+
+    mod deck_synced {
+        use super::*;
+
+        #[test]
+        fn a_clip_synced_to_a_dj_deck_neither_cuts_nor_warps() {
+            let keys: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+            let mut s = VideoState { enabled: true, beats_per_cut: 1, ..VideoState::default() };
+            s.deck_synced = true;
+            assert!(s.external_feed_active(false));
+            for _ in 0..8 {
+                assert!(!s.on_beat(&keys, false, 0.9));
+            }
+            assert_eq!(s.current_clip_index, 0);
+            s.on_audio_tick(1.0, false);
+            assert_eq!(s.playback_rate, 1.0);
+        }
+
+        #[test]
+        fn once_the_sync_ends_the_clip_cuts_again() {
+            let keys: Vec<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+            let mut s = VideoState { enabled: true, beats_per_cut: 1, ..VideoState::default() };
+            s.deck_synced = true;
+            s.deck_synced = false;
+            let cuts = (0..4).filter(|_| s.on_beat(&keys, false, 0.9)).count();
+            assert!(cuts > 0);
         }
     }
 

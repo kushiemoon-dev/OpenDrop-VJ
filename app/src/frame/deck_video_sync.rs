@@ -16,13 +16,18 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
     while let Ok(event) = state.rkbx_link.track_events.try_recv() {
         on_track_changed(state, &event.artist, &event.title);
         let Some(slot) = state.show.rkbx_deck_mapping.get(event.deck).copied().flatten() else { continue };
-        let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else { continue };
+        let Some(clip) = video_clips::match_clip_by_track(&state.video_clips, &event.artist, &event.title) else {
+            // The new track has no clip: the old one must not keep following it.
+            state.rkbx_sync[slot] = None;
+            continue;
+        };
         let path = clip.path.clone();
         let index = state.video_clips.iter().position(|c| c.path == path).unwrap_or(0);
         state.show.deck_video[slot].current_clip_index = index;
         state.show.deck_video[slot].enabled = true;
         let seek_seconds = state.rkbx_link.latest().deck_time[event.deck].unwrap_or(0.0);
         state.rkbx_sync[slot] = Some(RkbxSyncState { dj_deck: event.deck, matched_clip_path: path, seek_seconds, seeked_at: now });
+        state.show.deck_video[slot].deck_synced = true;
     }
 
     // rkbx_link drift correction: reseeks a synced
@@ -55,6 +60,12 @@ pub(crate) fn sync_deck_video(state: &mut AppState, now: Instant) {
                 seeked_at: now,
             });
         }
+    }
+
+    // A synced clip must not cut away on a beat or change speed, so the
+    // beat and audio ticks read this flag.
+    for slot in 0..deck::DECK_COUNT {
+        state.show.deck_video[slot].deck_synced = state.rkbx_sync[slot].is_some();
     }
 
     // Per-deck video decode: reconcile-then-upload, one

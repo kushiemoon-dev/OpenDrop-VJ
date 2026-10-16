@@ -8,14 +8,19 @@
 //! starting a receive just reports that Spout is unavailable.
 
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use arc_swap::ArcSwap;
 
 const POLL_TICK: Duration = Duration::from_millis(8);
 /// How often the list of available senders is refreshed.
 const SENDER_REFRESH: Duration = Duration::from_secs(1);
+/// The sender list is only kept up to date while a panel that shows it has
+/// asked for it within this long. Otherwise no Spout object is created, so
+/// an unused feature touches nothing native.
+const WATCH_WINDOW_MS: u64 = 3000;
 /// A receive with no new frame for this long is shown as not connected.
 const CONNECTED_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -57,9 +62,21 @@ pub struct SpoutInHandle {
     state: Arc<ArcSwap<SpoutInSnapshot>>,
     pub control_tx: Sender<SpoutInControl>,
     pub frame_rx: Receiver<SpoutInFrame>,
+    /// When a panel last asked for the sender list, in ms since the epoch.
+    watched_at: Arc<AtomicU64>,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 impl SpoutInHandle {
+    /// Called every frame by the panels that list senders; keeps the list
+    /// refreshing for the next few seconds.
+    pub fn watch_senders(&self) {
+        self.watched_at.store(now_ms(), Ordering::Relaxed);
+    }
+
     pub fn latest(&self) -> Arc<SpoutInSnapshot> {
         self.state.load_full()
     }
@@ -73,17 +90,20 @@ fn spawn_with(factory: SourceFactory) -> SpoutInHandle {
     let state = Arc::new(ArcSwap::from_pointee(SpoutInSnapshot::default()));
     let (control_tx, control_rx) = mpsc::channel();
     let (frame_tx, frame_rx) = mpsc::channel();
+    let watched_at = Arc::new(AtomicU64::new(0));
     std::thread::spawn({
         let state = state.clone();
-        move || run(control_rx, frame_tx, state, factory)
+        let watched_at = watched_at.clone();
+        move || run(control_rx, frame_tx, state, watched_at, factory)
     });
-    SpoutInHandle { state, control_tx, frame_rx }
+    SpoutInHandle { state, control_tx, frame_rx, watched_at }
 }
 
 fn run(
     control_rx: Receiver<SpoutInControl>,
     frame_tx: Sender<SpoutInFrame>,
     state: Arc<ArcSwap<SpoutInSnapshot>>,
+    watched_at: Arc<AtomicU64>,
     factory: SourceFactory,
 ) {
     let mut source: Option<Box<dyn SpoutSource>> = None;
@@ -136,7 +156,10 @@ fn run(
         }
         snapshot.connected = last_frame_at.is_some_and(|at| at.elapsed() < CONNECTED_TIMEOUT);
 
-        if last_refresh.is_none_or(|at| at.elapsed() >= SENDER_REFRESH) {
+        let watched = now_ms().saturating_sub(watched_at.load(Ordering::Relaxed)) < WATCH_WINDOW_MS;
+        if !watched {
+            finder = None;
+        } else if last_refresh.is_none_or(|at| at.elapsed() >= SENDER_REFRESH) {
             last_refresh = Some(Instant::now());
             if finder.is_none() {
                 finder = factory(None).ok();
@@ -276,6 +299,17 @@ mod tests {
     }
 
     #[test]
+    fn the_sender_list_stays_empty_until_a_panel_asks_for_it() {
+        let handle = spawn_with(ok_factory);
+        std::thread::sleep(Duration::from_millis(1300));
+        assert!(handle.latest().senders.is_empty(), "nothing should be enumerated while no panel watches");
+        assert!(wait_for(|| {
+            handle.watch_senders();
+            !handle.latest().senders.is_empty()
+        }));
+    }
+
+    #[test]
     fn frames_flow_while_started_and_the_senders_are_listed() {
         FRAMES_LEFT.store(3, Ordering::SeqCst);
         let handle = spawn_with(ok_factory);
@@ -286,7 +320,10 @@ mod tests {
         assert_eq!(frame.data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 
         assert!(wait_for(|| handle.latest().active && handle.latest().connected));
-        assert!(wait_for(|| handle.latest().senders == vec!["Resolume Output".to_string()]));
+        assert!(wait_for(|| {
+            handle.watch_senders();
+            handle.latest().senders == vec!["Resolume Output".to_string()]
+        }));
 
         handle.control_tx.send(SpoutInControl::Stop).unwrap();
         assert!(wait_for(|| !handle.latest().active));

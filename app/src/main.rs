@@ -4,6 +4,7 @@ use winit::event_loop::EventLoop;
 mod app;
 mod bootstrap;
 mod config;
+mod crash_handler;
 mod deck_spout;
 mod deck_video;
 mod egl_headless;
@@ -95,7 +96,9 @@ fn main() {
 /// leaves a trace even when nobody sees the terminal.
 fn install_error_log() {
     if let Some(dir) = config::config_file_path().and_then(|p| p.parent().map(Path::to_path_buf)) {
-        opendrop_core::error_log::set_file(dir.join("opendrop.log"));
+        let log = dir.join("opendrop.log");
+        crash_handler::install(log.clone());
+        opendrop_core::error_log::set_file(log);
     }
     // Helper processes inherit this, so thumbnails and scans see the same textures.
     if let Some(dir) = paths::texture_dir_env_value(

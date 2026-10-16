@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+- Windows: a crash inside a native library (projectM, the graphics driver) is now written to `opendrop.log` with the exception, the module and the call stack, instead of closing the app without a trace
+- The Spout sender list is only refreshed while a panel that shows it is open, so Spout is left alone when unused
+
 ## v0.2.0 (2026-10-15)
 
 ### New features

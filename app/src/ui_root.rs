@@ -300,6 +300,7 @@ pub(crate) fn ui_root(
                 // struct than every `&mut` this call takes, and the `Arc`
                 // only has to outlive this one call.
                 let ndi_snapshot = output.ndi.latest();
+                sources.spout_in.watch_senders();
                 let spout_senders = sources.spout_in.latest().senders.clone();
                 ui::video::show(
                     ui,

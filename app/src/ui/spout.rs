@@ -66,6 +66,7 @@ pub fn show_out(
 /// Spout input: pick one of the senders published on this machine, or follow
 /// whichever is active, and connect. Shown by `Panel::SpoutIn`.
 pub fn show_in(ui: &mut egui::Ui, spout_in: &SpoutInHandle, selected: &mut Option<String>) {
+    spout_in.watch_senders();
     let snapshot = spout_in.latest();
 
     ui.label("Spout input");

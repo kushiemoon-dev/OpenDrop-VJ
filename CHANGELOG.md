@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixes
+- Windows: the graphics layer (ANGLE) is updated to a recent revision with several Direct3D 11 memory fixes, and the Windows build now uses OpenGL ES 3.0. In tests, a crash that closed the app some seconds after music started, with certain combinations of presets, no longer happens
 - Windows: a crash inside a native library (projectM, the graphics driver) is now written to `opendrop.log` with the exception, the module and the call stack, instead of closing the app without a trace
 - The Spout sender list is only refreshed while a panel that shows it is open, so Spout is left alone when unused
 

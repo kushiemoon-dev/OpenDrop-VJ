@@ -155,7 +155,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\vcpkg\installed
-          key: vcpkg-projectm-4.1.6-angle-windows
+          key: vcpkg-projectm-4.1.6-angle-2026-10-windows
 
       - name: Install vcpkg dependencies (pinned projectM, ANGLE)
         if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
@@ -165,7 +165,7 @@ jobs:
           # bundles these for GLES support, same ANGLE approach as the
           # Linux build's GLES compat work) - not projectM's own
           # dependencies, so they need their own explicit install.
-          vcpkg install angle:x64-windows zlib:x64-windows
+          vcpkg install angle:x64-windows zlib:x64-windows --overlay-ports=packaging/windows/overlay-ports
 
       - name: Cache NDI SDK
         id: cache-ndi

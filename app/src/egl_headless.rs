@@ -63,23 +63,17 @@ pub fn init_egl() -> (Egl, egl::Display, egl::Config) {
 // No `share` context param here (unlike a general-purpose
 // version): neither child process ever has more than this one context.
 pub fn create_context(inst: &Egl, display: egl::Display, config: egl::Config) -> egl::Context {
-    // projectM 4.2.0's GladLoader::CheckGLRequirements() hard-requires GLES
-    // >= 3.2 by default (WithMinimumVersion(3, 2)) on every Windows/GLES
-    // code path. This vcpkg-vendored ANGLE build (chromium_7258) can create
-    // at most a GLES 3.1 context on its D3D11 backend (a 3.2 request fails
-    // eglCreateContext with BadMatch) and has no Vulkan backend built at
-    // all (its own vcpkg.json description says ES-to-Vulkan translation is
-    // still "underway" upstream), so 3.1 is this ANGLE build's real
-    // ceiling, not a placeholder pending a trivial bump to 3.2. projectM's
-    // own minimum is patched down to match
-    // (packaging/windows/overlay-ports/projectm/gles31-min-version.patch),
-    // verified empirically to render correctly at 3.1.
+    // The ANGLE build OpenDrop ships only exposes OpenGL ES 3.0 on its
+    // Direct3D 11 backend (a 3.1 request fails eglCreateContext with
+    // BadMatch). projectM's own minimum of 3.2 is patched down to match
+    // (packaging/windows/overlay-ports/projectm/gles30-min-version.patch),
+    // and every projectM shader is written for `#version 300 es`.
     #[cfg(target_os = "windows")]
     let attribs = [
         egl::CONTEXT_MAJOR_VERSION,
         3,
         egl::CONTEXT_MINOR_VERSION,
-        1,
+        0,
         egl::NONE,
     ];
     #[cfg(not(target_os = "windows"))]

@@ -329,13 +329,13 @@ pub fn create_one_deck_context(
     h: u32,
     debug_label: &'static str,
 ) -> Result<Deck, String> {
-    // `Gles(None)` lets glutin/ANGLE negotiate down to GLES 3.0, which is
-    // below projectM's GladLoader minimum (patched to 3.1 to match this
-    // vendored ANGLE build's ceiling on its D3D11 backend, see
-    // packaging/windows/overlay-ports/projectm/gles31-min-version.patch).
-    // Ask for exactly what's needed instead of leaving it to negotiation.
+    // The ANGLE build OpenDrop ships only exposes OpenGL ES 3.0 on its
+    // Direct3D 11 backend (a 3.1 request fails eglCreateContext with
+    // BadMatch), and projectM's minimum is patched down to match, see
+    // packaging/windows/overlay-ports/projectm/gles30-min-version.patch.
+    // Ask for exactly that instead of leaving it to negotiation.
     #[cfg(target_os = "windows")]
-    let context_api = ContextApi::Gles(Some(Version::new(3, 1)));
+    let context_api = ContextApi::Gles(Some(Version::new(3, 0)));
     #[cfg(not(target_os = "windows"))]
     let context_api = ContextApi::OpenGl(Some(Version::new(3, 3)));
 

@@ -200,7 +200,7 @@ mod imp {
                 code: 0xC000_0005,
                 flags: 0,
                 record: std::ptr::null_mut(),
-                address: filter as usize as *mut c_void,
+                address: (filter as Filter) as usize as *mut c_void,
                 number_parameters: 0,
                 information: [0; 15],
             };

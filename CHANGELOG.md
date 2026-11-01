@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.1 (2026-11-01)
 
 ### Fixes
 - Windows: the graphics layer (ANGLE) is updated to a recent revision with several Direct3D 11 memory fixes, and the Windows build now uses OpenGL ES 3.0. In tests, a crash that closed the app some seconds after music started, with certain combinations of presets, no longer happens

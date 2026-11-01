@@ -161,6 +161,7 @@ jobs:
         if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
         run: |
           vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           # Provides libEGL.dll/libGLESv2.dll/z.dll (build-portable.ps1
           # bundles these for GLES support, same ANGLE approach as the
           # Linux build's GLES compat work) - not projectM's own

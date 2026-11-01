@@ -56,6 +56,7 @@ jobs:
         if: steps.cache-vcpkg-projectm.outputs.cache-hit != 'true'
         run: |
           vcpkg install projectm:x64-windows --overlay-ports=packaging/windows/overlay-ports
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           vcpkg install angle:x64-windows zlib:x64-windows --overlay-ports=packaging/windows/overlay-ports
 
       - name: Cache NDI SDK

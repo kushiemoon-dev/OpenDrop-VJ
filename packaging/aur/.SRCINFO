@@ -1,7 +1,7 @@
 pkgbase = opendrop-vj-bin
 	pkgdesc = Native 4-deck Milkdrop VJ instrument, built on libprojectM (Linux release build)
-	pkgver = 0.1.4
-	pkgrel = 2
+	pkgver = 0.2.1
+	pkgrel = 1
 	url = https://github.com/kushiemoon-dev/OpenDrop-VJ
 	arch = x86_64
 	license = MIT
@@ -12,12 +12,13 @@ pkgbase = opendrop-vj-bin
 	depends = brotli
 	depends = zstd
 	depends = libglvnd
+	depends = libxkbcommon-x11
 	depends = dbus
 	depends = systemd-libs
 	depends = gcc-libs
 	provides = opendrop-vj
 	conflicts = opendrop-vj
-	source = https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v0.1.4/OpenDrop-Native-0.1.4-x86_64.AppImage
-	sha256sums = 6c1606dc49302374dc4991885179aa213a596c3ad01dc82c1e9877252f32fd08
+	source = https://github.com/kushiemoon-dev/OpenDrop-VJ/releases/download/v0.2.1/OpenDrop-Native-0.2.1-x86_64.AppImage
+	sha256sums = 49582279a17bfeedf61beb34b7d3665516a2a027450f4c8cb9500133dbf96a3f
 
 pkgname = opendrop-vj-bin

@@ -41,7 +41,7 @@
 #       root-caused 2026-09-05 by reproducing the crash on a clean Windows
 #       Server 2022 VM and fixing it by swapping in the real
 #       redistributable's System32 copies instead.)
-#     - libEGL.dll, libGLESv2.dll, z.dll (vcpkg x64-windows, dynamic
+#     - libEGL.dll, libGLESv2.dll, z.dll or libz.dll (vcpkg x64-windows, dynamic
 #       triplet, same as glew32.dll/projectM-4.dll above: (a) the app
 #       needs an EGL/GLES implementation and Windows has none natively:
 #       ANGLE provides it, the Chromium/Electron-precedented approach;
@@ -191,8 +191,7 @@ $vcpkgDlls = @(
     "projectM-4-playlist.dll",
     "glew32.dll",
     "libEGL.dll",
-    "libGLESv2.dll",
-    "z.dll"
+    "libGLESv2.dll"
 )
 
 $resolvedVcpkgDlls = @()
@@ -204,6 +203,19 @@ foreach ($name in $vcpkgDlls) {
     }
     $resolvedVcpkgDlls += $path
 }
+# zlib (a dependency of libGLESv2.dll): the DLL name depends on the zlib
+# version vcpkg builds. 1.3.x names it z.dll, 1.4 on MSVC names it libz.dll
+# (found 2026-11-20 when a lost vcpkg cache made the release build pick up
+# zlib 1.4). Whichever exists is the one libGLESv2.dll was linked against.
+$zlibDll = @("z.dll", "libz.dll") |
+    ForEach-Object { Join-Path $vcpkgBin $_ } |
+    Where-Object { Test-Path $_ -PathType Leaf } |
+    Select-Object -First 1
+if (-not $zlibDll) {
+    Write-Error "zlib DLL (z.dll or libz.dll) not found in $vcpkgBin (was 'vcpkg install zlib:x64-windows' run?)"
+    exit 1
+}
+$resolvedVcpkgDlls += $zlibDll
 Write-Output "vcpkg DLLs: $($resolvedVcpkgDlls -join ', ')"
 
 # VC++ Redistributable DLLs (not part of the OS, unlike the Universal CRT).

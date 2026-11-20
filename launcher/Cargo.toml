@@ -1,0 +1,14 @@
+[package]
+name = "opendrop-launcher"
+version = "0.2.3"
+edition = "2021"
+description = "Starts opendrop-app.exe from its real folder when launched through a symlink such as the winget alias"
+license = "MIT"
+
+# Standalone on purpose: it is built with a static CRT (see .cargo/config.toml)
+# and must not change how the workspace crates are built.
+[workspace]
+
+[[bin]]
+name = "opendrop-vj"
+path = "src/main.rs"

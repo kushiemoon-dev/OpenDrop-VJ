@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.3 (2026-11-20)
+
+### Fixes
+- Windows: the `opendrop-vj` command that winget installs no longer fails with a missing DLL error (`0xC0000135`). winget runs the app through a link in its own folder and Windows looked for the DLLs next to that link, so a small launcher now starts the app from its real folder. The zip contains it as `opendrop-vj.exe`
+
 ## v0.2.1 (2026-11-01)
 
 ### Fixes

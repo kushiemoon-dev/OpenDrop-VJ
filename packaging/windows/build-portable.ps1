@@ -48,6 +48,15 @@
 #       (b) z.dll (zlib) is a real transitive dependency of
 #       libGLESv2.dll confirmed by `dumpbin /dependents`, not itself an
 #       OS component, so it must ship alongside it)
+#   Also in the folder, built here and not a DLL:
+#     - opendrop-vj.exe              (launcher/, static CRT). winget exposes
+#       the portable exe through a symlink in WinGet\Links, and Windows then
+#       looks for the DLLs above next to the symlink, not next to the real
+#       file: opendrop-app.exe started through the alias fails with
+#       0xC0000135 (STATUS_DLL_NOT_FOUND), reproduced 2026-11-20 on a clean
+#       Windows Server 2022 VM. The launcher resolves the symlink and starts
+#       opendrop-app.exe from its own folder. It must stay free of
+#       vcruntime140.dll for the same reason.
 #   Never bundled: everything else `dumpbin /dependents` reports
 #   (KERNEL32.dll, USER32.dll, ADVAPI32.dll, ntdll.dll, WS2_32.dll,
 #   OPENGL32.dll, GDI32.dll, and the api-ms-win-crt-*.dll Universal CRT
@@ -71,6 +80,8 @@ $ScriptDir = $PSScriptRoot
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
 
 $Binary = Join-Path $RepoRoot "target\release\opendrop-app.exe"
+$LauncherDir = Join-Path $RepoRoot "launcher"
+$Launcher = Join-Path $LauncherDir "target\release\opendrop-vj.exe"
 $CargoToml = Join-Path $RepoRoot "app\Cargo.toml"
 $License = Join-Path $RepoRoot "LICENSE"
 $InterOfl = Join-Path $RepoRoot "app\assets\fonts\Inter-OFL.txt"
@@ -104,6 +115,25 @@ try {
 
 if (-not (Test-Path $Binary -PathType Leaf)) {
     Write-Error "Release binary not found at $Binary after build"
+    exit 1
+}
+
+# The launcher is its own cargo workspace (static CRT, see launcher\.cargo),
+# so it is built from its own folder.
+Write-Output "Building the launcher (cargo build --release in launcher) ..."
+Push-Location $LauncherDir
+try {
+    cargo build --release
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "launcher build failed with exit code $LASTEXITCODE"
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
+
+if (-not (Test-Path $Launcher -PathType Leaf)) {
+    Write-Error "Launcher not found at $Launcher after build"
     exit 1
 }
 
@@ -221,6 +251,7 @@ if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutDir | Out-Null
 
 Copy-Item $Binary (Join-Path $OutDir "opendrop-app.exe")
+Copy-Item $Launcher (Join-Path $OutDir "opendrop-vj.exe")
 Copy-Item $ndiDll $OutDir
 foreach ($dll in $resolvedVcpkgDlls) { Copy-Item $dll $OutDir }
 foreach ($dll in $resolvedVcRedistDlls) { Copy-Item $dll $OutDir }

@@ -4,7 +4,7 @@ PackageVersion: @VERSION@
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
-  - RelativeFilePath: OpenDrop-Native-@VERSION@-windows-x64\opendrop-app.exe
+  - RelativeFilePath: OpenDrop-Native-@VERSION@-windows-x64\opendrop-vj.exe
     PortableCommandAlias: opendrop-vj
 Commands:
   - opendrop-vj

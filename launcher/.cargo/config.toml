@@ -1,0 +1,4 @@
+# The launcher runs from the winget Links folder, where none of the DLLs
+# shipped in the zip can be found, so it must not depend on vcruntime140.dll.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

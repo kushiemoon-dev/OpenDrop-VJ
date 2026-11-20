@@ -452,10 +452,10 @@ mod on_deck_video_beat {
     #[test]
     fn cuts_only_the_targeted_slot_leaving_others_untouched() {
         let mut show = Show::default();
-        for slot in 0..4 {
-            show.deck_video[slot].enabled = true;
-            show.deck_video[slot].beats_per_cut = 1;
-            show.deck_video[slot].advance = crate::video::VideoAdvance::Sequential;
+        for deck in &mut show.deck_video {
+            deck.enabled = true;
+            deck.beats_per_cut = 1;
+            deck.advance = crate::video::VideoAdvance::Sequential;
         }
         show.video.enabled = true;
         show.video.beats_per_cut = 1;

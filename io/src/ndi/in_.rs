@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use grafton_ndi::{
     Finder, FinderOptions, Receiver as GraftonReceiver, ReceiverBandwidth, ReceiverColorFormat,
-    ReceiverOptions, Source, SourceAddress, NDI,
+    ReceiverOptions, Source, SourceAddress, Ndi,
 };
 
 /// A discovered NDI source, decoupled from `grafton_ndi::Source` the same
@@ -27,13 +27,7 @@ use grafton_ndi::{
 /// grafton-ndi types directly: insulates `app` from a `grafton-ndi`
 /// version bump changing field shapes just to display or select a source.
 ///
-/// `address` collapses `grafton_ndi::SourceAddress`'s `Ip`/`Url`/`None`
-/// distinction into a single optional string, mirroring the JS reference
-/// (`main.cjs`'s `s.urlAddress`, used uniformly for both IP- and
-/// URL-addressed sources). The round trip back to `grafton_ndi::Source`
-/// (`impl From<NdiSource> for Source` below) re-derives which variant to
-/// use with the same `"://"` heuristic `grafton_ndi::Source::try_from_raw`
-/// itself uses internally, so nothing needed to reconnect is lost.
+/// The address preserves the validated string returned by discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NdiSource {
     pub name: String,
@@ -42,22 +36,22 @@ pub struct NdiSource {
 
 impl From<Source> for NdiSource {
     fn from(source: Source) -> Self {
-        let address = match source.address {
-            SourceAddress::Ip(addr) | SourceAddress::Url(addr) => Some(addr),
-            SourceAddress::None => None,
-        };
-        NdiSource { name: source.name, address }
+        Self {
+            name: source.name().to_owned(),
+            address: source.address().map(|address| address.as_str().to_owned()),
+        }
     }
 }
 
-impl From<NdiSource> for Source {
-    fn from(source: NdiSource) -> Self {
-        let address = match source.address {
-            Some(addr) if addr.contains("://") => SourceAddress::Url(addr),
-            Some(addr) => SourceAddress::Ip(addr),
-            None => SourceAddress::None,
-        };
-        Source { name: source.name, address }
+impl TryFrom<NdiSource> for Source {
+    type Error = grafton_ndi::Error;
+
+    fn try_from(source: NdiSource) -> Result<Self, Self::Error> {
+        let target = Source::new(source.name)?;
+        match source.address {
+            Some(address) => Ok(target.with_address(SourceAddress::new(address)?)),
+            None => Ok(target),
+        }
     }
 }
 
@@ -101,7 +95,7 @@ pub(super) fn find(finder: &Finder, source_filter: Option<&str>, timeout_ms: u32
 
 /// Opens a discovery [`Finder`], logging once and returning `None` on
 /// failure: never panics, mirrors `out::ensure_ndi`'s failure handling.
-pub(super) fn open_finder(ndi: &NDI) -> Option<Finder> {
+pub(super) fn open_finder(ndi: &Ndi) -> Option<Finder> {
     match Finder::new(ndi, &FinderOptions::default()) {
         Ok(finder) => Some(finder),
         Err(e) => {
@@ -141,11 +135,18 @@ impl ActiveReceive {
     /// (`electron/main.cjs:687-689`). That reason (keeping an Electron
     /// IPC/relay path affordable) doesn't apply to this native app, but
     /// nothing argues for a different default either, so it's kept as-is.
-    pub(super) fn start(ndi: &NDI, source: NdiSource, frame_tx: Sender<NdiFrame>) -> Option<Self> {
-        let options = ReceiverOptions::builder(source.into())
-            .color(ReceiverColorFormat::RGBX_RGBA)
+    pub(super) fn start(ndi: &Ndi, source: NdiSource, frame_tx: Sender<NdiFrame>) -> Option<Self> {
+        let source = match Source::try_from(source) {
+            Ok(source) => source,
+            Err(e) => {
+                opendrop_core::log_error!("[ndi] invalid source: {e}");
+                return None;
+            }
+        };
+        let options = ReceiverOptions::new(source)
+            .color_format(ReceiverColorFormat::RgbxRgba)
             .bandwidth(ReceiverBandwidth::Lowest)
-            .build();
+            .allow_video_fields(false);
         match GraftonReceiver::new(ndi, &options) {
             Ok(receiver) => Some(ActiveReceive { receiver, frame_tx }),
             Err(e) => {
@@ -160,7 +161,7 @@ impl ActiveReceive {
     /// side's `drain_slot`, same reasoning: never block this shared
     /// thread waiting on a specific source.
     pub(super) fn poll(&self) {
-        match self.receiver.video().try_capture(Duration::ZERO) {
+        match self.receiver.capture_video(Duration::ZERO) {
             Ok(Some(frame)) => {
                 // frame_tx is unbounded; `app` is expected to
                 // drain NdiHandle::frame_rx continuously. A disconnected
@@ -168,8 +169,8 @@ impl ActiveReceive {
                 // sends fail silently from here on, until StopReceive
                 // tears this down.
                 let _ = self.frame_tx.send(NdiFrame {
-                    width: frame.width() as u32,
-                    height: frame.height() as u32,
+                    width: frame.width(),
+                    height: frame.height(),
                     data: frame.data().to_vec(),
                 });
             }
@@ -209,28 +210,28 @@ mod tests {
 
     #[test]
     fn ndi_source_round_trips_ip_address() {
-        let source = Source { name: "CAM".into(), address: SourceAddress::Ip("192.168.1.10:5960".into()) };
+        let source = Source::new("CAM").unwrap().with_address(SourceAddress::new("192.168.1.10:5960").unwrap());
         let ndi_source = NdiSource::from(source);
         assert_eq!(ndi_source.address.as_deref(), Some("192.168.1.10:5960"));
-        let back: Source = ndi_source.into();
-        assert!(matches!(back.address, SourceAddress::Ip(ip) if ip == "192.168.1.10:5960"));
+        let back = Source::try_from(ndi_source).unwrap();
+        assert_eq!(back.address().map(SourceAddress::as_str), Some("192.168.1.10:5960"));
     }
 
     #[test]
     fn ndi_source_round_trips_url_address() {
         let source =
-            Source { name: "CAM-HX".into(), address: SourceAddress::Url("http://camera.local:8080".into()) };
+            Source::new("CAM-HX").unwrap().with_address(SourceAddress::new("http://camera.local:8080").unwrap());
         let ndi_source = NdiSource::from(source);
-        let back: Source = ndi_source.into();
-        assert!(matches!(back.address, SourceAddress::Url(url) if url == "http://camera.local:8080"));
+        let back = Source::try_from(ndi_source).unwrap();
+        assert_eq!(back.address().map(SourceAddress::as_str), Some("http://camera.local:8080"));
     }
 
     #[test]
     fn ndi_source_round_trips_none_address() {
-        let source = Source { name: "CAM".into(), address: SourceAddress::None };
+        let source = Source::new("CAM").unwrap();
         let ndi_source = NdiSource::from(source);
         assert_eq!(ndi_source.address, None);
-        let back: Source = ndi_source.into();
-        assert!(matches!(back.address, SourceAddress::None));
+        let back = Source::try_from(ndi_source).unwrap();
+        assert!(back.address().is_none());
     }
 }

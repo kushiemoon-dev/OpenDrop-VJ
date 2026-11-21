@@ -29,6 +29,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: ./.github/actions/setup-native-deps
+        with:
+          bundle-ndi: "true"
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -75,6 +77,7 @@ jobs:
       - name: Build AppImage
         env:
           PRESETS_SRC: /tmp/opendrop-presets-combined
+          NDI_RUNTIME_DIR_V6: /opt/ndi-sdk/lib/x86_64-linux-gnu
         run: packaging/appimage/build-appimage.sh
 
       - name: Check the update information file was produced
@@ -200,26 +203,6 @@ jobs:
             exit 1
           }
 
-      - name: Locate NDI SDK for cargo build
-        run: |
-          # grafton-ndi's build.rs defaults NDI_SDK_DIR to
-          # "C:\Program Files\NDI\NDI 6 SDK" on Windows when unset, but this
-          # repo's .cargo/config.toml (an Arch-Linux dev-machine convenience)
-          # unconditionally sets NDI_SDK_DIR to the repo-relative
-          # "ndi-sdk-shim" whenever the shell doesn't already have it,
-          # pre-empting that Windows default. Export the real SDK dir here
-          # so it wins instead. Searched for rather than hardcoded, since
-          # 7-Zip's raw extraction of the Inno Setup installer may not lay
-          # out folders the same way a real install would.
-          $header = Get-ChildItem -Path "C:\Program Files\NDI" -Recurse -Filter "Processing.NDI.Lib.h" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $header) {
-            Write-Error "Processing.NDI.Lib.h not found anywhere under C:\Program Files\NDI"
-            exit 1
-          }
-          $sdkDir = Split-Path (Split-Path $header.FullName -Parent) -Parent
-          Write-Output "NDI_SDK_DIR=$sdkDir"
-          Add-Content -Path $env:GITHUB_ENV -Value "NDI_SDK_DIR=$sdkDir"
-
       - name: Build Windows portable zip
         env:
           PRESETS_SRC: C:\opendrop-presets-combined
@@ -311,6 +294,11 @@ jobs:
           Libs:
           PC
 
+      - name: cargo build --release
+        env:
+          PKG_CONFIG_PATH: /tmp/projectm-4.1.6-install/lib/pkgconfig
+        run: cargo build --release --workspace
+
       - name: Cache NDI SDK
         id: cache-ndi
         uses: actions/cache@v4
@@ -323,23 +311,6 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/ndi-sdk-installer.pkg" "https://downloads.ndi.tv/SDK/NDI_SDK_Mac/Install_NDI_SDK_v6_Apple.pkg"
           sudo installer -pkg "$RUNNER_TEMP/ndi-sdk-installer.pkg" -target /
-
-      - name: Locate NDI SDK for cargo build
-        run: |
-          # Installer layout isn't documented anywhere stable, same reasoning
-          # as the Windows job's search-instead-of-hardcode step.
-          header=$(find /Library /Applications -name "Processing.NDI.Lib.h" 2>/dev/null | head -n1)
-          if [[ -z "$header" ]]; then
-            echo "error: Processing.NDI.Lib.h not found under /Library or /Applications" >&2
-            exit 1
-          fi
-          sdk_dir=$(dirname "$(dirname "$header")")
-          echo "NDI_SDK_DIR=$sdk_dir" >> "$GITHUB_ENV"
-
-      - name: cargo build --release
-        env:
-          PKG_CONFIG_PATH: /tmp/projectm-4.1.6-install/lib/pkgconfig
-        run: cargo build --release --workspace
 
       - name: Build .app bundle
         env:

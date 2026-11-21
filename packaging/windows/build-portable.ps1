@@ -12,9 +12,8 @@
 # not guessed:
 #   Bundled next to opendrop-app.exe (resolved from the build machine's
 #   real install locations, not committed to the repo):
-#     - Processing.NDI.Lib.x64.dll   (NDI SDK; grafton-ndi links statically
-#       against the SDK's import lib, but the runtime DLL is still needed
-#       at load time; confirmed a direct import of opendrop-app.exe)
+#     - Processing.NDI.Lib.x64.dll   (from the NDI SDK; loaded on demand
+#       by grafton-ndi from beside opendrop-app.exe)
 #     - projectM-4.dll               (vcpkg x64-windows, dynamic triplet;
 #       confirmed a direct import of opendrop-app.exe)
 #     - projectM-4-playlist.dll      (vcpkg x64-windows, dynamic triplet;

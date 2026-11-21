@@ -46,10 +46,9 @@ macOS links system frameworks with `-framework OpenGL`, not
 
 ## NDI SDK
 
-Installed from the official `.pkg`
-(`https://downloads.ndi.tv/SDK/NDI_SDK_Mac/Install_NDI_SDK_v6_Apple.pkg`),
-same silent-install-with-Gatekeeper-exclusion approach as the Windows CI
-step for the `.exe` installer.
+Release CI installs the official SDK package to obtain `libndi.dylib`.
+`build-app.sh` looks for it under `/Library/NDI SDK for Apple`, or under
+`NDI_SDK_DIR` if set, and bundles it beside the executable.
 
 ## Unsigned build - no Apple Developer ID
 

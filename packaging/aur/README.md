@@ -2,9 +2,8 @@
 
 `opendrop-vj-bin` downloads the Linux release AppImage and installs its
 contents directly, rather than building from source. Building from source
-would need the same NDI SDK download and pinned-projectM build the release
-CI does, both a much heavier ask for an AUR user than for CI, so this
-package skips it entirely: `--appimage-extract` unpacks the AppImage's
+would need the same pinned projectM build as release CI. The binary
+package uses the released build directly: `--appimage-extract` unpacks the AppImage's
 embedded squashfs (no FUSE needed, since it never mounts anything), and
 `package()` installs that straight into `/opt/opendrop-vj`, with a thin
 `/usr/bin/opendrop-vj` wrapper standing in for `AppRun` (setting `$APPDIR`
@@ -13,7 +12,7 @@ set `$APPDIR` before it runs).
 
 `depends` lists every non-bundled `.so` the binary links against (checked
 with `ldd` against a real build, not guessed): `packaging/appimage/
-build-appimage.sh`'s `BUNDLE_LIBS` already ships `libndi`/`libprojectM-4`/
+build-appimage.sh` already ships `libndi`/`libprojectM-4`/
 `libavahi-*` inside the AppImage itself, so those aren't system deps here;
 everything else linked (pipewire, alsa, openssl, zlib, brotli, zstd,
 libglvnd, dbus, systemd-libs, gcc-libs) is.

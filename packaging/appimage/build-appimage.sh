@@ -11,10 +11,8 @@
 # installed.
 #
 # Shared-library bundling policy (Linux AppImage):
-#   Bundled into usr/lib/ (copied from the real file `ldd` resolves to,
-#   following symlinks, with a same-named symlink kept alongside so the
-#   SONAME the binary was linked against still resolves):
-#     - libndi.so.6          (NDI SDK has no distro package)
+#   Bundled into usr/lib/ (copied by SONAME, following symlinks):
+#     - libndi.so.6          (selected explicitly for runtime loading)
 #     - libprojectM-4.so.4   (projectM has no distro package)
 #     - libavahi-client.so.3 (avahi is opt-in on a standard Hyprland setup)
 #     - libavahi-common.so.3 (same as above)
@@ -138,16 +136,16 @@ mkdir -p \
 
 cp "$BINARY" "$APPDIR/usr/bin/opendrop-app"
 
-# bundle_lib <soname> <destdir> <ldd|ldconfig>: copy the real file behind
+# bundle_lib <soname> <destdir> <ldd|ldconfig> [linked-file]: copy the real file behind
 # <soname> into <destdir>, plus a SONAME symlink when the names differ. The
 # path comes from `ldd` of the binary, or from `ldconfig -p` for libraries
 # the binary only loads with dlopen.
 bundle_lib() {
-    local soname="$1" destdir="$2" lookup="$3" lib_path real_path real_name
+    local soname="$1" destdir="$2" lookup="$3" linked_file="${4:-$BINARY}" lib_path real_path real_name
     if [[ "$lookup" == ldd ]]; then
-        lib_path=$(ldd "$BINARY" | awk -v s="$soname" '$1 == s && $2 == "=>" { print $3 }')
+        lib_path=$(ldd "$linked_file" | awk -v s="$soname" '$1 == s && $2 == "=>" { print $3 }')
         if [[ -z "$lib_path" ]]; then
-            echo "error: '$soname' not found in 'ldd $BINARY' output" >&2
+            echo "error: '$soname' not found in 'ldd $linked_file' output" >&2
             exit 1
         fi
     else
@@ -171,19 +169,22 @@ bundle_lib() {
     fi
 }
 
-# Bundle the 4 libs into usr/lib/ from the policy above, resolving each SONAME to
-# the real file ldd reports (following the distro's dev symlink) so the
-# versioned file travels into the AppImage, then keeping a symlink under
-# the SONAME the binary actually needs at load time.
-BUNDLE_LIBS=(
-    libndi.so.6
-    libprojectM-4.so.4
-    libavahi-client.so.3
-    libavahi-common.so.3
-)
-for soname in "${BUNDLE_LIBS[@]}"; do
-    bundle_lib "$soname" "$APPDIR/usr/lib" ldd
-done
+# grafton-ndi loads the runtime on demand, so resolve it independently of
+# the application binary. Resolve its Avahi dependencies from the runtime.
+if [[ -n "${NDI_RUNTIME_DIR_V6:-}" ]]; then
+    ndi_runtime="$NDI_RUNTIME_DIR_V6/libndi.so.6"
+    if [[ ! -f "$ndi_runtime" ]]; then
+        echo "error: NDI runtime not found at $ndi_runtime" >&2
+        exit 1
+    fi
+    cp -L "$ndi_runtime" "$APPDIR/usr/lib/libndi.so.6"
+else
+    bundle_lib libndi.so.6 "$APPDIR/usr/lib" ldconfig
+    ndi_runtime="$APPDIR/usr/lib/libndi.so.6"
+fi
+bundle_lib libavahi-client.so.3 "$APPDIR/usr/lib" ldd "$ndi_runtime"
+bundle_lib libavahi-common.so.3 "$APPDIR/usr/lib" ldd "$ndi_runtime"
+bundle_lib libprojectM-4.so.4 "$APPDIR/usr/lib" ldd
 
 bundle_lib libpipewire-0.3.so.0 "$APPDIR/usr/lib-fallback/pipewire" ldd
 cp -a "$PIPEWIRE_PREFIX/lib/spa-0.2" "$PIPEWIRE_PREFIX/lib/pipewire-0.3" "$APPDIR/usr/lib-fallback/pipewire/"
@@ -209,7 +210,8 @@ cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 # $APPDIR is set by the AppImage runtime itself before AppRun executes;
 # it must not be recomputed here.
-export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export NDI_RUNTIME_DIR_V6="${NDI_RUNTIME_DIR_V6:-$APPDIR/usr/lib}"
 
 # Bundled copies of these libraries are fallbacks: used only when the host
 # has none, so a newer host PipeWire is never shadowed by the bundled one.

@@ -26,7 +26,7 @@
 //! forced by `Electron.capturePage()`, which has no equivalent here; the
 //! per-deck streams in that reference already used RGBA
 //! (`electron/main.cjs:642-644`), and that choice is simply extended to the
-//! composite stream too. See [`PixelFormat::RGBA`].
+//! composite stream too. See [`PixelFormat::Rgba`].
 //!
 //! Mirrors `midi::spawn`/`MidiHandle`'s shape: a dedicated `std::thread`
 //! publishes continuous state via `ArcSwap` and never panics on an NDI SDK
@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use grafton_ndi::{Finder, PixelFormat, Sender as GraftonSender, SenderOptions, VideoFrame, NDI};
+use grafton_ndi::{Finder, FrameRate, Ndi, PictureAspectRatio, PixelFormat, Sender as GraftonSender, SenderOptions, VideoFrame};
 
 use super::in_::{self, NdiFrame, NdiSource};
 
@@ -53,18 +53,18 @@ use super::in_::{self, NdiFrame, NdiSource};
 /// silent: `SlotSender::send`'s `VideoFrame::replace_data` call rejects a
 /// wrong-sized buffer, logs it, and drops that one frame, rather than
 /// panicking or sending corrupt data.
-const COMP_W: i32 = 1920;
-const COMP_H: i32 = 1080;
+const COMP_W: u32 = 1920;
+const COMP_H: u32 = 1080;
 /// Mirrors `engine::deck::DECK_W`/`DECK_H`/`DECK_COUNT`, same manual-sync
 /// caveat as [`COMP_W`].
-const DECK_W: i32 = 1280;
-const DECK_H: i32 = 720;
+const DECK_W: u32 = 1280;
+const DECK_H: u32 = 720;
 const DECK_COUNT: usize = 4;
 
 /// `frameRateN`/`frameRateD` from the OpenDrop-VJ reference
 /// (`electron/main.cjs:566-591`): 29.97fps, used for both streams.
-const NDI_FRAME_RATE_N: i32 = 30000;
-const NDI_FRAME_RATE_D: i32 = 1001;
+const NDI_FRAME_RATE_N: u32 = 30000;
+const NDI_FRAME_RATE_D: u32 = 1001;
 
 /// How often the run loop wakes up to drain the 5 frame receivers even when
 /// no control message has arrived. Tighter than `midi`'s 20ms tick: this is
@@ -183,22 +183,20 @@ struct SlotSender {
     frame: VideoFrame,
 }
 
-/// grafton-ndi refuses a sender with both clocks off. We never send audio,
-/// so the audio clock is free to satisfy that rule, while the video clock
-/// stays off: it would make `send_video` sleep ~1 frame on the one thread
-/// shared by the composite, the decks and NDI receive.
+/// Keep the current sender clock configuration. The video clock stays
+/// off so sending does not pace the thread shared by output and receive.
 fn sender_options(name: &str) -> SenderOptions {
-    SenderOptions::builder(name).clock_video(false).clock_audio(true).build()
+    SenderOptions::new(name).clock_video(false).clock_audio(true)
 }
 
 impl SlotSender {
-    fn new(ndi: &NDI, name: &str, width: i32, height: i32) -> grafton_ndi::Result<Self> {
+    fn new(ndi: &Ndi, name: &str, width: u32, height: u32) -> grafton_ndi::Result<Self> {
         let sender = GraftonSender::new(ndi, &sender_options(name))?;
         let frame = VideoFrame::builder()
             .resolution(width, height)
-            .pixel_format(PixelFormat::RGBA)
-            .frame_rate(NDI_FRAME_RATE_N, NDI_FRAME_RATE_D)
-            .aspect_ratio(width as f32 / height as f32)
+            .pixel_format(PixelFormat::Rgba)
+            .frame_rate(FrameRate::new(NDI_FRAME_RATE_N, NDI_FRAME_RATE_D)?)
+            .picture_aspect_ratio(PictureAspectRatio::new(width as f32 / height as f32)?)
             .build()?;
         Ok(Self { sender, frame })
     }
@@ -212,7 +210,9 @@ impl SlotSender {
             opendrop_core::log_error!("[ndi] dropping frame with unexpected size: {e}");
             return;
         }
-        self.sender.send_video(&self.frame);
+        if let Err(e) = self.sender.send_video(&self.frame) {
+            opendrop_core::log_error!("[ndi] failed to send video: {e}");
+        }
     }
 }
 
@@ -229,7 +229,7 @@ struct ThreadState {
     /// Start request rather than cached as permanently broken, in case the
     /// SDK becomes loadable later (e.g. a `LD_LIBRARY_PATH` fix without
     /// restarting the app is unlikely, but this costs nothing to allow).
-    ndi: Option<NDI>,
+    ndi: Option<Ndi>,
     composite: Option<SlotSender>,
     decks: [Option<SlotSender>; DECK_COUNT],
     /// Discovery `Finder`, kept alive across ticks (rather than recreated
@@ -415,7 +415,7 @@ fn ensure_ndi(ts: &mut ThreadState) -> bool {
     if ts.ndi.is_some() {
         return true;
     }
-    match NDI::new() {
+    match Ndi::new() {
         Ok(ndi) => {
             ts.ndi = Some(ndi);
             true
@@ -483,31 +483,24 @@ fn start_receive(ts: &mut ThreadState, source: NdiSource) {
 mod tests {
     use super::*;
 
-    /// Against the real NDI runtime: our options are accepted, and the
-    /// all-clocks-off combination the sender used to be built with is not.
+    /// Check the production sender configuration against the NDI runtime.
     /// Ignored by default because it needs the NDI library installed.
     #[test]
     #[ignore = "needs the NDI runtime"]
-    fn the_real_sdk_accepts_our_sender_options_and_rejected_the_old_ones() {
-        let ndi = NDI::new().expect("NDI runtime should load");
+    fn the_real_sdk_accepts_our_sender_options() {
+        let ndi = Ndi::new().expect("NDI runtime should load");
 
         let ours = GraftonSender::new(&ndi, &sender_options("OpenDrop SDK test"));
         assert!(ours.is_ok(), "our options were rejected: {:?}", ours.err());
-
-        let old = SenderOptions::builder("OpenDrop SDK test old").clock_video(false).clock_audio(false).build();
-        let old = GraftonSender::new(&ndi, &old);
-        assert!(old.is_err(), "the SDK accepted a sender with no clock");
     }
 
-    /// grafton-ndi rejects a sender with neither clock enabled
-    /// (`InvalidConfiguration`), which silently broke every NDI output.
-    /// The video clock must stay off so one slow stream cannot stall the
+    /// The video clock stays off so one slow stream cannot stall the
     /// single thread serving the composite and all decks.
     #[test]
-    fn sender_options_satisfy_sdk_and_keep_video_unclocked() {
+    fn sender_options_keep_video_unclocked() {
         let options = sender_options("OpenDrop");
-        assert!(options.clock_audio || options.clock_video, "SDK needs at least one clock");
-        assert!(!options.clock_video, "video clock would block the shared sender thread");
+        assert!(options.configured_clock_audio(), "retain the current audio-clock setting");
+        assert!(!options.configured_clock_video(), "video clock would block the shared sender thread");
     }
 
     /// `ThreadState::new()`/a fresh `NdiSnapshot` must start fully
@@ -555,15 +548,15 @@ mod tests {
 
     /// The dimension constants mirrored from `engine::compositor`/
     /// `engine::deck` (see their doc comments) must line up with what
-    /// `PixelFormat::RGBA` expects a frame's buffer to be, since
+    /// `PixelFormat::Rgba` expects a frame's buffer to be, since
     /// `FrameReadback` publishes exactly `w*h*4` RGBA8 bytes and this
     /// module never infers dimensions from the buffer length.
     #[test]
     fn frame_dimensions_match_readback_buffer_size() {
-        let comp_size = PixelFormat::RGBA.try_buffer_size(COMP_W, COMP_H).unwrap();
+        let comp_size = PixelFormat::Rgba.buffer_len(COMP_W, COMP_H, None).unwrap();
         assert_eq!(comp_size, (COMP_W as usize) * (COMP_H as usize) * 4);
 
-        let deck_size = PixelFormat::RGBA.try_buffer_size(DECK_W, DECK_H).unwrap();
+        let deck_size = PixelFormat::Rgba.buffer_len(DECK_W, DECK_H, None).unwrap();
         assert_eq!(deck_size, (DECK_W as usize) * (DECK_H as usize) * 4);
     }
 }

@@ -56,15 +56,12 @@ OpenDrop VJ is free and open source. If it is useful to you, you can support its
 cargo build --workspace
 ```
 
-### NDI SDK (build-time dependency)
+### NDI 6 runtime
 
-Building this workspace, including just the `io` or `app` crate (`app` depends on `io`), needs the NDI SDK (headers + libs) present at build time, not only at runtime: `grafton-ndi` uses `bindgen` in its `build.rs`, which makes it a real build dependency rather than a runtime `dlopen`.
-
-Two versioned files bridge this machine's Arch packaging: `ndi-sdk-shim/` (symlinks under `include`/`lib/x86_64-linux-gnu` to the pacman `ndi-sdk` package's system locations) and `.cargo/config.toml` (points `NDI_SDK_DIR` at `ndi-sdk-shim` when the shell doesn't already export it). See the comment at the top of `.cargo/config.toml` for the full workaround.
-
-On another machine or SDK layout (the standard NewTek installer, a different distro): either export your own `NDI_SDK_DIR` before building, or replace/remove `ndi-sdk-shim/` and the `[env]` entry in `.cargo/config.toml` accordingly. The SDK itself is available from ndi.video.
-
-This requirement (NDI SDK plus a `libprojectm` dev package) applies to every build machine, Windows included; see `packaging/windows/README.md` for the platform-specific setup there.
+Cargo uses the NDI bindings shipped with grafton-ndi. To use NDI input or output in a build
+from source, install the NDI 6 runtime or set `NDI_RUNTIME_DIR_V6` to the absolute directory
+containing its shared library. Release packages bundle the runtime. Builds still require
+projectM and the other native dependencies.
 
 ### Known limitation: NDI discovery
 

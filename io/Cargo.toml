@@ -18,7 +18,7 @@ flate2 = "1.1.10"
 # TLS backend matched to `reqwest`'s below (native-tls) so only one TLS
 # stack is pulled into the dependency tree.
 futures-util = "0.3"
-grafton-ndi = { version = "1.0.0", default-features = false }
+grafton-ndi = { version = "3.0", default-features = false }
 keyring = "4"
 local-ip-address = "0.6"
 midir = "0.11"

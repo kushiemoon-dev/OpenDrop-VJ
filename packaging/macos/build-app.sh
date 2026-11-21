@@ -11,9 +11,10 @@
 # Linux policy - same two libraries, no macOS system package provides either):
 #   Bundled into Contents/Frameworks/, with the binary's load commands
 #   rewritten via install_name_tool to @executable_path/../Frameworks/...:
-#     - libndi.dylib        (NDI SDK has no Homebrew package)
 #     - libprojectM-4.dylib (built from source at the pinned 4.1.6, see
 #       README.md in this directory - Homebrew's projectm formula floats)
+#   Bundled next to opendrop-app for runtime loading:
+#     - libndi.dylib        (from the NDI SDK)
 #   Never bundled: anything under /System or /usr/lib (Metal/OpenGL/
 #   CoreAudio stack) - same driver-coupling reasoning as the Linux script's
 #   libGLESv2/libGLdispatch exclusion.
@@ -115,50 +116,32 @@ done
 iconutil -c icns "$ICONSET/opendrop-native.iconset" -o "$APP_DIR/Contents/Resources/opendrop-native.icns"
 rm -rf "$ICONSET"
 
-# --- 3. Bundle the two non-system dylibs (policy documented above) ---
-#
-# Matched by prefix, not exact filename: the binary's install names carry
-# each SDK's own SOVERSION (e.g. `libprojectM-4.4.dylib`, not
-# `libprojectM-4.dylib` - found by running this for real in CI), and
-# `otool -L` reports @rpath references, not real filesystem paths (also
-# found running this for real: "cp: .../@rpath/libndi.dylib: No such file
-# or directory"). Resolve the real file separately, by the exact name
-# `otool` reported, from where each SDK actually installs it.
-resolve_dylib_source() {
-    local prefix="$1" soname="$2"
-    case "$prefix" in
-        libndi)
-            find "${NDI_SDK_DIR:?NDI_SDK_DIR must be set}" -name "$soname" -print -quit
-            ;;
-        libprojectM-4)
-            find "${PROJECTM_INSTALL_PREFIX:?PROJECTM_INSTALL_PREFIX must be set}/lib" -name "$soname" -print -quit
-            ;;
-        *)
-            echo "error: no source resolver defined for prefix '$prefix'" >&2
-            ;;
-    esac
-}
+# --- 3. Bundle the projectM dependency and the NDI runtime ---
+# projectM's install name includes its SOVERSION. Resolve the exact name
+# from the binary and rewrite its reference to the copy in Frameworks.
+load_name=$(otool -L "$BINARY" | awk '$1 ~ /\/libprojectM-4/ && !found { print $1; found = 1 }')
+if [[ -z "$load_name" ]]; then
+    echo "error: no projectM entry found in 'otool -L $BINARY' output" >&2
+    exit 1
+fi
+soname=$(basename "$load_name")
+real_path=$(find "${PROJECTM_INSTALL_PREFIX:?PROJECTM_INSTALL_PREFIX must be set}/lib" -name "$soname" -print -quit)
+if [[ -z "$real_path" ]]; then
+    echo "error: could not locate a real file for '$soname' on disk" >&2
+    exit 1
+fi
+cp -L "$real_path" "$APP_DIR/Contents/Frameworks/$soname"
+install_name_tool -id "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/Frameworks/$soname"
+install_name_tool -change "$load_name" "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/MacOS/opendrop-app"
 
-BUNDLE_LIB_PREFIXES=(
-    libndi
-    libprojectM-4
-)
-for prefix in "${BUNDLE_LIB_PREFIXES[@]}"; do
-    load_name=$(otool -L "$BINARY" | awk -v p="$prefix" '$1 ~ ("/" p) { print $1; exit }')
-    if [[ -z "$load_name" ]]; then
-        echo "error: no '$prefix*' entry found in 'otool -L $BINARY' output" >&2
-        exit 1
-    fi
-    soname=$(basename "$load_name")
-    real_path=$(resolve_dylib_source "$prefix" "$soname")
-    if [[ -z "$real_path" ]]; then
-        echo "error: could not locate a real file for '$soname' on disk" >&2
-        exit 1
-    fi
-    cp -L "$real_path" "$APP_DIR/Contents/Frameworks/$soname"
-    install_name_tool -id "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/Frameworks/$soname"
-    install_name_tool -change "$load_name" "@executable_path/../Frameworks/$soname" "$APP_DIR/Contents/MacOS/opendrop-app"
-done
+# grafton-ndi searches beside the executable for libndi.dylib at runtime.
+ndi_sdk_dir="${NDI_SDK_DIR:-/Library/NDI SDK for Apple}"
+ndi_runtime=$(find "$ndi_sdk_dir" -name libndi.dylib -print -quit)
+if [[ -z "$ndi_runtime" ]]; then
+    echo "error: could not locate libndi.dylib under $ndi_sdk_dir" >&2
+    exit 1
+fi
+cp -L "$ndi_runtime" "$APP_DIR/Contents/MacOS/libndi.dylib"
 
 echo "Copying presets from $PRESETS_SRC ..."
 rsync -a --exclude='.git' "$PRESETS_SRC/" "$APP_DIR/Contents/Resources/presets/"
